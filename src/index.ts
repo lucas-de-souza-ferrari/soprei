@@ -1,6 +1,7 @@
+import { ClientService } from './application/client.service.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
 import { loadConfig } from './infrastructure/config/index.js';
-import { getDatabase } from './infrastructure/database/index.js';
+import { getDatabase, PrismaClientRepository } from './infrastructure/database/index.js';
 import { buildServer } from './infrastructure/http/server.js';
 import {
   closeInfrastructure,
@@ -33,6 +34,10 @@ async function main(): Promise<void> {
     readiness: {
       database: () => infrastructure.database.check(),
       redis: () => infrastructure.redis.check(),
+    },
+    admin: {
+      apiKey: config.ADMIN_API_KEY,
+      clients: new ClientService(new PrismaClientRepository(infrastructure.database.prisma)),
     },
   });
 
