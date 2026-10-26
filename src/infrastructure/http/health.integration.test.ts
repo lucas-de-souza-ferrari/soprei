@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createRedis } from '../infrastructure/cache/redis.client.js';
-import { createDatabase } from '../infrastructure/database/database.js';
-import { buildServer } from '../infrastructure/http/server.js';
-import { createLogger } from '../infrastructure/logger/logger.js';
-import { getClosedPort, withPort } from '../test-support/closed-port.js';
-import { loadIntegrationConfig } from '../test-support/integration-env.js';
+import { createRedis } from '../cache/redis.client.js';
+import { createDatabase } from '../database/database.js';
+import { buildServer } from './server.js';
+import { createLogger } from '../logger/logger.js';
+import { getClosedPort, withPort } from '../../test-support/closed-port.js';
+import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 
 // Falha aqui (antes de abrir qualquer conexão) se o ambiente não for o de testes.
 const config = loadIntegrationConfig();
