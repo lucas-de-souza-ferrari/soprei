@@ -1,0 +1,11 @@
+// Sem models por enquanto: eles entram na spec 003 (base multi-tenant).
+// A URL do banco é lida de DATABASE_URL em prisma.config.ts (Prisma 7).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
