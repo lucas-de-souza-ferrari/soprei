@@ -1,5 +1,8 @@
-// Sem models por enquanto: eles entram na spec 003 (base multi-tenant).
 // A URL do banco é lida de DATABASE_URL em prisma.config.ts (Prisma 7).
+//
+// Isolamento entre clientes: todo model é de TENANT (tem `clientId`) ou GLOBAL (sem
+// `clientId`) e precisa estar classificado em src/infrastructure/database/tenant-scope.ts;
+// um teste lê este schema e falha se algum model ficar sem classificação.
 
 generator client {
   provider = "prisma-client"
@@ -8,4 +11,40 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum ClientStatus {
+  ACTIVE
+  SUSPENDED
+
+  @@map("client_status")
+}
+
+/// Raiz do tenant (GLOBAL: não é filtrado por clientId). Soft delete por `deletedAt`;
+/// o slug segue único mesmo depois da remoção (fica reservado).
+model Client {
+  id        String       @id @default(uuid(7)) @db.Uuid
+  name      String
+  slug      String       @unique
+  status    ClientStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  deletedAt DateTime?    @map("deleted_at")
+
+  conversations Conversation[]
+
+  @@map("clients")
+}
+
+/// Mínimo para provar o isolamento; os campos reais vêm em specs futuras. (TENANT)
+model Conversation {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  clientId  String   @map("client_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@index([clientId, createdAt, id])
+  @@map("conversations")
 }
