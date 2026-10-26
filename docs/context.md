@@ -73,9 +73,9 @@ src/
 ├── application/     # services/use-cases, interfaces (LLMProvider)
 ├── infrastructure/
 │   ├── config/      # env validada com Zod (fail-fast)
-│   ├── database/    # Prisma singleton, implementações de repositório
+│   ├── database/    # Prisma singleton, transação com retry, erros, implementações de repositório
 │   ├── http/        # servidor Fastify, error handler central
-│   ├── cache/       # (por spec)
+│   ├── cache/       # client Redis singleton (cache em si: spec 006)
 │   └── external-apis/  # LLM (mock + real), canal de mensagens
 ├── presentation/    # controllers/rotas, hooks, validators Zod
 ├── shared/          # errors (BaseError...), types (Brand, Result), utils
@@ -113,7 +113,8 @@ Produto (specs a escrever quando a base estiver pronta):
 
 - **Spec 001 (bootstrap): concluída e mergeada**, CI verde em Node 22 e LTS. Já existem: Fastify com `GET /health`, config validada com Zod (fail-fast), Pino, hierarquia de erros com error handler central, `Brand` e `Result`, ESLint + Prettier, Prisma 7 sem models e CI. Camadas `shared`, `infrastructure` e `presentation`; `domain` e `application` nascem quando houver conteúdo.
 - Versões fixadas na 001: TypeScript 6.0.x (o `typescript-eslint` ainda não suporta o 7) e Prisma 7.10.x (a tag `latest` do CLI aponta para um RC).
-- Specs 002 a 009 em rascunho. Próximo passo: aprovar e executar `docs/specs/002-infra-local-database.md`, na ordem numérica.
+- **Spec 002 (infra local e banco): implementada, aguardando o CI.** Postgres e Redis nativos (sem Docker; PostgreSQL 18.2 e Redis 8.0.1 na máquina do dono). Já existem: Prisma 7 com `@prisma/adapter-pg` (singleton, pool configurável, helper de transação com retry, `DatabaseError`, métricas do pool), client `ioredis` singleton, `GET /health/ready`, boot fail-fast e shutdown gracioso, testes unitários (`pnpm test`) separados dos de integração (`pnpm test:integration`, só contra `soprei_test` e Redis `/15`) e CI com services Postgres 18 e Redis 8.
+- Specs 003 a 009 em rascunho. Próximo passo: após o CI da 002 e o merge, aprovar e executar `docs/specs/003-*.md`, na ordem numérica.
 
 ## 7. Histórico de decisões
 

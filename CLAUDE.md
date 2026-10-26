@@ -27,21 +27,47 @@ Subagentes em `.claude/agents/`: `spec-writer` (escreve a spec), `implementer` (
 
 ## Comandos
 
-Gerenciador de pacotes: **pnpm**. Primeiro uso: `pnpm install` e `cp .env.example .env`.
+Gerenciador de pacotes: **pnpm**. Primeiro uso: `pnpm install`, `pnpm db:generate` (o Prisma Client não vai para o git e o `typecheck` precisa dele), `cp .env.example .env`, `cp .env.test.example .env.test` (preencha a senha nos dois) e a preparação do banco em "Ambiente local" abaixo.
 
 | Script | O que faz |
 | --- | --- |
 | `pnpm dev` | Sobe o servidor com `tsx watch` (log colorido via `pino-pretty`) |
 | `pnpm build` | Compila para `dist/` (`tsc -p tsconfig.build.json`, sem testes) |
 | `pnpm start` | Roda `node dist/index.js` (rode `pnpm build` antes) |
-| `pnpm test` | Testes com `node --test` + `tsx` (`src/**/*.test.ts`) |
+| `pnpm test` | Testes **unitários** com `node --test` + `tsx` (`src/**/*.test.ts`, exceto `*.integration.test.ts`); não precisam de Postgres nem de Redis |
+| `pnpm test:integration` | Testes de integração (`src/**/*.integration.test.ts`); exigem Postgres e Redis no ar, leem `.env.test` e só rodam contra `soprei_test` e Redis `/15` |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | ESLint (flat config, `typescript-eslint` strict type-checked) |
 | `pnpm format` / `pnpm format:check` | Prettier (escreve / só verifica) |
 | `pnpm db:generate` | `prisma generate` (Prisma Client em `src/generated/prisma`, ignorado pelo git) |
 | `pnpm db:migrate` | `prisma migrate dev` (exige PostgreSQL acessível em `DATABASE_URL`; sem models ainda, a primeira migration vem na spec 003) |
+| `pnpm db:migrate:deploy` | `prisma migrate deploy` (aplica migrations pendentes; é o que o CI roda) |
 
-Antes de dar uma spec como pronta: `pnpm typecheck && pnpm lint && pnpm test` (o CI roda os mesmos três em Node 22 e na LTS mais recente).
+Antes de dar uma spec como pronta: `pnpm typecheck && pnpm lint && pnpm test && pnpm test:integration`. O CI roda esses quatro (mais `db:generate` e `db:migrate:deploy`) em Node 22 e na LTS mais recente, com Postgres e Redis como services do job.
+
+### Ambiente local (sem Docker)
+
+PostgreSQL e Redis rodam **nativos** na máquina, em `localhost:5432` e `localhost:6379`. O projeto não usa Docker nem `docker-compose` no desenvolvimento. Preparação única, feita por quem administra a máquina (um agente não cria nem altera roles, bancos ou senhas), em um `psql` ou pgAdmin como administrador:
+
+```sql
+CREATE ROLE soprei LOGIN PASSWORD '<escolha-uma-senha>' CREATEDB;
+CREATE DATABASE soprei OWNER soprei;
+CREATE DATABASE soprei_test OWNER soprei;
+```
+
+`CREATEDB` é necessário porque `prisma migrate dev` cria um shadow database. Dois bancos separam desenvolvimento (`soprei`) e testes (`soprei_test`). No Redis, índice `0` para desenvolvimento e `15` para testes.
+
+Depois: `cp .env.example .env` e `cp .env.test.example .env.test`, trocando `<senha>` pela senha escolhida (ambos ficam fora do git). `.env` aponta para `soprei` e Redis `/0`; `.env.test` para `soprei_test` e Redis `/15`.
+
+Confirmar que os serviços estão no ar (o servidor também verifica os dois no boot e encerra com código 1 se algum faltar):
+
+- Postgres: `psql "postgresql://soprei@localhost:5432/soprei_test" -c "SELECT 1"` (ou `pg_isready -h localhost -p 5432`).
+- Redis: `redis-cli -h localhost -p 6379 ping` (resposta `PONG`).
+- Com o servidor rodando: `curl localhost:3000/health` (processo vivo) e `curl localhost:3000/health/ready` (banco e Redis; 200 ou 503).
+
+Migrations contra o banco de testes (sem tocar no de desenvolvimento): `node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy`.
+
+**Segurança dos testes:** os testes de integração se recusam a rodar se `DATABASE_URL` não apontar para `soprei_test` ou `REDIS_URL` para o índice 15 (ambos em localhost), nunca usam `FLUSHALL`/`FLUSHDB` e cada teste remove só as chaves que criou, com prefixo único (`src/test-support/`). Testes que precisam de infra devem se chamar `*.integration.test.ts` e começar com `loadIntegrationConfig()`.
 
 ## Regras invariantes
 
@@ -82,7 +108,7 @@ src/
 
 **Código em geral:** `async/await`, funções pequenas, responsabilidade única, services sem dependência de Fastify (`req`/`res`). Sufixos de arquivo: `.service.ts`, `.repository.ts`, `.controller.ts`.
 
-**Testes** (o guia não cobre; regra nossa): ao lado do código (`*.test.ts`), runner nativo do Node, salvo decisão em spec. Rotas testadas com `fastify.inject`. Toda regra de acesso a dados tem teste de isolamento entre clientes.
+**Testes** (o guia não cobre; regra nossa): ao lado do código (`*.test.ts`), runner nativo do Node, salvo decisão em spec. Os que precisam de Postgres ou Redis são `*.integration.test.ts` (ver "Ambiente local"). Rotas testadas com `fastify.inject`. Toda regra de acesso a dados tem teste de isolamento entre clientes.
 
 ## Nunca faça sem perguntar
 

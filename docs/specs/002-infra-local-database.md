@@ -66,15 +66,15 @@ Ter PostgreSQL e Redis rodando localmente e no CI, com o Prisma como singleton b
 
 ## Critérios de aceite
 
-- [ ] Com Postgres e Redis nativos no ar e o `.env` preenchido, `pnpm db:migrate:deploy` termina com sucesso no banco `soprei_test` limpo.
-- [ ] Teste: a suíte de integração se recusa a rodar quando `DATABASE_URL` não aponta para `soprei_test` e nunca emite `FLUSHALL`/`FLUSHDB`.
-- [ ] Integração: `GET /health/ready` retorna 200 com banco e Redis no ar e 503 quando um deles está indisponível (simular desconectando o client ou apontando para porta fechada).
-- [ ] Teste: importar o módulo de database duas vezes devolve a mesma instância do `PrismaClient`.
-- [ ] Integração do helper de transação: repete em `P2034` com backoff (erro simulado), não repete em erro não recuperável e faz rollback quando a função lança.
-- [ ] Integração: query que excede `statement_timeout` vira `DatabaseError` sem vazar SQL.
-- [ ] Teste de config: `REDIS_URL` ausente impede o boot com mensagem clara; as variáveis de pool respeitam defaults e limites.
-- [ ] Teste: boot com banco ou Redis indisponível sai com código 1 e mensagem clara.
-- [ ] Teste: shutdown fecha pool e Redis (nenhum handle aberto depois do `close`).
+- [x] Com Postgres e Redis nativos no ar e o `.env` preenchido, `pnpm db:migrate:deploy` termina com sucesso no banco `soprei_test` limpo.
+- [x] Teste: a suíte de integração se recusa a rodar quando `DATABASE_URL` não aponta para `soprei_test` e nunca emite `FLUSHALL`/`FLUSHDB`.
+- [x] Integração: `GET /health/ready` retorna 200 com banco e Redis no ar e 503 quando um deles está indisponível (simular desconectando o client ou apontando para porta fechada).
+- [x] Teste: importar o módulo de database duas vezes devolve a mesma instância do `PrismaClient`.
+- [x] Integração do helper de transação: repete em `P2034` com backoff (erro simulado), não repete em erro não recuperável e faz rollback quando a função lança.
+- [x] Integração: query que excede `statement_timeout` vira `DatabaseError` sem vazar SQL.
+- [x] Teste de config: `REDIS_URL` ausente impede o boot com mensagem clara; as variáveis de pool respeitam defaults e limites.
+- [x] Teste: boot com banco ou Redis indisponível sai com código 1 e mensagem clara.
+- [x] Teste: shutdown fecha pool e Redis (nenhum handle aberto depois do `close`).
 - [ ] `pnpm test` roda sem infra e `pnpm test:integration` roda com infra; ambos verdes no CI, em Node 22 e na LTS.
 
 ## Casos de borda e erros
@@ -100,3 +100,26 @@ Não se aplica (sem dados de cliente ainda).
 - **Decisão proposta (aprovar a spec = aceitar):** no boot, banco ou Redis indisponível **derruba o processo**. Motivo: auth e rate limit dependem do Redis, e subir "meio vivo" esconde problema. Em runtime a degradação é tratada por spec.
 - Versão do PostgreSQL: o implementer registra aqui a versão do Postgres local do dono (`SHOW server_version`) e usa a mesma major no CI, confirmando que o Prisma 7.10 a suporta.
 - Se o `prisma migrate deploy` exigir ao menos uma migration em alguma versão do Prisma, o implementer registra aqui o desvio e adota a alternativa mais simples (por exemplo, `prisma migrate status` no teste).
+
+### Implementação (registro do implementer)
+
+Versões: PostgreSQL local **18.2** (`SHOW server_version` com o role `soprei`), Redis local 8.0.1. O CI usa `postgres:18` e `redis:8`. O Prisma 7.10.1 com `@prisma/adapter-pg` funcionou contra o Postgres 18.2 (`migrate deploy` e toda a suíte de integração).
+
+Dependências adicionadas (versões estáveis mais recentes no momento): `@prisma/adapter-pg` 7.10.1 (mesma versão do `@prisma/client`), `pg` 8.23.1, `ioredis` 6.0.0 e, em dev, `@types/pg` 8.23.1.
+
+Desvios e decisões tomadas:
+
+- **`prisma migrate deploy` sem nenhuma migration** termina com sucesso ("No pending migrations to apply"): o desvio previsto (usar `migrate status`) não foi necessário.
+- **Singleton preguiçoso:** `getDatabase()` e `getRedis()` criam a instância na primeira chamada (com config injetada ou a do ambiente) e devolvem a mesma depois; o módulo não conecta nem lê config ao ser importado. `createDatabase`/`createRedis` (fábricas) existem para testes e para o shutdown (`closeDatabase`/`closeRedis` liberam o slot).
+- **Pool criado por nós:** um `pg.Pool` (`max`, `idleTimeoutMillis`, `connectionTimeoutMillis`, `statement_timeout`) é passado ao `PrismaPg` com `disposeExternalPool: true`; assim temos `totalCount`/`idleCount`/`waitingCount` para as métricas e `prisma.$disconnect()` encerra o pool. O parâmetro `?schema=` da URL (do Prisma) é retirado da connection string do `pg` e passado ao adapter; `sslmode` e o resto da URL seguem para o `pg` (TLS preservado).
+- **Conversão para `DatabaseError` explícita, não automática:** `toDatabaseError`, `withDatabaseErrors(operação, fn)` e `runInTransaction` fazem a conversão; não usei `$extends` para interceptar toda query (complicaria o retry de `P2034`/`P2028`, que precisa ver o erro original). Os repositórios da spec 003 devem usar `withDatabaseErrors`/`runInTransaction`. Statement timeout chega como `P2010` (código `57014` do Postgres no `meta`) e conexão recusada como `ECONNREFUSED`; ambos viram `DatabaseError`.
+- **Checagens devolvem `Result`:** `database.check()` (`SELECT 1` via Prisma) e `redis.check()` (`PING`) nunca lançam e têm timeout; o Redis falha com `ExternalServiceError`. `/health/ready` responde `{"status":"ok|unavailable","checks":{"database":"up|down","redis":"up|down"}}`.
+- **Ordem do boot:** verifica banco e Redis **antes** de `listen`; se algum falhar, loga `dependência indisponível no boot: PostgreSQL, Redis` (só os que falharam) e sai com código 1. O teste de "porta em uso" passou a ser de integração, porque agora o boot precisa de infra para chegar ao `listen`.
+- **Redis:** `maxRetriesPerRequest: 2` e reconexão com espera crescente (até 2 s), para que um comando não fique pendurado para sempre quando o Redis cai. `close()` faz `QUIT` e espera o evento `end`.
+- **Separação dos testes:** `pnpm test` usa o glob `src/**/!(*.integration).test.ts` e `pnpm test:integration` roda `src/**/*.integration.test.ts` com `--env-file-if-exists=.env.test` (no CI não há arquivo; as variáveis vêm do job) e `--test-concurrency=1`. `src/test-support/` (fora do build) tem a trava de ambiente (`loadIntegrationConfig`), o prefixo de chaves de Redis por teste (`TestKeyspace`), o helper de porta fechada e o processo auxiliar do teste de shutdown.
+- **CI:** além dos services, ganhou `pnpm db:generate` antes do `typecheck` (o Prisma Client gerado não vai para o git e agora é importado pelo código) e `db:migrate:deploy`; `CLAUDE.md` documenta `db:generate` no primeiro uso.
+- **Shutdown:** a função `shutdown` (Fastify, depois pool e Redis) é a que o handler de `SIGINT`/`SIGTERM` chama. Verificado por processo auxiliar que fecha tudo e termina sozinho, com pool em 0 e Redis em `end`. O envio real de `SIGTERM` a um processo não foi exercitado: no Windows (onde foi desenvolvido) o sinal mata o processo sem rodar handlers.
+
+### Pendente
+
+- Critério "ambos verdes no CI, em Node 22 e na LTS": depende do GitHub Actions (remoto inacessível daqui). Rodei localmente `pnpm test` e `pnpm test:integration` em Node 22.23.2 e 24.18.0, ambos verdes. O status só vira `concluída` depois do CI.
