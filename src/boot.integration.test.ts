@@ -33,6 +33,8 @@ function bootEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
     Path,
     SystemRoot,
     NODE_ENV: 'production',
+    // Em produção a chave de administração é obrigatória (valor descartável, só do teste).
+    ADMIN_API_KEY: 'k'.repeat(32),
     HOST: '127.0.0.1',
     PORT: '0',
     DATABASE_URL: config.DATABASE_URL,

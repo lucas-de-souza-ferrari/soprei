@@ -57,11 +57,36 @@ describe('boot da aplicação (sem infraestrutura)', () => {
     const [dbPort, redisPort] = [await getClosedPort(), await getClosedPort()];
     const { status, output } = boot({
       NODE_ENV: 'production',
+      ADMIN_API_KEY: 'k'.repeat(32),
       DATABASE_URL: `postgresql://u:p@127.0.0.1:${String(dbPort)}/db`,
       REDIS_URL: `redis://127.0.0.1:${String(redisPort)}/0`,
       DB_POOL_CONNECTION_TIMEOUT_MS: '1000',
     });
     assert.equal(status, 1);
     assert.match(output, /dependência indisponível no boot: PostgreSQL, Redis/);
+  });
+
+  describe('ADMIN_API_KEY em produção', () => {
+    const infra = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://u:p@127.0.0.1:1/db',
+      REDIS_URL: 'redis://127.0.0.1:1/0',
+    };
+
+    it('sem a chave, não sobe: código 1 e mensagem clara, antes de tocar na infraestrutura', () => {
+      const { status, output } = boot(infra);
+      assert.equal(status, 1);
+      assert.match(output, /Configuração inválida/);
+      assert.match(output, /ADMIN_API_KEY: obrigatória em produção, com no mínimo 32 caracteres/);
+      assert.doesNotMatch(output, /dependência indisponível/);
+    });
+
+    it('com chave curta, também não sobe e não ecoa o valor', () => {
+      const short = 'chave-curta-demais';
+      const { status, output } = boot({ ...infra, ADMIN_API_KEY: short });
+      assert.equal(status, 1);
+      assert.match(output, /ADMIN_API_KEY/);
+      assert.ok(!output.includes(short));
+    });
   });
 });

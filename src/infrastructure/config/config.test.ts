@@ -102,4 +102,51 @@ describe('parseConfig', () => {
       });
     }
   });
+
+  describe('ADMIN_API_KEY', () => {
+    const KEY = 'a'.repeat(32);
+
+    it('é opcional em desenvolvimento e em teste', () => {
+      for (const NODE_ENV of ['development', 'test']) {
+        const result = parseConfig({ ...VALID_ENV, NODE_ENV });
+        assert.ok(result.ok, NODE_ENV);
+        assert.equal(result.value.ADMIN_API_KEY, undefined);
+      }
+    });
+
+    it('aceita qualquer valor não vazio fora de produção e variável vazia vale como ausente', () => {
+      const short = parseConfig({ ...VALID_ENV, ADMIN_API_KEY: 'curta' });
+      assert.ok(short.ok);
+      assert.equal(short.value.ADMIN_API_KEY, 'curta');
+      const empty = parseConfig({ ...VALID_ENV, ADMIN_API_KEY: '' });
+      assert.ok(empty.ok);
+      assert.equal(empty.value.ADMIN_API_KEY, undefined);
+    });
+
+    it('em produção é obrigatória, com mensagem clara', () => {
+      const result = parseConfig({ ...VALID_ENV, NODE_ENV: 'production' });
+      assert.equal(result.ok, false);
+      assert.match(
+        result.error.message,
+        /ADMIN_API_KEY: obrigatória em produção, com no mínimo 32 caracteres/,
+      );
+    });
+
+    it('em produção, variável vazia ou com menos de 32 caracteres também falha', () => {
+      for (const value of ['', 'a'.repeat(31)]) {
+        const result = parseConfig({ ...VALID_ENV, NODE_ENV: 'production', ADMIN_API_KEY: value });
+        assert.equal(result.ok, false, value);
+        assert.match(result.error.message, /ADMIN_API_KEY/);
+        assert.ok(!result.error.message.includes(value) || value === '');
+      }
+    });
+
+    it('em produção aceita 32 caracteres ou mais', () => {
+      for (const value of [KEY, KEY + 'b']) {
+        const result = parseConfig({ ...VALID_ENV, NODE_ENV: 'production', ADMIN_API_KEY: value });
+        assert.ok(result.ok);
+        assert.equal(result.value.ADMIN_API_KEY, value);
+      }
+    });
+  });
 });
