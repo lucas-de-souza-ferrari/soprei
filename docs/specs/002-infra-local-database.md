@@ -1,6 +1,6 @@
 # 002 — Infra local, banco e Redis
 
-- **Status:** aprovada
+- **Status:** concluída
 - **Branch:** `spec/002-infra-local-database`
 - **Depende de:** 001 (concluída)
 
@@ -75,7 +75,7 @@ Ter PostgreSQL e Redis rodando localmente e no CI, com o Prisma como singleton b
 - [x] Teste de config: `REDIS_URL` ausente impede o boot com mensagem clara; as variáveis de pool respeitam defaults e limites.
 - [x] Teste: boot com banco ou Redis indisponível sai com código 1 e mensagem clara.
 - [x] Teste: shutdown fecha pool e Redis (nenhum handle aberto depois do `close`).
-- [ ] `pnpm test` roda sem infra e `pnpm test:integration` roda com infra; ambos verdes no CI, em Node 22 e na LTS.
+- [x] `pnpm test` roda sem infra e `pnpm test:integration` roda com infra; ambos verdes no CI, em Node 22 e na LTS (CI confirmado pelo dono do projeto no GitHub).
 
 ## Casos de borda e erros
 
@@ -122,4 +122,5 @@ Desvios e decisões tomadas:
 
 ### Pendente
 
-- Critério "ambos verdes no CI, em Node 22 e na LTS": depende do GitHub Actions (remoto inacessível daqui). Rodei localmente `pnpm test` e `pnpm test:integration` em Node 22.23.2 e 24.18.0, ambos verdes. O status só vira `concluída` depois do CI.
+- Critério "ambos verdes no CI, em Node 22 e na LTS": confirmado pelo dono no GitHub depois do merge; por isso a spec está `concluída`. Rodei antes, localmente, `pnpm test` e `pnpm test:integration` em Node 22.23.2 e 24.18.0, ambos verdes.
+- O envio real de `SIGTERM`/`SIGINT` continua sem ser exercitado no Windows (o shutdown foi verificado por processo auxiliar); vale rever quando houver deploy em Linux.
