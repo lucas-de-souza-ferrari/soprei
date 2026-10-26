@@ -40,3 +40,25 @@ export class ExternalServiceError extends BaseError {
     super({ message, code: 'EXTERNAL_SERVICE_ERROR', statusCode: 502, ...options });
   }
 }
+
+export class ConflictError extends BaseError {
+  constructor(message = 'Conflito com o estado atual do recurso', options: AppErrorOptions = {}) {
+    super({ message, code: 'CONFLICT', statusCode: 409, ...options });
+  }
+}
+
+/**
+ * Operação de dado de tenant sem o filtro por cliente (ou proibida por não carregá-lo).
+ * É erro de programação, nunca de entrada do usuário: 500 e não operacional.
+ */
+export class TenantScopeError extends BaseError {
+  constructor(message = 'Operação de tenant sem escopo de cliente', options: AppErrorOptions = {}) {
+    super({
+      message,
+      code: 'TENANT_SCOPE_ERROR',
+      statusCode: 500,
+      isOperational: false,
+      ...options,
+    });
+  }
+}

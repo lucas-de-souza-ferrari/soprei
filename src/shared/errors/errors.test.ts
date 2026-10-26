@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   BaseError,
+  ConflictError,
   DatabaseError,
   ExternalServiceError,
   ForbiddenError,
   NotFoundError,
+  TenantScopeError,
   UnauthorizedError,
   ValidationError,
 } from './index.js';
@@ -16,7 +18,9 @@ describe('hierarquia de erros', () => {
     { create: () => new UnauthorizedError(), statusCode: 401, code: 'UNAUTHORIZED' },
     { create: () => new ForbiddenError(), statusCode: 403, code: 'FORBIDDEN' },
     { create: () => new NotFoundError(), statusCode: 404, code: 'NOT_FOUND' },
+    { create: () => new ConflictError(), statusCode: 409, code: 'CONFLICT' },
     { create: () => new DatabaseError(), statusCode: 500, code: 'DATABASE_ERROR' },
+    { create: () => new TenantScopeError(), statusCode: 500, code: 'TENANT_SCOPE_ERROR' },
     { create: () => new ExternalServiceError(), statusCode: 502, code: 'EXTERNAL_SERVICE_ERROR' },
   ];
 
@@ -42,7 +46,9 @@ describe('hierarquia de erros', () => {
     assert.equal(error.isOperational, true);
   });
 
-  it('DatabaseError não é operacional', () => {
+  it('DatabaseError e TenantScopeError não são operacionais; ConflictError é', () => {
     assert.equal(new DatabaseError().isOperational, false);
+    assert.equal(new TenantScopeError().isOperational, false);
+    assert.equal(new ConflictError().isOperational, true);
   });
 });
