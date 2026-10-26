@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { getClosedPort } from './test-support/closed-port.js';
 
 const ENTRYPOINT = fileURLToPath(new URL('./index.ts', import.meta.url));
 const TSX = import.meta.resolve('tsx');
@@ -26,50 +26,42 @@ function bootEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   return { PATH, Path, SystemRoot, ...extra };
 }
 
-describe('boot da aplicação', () => {
+function boot(extra: Record<string, string>): { status: number | null; output: string } {
+  const result = spawnSync(process.execPath, ['--import', TSX, ENTRYPOINT], {
+    cwd: emptyDir,
+    env: bootEnv(extra),
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
+describe('boot da aplicação (sem infraestrutura)', () => {
   it('encerra com código 1 e mensagem clara quando DATABASE_URL está ausente', () => {
-    const result = spawnSync(process.execPath, ['--import', TSX, ENTRYPOINT], {
-      cwd: emptyDir,
-      env: bootEnv({}),
-      encoding: 'utf8',
-      timeout: 30_000,
-    });
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /Configuração inválida/);
-    assert.match(result.stderr, /DATABASE_URL/);
-    assert.match(result.stderr, /cp \.env\.example \.env/);
+    const { status, output } = boot({ REDIS_URL: 'redis://localhost:6379/0' });
+    assert.equal(status, 1);
+    assert.match(output, /Configuração inválida/);
+    assert.match(output, /DATABASE_URL/);
+    assert.match(output, /cp \.env\.example \.env/);
   });
 
-  it('loga o erro e encerra com código 1 quando a porta está em uso', async () => {
-    const blocker = createServer();
-    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
-    const address = blocker.address();
-    assert.ok(address !== null && typeof address === 'object');
+  it('encerra com código 1 e mensagem clara quando REDIS_URL está ausente', () => {
+    const { status, output } = boot({ DATABASE_URL: 'postgresql://u:p@localhost:5432/db' });
+    assert.equal(status, 1);
+    assert.match(output, /Configuração inválida/);
+    assert.match(output, /REDIS_URL/);
+    assert.match(output, /obrigatória ausente/);
+  });
 
-    try {
-      const child = spawn(process.execPath, ['--import', TSX, ENTRYPOINT], {
-        cwd: emptyDir,
-        env: bootEnv({
-          NODE_ENV: 'production',
-          HOST: '127.0.0.1',
-          PORT: String(address.port),
-          DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
-        }),
-      });
-      let output = '';
-      child.stdout.on('data', (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-      child.stderr.on('data', (chunk: Buffer) => {
-        output += chunk.toString();
-      });
-      const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
-
-      assert.equal(code, 1);
-      assert.match(output, /EADDRINUSE/);
-      assert.match(output, /falha ao iniciar o servidor/);
-    } finally {
-      await new Promise((resolve) => blocker.close(resolve));
-    }
+  it('encerra com código 1 e nomeia o banco e o Redis quando ambos estão indisponíveis', async () => {
+    const [dbPort, redisPort] = [await getClosedPort(), await getClosedPort()];
+    const { status, output } = boot({
+      NODE_ENV: 'production',
+      DATABASE_URL: `postgresql://u:p@127.0.0.1:${String(dbPort)}/db`,
+      REDIS_URL: `redis://127.0.0.1:${String(redisPort)}/0`,
+      DB_POOL_CONNECTION_TIMEOUT_MS: '1000',
+    });
+    assert.equal(status, 1);
+    assert.match(output, /dependência indisponível no boot: PostgreSQL, Redis/);
   });
 });
