@@ -27,7 +27,21 @@ Subagentes em `.claude/agents/`: `spec-writer` (escreve a spec), `implementer` (
 
 ## Comandos
 
-Ainda não existem; são criados pela spec 001 (`docs/specs/001-bootstrap.md`). Quando existirem, liste aqui os scripts reais de `package.json`: `dev`, `build`, `test`, `typecheck`, `lint`, e os de Prisma.
+Gerenciador de pacotes: **pnpm**. Primeiro uso: `pnpm install` e `cp .env.example .env`.
+
+| Script | O que faz |
+| --- | --- |
+| `pnpm dev` | Sobe o servidor com `tsx watch` (log colorido via `pino-pretty`) |
+| `pnpm build` | Compila para `dist/` (`tsc -p tsconfig.build.json`, sem testes) |
+| `pnpm start` | Roda `node dist/index.js` (rode `pnpm build` antes) |
+| `pnpm test` | Testes com `node --test` + `tsx` (`src/**/*.test.ts`) |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm lint` | ESLint (flat config, `typescript-eslint` strict type-checked) |
+| `pnpm format` / `pnpm format:check` | Prettier (escreve / só verifica) |
+| `pnpm db:generate` | `prisma generate` (Prisma Client em `src/generated/prisma`, ignorado pelo git) |
+| `pnpm db:migrate` | `prisma migrate dev` (exige PostgreSQL acessível em `DATABASE_URL`; sem models ainda, a primeira migration vem na spec 003) |
+
+Antes de dar uma spec como pronta: `pnpm typecheck && pnpm lint && pnpm test` (o CI roda os mesmos três em Node 22 e na LTS mais recente).
 
 ## Regras invariantes
 
