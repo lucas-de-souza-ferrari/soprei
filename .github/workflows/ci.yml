@@ -13,6 +13,38 @@ jobs:
       fail-fast: false
       matrix:
         node: ['22', 'lts/*']
+
+    # Serviços só do CI (no desenvolvimento local, Postgres e Redis rodam nativos, sem Docker).
+    # Postgres na mesma major do ambiente local do dono (18); Redis 8, idem.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: soprei
+          POSTGRES_PASSWORD: soprei
+          POSTGRES_DB: soprei_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U soprei -d soprei_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Credenciais descartáveis dos serviços acima; os testes só aceitam soprei_test e Redis /15.
+    env:
+      DATABASE_URL: postgresql://soprei:soprei@localhost:5432/soprei_test?schema=public
+      REDIS_URL: redis://localhost:6379/15
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,8 +57,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # O Prisma Client (src/generated, ignorado pelo git) precisa existir antes do typecheck.
+      - run: pnpm db:generate
+
       - run: pnpm typecheck
 
       - run: pnpm lint
 
+      - run: pnpm db:migrate:deploy
+
       - run: pnpm test
+
+      - run: pnpm test:integration
