@@ -1,6 +1,6 @@
 # 001 — Bootstrap do projeto
 
-- **Status:** aprovada (implementada; só falta o critério "CI verde no PR", que só dá para verificar depois do push)
+- **Status:** concluída
 - **Branch:** `spec/001-bootstrap`
 - **Depende de:** nenhuma
 
@@ -33,7 +33,7 @@ Ter um projeto Node 22+ + TypeScript + Fastify + Prisma + Pino que sobe, tem scr
 - [x] Teste verifica que um `NotFoundError` lançado numa rota vira `404` em JSON sem stack, que erro de validação vira `400` e que erro inesperado vira `500` genérico sem vazar mensagem interna.
 - [x] Teste unitário de `Result` (sucesso, falha e `Result.from` com promise rejeitada).
 - [x] `pnpm build` gera `dist/` e `pnpm start` sobe o servidor.
-- [ ] CI roda e fica verde no PR.
+- [x] CI roda e fica verde no PR (confirmado pelo dono do projeto no GitHub, matriz Node 22 e LTS).
 
 ## Casos de borda e erros
 

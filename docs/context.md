@@ -111,8 +111,9 @@ Produto (specs a escrever quando a base estiver pronta):
 
 ## 6. Estado atual
 
-- Repositório criado, sem código. Estrutura de ADD (CLAUDE.md, specs, subagentes) montada.
-- Specs 001 a 009 em rascunho. Próximo passo: aprovar e executar `docs/specs/001-bootstrap.md`, na ordem numérica.
+- **Spec 001 (bootstrap): concluída e mergeada**, CI verde em Node 22 e LTS. Já existem: Fastify com `GET /health`, config validada com Zod (fail-fast), Pino, hierarquia de erros com error handler central, `Brand` e `Result`, ESLint + Prettier, Prisma 7 sem models e CI. Camadas `shared`, `infrastructure` e `presentation`; `domain` e `application` nascem quando houver conteúdo.
+- Versões fixadas na 001: TypeScript 6.0.x (o `typescript-eslint` ainda não suporta o 7) e Prisma 7.10.x (a tag `latest` do CLI aponta para um RC).
+- Specs 002 a 009 em rascunho. Próximo passo: aprovar e executar `docs/specs/002-infra-local-database.md`, na ordem numérica.
 
 ## 7. Histórico de decisões
 

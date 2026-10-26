@@ -89,4 +89,5 @@ src/
 - Trocar item da stack ou reverter decisão registrada em `docs/context.md`.
 - Relaxar o isolamento entre clientes.
 - Apagar ou reescrever migrations já aplicadas.
+- Criar ou alterar roles, bancos, senhas ou dados no PostgreSQL e no Redis locais do dono, ou rodar `FLUSHALL`/`FLUSHDB`/`DROP DATABASE`. Eles rodam nativos na máquina (sem Docker) e podem ter outros dados; testes só tocam `soprei_test` e Redis `/15`.
 - Rodar comandos destrutivos em banco, `git push --force`, ou mexer em segredos.
