@@ -3,6 +3,7 @@
 - **Status:** aprovada
 - **Branch:** `spec/003-multi-tenant-base`
 - **Depende de:** 002 (concluída)
+- **Implementação:** feita na branch e verificada localmente (ver critérios); falta só a confirmação do CI no GitHub, que não é acessível ao implementer. O status muda para `concluída` depois dela.
 
 ## Objetivo
 
@@ -67,18 +68,19 @@ Garantir por design que nenhum cliente (tenant) acessa dado de outro. Esta spec 
 
 ## Critérios de aceite
 
-- [ ] **Isolamento no repositório:** com clientes A e B, cada operação do repositório de `Conversation` feita com o `ClientId` de A nunca lê, altera nem apaga registros de B (`findById`, `list`, `update`, `delete`, `count`); o id de B usado com o `ClientId` de A resulta em `NotFoundError`.
-- [ ] Teste: `list` e `count` de A não incluem registros de B, inclusive com paginação por cursor atravessando várias páginas.
-- [ ] Teste: `create` com `clientId` de outro cliente injetado em `data` em runtime (via `as`) grava no cliente do parâmetro, não no injetado.
-- [ ] **Segunda barreira:** chamar `prisma.conversation.findMany({})` (sem `clientId`), `findUnique`, `update`, `delete` e `upsert` no client estendido lança `TenantScopeError`; o mesmo vale dentro de `runInTransaction`.
-- [ ] Teste de cobertura do registro falha se um model com `clientId` não estiver registrado (simular com a lista do registro, ou verificar o schema real).
-- [ ] **Tipos:** arquivo de teste compilado por `pnpm typecheck` com `// @ts-expect-error` prova que chamar o repositório sem `ClientId`, ou com `string`, e passar `clientId` em `TCreate`, não compila.
-- [ ] Teste: `ClientId.parse` aceita UUID válido e rejeita string vazia, texto e UUID malformado com `ValidationError`.
-- [ ] **Lint:** um arquivo de fixture fora da pasta permitida que importe `src/generated/prisma` ou use `$queryRaw` faz o ESLint falhar (teste executa o ESLint programaticamente ou o CI garante com o próprio `pnpm lint`; registrar qual).
-- [ ] CRUD de `Client` com testes de rota (`fastify.inject`): sucesso com a chave, 401 sem chave, com chave errada e com `ADMIN_API_KEY` não configurada; 400 para `:id` inválido; 404 para inexistente e para removido; 409 para slug duplicado; slug inválido 400.
-- [ ] Teste: config em produção sem `ADMIN_API_KEY` ou com menos de 32 caracteres impede o boot com mensagem clara.
-- [ ] Teste: respostas de erro de banco e de `TenantScopeError` não vazam SQL nem detalhes internos.
-- [ ] Migration criada, aplicada em `soprei` e em `soprei_test` limpo via `pnpm db:migrate:deploy`; CI verde (services com Postgres 18 e Redis 8, `db:generate` antes do typecheck).
+- [x] **Isolamento no repositório:** com clientes A e B, cada operação do repositório de `Conversation` feita com o `ClientId` de A nunca lê, altera nem apaga registros de B (`findById`, `list`, `update`, `delete`, `count`); o id de B usado com o `ClientId` de A resulta em `NotFoundError`. _(`conversation.repository.integration.test.ts`, contra `soprei_test`; a base também tem testes unitários com operações falsas.)_
+- [x] Teste: `list` e `count` de A não incluem registros de B, inclusive com paginação por cursor atravessando várias páginas.
+- [x] Teste: `create` com `clientId` de outro cliente injetado em `data` em runtime (via `as`) grava no cliente do parâmetro, não no injetado.
+- [x] **Segunda barreira:** chamar `prisma.conversation.findMany({})` (sem `clientId`), `findUnique`, `update`, `delete` e `upsert` no client estendido lança `TenantScopeError`; o mesmo vale dentro de `runInTransaction`.
+- [x] Teste de cobertura do registro falha se um model com `clientId` não estiver registrado (simular com a lista do registro, ou verificar o schema real). _(`tenant-scope.test.ts`: verifica o schema real e simula models novos; ver a decisão sobre `Prisma.dmmf`.)_
+- [x] **Tipos:** arquivo de teste compilado por `pnpm typecheck` com `// @ts-expect-error` prova que chamar o repositório sem `ClientId`, ou com `string`, e passar `clientId` em `TCreate`, não compila.
+- [x] Teste: `ClientId.parse` aceita UUID válido e rejeita string vazia, texto e UUID malformado com `ValidationError`.
+- [x] **Lint:** um arquivo de fixture fora da pasta permitida que importe `src/generated/prisma` ou use `$queryRaw` faz o ESLint falhar (teste executa o ESLint programaticamente ou o CI garante com o próprio `pnpm lint`; registrar qual). _(Registrado: `src/eslint-rules.test.ts` executa o ESLint programaticamente com o `eslint.config.js` real; o CI também roda `pnpm lint`.)_
+- [x] CRUD de `Client` com testes de rota (`fastify.inject`): sucesso com a chave, 401 sem chave, com chave errada e com `ADMIN_API_KEY` não configurada; 400 para `:id` inválido; 404 para inexistente e para removido; 409 para slug duplicado; slug inválido 400.
+- [x] Teste: config em produção sem `ADMIN_API_KEY` ou com menos de 32 caracteres impede o boot com mensagem clara.
+- [x] Teste: respostas de erro de banco e de `TenantScopeError` não vazam SQL nem detalhes internos.
+- [x] Migration criada e aplicada em `soprei` e em `soprei_test` (que estava vazio) com `prisma migrate deploy`; `prisma migrate status` confirma os dois em dia. _(No `soprei_test` foi usado `node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy`, o comando documentado no CLAUDE.md, equivalente a `pnpm db:migrate:deploy` com `.env.test`.)_
+- [ ] CI verde no GitHub (services com Postgres 18 e Redis 8, `db:generate` antes do typecheck, `db:migrate:deploy` com a migration nova). **Pendente:** o CI não é acessível ao implementer; o workflow não precisou mudar.
 
 ## Casos de borda e erros
 
@@ -101,6 +103,22 @@ Garantir por design que nenhum cliente (tenant) acessa dado de outro. Esta spec 
 
 ## Decisões e dependências novas
 
-- Sem dependências novas esperadas (Prisma Client Extensions já vêm no Prisma 7).
-- **Decisão proposta:** soft delete com slug reservado para sempre, FK `RESTRICT` e `Conversation` com remoção física permitida só pelo repositório de tenant.
+- **Sem dependências novas** (Prisma Client Extensions já vêm no Prisma 7; `zod` e `node:crypto` já existiam).
+- **Decisão proposta (implementada):** soft delete com slug reservado para sempre (a unicidade do índice vale para todas as linhas), FK `RESTRICT` e `Conversation` com remoção física permitida só pelo repositório de tenant. A entidade de domínio `Client` não expõe `deletedAt` (removido nunca chega ao domínio).
 - **Decisão do dono:** RLS do Postgres fica para uma spec separada **depois da 009** (e antes de entrar com dados reais de clientes).
+
+### Decisões tomadas na implementação
+
+- **UUID v7** (`@default(uuid(7))`, gerado pelo Prisma no client): ordenável por tempo, bom para índices e para o desempate da paginação. `ClientId.parse` aceita qualquer UUID RFC (versões 1 a 8) e normaliza para minúsculas (o que o PostgreSQL devolve).
+- **Nomes no banco em snake_case** (`@@map`/`@map`: `clients`, `conversations`, `client_id`, `created_at`...; enum `client_status`). Índice `conversations(client_id, created_at, id)`, que serve ao filtro por cliente e à paginação por cursor. Migration `20261026193548_init_clients_conversations`.
+- **Desvio: `Prisma.dmmf` não existe no Prisma 7.** O teste de cobertura e a extensão leem o modelo de dados que o client gerado carrega em `_runtimeDataModel` (API interna), em um único módulo (`schema-info.ts`) com a forma validada por Zod; se uma atualização do Prisma mudar isso, falha alto. Além do teste, a classificação é conferida **na construção do client** (um model novo sem classificar derruba o boot) e **pelo compilador** (`MODEL_SCOPES ... satisfies Record<Prisma.ModelName, ...>`).
+- **`findById` lança `NotFoundError`** (em vez de devolver `null`), nos dois repositórios, para um id de outro cliente ser indistinguível de inexistente. Id malformado também é `NotFoundError` e nem vai ao banco (o cast para `uuid` daria 500).
+- **A segunda barreira vai além do mínimo da spec:** em model de tenant só aceita `clientId` como string não vazia ou `{ equals: string }` no `where` (`undefined`, `null`, `in`, `not` e `OR` não valem); `updateMany` não pode alterar `clientId` nem `client`; `create`/`createMany` exigem `clientId` em todos os registros e recusam criar por relacionamento; operação desconhecida é recusada (falha fechada); e, em model **global**, `include`/`select`/`_count` de relacionamento que leva a model de tenant é recusado (senão `client.findMany({ include: { conversations: true } })` leria conversas de todos os clientes).
+- **`$queryRaw` e afins não são bloqueados em runtime**, só pelo lint: o health check e os testes usam SQL cru dentro de `infrastructure/database/`, como a spec previa ("ver lint").
+- **Lint além do mínimo:** fora de `infrastructure/database/**` também é proibido importar `@prisma/*` e `pg`; `application`, `presentation` e `domain` não importam `infrastructure/database`; `domain` só importa de `shared`. O `health.integration.test.ts` saiu de `presentation/` para `infrastructure/http/` por montar infraestrutura real.
+- **`update` de `Conversation`:** sem campos editáveis, só marca `updatedAt`. O `update` dos repositórios é `updateMany` + `findFirst` (duas consultas, não atômicas): se o registro some entre elas, `NotFoundError`.
+- **`ADMIN_API_KEY`:** variável vazia vale como ausente; fora de produção aceita qualquer valor não vazio; as chaves são comparadas pelo SHA-256 de cada uma com `timingSafeEqual` (tamanho fixo, sem vazar o comprimento); esquema `Bearer` sem diferenciar maiúsculas; 401 idêntico para ausente, malformada e errada. Em produção o boot falha sem a chave ou com menos de 32 caracteres (os testes de boot em produção passaram a informar uma chave descartável).
+- **API:** `POST /admin/clients` (201), `GET /admin/clients` (`?limit=&cursor=`; resposta `{ items, nextCursor }`), `GET|PATCH|DELETE /admin/clients/:id` (DELETE responde 204). `PATCH` aceita só `name` e `status` (o slug é imutável); os corpos e a query são `.strict()` (chave desconhecida, como `clientId`, é 400). Não há busca por slug em rota: `ClientService.getBySlug` existe e é testado.
+- **Risco conhecido (da spec):** sem rate limit nas rotas `/admin` até a spec 005, e a chave vale para todos os clientes.
+- **Ferramentas de teste novas** em `src/test-support/`: `tenant-fixtures.ts` (clientes com slug único, limpeza só do criado) e `in-memory-client.repository.ts`.
+- **Verificado com:** Node 24.18.0 e Node 22.23.2 (nvm, chamado por caminho), `typecheck`, `lint`, `format:check`, `test`, `test:integration`, `build`, `prisma migrate status` nos dois bancos e servidor real com curl (create, get, list, patch, delete, 401, 409, 400) contra `soprei_test` e Redis /15, com os dados criados removidos depois.
