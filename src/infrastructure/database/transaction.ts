@@ -1,10 +1,11 @@
 import { setTimeout as sleepMs } from 'node:timers/promises';
-import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
+import type { Prisma } from '../../generated/prisma/client.js';
 import {
   isDatabaseFailure,
   isRecoverableTransactionError,
   toDatabaseError,
 } from './database-errors.js';
+import type { TenantScopedDb, TenantScopedPrisma } from './tenant-scope.js';
 
 export interface RetryOptions {
   /** Repetições depois da primeira tentativa. */
@@ -67,8 +68,8 @@ export async function retryOnRecoverable<T>(
  * sobem intactos (e não são repetidos).
  */
 export async function runInTransaction<T>(
-  prisma: PrismaClient,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  prisma: TenantScopedPrisma,
+  fn: (tx: TenantScopedDb) => Promise<T>,
   options: TransactionOptions = {},
 ): Promise<T> {
   try {

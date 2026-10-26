@@ -8,6 +8,7 @@ import { withTimeout } from '../../shared/utils/index.js';
 import { type Config, loadConfig } from '../config/index.js';
 import { createLogger } from '../logger/logger.js';
 import { toDatabaseError } from './database-errors.js';
+import { extendWithTenantScope, type TenantScopedPrisma } from './tenant-scope.js';
 
 export type DatabaseConfig = Pick<
   Config,
@@ -25,7 +26,8 @@ export interface PoolMetrics {
 }
 
 export interface Database {
-  readonly prisma: PrismaClient;
+  /** Client do Prisma com a segunda barreira de isolamento entre clientes (tenant-scope). */
+  readonly prisma: TenantScopedPrisma;
   /** Verifica o banco com `SELECT 1`. Nunca lança: a falha volta como `DatabaseError`. */
   check(timeoutMs?: number): Promise<Result<void, DatabaseError>>;
   /** Números do pool, para a spec de métricas publicar. */
@@ -70,7 +72,7 @@ export function createDatabase(config: DatabaseConfig, logger: FastifyBaseLogger
     ...(schema === undefined ? {} : { schema }),
     disposeExternalPool: true,
   });
-  const prisma = new PrismaClient({ adapter });
+  const prisma = extendWithTenantScope(new PrismaClient({ adapter }));
 
   let closing: Promise<void> | undefined;
 
@@ -120,7 +122,7 @@ export function getDatabase(options?: GetDatabaseOptions): Database {
   return instance;
 }
 
-export function getPrisma(): PrismaClient {
+export function getPrisma(): TenantScopedPrisma {
   return getDatabase().prisma;
 }
 
