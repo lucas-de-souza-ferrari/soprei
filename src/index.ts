@@ -10,15 +10,26 @@ import {
   verifyInfrastructure,
 } from './infrastructure/lifecycle.js';
 import { createLogger } from './infrastructure/logger/logger.js';
+import { createMetrics } from './infrastructure/metrics/index.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config);
 
+  const metrics = createMetrics();
+
   const infrastructure: Infrastructure = {
-    database: getDatabase({ config, logger }),
+    database: getDatabase({
+      config,
+      logger,
+      queryObserver: (sample) => {
+        metrics.observeDbQuery(sample);
+      },
+    }),
     redis: getRedis({ config, logger }),
   };
+
+  metrics.bindPool(() => infrastructure.database.poolMetrics());
 
   // Fail-fast: auth e rate limit dependem do Redis e tudo depende do banco; subir "meio
   // vivo" esconde o problema. Em runtime, a degradação é decidida por spec.
@@ -31,6 +42,8 @@ async function main(): Promise<void> {
 
   const app = buildServer({
     logger,
+    metrics,
+    metricsToken: config.METRICS_TOKEN,
     readiness: {
       database: () => infrastructure.database.check(),
       redis: () => infrastructure.redis.check(),
