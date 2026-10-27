@@ -50,6 +50,15 @@ export const envSchema = z
         message: `se informado, precisa ter no mínimo ${String(METRICS_TOKEN_MIN_LENGTH)} caracteres`,
       });
     }
+    // Senão uma chamada ao LLM ainda dentro do prazo já seria tratada como "abandonada" e a
+    // retentativa a retomaria, gerando uma segunda chamada ao modelo para a mesma mensagem.
+    if (env.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS <= env.LLM_TIMEOUT_MS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ATTENDANCE_IN_FLIGHT_TIMEOUT_MS'],
+        message: `precisa ser maior que LLM_TIMEOUT_MS (${String(env.LLM_TIMEOUT_MS)} ms), senão uma chamada ainda dentro do prazo seria retomada como abandonada`,
+      });
+    }
     if (
       env.NODE_ENV === 'production' &&
       (env.ADMIN_API_KEY === undefined || env.ADMIN_API_KEY.length < ADMIN_API_KEY_MIN_LENGTH)

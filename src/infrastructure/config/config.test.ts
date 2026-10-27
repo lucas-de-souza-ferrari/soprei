@@ -124,6 +124,46 @@ describe('parseConfig', () => {
       assert.equal(result.value.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS, 9000);
     });
 
+    it('os valores dos .env*.example (15000 e 60000) são válidos', () => {
+      const result = parseConfig({
+        ...VALID_ENV,
+        LLM_PROVIDER: 'mock',
+        LLM_TIMEOUT_MS: '15000',
+        ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '60000',
+      });
+      assert.ok(result.ok);
+    });
+
+    it('ATTENDANCE_IN_FLIGHT_TIMEOUT_MS precisa ser maior que LLM_TIMEOUT_MS', () => {
+      for (const [llm, inFlight] of [
+        ['15000', '15000'],
+        ['15000', '14999'],
+        ['120000', '60000'],
+        ['5000', '1'],
+      ] as const) {
+        const result = parseConfig({
+          ...VALID_ENV,
+          LLM_TIMEOUT_MS: llm,
+          ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: inFlight,
+        });
+        assert.equal(result.ok, false, `${llm}/${inFlight}`);
+        assert.match(
+          result.error.message,
+          /ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: precisa ser maior que LLM_TIMEOUT_MS/,
+        );
+      }
+      // Um milissegundo a mais basta.
+      assert.ok(
+        parseConfig({
+          ...VALID_ENV,
+          LLM_TIMEOUT_MS: '15000',
+          ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '15001',
+        }).ok,
+      );
+      // Mudar só o LLM_TIMEOUT_MS para além do padrão de 60000 também é pego.
+      assert.equal(parseConfig({ ...VALID_ENV, LLM_TIMEOUT_MS: '60000' }).ok, false);
+    });
+
     const invalid: readonly (readonly [string, string])[] = [
       ['LLM_PROVIDER', 'openai'],
       ['LLM_PROVIDER', ''],
