@@ -1,6 +1,6 @@
 # 012 — Reorganização de pastas (sem mudança de comportamento)
 
-- **Status:** rascunho (aguarda aprovação do dono)
+- **Status:** aprovada pelo dono em 2026-10-27, com todas as recomendações da seção "Decisões"
 - **Branch:** `spec/012-reorganizacao-pastas`
 - **Depende de:** 005 (concluída). É a próxima na ordem do roadmap, **antes da 011**, para que o canal WhatsApp já nasça na estrutura nova e para não haver ramo aberto mexendo nos mesmos arquivos.
 

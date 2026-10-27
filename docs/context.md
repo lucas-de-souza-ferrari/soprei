@@ -106,7 +106,7 @@ prisma/
 
 **Próximas, nesta ordem**
 
-7. **Reorganização de pastas ([spec 012](specs/012-reorganizacao-pastas.md), rascunho aguardando aprovação):** só mover arquivos (subpastas por área em `infrastructure/database`, `infrastructure/http`, `application` e `presentation`), sem mudar comportamento; entra antes da 011 para ela já nascer na estrutura nova.
+7. **Reorganização de pastas ([spec 012](specs/012-reorganizacao-pastas.md), aprovada em 2026-10-27):** só mover arquivos (subpastas por área em `infrastructure/database`, `infrastructure/http`, `application` e `presentation`), sem mudar comportamento; entra antes da 011 para ela já nascer na estrutura nova.
 8. **Canal WhatsApp, parte A ([spec 011](specs/011-canal-whatsapp.md), aprovada em 2026-10-27):** webhook com verificação e assinatura, fila BullMQ, envio da resposta pela Cloud API, mapeamento `phone_number_id` → cliente, número de teste da Meta, LLM ainda `mock`. Depende da 005, concluída.
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
