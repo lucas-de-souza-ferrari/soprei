@@ -1,6 +1,6 @@
 # 004 — Observabilidade: logs com contexto e métricas
 
-- **Status:** rascunho
+- **Status:** aprovada
 - **Branch:** `spec/004-observabilidade`
 - **Depende de:** 002 e 003 (concluídas)
 
@@ -10,7 +10,7 @@ Toda requisição e todo log carregam contexto (id da requisição, cliente, usu
 
 ## Pré-requisito
 
-A `main` precisa compilar. Hoje o `pnpm typecheck` falha com `TS2300 Duplicate identifier` em `src/shared/errors/app.errors.ts` (o commit `a40eede` duplicou `ConflictError` e `TenantScopeError`). A correção é feita **antes**, em branch própria de fix, e esta spec só começa com `typecheck`, `lint`, `test` e `test:integration` verdes na `main`.
+A `main` precisa compilar e ter `typecheck`, `lint`, `test` e `test:integration` verdes. A duplicidade de `ConflictError`/`TenantScopeError` que quebrava o `typecheck` já foi corrigida e mergeada pelo dono (commit `136af89`).
 
 ## Estado de partida (herdado da 001 a 003)
 
