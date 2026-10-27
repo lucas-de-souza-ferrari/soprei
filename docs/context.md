@@ -40,9 +40,9 @@ Resolver cada uma por spec antes de implementar o que depende dela.
 
 ## 3.1. Modelo de IA em desenvolvimento
 
-- Interface única `LLMProvider` (gerar resposta, gerar embedding).
-- Três implementações: `mock` (respostas determinísticas, usada nos testes e no CI), um modelo barato ou gratuito para dev manual, e o modelo de produção.
-- A escolha vem de variável de ambiente (por exemplo `LLM_PROVIDER`), validada na config.
+- Interface única `LlmProvider` (`src/application/llm-provider.ts`; gerar resposta, e mais tarde gerar embedding). Hoje só `generate`, que devolve `Result<LlmReply, ExternalServiceError>`.
+- Três implementações previstas: `mock` (respostas determinísticas, usada nos testes e no CI; **já existe**, em `src/infrastructure/external-apis/llm/`), um modelo barato ou gratuito para dev manual, e o modelo de produção (as duas últimas entram em spec própria).
+- A escolha vem de `LLM_PROVIDER` (por ora só `mock`), validada na config, junto de `LLM_TIMEOUT_MS`.
 
 ## 4. Arquitetura (princípios)
 
@@ -102,9 +102,9 @@ prisma/
 3. 003 — Base multi-tenant e isolamento
 4. 004 — Observabilidade: logs com contexto por requisição e métricas
 
-**Próxima, em andamento**
+**Próxima, implementada (aguardando CI e revisão)**
 
-5. **Fatia vertical ([spec 010](specs/010-fatia-vertical-atendimento.md), aprovada):** mensagem de entrada → conversa/mensagem do cliente → `LLMProvider` com `mock` → resposta, com isolamento por cliente e fallback de erro. Decisões do dono (todas conforme a recomendação): simulador por API administrativa, processamento síncrono, persona em `Client`, `contactRef` livre, histórico de 20 mensagens e 12 000 caracteres, fallback constante, nunca logar conteúdo de mensagens, política de retenção de dados pessoais só antes de dados reais. Passa pelo `reviewer` antes do merge.
+5. **Fatia vertical ([spec 010](specs/010-fatia-vertical-atendimento.md), implementada na branch `spec/010-fatia-vertical-atendimento`; aprovada até o CI confirmar):** mensagem de entrada → conversa/mensagem do cliente → `LLMProvider` com `mock` → resposta, com isolamento por cliente e fallback de erro. Decisões do dono (todas conforme a recomendação): simulador por API administrativa, processamento síncrono, persona em `Client`, `contactRef` livre, histórico de 20 mensagens e 12 000 caracteres, fallback constante, nunca logar conteúdo de mensagens, política de retenção de dados pessoais só antes de dados reais. Passa pelo `reviewer` antes do merge.
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
 
@@ -133,7 +133,7 @@ prisma/
 - **Spec 003 (base multi-tenant): concluída e mergeada**, CI verde no PR. Já existem: models `Client` (raiz, soft delete, slug único e reservado) e `Conversation` (mínima) com a primeira migration; `src/domain/` (`ClientId`, entidades, `TenantRepository`, `ClientRepository`) e `src/application/` (`ClientService`); base de repositório de tenant, que exige `ClientId` e injeta o filtro; segunda barreira no Prisma Client (extension `tenant-scope` com `MODEL_SCOPES` e `TenantScopeError`); regras de ESLint que proíbem Prisma e SQL cru fora de `infrastructure/database/`; `ConflictError`; rotas `/admin/clients` protegidas por `ADMIN_API_KEY` (credencial temporária entre clientes, sem rate limit até a spec 005). A RLS do Postgres fica para spec separada depois da 009.
 - A duplicidade de `ConflictError`/`TenantScopeError` que quebrava o `typecheck` foi corrigida na `main` pelo dono (commit `136af89`).
 - **Spec 004 (observabilidade): concluída e mergeada**, CI verde. Já existem: contexto por requisição com `AsyncLocalStorage` (`src/shared/request-context/`), `x-request-id` reaproveitado ou UUID, logger com `mixin` de contexto e `redact` de segredos, log de requisição próprio com o padrão da rota, métricas `prom-client` num `Registry` dedicado (HTTP, queries do Prisma por model/operação via extensão aplicada depois da `tenant-scope`, pool de conexões, processo), `GET /metrics` só com `METRICS_TOKEN` (404 sem ele) e `bearerAuthHook` compartilhado com o admin. `clientId`/`userId` do contexto ficam vazios até a autenticação (spec 007). Dependência nova: `prom-client`.
-- Spec 010 (fatia vertical) aprovada, ainda sem implementação. Specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: implementar a 010 e passar pelo `reviewer` antes do merge.
+- **Spec 010 (fatia vertical): implementada na branch `spec/010-fatia-vertical-atendimento`**, aguardando CI e o agente `reviewer` antes do merge. Já existem: migration aditiva (`Client.persona`, `Conversation.contactRef` e o model `Message`, de tenant, com chaves estrangeiras compostas por `clientId`); `LlmProvider` + `MockLlmProvider` (modo de falha, marcadores `[[mock:fail]]`, `[[mock:hang]]`, `[[mock:empty]]`, `[[mock:huge]]`, registro de entradas só para testes); `AttendanceService` (idempotência por `externalId`, histórico de 20 mensagens e 12 000 caracteres, fallback constante gravado com `isFallback`, LLM fora da transação, timeout por `withTimeout`/`TimeoutError`); rotas `POST /admin/clients/:clientId/messages`, `GET .../conversations`, `GET .../conversations/:conversationId/messages` e `persona` no `PATCH /admin/clients/:id`; métricas `llm_requests_total`, `llm_request_duration_seconds`, `attendance_fallbacks_total`; regra de nunca logar conteúdo de mensagem nem persona, com teste de captura de log. Retenção de dados pessoais (mensagens e `contactRef`) segue sem política: decidir antes de dados reais, junto com a RLS. Specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: CI, `reviewer`, merge; depois a spec do provedor real de LLM.
 
 ## 7. Histórico de decisões
 
