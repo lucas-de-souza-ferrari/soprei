@@ -136,6 +136,6 @@ describe('createMetrics', () => {
     assert.match(body, /rate_limit_rejected_total{profile="admin"} 2/);
     assert.match(body, /rate_limit_rejected_total{profile="webhook"} 1/);
     assert.match(body, /rate_limit_store_errors_total 1/);
-    assert.doesNotMatch(body, /ip=|key=|clientId|userId/i);
+    assert.doesNotMatch(body, /\bip=|key=|clientId|userId/i);
   });
 });

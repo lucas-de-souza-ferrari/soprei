@@ -79,11 +79,17 @@ export function rateLimitKey(request: FastifyRequest): string {
 
 /**
  * Liga o `@fastify/rate-limit` à instância (spec 005). Chame DEPOIS de `registerObservability`
- * (o 429 entra no log de requisição e nas métricas HTTP) e ANTES de registrar as rotas (o plugin
- * liga o hook em cada rota que nasce depois dele).
+ * (o 429 entra no log de requisição e nas métricas HTTP; o contexto já existe) e ANTES de
+ * registrar as rotas.
  *
- * - `global: true`: toda rota é limitada; rota sem perfil cai em `public`;
- * - roda no `onRequest`, antes de ler o corpo e de autenticar;
+ * - **Hook `onRequest` da instância raiz**, não o hook por rota do plugin (`global: true`): o
+ *   hook da raiz roda antes de qualquer hook de plugin filho, como o de autenticação de
+ *   `/admin` (`app.addHook('onRequest', adminAuthHook(...))` no controller). Com o hook por rota
+ *   o limite rodaria DEPOIS da autenticação e tentativa de adivinhar a `ADMIN_API_KEY` recebia
+ *   401 sem nunca esbarrar no 429 (o teste de integração pegou isso). Vale também para a 011
+ *   (assinatura do webhook) e a 007 (JWT): o limiter é sempre o primeiro, antes de ler corpo;
+ * - toda rota é limitada: sem perfil cai em `public`; opt-out só com `config: { rateLimit: false }`
+ *   (`/health`, `/health/ready`, `/metrics`) e o 404 de rota inexistente não conta;
  * - store Redis (script atômico do plugin: INCR + PEXPIRE, sempre com TTL);
  * - `skipOnError: true`: Redis fora é fail-open, com log `error` e `rate_limit_store_errors_total`.
  */
@@ -113,7 +119,8 @@ export function registerRateLimit(
   });
 
   void app.register(rateLimit, {
-    global: true,
+    // O hook é nosso (abaixo); o plugin só fornece `app.rateLimit()` com estes parâmetros.
+    global: false,
     redis: store,
     nameSpace: keyPrefix,
     skipOnError: true,
@@ -130,5 +137,17 @@ export function registerRateLimit(
         request.log.warn({ err }, 'falha ao registrar métrica do rate limit');
       }
     },
+  });
+
+  // `after`: roda quando o plugin acima já carregou (`app.rateLimit` existe) e antes dos plugins
+  // registrados depois (controllers), que herdam este hook.
+  app.after((error) => {
+    if (error !== null) return;
+    const limit = app.rateLimit();
+    app.addHook('onRequest', async function rateLimitHook(request, reply) {
+      // 404 não tem perfil (e o plugin também não o cobriria); `rateLimit: false` é o opt-out.
+      if (request.is404 || request.routeOptions.config.rateLimit === false) return;
+      await limit.call(app, request, reply);
+    });
   });
 }
