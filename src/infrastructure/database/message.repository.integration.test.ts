@@ -244,7 +244,10 @@ describe('isolamento no repositório de Message (clientes A e B)', () => {
     const other = await repo.listByConversation(clientB.id, conversationB.id, {
       cursor: first.nextCursor,
     });
+    // As mensagens de B vêm depois do cursor de A: a lista não pode ser vazia (senão o teste seria vácuo).
+    assert.ok(other.items.length > 0, 'a página de B tem itens');
     assert.ok(other.items.every((m) => m.clientId === clientB.id));
+    assert.ok(other.items.every((m) => m.conversationId === conversationB.id));
   });
 
   it('update e delete com o ClientId de A não tocam a mensagem de B (NotFoundError)', async () => {
@@ -421,18 +424,24 @@ describe('forTransaction e segunda barreira', () => {
     );
     assert.equal(await repo.count(clientA.id), before);
 
+    // O externalId REAL da mensagem criada: o dono a enxerga dentro da transação; B, não.
+    const externalId = `tx-${randomUUID()}`;
     const id = await runInTransaction(database.prisma, async (tx) => {
       const inTx = repo.forTransaction(tx);
       const created = await inTx.create(clientA.id, {
         conversationId: conversationA.id,
         role: 'USER',
         content: 'confirmada',
+        externalId,
       });
       await assert.rejects(inTx.findById(clientB.id, created.id), NotFoundError);
-      assert.equal(await inTx.findByExternalId(clientB.id, 'confirmada'), null);
+      assert.equal((await inTx.findByExternalId(clientA.id, externalId))?.id, created.id);
+      assert.equal(await inTx.findByExternalId(clientB.id, externalId), null);
       return created.id;
     });
     assert.equal((await repo.findById(clientA.id, id)).content, 'confirmada');
+    assert.equal((await repo.findByExternalId(clientA.id, externalId))?.id, id);
+    assert.equal(await repo.findByExternalId(clientB.id, externalId), null);
   });
 
   it('o client estendido recusa operações de message sem clientId (TenantScopeError)', async () => {

@@ -644,6 +644,11 @@ describe('AttendanceService: isolamento entre clientes', () => {
         h.service.handleInboundMessage(b.id, { contactRef: 'mesmo', text: `B-${String(i)}` }),
       ]).flat(),
     );
+    assert.equal(h.llm.calls.length, 10);
+    assert.ok(
+      h.llm.calls.some((call) => call.history.length > 0),
+      'há histórico (não é vácuo)',
+    );
     for (const call of h.llm.calls) {
       const prefix = call.systemPrompt === 'Persona-Alfa' ? 'A-' : 'B-';
       const other = prefix === 'A-' ? 'B-' : 'A-';

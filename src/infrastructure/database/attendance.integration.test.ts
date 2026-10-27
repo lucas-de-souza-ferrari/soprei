@@ -345,6 +345,8 @@ describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e me
   });
 
   it('a persona de um nunca é usada no outro', () => {
+    assert.equal(callsFor('isoA-').length, 4);
+    assert.equal(callsFor('isoB-').length, 4);
     assert.ok(callsFor('isoA-').every((call) => call.systemPrompt === 'Persona-Alfa-ISO'));
     assert.ok(callsFor('isoB-').every((call) => call.systemPrompt === 'Persona-Beta-ISO'));
   });
@@ -386,6 +388,16 @@ describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e me
           text: `concB-${String(i)}`,
         }),
       ]).flat(),
+    );
+    assert.equal(callsFor('concA-').length, 6);
+    assert.equal(callsFor('concB-').length, 6);
+    assert.ok(
+      callsFor('concA-').some((call) => call.history.length > 0),
+      'há histórico (não é vácuo)',
+    );
+    assert.ok(
+      callsFor('concB-').some((call) => call.history.length > 0),
+      'há histórico (não é vácuo)',
     );
     for (const call of callsFor('concA-')) {
       assert.equal(call.systemPrompt, 'Persona-Alfa-ISO');

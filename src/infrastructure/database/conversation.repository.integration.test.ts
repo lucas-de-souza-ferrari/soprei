@@ -179,7 +179,10 @@ describe('listagem paginada por cursor', () => {
     const first = await repo.list(clientA.id, { limit: 1 });
     assert.ok(first.nextCursor !== null);
     const other = await repo.list(clientB.id, { cursor: first.nextCursor });
+    // As conversas de B são mais novas que o cursor de A: a página tem itens (senão o teste seria vácuo).
+    assert.ok(other.items.length > 0, 'a página de B tem itens');
     assert.ok(other.items.every((conversation) => conversation.clientId === clientB.id));
+    assert.ok(other.items.every((conversation) => idsB.includes(conversation.id)));
   });
 
   it('limit fora do intervalo e cursor inválido dão ValidationError', async () => {

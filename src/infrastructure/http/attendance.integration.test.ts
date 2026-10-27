@@ -337,15 +337,17 @@ describe('isolamento via HTTP (clientes A e B)', () => {
     // Intercala mais mensagens e confere o que o LLM recebeu.
     await send(a, { contactRef: 'mesmo', text: 'httpA-2' });
     await send(b, { contactRef: 'mesmo', text: 'httpB-2' });
-    for (const call of mock.calls.filter((candidate) =>
-      candidate.userMessage.startsWith('httpA-'),
-    )) {
+    const callsA = mock.calls.filter((candidate) => candidate.userMessage.startsWith('httpA-'));
+    const callsB = mock.calls.filter((candidate) => candidate.userMessage.startsWith('httpB-'));
+    assert.equal(callsA.length, 2);
+    assert.equal(callsB.length, 2);
+    assert.equal(callsA[1]?.history.length, 2, 'a 2ª mensagem de A tem histórico (não é vácuo)');
+    assert.equal(callsB[1]?.history.length, 2, 'a 2ª mensagem de B tem histórico (não é vácuo)');
+    for (const call of callsA) {
       assert.equal(call.systemPrompt, 'Persona-A-HTTP');
       assert.ok(call.history.every((turn) => !turn.content.includes('httpB-')));
     }
-    for (const call of mock.calls.filter((candidate) =>
-      candidate.userMessage.startsWith('httpB-'),
-    )) {
+    for (const call of callsB) {
       assert.equal(call.systemPrompt, 'Persona-B-HTTP');
       assert.ok(call.history.every((turn) => !turn.content.includes('httpA-')));
     }
