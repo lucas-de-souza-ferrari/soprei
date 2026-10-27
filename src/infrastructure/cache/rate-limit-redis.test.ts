@@ -94,6 +94,17 @@ describe('observeStoreErrors', () => {
     assert.equal(errors.length, 1);
   });
 
+  it('observador que lança não impede o plugin de receber o erro (a requisição não pendura)', async () => {
+    const client = new FakeClient();
+    client.behavior = 'error';
+    const store = observeStoreErrors(client as unknown as Redis, () => {
+      throw new Error('logger quebrado');
+    });
+    store.defineCommand('rateLimit', { numberOfKeys: 1, lua: 'x' });
+    const { error } = await call(store);
+    assert.match(error?.message ?? '', /Command timed out/);
+  });
+
   it('o aviso de erro roda no contexto assíncrono de quem chamou (herda o requestId do log)', async () => {
     const als = new AsyncLocalStorage<string>();
     const client = new FakeClient();

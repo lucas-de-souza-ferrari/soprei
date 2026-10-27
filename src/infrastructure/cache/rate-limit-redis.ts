@@ -150,7 +150,14 @@ export function observeStoreErrors(
         if (typeof callback !== 'function') return command.apply(client, args);
         const plugin = callback as ScriptCallback;
         const settle: ScriptCallback = AsyncResource.bind((error, result) => {
-          if (error !== null) onError(error);
+          if (error !== null) {
+            try {
+              onError(error);
+            } catch {
+              // Um observador que lança (logger quebrado) não pode pendurar a requisição: o plugin
+              // precisa receber o erro para o fail-open seguir.
+            }
+          }
           plugin(error, result);
         });
         try {

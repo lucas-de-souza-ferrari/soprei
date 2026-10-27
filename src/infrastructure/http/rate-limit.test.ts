@@ -103,6 +103,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     const infrastructure = new Set(['/health', '/health/ready', '/metrics']);
     for (const route of routes) {
       const label = `${String(route.method)} ${route.url}`;
+      // `config.rateLimit` só pode ser `false` (opt-out) ou ausente: o limite por rota (objeto) é
+      // ignorado pelo hook da raiz, então declarar um daria falsa sensação de proteção.
+      assert.ok(
+        route.config.rateLimit === undefined || route.config.rateLimit === false,
+        `${label} declara config.rateLimit como objeto (só false ou ausente; use rateLimitProfile)`,
+      );
       if (infrastructure.has(route.url)) {
         assert.equal(route.config.rateLimit, false, `${label} deve ser opt-out explícito`);
       } else if (route.url.startsWith('/admin/')) {
