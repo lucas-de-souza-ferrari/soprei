@@ -25,6 +25,40 @@ export interface LlmRequestSample {
   readonly durationSeconds: number;
 }
 
+/** Resultado de uma requisição ao webhook do canal (spec 011). Conjunto fixo. */
+export type WebhookRequestResult =
+  | 'verification_ok'
+  | 'verification_failed'
+  | 'ok'
+  | 'invalid_signature'
+  | 'invalid_payload'
+  | 'enqueue_failed';
+
+/** Destino de uma mensagem de entrada do canal (spec 011). Conjunto fixo. */
+export type ChannelInboundResult =
+  | 'enqueued'
+  | 'unknown_number'
+  | 'client_unavailable'
+  | 'unsupported_type'
+  | 'invalid_text'
+  | 'missing_sender'
+  | 'invalid_message';
+
+export type ChannelSendResult = 'ok' | 'error';
+
+export interface ChannelSendSample {
+  /** Canal (`whatsapp`): conjunto pequeno e fixo, nunca dado do usuário. */
+  readonly channel: string;
+  readonly result: ChannelSendResult;
+  readonly durationSeconds: number;
+}
+
+/** Resultado de um job da fila: `completed`, `retried`, `failed` ou `discarded`. */
+export type QueueJobResult = 'completed' | 'retried' | 'failed' | 'discarded';
+
+/** Status de entrega informado pelo canal (`other` agrupa qualquer valor desconhecido). */
+export type ChannelStatusEvent = 'sent' | 'delivered' | 'read' | 'played' | 'failed' | 'other';
+
 export interface DbQuerySample {
   readonly model: string;
   readonly operation: string;
@@ -48,6 +82,16 @@ export interface Metrics {
   observeLlmRequest(sample: LlmRequestSample): void;
   /** O contato recebeu o texto padrão de falha em vez de uma resposta do modelo. */
   countAttendanceFallback(): void;
+  /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
+  countWebhookRequest(channel: string, result: WebhookRequestResult): void;
+  /** O destino de uma mensagem de entrada do canal. */
+  countChannelInbound(channel: string, result: ChannelInboundResult): void;
+  /** Um evento de status de entrega do canal (só contagem). */
+  countChannelStatus(channel: string, status: ChannelStatusEvent): void;
+  /** Um envio de mensagem ao canal terminou. */
+  observeChannelSend(sample: ChannelSendSample): void;
+  /** Um job da fila terminou (ou foi reagendado). `queue` é o nome fixo da fila. */
+  countQueueJob(queue: string, result: QueueJobResult): void;
   /** Uma requisição foi recusada com 429 (spec 005). `profile` é um dos perfis fixos, nunca IP. */
   countRateLimitRejected(profile: string): void;
   /** O store (Redis) do rate limit falhou e a requisição passou em fail-open (spec 005). */
@@ -131,6 +175,44 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const webhookRequests = new Counter({
+    name: 'webhook_requests_total',
+    help: 'Requisições ao webhook do canal, por canal e resultado',
+    labelNames: ['channel', 'result'] as const,
+    registers: [registry],
+  });
+  const channelInbound = new Counter({
+    name: 'channel_inbound_messages_total',
+    help: 'Mensagens de entrada do canal, por canal e destino',
+    labelNames: ['channel', 'result'] as const,
+    registers: [registry],
+  });
+  const channelStatus = new Counter({
+    name: 'channel_status_events_total',
+    help: 'Eventos de status de entrega informados pelo canal, por canal e status',
+    labelNames: ['channel', 'status'] as const,
+    registers: [registry],
+  });
+  const channelSend = new Counter({
+    name: 'channel_send_total',
+    help: 'Envios de mensagem ao canal, por canal e resultado (ok, error)',
+    labelNames: ['channel', 'result'] as const,
+    registers: [registry],
+  });
+  const channelSendDuration = new Histogram({
+    name: 'channel_send_duration_seconds',
+    help: 'Duração dos envios de mensagem ao canal em segundos',
+    labelNames: ['channel'] as const,
+    buckets: [...HTTP_DURATION_BUCKETS],
+    registers: [registry],
+  });
+  const queueJobs = new Counter({
+    name: 'queue_jobs_total',
+    help: 'Jobs da fila por nome da fila e resultado (completed, retried, failed, discarded)',
+    labelNames: ['queue', 'result'] as const,
+    registers: [registry],
+  });
+
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
     name: 'db_pool_connections',
@@ -164,6 +246,22 @@ export function createMetrics(): Metrics {
     },
     countAttendanceFallback() {
       attendanceFallbacks.inc();
+    },
+    countWebhookRequest(channel, result) {
+      webhookRequests.inc({ channel, result });
+    },
+    countChannelInbound(channel, result) {
+      channelInbound.inc({ channel, result });
+    },
+    countChannelStatus(channel, status) {
+      channelStatus.inc({ channel, status });
+    },
+    observeChannelSend({ channel, result, durationSeconds }) {
+      channelSend.inc({ channel, result });
+      channelSendDuration.observe({ channel }, durationSeconds);
+    },
+    countQueueJob(queue, result) {
+      queueJobs.inc({ queue, result });
     },
     countRateLimitRejected(profile) {
       rateLimitRejected.inc({ profile });

@@ -5,10 +5,16 @@ export {
   LLM_DURATION_BUCKETS,
 } from './metrics.js';
 export type {
+  ChannelInboundResult,
+  ChannelSendResult,
+  ChannelSendSample,
+  ChannelStatusEvent,
   DbQuerySample,
   HttpRequestSample,
   LlmRequestResult,
   LlmRequestSample,
   Metrics,
   PoolSnapshot,
+  QueueJobResult,
+  WebhookRequestResult,
 } from './metrics.js';

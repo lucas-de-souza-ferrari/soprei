@@ -138,4 +138,32 @@ describe('createMetrics', () => {
     assert.match(body, /rate_limit_store_errors_total 1/);
     assert.doesNotMatch(body, /\bip=|key=|clientId|userId/i);
   });
+
+  it('métricas do canal (spec 011): webhook, entrada, status, envio e fila, só com labels fixos', async () => {
+    const metrics = createMetrics();
+    metrics.countWebhookRequest('whatsapp', 'ok');
+    metrics.countWebhookRequest('whatsapp', 'invalid_signature');
+    metrics.countChannelInbound('whatsapp', 'enqueued');
+    metrics.countChannelInbound('whatsapp', 'unknown_number');
+    metrics.countChannelStatus('whatsapp', 'failed');
+    metrics.observeChannelSend({ channel: 'whatsapp', result: 'ok', durationSeconds: 0.12 });
+    metrics.observeChannelSend({ channel: 'whatsapp', result: 'error', durationSeconds: 0.3 });
+    metrics.countQueueJob('channel-inbound', 'completed');
+    metrics.countQueueJob('channel-inbound', 'retried');
+    const body = await metrics.render();
+    assert.match(body, /webhook_requests_total{channel="whatsapp",result="ok"} 1/);
+    assert.match(body, /webhook_requests_total{channel="whatsapp",result="invalid_signature"} 1/);
+    assert.match(body, /channel_inbound_messages_total{channel="whatsapp",result="enqueued"} 1/);
+    assert.match(
+      body,
+      /channel_inbound_messages_total{channel="whatsapp",result="unknown_number"} 1/,
+    );
+    assert.match(body, /channel_status_events_total{channel="whatsapp",status="failed"} 1/);
+    assert.match(body, /channel_send_total{channel="whatsapp",result="ok"} 1/);
+    assert.match(body, /channel_send_total{channel="whatsapp",result="error"} 1/);
+    assert.match(body, /channel_send_duration_seconds_count{channel="whatsapp"} 2/);
+    assert.match(body, /queue_jobs_total{queue="channel-inbound",result="completed"} 1/);
+    assert.match(body, /queue_jobs_total{queue="channel-inbound",result="retried"} 1/);
+    assert.doesNotMatch(body, /clientId|userId|phone|contact|text=/i);
+  });
 });
