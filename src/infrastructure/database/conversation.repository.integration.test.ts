@@ -6,7 +6,12 @@ import {
   type Conversation,
   type NewConversation,
 } from '../../domain/index.js';
-import { NotFoundError, TenantScopeError, ValidationError } from '../../shared/errors/index.js';
+import {
+  ConflictError,
+  NotFoundError,
+  TenantScopeError,
+  ValidationError,
+} from '../../shared/errors/index.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { createLogger } from '../logger/logger.js';
@@ -204,6 +209,63 @@ describe('create', () => {
       return true;
     });
     assert.equal(await repo.count(ghost), 0);
+  });
+});
+
+describe('contactRef e findOrCreateByContact', () => {
+  it('cria na primeira chamada e devolve a mesma conversa nas seguintes', async () => {
+    const ref = nextRef();
+    const first = await repo.findOrCreateByContact(clientA.id, ref);
+    const second = await repo.findOrCreateByContact(clientA.id, ref);
+    assert.equal(first.contactRef, ref);
+    assert.equal(first.clientId, clientA.id);
+    assert.equal(second.id, first.id);
+    await repo.delete(clientA.id, first.id);
+  });
+
+  it('o mesmo contactRef em A e em B dá conversas distintas, cada uma no seu cliente', async () => {
+    const ref = nextRef();
+    const inA = await repo.findOrCreateByContact(clientA.id, ref);
+    const inB = await repo.findOrCreateByContact(clientB.id, ref);
+    assert.notEqual(inA.id, inB.id);
+    assert.equal(inA.clientId, clientA.id);
+    assert.equal(inB.clientId, clientB.id);
+    await assert.rejects(repo.findById(clientA.id, inB.id), NotFoundError);
+    await assert.rejects(repo.findById(clientB.id, inA.id), NotFoundError);
+    await repo.delete(clientA.id, inA.id);
+    await repo.delete(clientB.id, inB.id);
+  });
+
+  it('chamadas simultâneas para o mesmo contato resultam numa única conversa', async () => {
+    const ref = nextRef();
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => repo.findOrCreateByContact(clientA.id, ref)),
+    );
+    assert.equal(new Set(results.map((conversation) => conversation.id)).size, 1);
+    await repo.delete(clientA.id, results[0]?.id ?? '');
+  });
+
+  it('dentro de transação concorrente também: nenhuma transação é abortada pela corrida', async () => {
+    const ref = nextRef();
+    const ids = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        runInTransaction(database.prisma, async (tx) => {
+          const conversation = await repo.forTransaction(tx).findOrCreateByContact(clientA.id, ref);
+          return conversation.id;
+        }),
+      ),
+    );
+    assert.equal(new Set(ids).size, 1);
+    await repo.delete(clientA.id, ids[0] ?? '');
+  });
+
+  it('create com contactRef repetido no mesmo cliente é ConflictError; em outro cliente é permitido', async () => {
+    const ref = nextRef();
+    const created = await repo.create(clientA.id, { contactRef: ref });
+    await assert.rejects(repo.create(clientA.id, { contactRef: ref }), ConflictError);
+    const inB = await repo.create(clientB.id, { contactRef: ref });
+    await repo.delete(clientA.id, created.id);
+    await repo.delete(clientB.id, inB.id);
   });
 });
 
