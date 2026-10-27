@@ -56,6 +56,30 @@ describe('ClientService', () => {
     await assert.rejects(service.update(unknownId(), { name: 'x' }), NotFoundError);
   });
 
+  it('persona: nasce nula, é definida (aparada), limpa com null e validada', async () => {
+    const created = await service.create(input());
+    assert.equal(created.persona, null);
+
+    const set = await service.update(created.id, { persona: '  Você é a Ana.  ' });
+    assert.equal(set.persona, 'Você é a Ana.');
+    // Atualizar outro campo não mexe na persona.
+    assert.equal((await service.update(created.id, { name: 'Outro' })).persona, 'Você é a Ana.');
+
+    assert.equal((await service.update(created.id, { persona: null })).persona, null);
+    assert.equal(
+      (await service.update(created.id, { persona: 'p'.repeat(4000) })).persona?.length,
+      4000,
+    );
+
+    for (const persona of ['', '   ', 'p'.repeat(4001)]) {
+      await assert.rejects(
+        service.update(created.id, { persona }),
+        ValidationError,
+        persona.slice(0, 5),
+      );
+    }
+  });
+
   it('remove por soft delete: some das buscas e o slug continua reservado', async () => {
     const created = await service.create(input());
     await service.remove(created.id);

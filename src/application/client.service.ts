@@ -7,6 +7,7 @@ import {
   type ClientUpdate,
   type ListOptions,
   type NewClient,
+  PERSONA_MAX_LENGTH,
   type Page,
 } from '../domain/index.js';
 import { ConflictError, ValidationError } from '../shared/errors/index.js';
@@ -53,14 +54,18 @@ export class ClientService {
     return this.clients.list(options);
   }
 
-  /** Atualiza nome e/ou status. O slug não muda: ele identifica o cliente para sempre. */
+  /**
+   * Atualiza nome, status e/ou persona (`null` limpa a persona). O slug não muda: ele
+   * identifica o cliente para sempre.
+   */
   async update(id: ClientId, input: ClientUpdate): Promise<Client> {
-    if (input.name === undefined && input.status === undefined) {
-      throw new ValidationError('Informe name ou status para atualizar');
+    if (input.name === undefined && input.status === undefined && input.persona === undefined) {
+      throw new ValidationError('Informe name, status ou persona para atualizar');
     }
     const data: ClientUpdate = {
       ...(input.name === undefined ? {} : { name: parseName(input.name) }),
       ...(input.status === undefined ? {} : { status: parseStatus(input.status) }),
+      ...(input.persona === undefined ? {} : { persona: parsePersona(input.persona) }),
     };
     return await this.clients.update(id, data);
   }
@@ -77,6 +82,18 @@ function parseName(value: string): string {
     throw new ValidationError(`name deve ter de 1 a ${String(CLIENT_NAME_MAX_LENGTH)} caracteres`);
   }
   return name;
+}
+
+/** `null` limpa a persona; texto vazio (ou só espaços) é inválido, nunca vira persona vazia. */
+function parsePersona(value: string | null): string | null {
+  if (value === null) return null;
+  const persona = value.trim();
+  if (persona.length === 0 || persona.length > PERSONA_MAX_LENGTH) {
+    throw new ValidationError(
+      `persona deve ter de 1 a ${String(PERSONA_MAX_LENGTH)} caracteres (ou null para limpar)`,
+    );
+  }
+  return persona;
 }
 
 function parseSlug(value: string): string {

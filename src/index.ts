@@ -1,7 +1,15 @@
+import { AttendanceService } from './application/attendance.service.js';
 import { ClientService } from './application/client.service.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
 import { loadConfig } from './infrastructure/config/index.js';
-import { getDatabase, PrismaClientRepository } from './infrastructure/database/index.js';
+import {
+  getDatabase,
+  PrismaAttendanceUnitOfWork,
+  PrismaClientRepository,
+  PrismaConversationRepository,
+  PrismaMessageRepository,
+} from './infrastructure/database/index.js';
+import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
 import { buildServer } from './infrastructure/http/server.js';
 import {
   closeInfrastructure,
@@ -40,6 +48,22 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const { prisma } = infrastructure.database;
+  const clientRepository = new PrismaClientRepository(prisma);
+  const attendance = new AttendanceService({
+    clients: clientRepository,
+    conversations: new PrismaConversationRepository(prisma),
+    messages: new PrismaMessageRepository(prisma),
+    unitOfWork: new PrismaAttendanceUnitOfWork(prisma),
+    llm: createLlmProvider(config),
+    logger,
+    metrics,
+    options: {
+      llmTimeoutMs: config.LLM_TIMEOUT_MS,
+      inFlightTimeoutMs: config.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS,
+    },
+  });
+
   const app = buildServer({
     logger,
     metrics,
@@ -50,7 +74,8 @@ async function main(): Promise<void> {
     },
     admin: {
       apiKey: config.ADMIN_API_KEY,
-      clients: new ClientService(new PrismaClientRepository(infrastructure.database.prisma)),
+      clients: new ClientService(clientRepository),
+      attendance,
     },
   });
 

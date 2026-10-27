@@ -15,6 +15,7 @@ interface ClientBody {
   name: string;
   slug: string;
   status: string;
+  persona: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +66,7 @@ describe('rotas /admin/clients', () => {
         'createdAt',
         'id',
         'name',
+        'persona',
         'slug',
         'status',
         'updatedAt',
@@ -99,6 +101,50 @@ describe('rotas /admin/clients', () => {
         headers: auth,
       });
       assert.equal(next.statusCode, 200);
+    });
+
+    it('PATCH define a persona (com trim), a devolve no GET e null a limpa', async () => {
+      const created = await createClient('acme-persona');
+      assert.equal(created.persona, null);
+
+      const set = await app.inject({
+        method: 'PATCH',
+        url: `/admin/clients/${created.id}`,
+        headers: auth,
+        payload: { persona: '  Você é a Ana, atendente da Acme.  ' },
+      });
+      assert.equal(set.statusCode, 200);
+      assert.equal(set.json<ClientBody>().persona, 'Você é a Ana, atendente da Acme.');
+      const read = await app.inject({
+        method: 'GET',
+        url: `/admin/clients/${created.id}`,
+        headers: auth,
+      });
+      assert.equal(read.json<ClientBody>().persona, 'Você é a Ana, atendente da Acme.');
+
+      // Persona mexe só na persona: o resto fica como estava.
+      assert.equal(set.json<ClientBody>().name, created.name);
+      assert.equal(set.json<ClientBody>().status, 'ACTIVE');
+
+      const cleared = await app.inject({
+        method: 'PATCH',
+        url: `/admin/clients/${created.id}`,
+        headers: auth,
+        payload: { persona: null },
+      });
+      assert.equal(cleared.statusCode, 200);
+      assert.equal(cleared.json<ClientBody>().persona, null);
+    });
+
+    it('persona de 4000 caracteres é aceita', async () => {
+      const created = await createClient('acme-persona-max');
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/admin/clients/${created.id}`,
+        headers: auth,
+        payload: { persona: 'p'.repeat(4000) },
+      });
+      assert.equal(response.statusCode, 200);
     });
 
     it('PATCH atualiza nome e status; DELETE remove (204) e depois é 404', async () => {
@@ -314,9 +360,18 @@ describe('rotas /admin/clients', () => {
       assert.equal(noBody.statusCode, 400);
     });
 
-    it('PATCH exige name ou status e não aceita slug', async () => {
+    it('PATCH exige name, status ou persona e não aceita slug nem persona inválida', async () => {
       const created = await createClient('acme-patch400');
-      for (const payload of [{}, { slug: 'outro-slug' }, { status: 'X' }, { name: '' }]) {
+      for (const payload of [
+        {},
+        { slug: 'outro-slug' },
+        { status: 'X' },
+        { name: '' },
+        { persona: '' },
+        { persona: '   ' },
+        { persona: 'p'.repeat(4001) },
+        { persona: 42 },
+      ]) {
         const response = await app.inject({
           method: 'PATCH',
           url: `/admin/clients/${created.id}`,

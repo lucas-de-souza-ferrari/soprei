@@ -21,6 +21,7 @@ function toResponse(client: Client): {
   name: string;
   slug: string;
   status: string;
+  persona: string | null;
   createdAt: string;
   updatedAt: string;
 } {
@@ -29,6 +30,7 @@ function toResponse(client: Client): {
     name: client.name,
     slug: client.slug,
     status: client.status,
+    persona: client.persona,
     createdAt: client.createdAt.toISOString(),
     updatedAt: client.updatedAt.toISOString(),
   };

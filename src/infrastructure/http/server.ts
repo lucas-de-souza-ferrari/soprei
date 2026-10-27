@@ -1,5 +1,7 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, LogController } from 'fastify';
+import type { AttendanceService } from '../../application/attendance.service.js';
 import type { ClientService } from '../../application/client.service.js';
+import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
 import { healthController, type ReadinessChecks } from '../../presentation/health.controller.js';
 import { metricsController } from '../../presentation/metrics.controller.js';
@@ -11,6 +13,8 @@ export interface AdminRoutesParams {
   /** `ADMIN_API_KEY`. Ausente: as rotas existem, mas respondem sempre 401. */
   readonly apiKey: string | undefined;
   readonly clients: ClientService;
+  /** Sem isto as rotas de mensagens e conversas (spec 010) não são registradas. */
+  readonly attendance?: AttendanceService;
 }
 
 export interface BuildServerParams {
@@ -59,7 +63,18 @@ export function buildServer({
     void app.register(metricsController, { token: metricsToken, source: metrics });
   }
   if (admin !== undefined) {
-    void app.register(adminClientsController, { prefix: '/admin/clients', ...admin });
+    void app.register(adminClientsController, {
+      prefix: '/admin/clients',
+      apiKey: admin.apiKey,
+      clients: admin.clients,
+    });
+    if (admin.attendance !== undefined) {
+      void app.register(adminAttendanceController, {
+        prefix: '/admin/clients',
+        apiKey: admin.apiKey,
+        attendance: admin.attendance,
+      });
+    }
   }
 
   return app;

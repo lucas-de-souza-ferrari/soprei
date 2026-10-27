@@ -4,6 +4,7 @@ import {
   CLIENT_STATUSES,
   ClientId,
   MAX_LIST_LIMIT,
+  PERSONA_MAX_LENGTH,
 } from '../../domain/index.js';
 import { CLIENT_NAME_MAX_LENGTH } from '../../application/client.service.js';
 import { ValidationError } from '../../shared/errors/index.js';
@@ -38,11 +39,14 @@ export const updateClientBodySchema = z
   .object({
     name: nameSchema.optional(),
     status: statusSchema.optional(),
+    // `null` limpa a persona (volta à padrão). Nunca é logada.
+    persona: z.string().trim().min(1).max(PERSONA_MAX_LENGTH).nullable().optional(),
   })
   .strict()
-  .refine((body) => body.name !== undefined || body.status !== undefined, {
-    message: 'informe name ou status',
-  });
+  .refine(
+    (body) => body.name !== undefined || body.status !== undefined || body.persona !== undefined,
+    { message: 'informe name, status ou persona' },
+  );
 
 export const listClientsQuerySchema = z
   .object({
