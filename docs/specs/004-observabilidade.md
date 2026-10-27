@@ -1,6 +1,6 @@
 # 004 — Observabilidade: logs com contexto e métricas
 
-- **Status:** aprovada
+- **Status:** concluída
 - **Branch:** `spec/004-observabilidade`
 - **Depende de:** 002 e 003 (concluídas)
 
@@ -65,7 +65,7 @@ A `main` precisa compilar e ter `typecheck`, `lint`, `test` e `test:integration`
 - [x] Teste: uma falha forçada ao registrar métrica não muda o status nem o corpo da resposta.
 - [x] Teste: config rejeita `METRICS_TOKEN` com menos de 32 caracteres; o `adminAuthHook` refatorado mantém todos os testes existentes verdes.
 - [x] Shutdown continua sem handles abertos (o teste de shutdown da 002 passa com as métricas padrão ligadas).
-- [ ] CI verde em Node 22 e na LTS (confirmado pelo dono).
+- [x] CI verde em Node 22 e na LTS (confirmado pelo dono no GitHub).
 
 ## Casos de borda e erros
 
@@ -94,7 +94,7 @@ Contexto e logs são por requisição e nunca globais; o teste de concorrência 
 
 ### Registro da implementação (implementer, 2026-10-27)
 
-Status mantido em `aprovada` até o CI confirmar (critério final, não verificável localmente).
+Status passou a `concluída` depois que o dono confirmou o CI verde no GitHub (critério final, não verificável localmente pelo implementer).
 
 **Verificado localmente:** `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test` (311 unitários), `pnpm test:integration` (74), `pnpm build`; unitários e integração também em Node v22.23.2 (binário do nvm, sem trocar a versão global); smoke manual com o servidor compilado (`/health`, `/admin/clients`, `/metrics` sem e com `METRICS_TOKEN`): chave e token ausentes de todas as linhas de log, rota sempre como padrão (`/admin/clients/:id`, `unmatched`), `/metrics` fora de `http_requests_total`. O cliente criado no banco de desenvolvimento no smoke foi removido.
 
