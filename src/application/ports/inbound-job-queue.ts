@@ -13,33 +13,42 @@ export type InboundNoticeReason = (typeof INBOUND_NOTICE_REASONS)[number];
 
 const NO_CONTROL_CHARS = /^[^\p{Cc}]*$/u;
 
+/** Campos de identificação do job, também usados para validar a entrada antes de enfileirar. */
+export const jobContactRefSchema = z
+  .string()
+  .regex(NO_CONTROL_CHARS)
+  .min(1)
+  .max(CONTACT_REF_MAX_LENGTH);
+export const jobExternalIdSchema = z
+  .string()
+  .regex(NO_CONTROL_CHARS)
+  .min(1)
+  .max(EXTERNAL_ID_MAX_LENGTH);
+
 const baseFields = {
   clientId: z.uuid(),
-  contactRef: z.string().regex(NO_CONTROL_CHARS).min(1).max(CONTACT_REF_MAX_LENGTH),
-  externalId: z.string().regex(NO_CONTROL_CHARS).min(1).max(EXTERNAL_ID_MAX_LENGTH),
+  contactRef: jobContactRefSchema,
+  externalId: jobExternalIdSchema,
   requestId: z.string().min(1).max(128),
 };
 
 /**
  * Job da fila de entrada do canal. Guarda o texto do contato e o `contactRef` (dado pessoal) até
- * ser concluído e pelo período configurado. O `clientId` foi resolvido no banco a partir do número
+ * ser concluído e pelo período configurado. Campos desconhecidos são descartados na leitura (um job
+ * adulterado nunca escolhe o número de envio: ele vem do banco, pelo `clientId`). O `clientId` foi resolvido no banco a partir do número
  * do canal; o worker nunca o deduz de outra coisa.
  */
 export const inboundJobSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('text'),
-      ...baseFields,
-      text: z.string().min(1).max(MESSAGE_CONTENT_MAX_LENGTH),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('notice'),
-      ...baseFields,
-      reason: z.enum(INBOUND_NOTICE_REASONS),
-    })
-    .strict(),
+  z.object({
+    kind: z.literal('text'),
+    ...baseFields,
+    text: z.string().min(1).max(MESSAGE_CONTENT_MAX_LENGTH),
+  }),
+  z.object({
+    kind: z.literal('notice'),
+    ...baseFields,
+    reason: z.enum(INBOUND_NOTICE_REASONS),
+  }),
 ]);
 
 export type InboundJob = z.infer<typeof inboundJobSchema>;

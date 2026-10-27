@@ -1,0 +1,211 @@
+import {
+  type Client,
+  type ClientRepository,
+  WHATSAPP_PHONE_NUMBER_ID_PATTERN,
+} from '../../domain/index.js';
+import { messageRef } from '../../shared/utils/index.js';
+import { describeError } from './describe-error.js';
+import { messageTextSchema } from '../attendance/attendance.schemas.js';
+import {
+  type InboundJob,
+  type InboundJobQueue,
+  jobExternalIdSchema,
+} from '../ports/inbound-job-queue.js';
+
+/** Destino de uma mensagem de entrada (vira o label `result` da métrica; conjunto fixo). */
+export type ChannelInboundResult =
+  | 'enqueued'
+  | 'unknown_number'
+  | 'client_unavailable'
+  | 'unsupported_type'
+  | 'invalid_text'
+  | 'missing_sender'
+  | 'invalid_message';
+
+export interface ChannelIntakeMetrics {
+  countChannelInbound(channel: string, result: ChannelInboundResult): void;
+}
+
+/** Logger do canal. **Nunca** passe texto de mensagem, remetente, destinatário, nome nem segredo. */
+export interface ChannelLogger {
+  info(fields: object, message: string): void;
+  warn(fields: object, message: string): void;
+  error(fields: object, message: string): void;
+}
+
+/** Uma mensagem de entrada, já extraída do formato do canal (o webhook valida o formato). */
+export interface InboundChannelMessage {
+  /** Número do **negócio** que recebeu a mensagem (`phone_number_id`): o que resolve o cliente. */
+  readonly phoneNumberId: string;
+  /** Id da mensagem no canal (`wamid`): idempotência e id do job. */
+  readonly messageId: string;
+  /** Identificador do contato (`from`); ausente quando o canal não o informa. */
+  readonly sender: string | undefined;
+  readonly content:
+    { readonly kind: 'text'; readonly text: string | undefined } | { readonly kind: 'unsupported' };
+}
+
+export interface IntakeSummary {
+  /** Mensagens que viraram job (texto ou aviso). */
+  readonly enqueued: number;
+  /** Descartadas de propósito (número desconhecido, cliente indisponível, sem remetente...). */
+  readonly discarded: number;
+  /** Que não puderam ser enfileiradas (fila ou banco fora): o webhook responde 500. */
+  readonly failed: number;
+}
+
+export interface ChannelIntakeDeps {
+  readonly clients: Pick<ClientRepository, 'findByWhatsappPhoneNumberId'>;
+  readonly queue: InboundJobQueue;
+  readonly logger: ChannelLogger;
+  readonly metrics?: ChannelIntakeMetrics;
+  /** Nome do canal para métricas (`whatsapp`). */
+  readonly channel: string;
+}
+
+/** `wa_id` do contato: só dígitos (o canal o entrega assim). */
+const SENDER_PATTERN = /^[0-9]{1,32}$/;
+
+/**
+ * Entrada do canal (spec 011): para cada mensagem, resolve o cliente **no banco** pelo número do
+ * negócio e enfileira um job de atendimento (`text`) ou de aviso (`notice`). Não chama LLM nem o
+ * canal: é o que o webhook faz de forma síncrona antes de responder 200.
+ *
+ * Isolamento: o `ClientId` nasce aqui, da resolução `phone_number_id` -> cliente (assinada pela
+ * Meta e conferida no banco), e é a única origem do cliente do job. Nada vem de cabeçalho, query
+ * ou corpo. Privacidade: nenhum texto, remetente nem id de mensagem cru vai a log (só `messageRef`).
+ */
+export class ChannelIntakeService {
+  constructor(private readonly deps: ChannelIntakeDeps) {}
+
+  async accept(
+    messages: readonly InboundChannelMessage[],
+    requestId: string,
+  ): Promise<IntakeSummary> {
+    let enqueued = 0;
+    let discarded = 0;
+    let failed = 0;
+    // Uma resolução por número dentro do lote (um lote costuma ter um número só).
+    const clientCache = new Map<string, Promise<Client | null>>();
+
+    // Em sequência: a ordem de chegada do lote é a ordem dos jobs (fila de concorrência 1).
+    for (const message of messages) {
+      try {
+        const outcome = await this.acceptOne(message, requestId, clientCache);
+        if (outcome === 'enqueued') enqueued += 1;
+        else if (outcome === 'failed') failed += 1;
+        else discarded += 1;
+      } catch (error) {
+        failed += 1;
+        this.deps.logger.error(
+          { messageRef: messageRef(message.messageId), ...describeError(error) },
+          'falha ao aceitar a mensagem de entrada do canal',
+        );
+      }
+    }
+    return { enqueued, discarded, failed };
+  }
+
+  private async acceptOne(
+    message: InboundChannelMessage,
+    requestId: string,
+    clientCache: Map<string, Promise<Client | null>>,
+  ): Promise<'enqueued' | 'discarded' | 'failed'> {
+    const { logger } = this.deps;
+    const ref = messageRef(message.messageId);
+
+    const contactRef = message.sender;
+    if (contactRef === undefined || !SENDER_PATTERN.test(contactRef)) {
+      this.count('missing_sender');
+      logger.warn({ messageRef: ref }, 'mensagem sem remetente utilizável descartada');
+      return 'discarded';
+    }
+    // O id do canal precisa servir de `externalId` (idempotência) e de id do job.
+    if (
+      !jobExternalIdSchema.safeParse(message.messageId).success ||
+      !WHATSAPP_PHONE_NUMBER_ID_PATTERN.test(message.phoneNumberId)
+    ) {
+      this.count('invalid_message');
+      logger.warn({ messageRef: ref }, 'mensagem com identificador inválido descartada');
+      return 'discarded';
+    }
+
+    let lookup = clientCache.get(message.phoneNumberId);
+    if (lookup === undefined) {
+      lookup = this.deps.clients.findByWhatsappPhoneNumberId(message.phoneNumberId);
+      clientCache.set(message.phoneNumberId, lookup);
+    }
+    const client = await lookup;
+    if (client === null) {
+      this.count('unknown_number');
+      logger.warn(
+        { phoneNumberId: message.phoneNumberId, messageRef: ref },
+        'mensagem para número sem cliente descartada',
+      );
+      return 'discarded';
+    }
+    if (client.status === 'SUSPENDED') {
+      this.count('client_unavailable');
+      logger.warn(
+        { clientId: client.id, messageRef: ref },
+        'mensagem de cliente suspenso descartada',
+      );
+      return 'discarded';
+    }
+
+    const { job, result } = this.buildJob(message, client, contactRef, requestId);
+    const enqueuedJob = await this.deps.queue.enqueue(job);
+    if (!enqueuedJob.ok) {
+      logger.error(
+        {
+          clientId: client.id,
+          messageRef: ref,
+          jobKind: job.kind,
+          ...describeError(enqueuedJob.error),
+        },
+        'falha ao enfileirar a mensagem de entrada',
+      );
+      return 'failed';
+    }
+    this.count(result);
+    logger.info(
+      { clientId: client.id, messageRef: ref, jobKind: job.kind, result },
+      'mensagem de entrada enfileirada',
+    );
+    return 'enqueued';
+  }
+
+  /** Texto válido vira `text`; tipo não textual ou texto inválido vira `notice` (nunca silêncio). */
+  private buildJob(
+    message: InboundChannelMessage,
+    client: Client,
+    contactRef: string,
+    requestId: string,
+  ): { job: InboundJob; result: ChannelInboundResult } {
+    const base = {
+      clientId: client.id,
+      contactRef,
+      externalId: message.messageId,
+      requestId,
+    };
+    if (message.content.kind === 'unsupported') {
+      return {
+        job: { kind: 'notice', ...base, reason: 'unsupported_type' },
+        result: 'unsupported_type',
+      };
+    }
+    const text = message.content.text;
+    if (text === undefined || !messageTextSchema.safeParse(text).success) {
+      return { job: { kind: 'notice', ...base, reason: 'invalid_text' }, result: 'invalid_text' };
+    }
+    return { job: { kind: 'text', ...base, text }, result: 'enqueued' };
+  }
+
+  private count(result: ChannelInboundResult): void {
+    try {
+      this.deps.metrics?.countChannelInbound(this.deps.channel, result);
+    } catch (err) {
+      this.deps.logger.warn(describeError(err), 'falha ao registrar métrica do canal');
+    }
+  }
+}
