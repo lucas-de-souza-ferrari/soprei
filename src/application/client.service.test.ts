@@ -71,7 +71,7 @@ describe('ClientService', () => {
       4000,
     );
 
-    for (const persona of ['', '   ', 'p'.repeat(4001)]) {
+    for (const persona of ['', '   ', 'p'.repeat(4001), 'com\u0000nul']) {
       await assert.rejects(
         service.update(created.id, { persona }),
         ValidationError,

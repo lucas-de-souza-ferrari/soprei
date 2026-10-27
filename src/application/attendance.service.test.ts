@@ -318,6 +318,22 @@ describe('AttendanceService: falhas do provider', () => {
     assert.ok(h.logs.lines().some((line) => line.reason === 'provider_threw'));
   });
 
+  it('provider que devolve NUL na resposta: fallback gravado (invalid_reply), sem o texto no log', async () => {
+    const withNul: LlmProvider = {
+      name: 'nul',
+      generate: () => Promise.resolve(Result.ok({ text: 'resposta-secreta\u0000resto' })),
+    };
+    const h = setup({}, withNul);
+    const client = await newClient(h, 'nul');
+    const result = await h.service.handleInboundMessage(client.id, { contactRef: 'c', text: 'oi' });
+    assert.equal(result.reply.isFallback, true);
+    assert.equal(result.reply.text, ATTENDANCE_FALLBACK_TEXT);
+    assert.equal(h.store.allMessages().at(-1)?.content, ATTENDANCE_FALLBACK_TEXT);
+    assert.deepEqual(h.metrics.llm, [{ provider: 'nul', result: 'error' }]);
+    assert.ok(h.logs.lines().some((line) => line.reason === 'invalid_reply'));
+    assert.ok(!h.logs.raw().includes('resposta-secreta'));
+  });
+
   it('depois de um fallback a conversa segue normalmente', async () => {
     const h = setup();
     const client = await newClient(h, 'falha');
@@ -515,6 +531,8 @@ describe('AttendanceService: cliente e entrada', () => {
     ['contactRef com mais de 128 caracteres', { contactRef: 'c'.repeat(129), text: 'oi' }],
     ['contactRef com caractere de controle', { contactRef: 'a\u0000b', text: 'oi' }],
     ['contactRef com quebra de linha', { contactRef: 'a\nb', text: 'oi' }],
+    ['texto com NUL (o Postgres recusaria)', { contactRef: 'c', text: 'oi\u0000' }],
+    ['texto só com NUL no meio', { contactRef: 'c', text: 'a\u0000b' }],
     [
       'externalId com mais de 128 caracteres',
       { contactRef: 'c', text: 'oi', externalId: 'e'.repeat(129) },
@@ -532,6 +550,15 @@ describe('AttendanceService: cliente e entrada', () => {
       assert.equal(h.llm.calls.length, 0);
     });
   }
+
+  it('texto com quebra de linha e tab continua aceito (só o NUL é recusado)', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    const text = 'linha um\n\tlinha dois\r\nfim';
+    const result = await h.service.handleInboundMessage(client.id, { contactRef: 'c', text });
+    assert.equal(result.reply.isFallback, false);
+    assert.equal(h.store.allMessages()[0]?.content, text);
+  });
 
   it('aceita texto de 4000 caracteres e contactRef de 128', async () => {
     const h = setup();

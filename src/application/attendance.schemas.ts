@@ -28,7 +28,9 @@ export const inboundMessageSchema = z
     text: z
       .string()
       .max(MESSAGE_CONTENT_MAX_LENGTH)
-      .refine((value) => value.trim().length > 0, 'não pode ser vazio'),
+      .refine((value) => value.trim().length > 0, 'não pode ser vazio')
+      // O Postgres recusa NUL em texto (22021): vira 400 aqui, não 500 no banco.
+      .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL'),
     externalId: z
       .string()
       .regex(NO_CONTROL_CHARS, NO_CONTROL_MESSAGE)

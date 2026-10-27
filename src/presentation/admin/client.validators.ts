@@ -40,7 +40,15 @@ export const updateClientBodySchema = z
     name: nameSchema.optional(),
     status: statusSchema.optional(),
     // `null` limpa a persona (volta à padrão). Nunca é logada.
-    persona: z.string().trim().min(1).max(PERSONA_MAX_LENGTH).nullable().optional(),
+    persona: z
+      .string()
+      .trim()
+      .min(1)
+      .max(PERSONA_MAX_LENGTH)
+      // O Postgres recusa NUL em texto (22021): vira 400 aqui, não 500 no banco.
+      .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL')
+      .nullable()
+      .optional(),
   })
   .strict()
   .refine(

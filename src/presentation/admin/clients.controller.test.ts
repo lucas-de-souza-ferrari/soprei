@@ -371,6 +371,7 @@ describe('rotas /admin/clients', () => {
         { persona: '   ' },
         { persona: 'p'.repeat(4001) },
         { persona: 42 },
+        { persona: 'com\u0000nul' },
       ]) {
         const response = await app.inject({
           method: 'PATCH',

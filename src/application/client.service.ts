@@ -88,9 +88,9 @@ function parseName(value: string): string {
 function parsePersona(value: string | null): string | null {
   if (value === null) return null;
   const persona = value.trim();
-  if (persona.length === 0 || persona.length > PERSONA_MAX_LENGTH) {
+  if (persona.length === 0 || persona.length > PERSONA_MAX_LENGTH || persona.includes('\u0000')) {
     throw new ValidationError(
-      `persona deve ter de 1 a ${String(PERSONA_MAX_LENGTH)} caracteres (ou null para limpar)`,
+      `persona deve ter de 1 a ${String(PERSONA_MAX_LENGTH)} caracteres, sem NUL (ou null para limpar)`,
     );
   }
   return persona;

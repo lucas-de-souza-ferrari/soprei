@@ -184,6 +184,7 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
         { contactRef: 'c', text: 'a'.repeat(4001) },
         { contactRef: '', text: 'oi' },
         { contactRef: 'a\u0007b', text: 'oi' },
+        { contactRef: 'c', text: 'oi\u0000' },
         { contactRef: 'c'.repeat(129), text: 'oi' },
         { contactRef: 'c', text: 'oi', externalId: 'e'.repeat(129) },
         { contactRef: 'c', text: 'oi', clientId: randomUUID() },

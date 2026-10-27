@@ -353,6 +353,9 @@ export class AttendanceService {
         reason = 'empty_reply';
       } else if (outcome.value.text.length > MESSAGE_CONTENT_MAX_LENGTH) {
         reason = 'reply_too_long';
+      } else if (outcome.value.text.includes('\u0000')) {
+        // O Postgres não aceita NUL em texto: resposta inutilizável (o texto nunca vai ao log).
+        reason = 'invalid_reply';
       } else {
         result = 'ok';
         text = outcome.value.text;

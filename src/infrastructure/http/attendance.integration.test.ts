@@ -276,9 +276,25 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
       { contactRef: 'c', text: 'a'.repeat(4001) },
       { contactRef: '', text: 'oi' },
       { contactRef: 'a\u0000b', text: 'oi' },
+      { contactRef: 'c', text: 'oi\u0000' },
     ]) {
       assert.equal((await send(clientId, payload)).statusCode, 400);
     }
+    // Nada foi gravado (nem conversa): o NUL não chegou ao banco.
+    const none = await app.inject({
+      method: 'GET',
+      url: `/admin/clients/${clientId}/conversations`,
+      headers: auth,
+    });
+    assert.deepEqual(none.json<PageBody<unknown>>().items, []);
+    // Persona com NUL: 400, não 500.
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/admin/clients/${clientId}`,
+      headers: auth,
+      payload: { persona: 'com\u0000nul' },
+    });
+    assert.equal(patched.statusCode, 400);
     assert.equal((await send('nao-uuid', { contactRef: 'c', text: 'oi' })).statusCode, 400);
   });
 
@@ -400,6 +416,8 @@ describe('contexto de log e privacidade', () => {
     await send(clientId, { contactRef: contact, text: `${secrets[2] ?? ''} ${MOCK_HANG_MARKER}` });
     // Entradas inválidas e corpo malformado também não podem ecoar o conteúdo.
     await send(clientId, { contactRef: `${contact}\u0000`, text: secrets[0] ?? '' });
+    // Texto com NUL (400): o conteúdo também não pode ser ecoado no log.
+    await send(clientId, { contactRef: contact, text: `${secrets[2] ?? ''}\u0000` });
     await app.inject({
       method: 'POST',
       url: `/admin/clients/${clientId}/messages`,
