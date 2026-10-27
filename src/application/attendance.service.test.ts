@@ -20,6 +20,7 @@ import { createRequestContext, runWithContext } from '../shared/request-context/
 import { Result } from '../shared/types/index.js';
 import { InMemoryAttendanceStore } from '../test-support/in-memory-attendance.js';
 import { InMemoryClientRepository } from '../test-support/in-memory-client.repository.js';
+import { keepEventLoopAlive } from '../test-support/keep-alive.js';
 import { captureLogs } from '../test-support/log-capture.js';
 import {
   ATTENDANCE_FALLBACK_TEXT,
@@ -237,9 +238,16 @@ describe('AttendanceService: falhas do provider', () => {
   ): Promise<Awaited<ReturnType<AttendanceService['handleInboundMessage']>>> {
     const client = await newClient(h, 'falha');
     clientIdOfLastCase = client.id;
-    return runWithContext({ ...createRequestContext('req-falha-1'), clientId: client.id }, () =>
-      h.service.handleInboundMessage(client.id, { contactRef: 'c1', text: `oi ${marker}` }),
-    );
+    // O timer de `withTimeout` é `unref()`: com o provider travado, nada mais segura o event loop.
+    const release = keepEventLoopAlive();
+    try {
+      return await runWithContext(
+        { ...createRequestContext('req-falha-1'), clientId: client.id },
+        () => h.service.handleInboundMessage(client.id, { contactRef: 'c1', text: `oi ${marker}` }),
+      );
+    } finally {
+      release();
+    }
   }
   let clientIdOfLastCase = '';
 
@@ -656,7 +664,8 @@ describe('AttendanceService: isolamento entre clientes', () => {
 });
 
 describe('AttendanceService: privacidade nos logs', () => {
-  it('conteúdo das mensagens e persona não aparecem em nenhuma linha de log (sucesso, fallback, timeout, duplicata)', async () => {
+  it('conteúdo das mensagens e persona não aparecem em nenhuma linha de log (sucesso, fallback, timeout, duplicata)', async (t) => {
+    t.after(keepEventLoopAlive()); // o timer de withTimeout é unref()
     const h = setup({ llmTimeoutMs: 30 });
     const secretPersona = 'PERSONA-SECRETA-9f3a';
     const client = await newClient(h, 'priv', secretPersona);
