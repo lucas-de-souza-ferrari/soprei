@@ -89,13 +89,13 @@ Depois de mover, ajustam-se **apenas** as linhas de `import`/`export ... from` e
 
 Cada item é verificável por comando ou por teste existente:
 
-- [ ] `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test` e `pnpm test:integration` verdes em Node 22 e 24, com **a mesma contagem de testes** de antes da mudança (hoje 466 unitários e 148 de integração) e os mesmos nomes de teste (comparação da lista de nomes antes e depois, ignorando a ordem).
-- [ ] `pnpm build` gera `dist/` e o processo compilado sobe e responde `GET /health` (o teste de boot existente cobre isso); `dist/` limpo antes do build, para não sobrar arquivo da estrutura antiga.
-- [ ] `git diff -M --summary main..HEAD` mostra os arquivos como **renames** (similaridade alta), e as demais mudanças de conteúdo são só linhas de `import`/`export ... from`, comentários e os documentos listados acima. A revisão confere isso por amostragem do diff com `git diff -M -U0` filtrando as linhas de import.
-- [ ] O teste `src/eslint-rules.test.ts` passa sem alteração de conteúdo (as exceções de Prisma e SQL cru continuam valendo em toda a pasta `database/**`, inclusive nas subpastas novas).
-- [ ] Nenhum arquivo `.ts` de produção ou teste ficou em pasta onde a convenção 2 mandaria outra (inspeção da lista final de `ls` por pasta, registrada no "Registro da implementação").
-- [ ] Nenhum import de fora de `src/infrastructure/database/` entra por subpasta (`extensions/` ou `repositories/`) quando o símbolo é exportado pelo barrel; os que hoje entram por arquivo (testes de `http`, `metrics` e `test-support/shutdown-probe.ts`) passam a usar o barrel se ele exporta o símbolo, ou o caminho novo do arquivo se não exporta (sem inflar o barrel só para isso).
-- [ ] `CLAUDE.md` e `docs/context.md` atualizados e sem citação de caminho antigo (`grep` por cada caminho movido, fora das specs históricas).
+- [x] `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test` e `pnpm test:integration` verdes em Node 22 e 24, com **a mesma contagem de testes** de antes da mudança (hoje 466 unitários e 148 de integração) e os mesmos nomes de teste (comparação da lista de nomes antes e depois, ignorando a ordem).
+- [x] `pnpm build` gera `dist/` e o processo compilado sobe e responde `GET /health` (o teste de boot existente cobre isso); `dist/` limpo antes do build, para não sobrar arquivo da estrutura antiga.
+- [x] `git diff -M --summary main..HEAD` mostra os arquivos como **renames** (similaridade alta), e as demais mudanças de conteúdo são só linhas de `import`/`export ... from`, comentários e os documentos listados acima. A revisão confere isso por amostragem do diff com `git diff -M -U0` filtrando as linhas de import.
+- [x] O teste `src/eslint-rules.test.ts` passa sem alteração de conteúdo (as exceções de Prisma e SQL cru continuam valendo em toda a pasta `database/**`, inclusive nas subpastas novas).
+- [x] Nenhum arquivo `.ts` de produção ou teste ficou em pasta onde a convenção 2 mandaria outra (inspeção da lista final de `ls` por pasta, registrada no "Registro da implementação").
+- [x] Nenhum import de fora de `src/infrastructure/database/` entra por subpasta (`extensions/` ou `repositories/`) quando o símbolo é exportado pelo barrel; os que hoje entram por arquivo (testes de `http`, `metrics` e `test-support/shutdown-probe.ts`) passam a usar o barrel se ele exporta o símbolo, ou o caminho novo do arquivo se não exporta (sem inflar o barrel só para isso).
+- [x] `CLAUDE.md` e `docs/context.md` atualizados e sem citação de caminho antigo (`grep` por cada caminho movido, fora das specs históricas).
 
 ## Casos de borda e erros
 
@@ -131,3 +131,38 @@ Não se aplica: nenhuma lógica de acesso a dados muda. Os testes de isolamento 
 
 - Dependências novas: nenhuma. Sem migration.
 - A spec não muda a stack nem as regras invariantes; só a localização dos arquivos e as convenções da seção "Convenções".
+
+## Registro da implementação
+
+Feita em 2026-10-27, branch `spec/012-reorganizacao-pastas`, um commit por área (`database`, `http`, `application`, `presentation`, docs). Status da spec mantido em `aprovada` (a conclusão fica para o dono).
+
+**Pastas finais (arquivos diretamente em cada pasta):**
+
+| Pasta | Arquivos |
+| --- | --- |
+| `infrastructure/database` | 9: `index.ts`, `database.ts` (+ `.test`, `.integration.test`), `transaction.ts` (+ `.test`), `database-errors.ts` (+ `.test`), `attendance.integration.test.ts` |
+| `infrastructure/database/extensions` | 6: `tenant-scope` (+ `.test`, `.integration.test`), `query-timing` (+ `.test`), `schema-info` |
+| `infrastructure/database/repositories` | 13: `tenant.repository.base` (+ `.test`), `client`, `conversation` e `message.repository` (cada um + `.integration.test`), `repository-errors`, `mappers`, `cursor` (+ `.test`), `attendance-unit-of-work` |
+| `infrastructure/http` | 7: `server`, `test-server`, `error-handler` (+ `.test`), 3 testes de integração de rotas |
+| `infrastructure/http/observability` | 2: `observability` (+ `.test`) |
+| `infrastructure/http/rate-limit` | 5: `rate-limit` (+ `.test`, `.integration.test`), `client-ip` (+ `.test`) |
+| `application/attendance`, `clients`, `ports` | 3, 2, 1 (raiz de `application/` ficou sem arquivos) |
+| `presentation/system`, `common`, `admin` | 3, 4, 7 (raiz de `presentation/` ficou sem arquivos) |
+
+**Verificação:**
+
+- 39 renames (`git diff -M --summary main..HEAD`, similaridade de 79% a 100%; nenhum arquivo movido deixou de aparecer como rename). O restante do diff de `src/` são só linhas de `import`/`export ... from` (checado com `git diff -M -U0` filtrando essas linhas: nada sobra).
+- Lista de nomes de teste capturada antes (reporter `tap`, 466 unitários e 148 de integração) e depois, nos Node 22.23.2 e 24.18.0: idêntica, mesmas contagens, nenhum teste falhado ou pulado.
+- `pnpm typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes nos dois Node. `rm -rf dist && pnpm build`: `dist/` só com a estrutura nova; `node dist/index.js` subiu e respondeu `GET /health` (200) e `/health/ready` (200).
+- `src/eslint-rules.test.ts`, `eslint.config.js`, `package.json`, `tsconfig*.json`, CI e `pnpm-lock.yaml` não foram alterados.
+
+**Decisões e desvios:**
+
+- Nenhum arquivo foi usado por dois grupos: `schema-info.ts` segue em `extensions/` (só o `tenant-scope` o usa), `repository-errors.ts` e `cursor.ts` em `repositories/` (usados só pelos repositórios e pela base; `repository-errors` importa `database-errors` da raiz de `database/`, sentido que continua válido).
+- Imports de fora de `database/` (testes de `http` e `metrics`, `lifecycle.integration.test.ts`, `test-support/shutdown-probe.ts`) passaram a usar o barrel `database/index.ts`, que já exportava todos os símbolos (`createDatabase`, `Database`, os quatro repositórios Prisma e a unit of work); o barrel não cresceu. Em dois arquivos de teste isso juntou duas linhas de import em uma (`admin-clients` e `db-metrics`).
+- O `prettier` reformatou duas linhas de import que passaram de 100 colunas com o caminho novo (`mock-llm.provider.ts`, `server.ts`); o diff desses arquivos continua só de import.
+- Comentário em `prisma/schema.prisma` citava `src/infrastructure/database/tenant-scope.ts`; ajustado para o caminho novo (só comentário; `prisma/` não tinha outra mudança, sem migration nem efeito no schema).
+- As linhas 97 e 98 de `src/eslint-rules.test.ts` citam `../application/client.service.js` e `../presentation/health.controller.js` dentro de strings de código fictício que o teste manda o ESLint avaliar; não são imports reais e o arquivo não deveria mudar, então foram mantidas.
+- O `import '.../presentation/common/rate-limit.js'` de efeito colateral continua em `infrastructure/http/rate-limit/rate-limit.ts`.
+- Spec 011 ajustada (portas em `application/ports/`, `presentation/webhooks/` a criar na 011, caminho completo do teste de isolamento de `message.repository`); specs 001 a 010 intactas.
+- Script de reescrita de imports usado fora do repositório (resolve cada `import`/`export ... from` relativo contra o caminho antigo e regrava só quando o arquivo ou o alvo mudou); resultado conferido com `tsc` e com o diff.
