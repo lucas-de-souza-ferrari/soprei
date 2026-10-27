@@ -8,6 +8,7 @@ import { withTimeout } from '../../shared/utils/index.js';
 import { type Config, loadConfig } from '../config/index.js';
 import { createLogger } from '../logger/logger.js';
 import { toDatabaseError } from './database-errors.js';
+import { type QueryObserver, queryTimingExtension } from './query-timing.js';
 import { extendWithTenantScope, type TenantScopedPrisma } from './tenant-scope.js';
 
 export type DatabaseConfig = Pick<
@@ -52,8 +53,32 @@ function splitConnectionString(databaseUrl: string): {
   return { connectionString: url.toString(), schema };
 }
 
+export interface CreateDatabaseOptions {
+  /** Recebe a duração de cada query de model (métricas). Falha do observer vira só um `warn`. */
+  readonly queryObserver?: QueryObserver;
+}
+
+/** O observer de métrica nunca derruba uma query: a falha dele é só logada. */
+function safeObserver(
+  observer: QueryObserver | undefined,
+  logger: FastifyBaseLogger,
+): QueryObserver {
+  return (sample) => {
+    if (observer === undefined) return;
+    try {
+      observer(sample);
+    } catch (err) {
+      logger.warn({ err }, 'falha ao registrar métrica de query');
+    }
+  };
+}
+
 /** Cria um `PrismaClient` sobre um pool `pg` configurado. Prefira `getDatabase()`. */
-export function createDatabase(config: DatabaseConfig, logger: FastifyBaseLogger): Database {
+export function createDatabase(
+  config: DatabaseConfig,
+  logger: FastifyBaseLogger,
+  options: CreateDatabaseOptions = {},
+): Database {
   const { connectionString, schema } = splitConnectionString(config.DATABASE_URL);
   const pool = new pg.Pool({
     connectionString,
@@ -72,7 +97,11 @@ export function createDatabase(config: DatabaseConfig, logger: FastifyBaseLogger
     ...(schema === undefined ? {} : { schema }),
     disposeExternalPool: true,
   });
-  const prisma = extendWithTenantScope(new PrismaClient({ adapter }));
+  // Ordem das extensões: tenant-scope primeiro (barreira de isolamento, a mais externa), depois
+  // a de tempo, que só mede o que a barreira deixou passar. Ver query-timing.ts.
+  const prisma = extendWithTenantScope(new PrismaClient({ adapter })).$extends(
+    queryTimingExtension(safeObserver(options.queryObserver, logger)),
+  );
 
   let closing: Promise<void> | undefined;
 
@@ -103,7 +132,7 @@ export function getPoolMetrics(pool: pg.Pool): PoolMetrics {
   };
 }
 
-export interface GetDatabaseOptions {
+export interface GetDatabaseOptions extends CreateDatabaseOptions {
   readonly config: DatabaseConfig;
   readonly logger: FastifyBaseLogger;
 }
@@ -117,7 +146,9 @@ let instance: Database | undefined;
 export function getDatabase(options?: GetDatabaseOptions): Database {
   if (instance === undefined) {
     const resolved = options ?? defaultOptions();
-    instance = createDatabase(resolved.config, resolved.logger);
+    instance = createDatabase(resolved.config, resolved.logger, {
+      ...(resolved.queryObserver === undefined ? {} : { queryObserver: resolved.queryObserver }),
+    });
   }
   return instance;
 }

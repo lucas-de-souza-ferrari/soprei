@@ -1,18 +1,26 @@
 /**
- * Processo auxiliar do teste de shutdown: abre o pool do banco e o Redis, usa os dois,
- * fecha com `closeInfrastructure` e termina SEM chamar `process.exit`. Se sobrar algum
+ * Processo auxiliar do teste de shutdown: cria as métricas (com as métricas padrão do processo
+ * ligadas), abre o pool do banco e o Redis, usa os dois, fecha com `closeInfrastructure` e
+ * termina SEM chamar `process.exit`. Se sobrar algum
  * handle aberto, o processo não termina sozinho e o teste que o executa falha por timeout.
  */
 import { createRedis } from '../infrastructure/cache/redis.client.js';
 import { createDatabase } from '../infrastructure/database/database.js';
 import { closeInfrastructure } from '../infrastructure/lifecycle.js';
 import { createLogger } from '../infrastructure/logger/logger.js';
+import { createMetrics } from '../infrastructure/metrics/index.js';
 import { loadIntegrationConfig } from './integration-env.js';
 
 const config = loadIntegrationConfig();
 const logger = createLogger(config);
 
-const database = createDatabase(config, logger);
+const metrics = createMetrics();
+const database = createDatabase(config, logger, {
+  queryObserver: (sample) => {
+    metrics.observeDbQuery(sample);
+  },
+});
+metrics.bindPool(() => database.poolMetrics());
 const redis = createRedis(config, logger);
 
 const [databaseResult, redisResult] = await Promise.all([database.check(), redis.check()]);
@@ -21,6 +29,8 @@ if (!databaseResult.ok || !redisResult.ok) {
   process.exitCode = 2;
 }
 
+// Coleta as métricas (padrão do processo + pool) antes de fechar, como o /metrics faria.
+await metrics.render();
 const before = database.poolMetrics();
 await closeInfrastructure({ database, redis }, logger);
 const after = database.poolMetrics();

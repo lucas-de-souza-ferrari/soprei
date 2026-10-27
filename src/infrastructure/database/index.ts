@@ -5,7 +5,15 @@ export {
   getPoolMetrics,
   getPrisma,
 } from './database.js';
-export type { Database, DatabaseConfig, GetDatabaseOptions, PoolMetrics } from './database.js';
+export type {
+  CreateDatabaseOptions,
+  Database,
+  DatabaseConfig,
+  GetDatabaseOptions,
+  PoolMetrics,
+} from './database.js';
+export { queryTimingExtension } from './query-timing.js';
+export type { QueryObserver, QueryTimingSample } from './query-timing.js';
 export {
   isDatabaseFailure,
   isRecoverableTransactionError,
