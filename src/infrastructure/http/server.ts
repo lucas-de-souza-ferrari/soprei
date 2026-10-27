@@ -43,18 +43,8 @@ export interface BuildServerParams {
   readonly trustProxy?: TrustProxySetting;
 }
 
-/**
- * Converte a config no `trustProxy` do Fastify. A lista vira `string[]` mutável; o inteiro vira
- * função porque os tipos do Fastify (5.12) não listam `number`, embora o runtime o aceite: a
- * função `(address, hop) => hop < n` é exatamente o que o proxy-addr faz com um número (confia
- * nos `n` saltos mais próximos do servidor e para na primeira entrada não confiada).
- */
-function fastifyTrustProxy(
-  setting: TrustProxySetting,
-): boolean | string[] | ((address: string, hop: number) => boolean) {
-  if (typeof setting === 'number') {
-    return (_address, hop) => hop < setting;
-  }
+/** O Fastify quer `string[]` mutável; a config entrega `readonly string[]`. */
+function fastifyTrustProxy(setting: TrustProxySetting): boolean | string[] {
   return typeof setting === 'object' ? [...setting] : setting;
 }
 

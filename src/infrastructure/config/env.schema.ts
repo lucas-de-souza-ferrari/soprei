@@ -67,7 +67,7 @@ export const envSchema = z
     RATE_LIMIT_WEBHOOK_WINDOW_SECONDS: rateLimitWindowSeconds(60),
     // Prazo de cada comando da conexão Redis dedicada ao limiter; estourou: fail-open.
     RATE_LIMIT_REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(10_000).default(250),
-    // IP atrás de proxy: false | true | número de proxies | lista de IPs/CIDRs (ver trust-proxy.ts).
+    // IP atrás de proxy: false | true | lista de IPs/CIDRs dos proxies (ver trust-proxy.ts).
     TRUST_PROXY: z
       .string()
       .optional()
@@ -79,6 +79,15 @@ export const envSchema = z
       }),
   })
   .superRefine((env, ctx) => {
+    // `true` confia em toda a cadeia de X-Forwarded-For: o cliente escolhe o IP e escapa do limite.
+    if (env.NODE_ENV === 'production' && env.TRUST_PROXY === true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRUST_PROXY'],
+        message:
+          'não pode ser "true" em produção (o cliente escolheria o próprio IP); liste os IPs/CIDRs dos proxies, ex.: 127.0.0.1,::1',
+      });
+    }
     if (env.NODE_ENV === 'production' && !env.RATE_LIMIT_ENABLED) {
       ctx.addIssue({
         code: 'custom',

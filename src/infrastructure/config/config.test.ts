@@ -364,7 +364,18 @@ describe('parseConfig', () => {
       assert.ok(parseConfig(PRODUCTION).ok);
     });
 
-    it('TRUST_PROXY aceita false, true, inteiro e lista de IPs/CIDRs e rejeita lixo', () => {
+    it('TRUST_PROXY=true é rejeitado em produção; false e lista passam', () => {
+      const bad = parseConfig({ ...PRODUCTION, TRUST_PROXY: 'true' });
+      assert.equal(bad.ok, false);
+      assert.match(bad.error.message, /TRUST_PROXY: não pode ser "true" em produção/);
+      assert.ok(parseConfig({ ...PRODUCTION, TRUST_PROXY: 'false' }).ok);
+      assert.ok(parseConfig({ ...PRODUCTION, TRUST_PROXY: '127.0.0.1,::1' }).ok);
+      // Fora de produção segue aceito (ambiente fechado), com warn no boot.
+      assert.ok(parseConfig({ ...VALID_ENV, NODE_ENV: 'development', TRUST_PROXY: 'true' }).ok);
+      assert.ok(parseConfig({ ...VALID_ENV, NODE_ENV: 'test', TRUST_PROXY: 'true' }).ok);
+    });
+
+    it('TRUST_PROXY aceita false, true e lista de IPs/CIDRs e rejeita inteiro e lixo', () => {
       const trust = (value: string): unknown => {
         const result = parseConfig({ ...VALID_ENV, TRUST_PROXY: value });
         assert.ok(result.ok, value);
@@ -372,13 +383,15 @@ describe('parseConfig', () => {
       };
       assert.equal(trust('false'), false);
       assert.equal(trust('true'), true);
-      assert.equal(trust('1'), 1);
+      assert.deepEqual(trust('127.0.0.1,::1'), ['127.0.0.1', '::1']);
       assert.deepEqual(trust('10.0.0.0/8,172.16.0.1'), ['10.0.0.0/8', '172.16.0.1']);
 
       const bad = parseConfig({ ...VALID_ENV, TRUST_PROXY: 'talvez' });
       assert.equal(bad.ok, false);
       assert.match(bad.error.message, /TRUST_PROXY/);
-      assert.equal(parseConfig({ ...VALID_ENV, TRUST_PROXY: '0' }).ok, false);
+      for (const integer of ['0', '1', '2']) {
+        assert.equal(parseConfig({ ...VALID_ENV, TRUST_PROXY: integer }).ok, false, integer);
+      }
     });
   });
 });

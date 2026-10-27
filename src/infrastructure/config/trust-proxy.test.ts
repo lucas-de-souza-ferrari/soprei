@@ -20,15 +20,11 @@ describe('parseTrustProxy', () => {
     assert.equal(parsed('true'), true);
   });
 
-  it('aceita inteiro de 1 a 32 como número de proxies', () => {
-    assert.equal(parsed('1'), 1);
-    assert.equal(parsed('2'), 2);
-    assert.equal(parsed('32'), 32);
-  });
-
-  it('rejeita 0 e inteiro acima de 32', () => {
-    for (const raw of ['0', '33', '999']) {
-      assert.equal(parseTrustProxy(raw).ok, false, raw);
+  it('rejeita inteiro (o Fastify não confia em contagem de saltos), com a dica da lista', () => {
+    for (const raw of ['0', '1', '2', '32', '33', '999']) {
+      const result = parseTrustProxy(raw);
+      assert.ok(!result.ok, raw);
+      assert.match(result.message, /liste os IPs[/]CIDRs/);
     }
   });
 

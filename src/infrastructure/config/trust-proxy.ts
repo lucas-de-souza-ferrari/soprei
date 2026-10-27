@@ -4,12 +4,13 @@ import { isIP } from 'node:net';
  * Valor de `TRUST_PROXY` já interpretado, no formato que o `trustProxy` do Fastify aceita:
  * - `false`: ignora `X-Forwarded-For` (o IP é o do socket);
  * - `true`: confia em TODA a cadeia (spoofável: o cliente escolhe o IP; só para ambiente fechado);
- * - número: quantos proxies confiáveis existem à frente do servidor (`1` para um túnel);
- * - lista de IPs/CIDRs: só esses proxies são confiados.
+ * - lista de IPs/CIDRs: só esses proxies são confiados (o proxy-addr valida o peer imediato).
+ *
+ * Não existe valor inteiro ("n proxies à frente"): o Fastify 5.12.7 o trata como fail-closed (nunca
+ * confia, de propósito: contagem de saltos sozinha não valida o peer imediato) e a função
+ * equivalente `(addr, hop) => hop < n` reabriria o spoofing de `X-Forwarded-For`.
  */
-export type TrustProxySetting = boolean | number | readonly string[];
-
-export const TRUST_PROXY_MAX_HOPS = 32;
+export type TrustProxySetting = boolean | readonly string[];
 
 export type TrustProxyParseResult =
   | { readonly ok: true; readonly value: TrustProxySetting }
@@ -40,7 +41,7 @@ function validateAddress(entry: string): string | undefined {
 }
 
 /**
- * Interpreta `TRUST_PROXY`: `false`, `true`, inteiro (1 a 32) ou lista de IPs/CIDRs separados
+ * Interpreta `TRUST_PROXY`: `false`, `true` ou lista de IPs/CIDRs separados
  * por vírgula. Vazio vale como `false`. Qualquer outra coisa é rejeitada (nada de palavras-chave
  * do proxy-addr como `loopback`, para a configuração ser explícita).
  */
@@ -50,14 +51,11 @@ export function parseTrustProxy(raw: string | undefined): TrustProxyParseResult 
   if (text === 'true') return { ok: true, value: true };
 
   if (INTEGER.test(text)) {
-    const hops = Number(text);
-    if (hops < 1 || hops > TRUST_PROXY_MAX_HOPS) {
-      return {
-        ok: false,
-        message: `número de proxies deve ficar entre 1 e ${String(TRUST_PROXY_MAX_HOPS)} (use false para não confiar em nenhum)`,
-      };
-    }
-    return { ok: true, value: hops };
+    return {
+      ok: false,
+      message:
+        'inteiro não é aceito (o Fastify não confia em contagem de saltos); liste os IPs/CIDRs dos proxies, ex.: 127.0.0.1,::1',
+    };
   }
 
   const entries = text.split(',').map((entry) => entry.trim());

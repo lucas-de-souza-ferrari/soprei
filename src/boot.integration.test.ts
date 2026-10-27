@@ -195,14 +195,19 @@ async function startServer(extra: Record<string, string>): Promise<RunningServer
 }
 
 describe('boot com rate limiting (spec 005)', () => {
-  it('liga o limite por IP de ponta a ponta, com TRUST_PROXY=1 e o Redis dedicado', async () => {
+  it('liga o limite por IP de ponta a ponta, com TRUST_PROXY=127.0.0.1,::1 e o Redis dedicado', async () => {
     // IPv6 aleatório (documentação, 2001:db8::/32) de /64 próprio: a chave do contador no Redis
     // é só deste teste (`soprei:ratelimit:admin:2001:db8:xxxx:yyyy::`) e expira em 5 s.
     const a = randomBytes(2).toString('hex');
     const b = randomBytes(2).toString('hex');
     const clientIp = `2001:db8:${a}:${b}::1`;
+    // Segundo IP, também aleatório e de /64 próprio.
+    const c = randomBytes(2).toString('hex');
+    const d = randomBytes(2).toString('hex');
+    const otherIp = `2001:db8:${c}:${d}::1`;
     const server = await startServer({
-      TRUST_PROXY: '1',
+      // Túnel/proxy local: o peer imediato (127.0.0.1) é confiável, o IP é o que ele acrescenta.
+      TRUST_PROXY: '127.0.0.1,::1',
       RATE_LIMIT_ADMIN_MAX: '2',
       RATE_LIMIT_ADMIN_WINDOW_SECONDS: '5',
     });
@@ -224,7 +229,7 @@ describe('boot com rate limiting (spec 005)', () => {
       assert.ok(Number.isInteger(body.error.retryAfter) && body.error.retryAfter >= 1);
 
       // Outro IP (outro /64) não foi afetado.
-      const other = await fetch(url, { headers: { 'x-forwarded-for': '198.51.100.9' } });
+      const other = await fetch(url, { headers: { 'x-forwarded-for': otherIp } });
       assert.equal(other.status, 401);
 
       // /health segue fora do limite.
@@ -233,7 +238,7 @@ describe('boot com rate limiting (spec 005)', () => {
       // Só a chave deste teste (nome exato, derivado do IP aleatório) é removida.
       const keys = [
         `soprei:ratelimit:admin:2001:db8:${a}:${b}::`,
-        'soprei:ratelimit:admin:198.51.100.9',
+        `soprei:ratelimit:admin:2001:db8:${c}:${d}::`,
       ];
       assert.equal(await redis.client.exists(keys[0] ?? ''), 1);
       await redis.client.del(...keys);

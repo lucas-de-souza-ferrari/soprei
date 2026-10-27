@@ -600,6 +600,8 @@ describe('métricas e logs', () => {
 
 describe('TRUST_PROXY', () => {
   const PROXY_IP = '10.0.0.1';
+  // Lista de proxies confiáveis (o proxy-addr valida o peer imediato; inteiro não existe mais).
+  const PROXIES = ['10.0.0.0/8'] as const;
   const quota1 = { public: { max: 1, windowSeconds: 60 } };
 
   it('false: X-Forwarded-For é ignorado (dois valores diferentes compartilham a cota do socket)', async () => {
@@ -621,8 +623,8 @@ describe('TRUST_PROXY', () => {
     });
   });
 
-  it('1: o IP vem do X-Forwarded-For acrescentado pelo proxy; valor forjado à esquerda não muda a chave', async () => {
-    await withHarness({ trustProxy: 1, profiles: profiles(quota1) }, async (h) => {
+  it('lista: o IP vem do X-Forwarded-For acrescentado pelo proxy; valor forjado à esquerda não muda a chave', async () => {
+    await withHarness({ trustProxy: PROXIES, profiles: profiles(quota1) }, async (h) => {
       const viaProxy = (forwarded: string): Promise<LightMyRequestResponse> =>
         h.get('/test/sem-perfil', { ip: PROXY_IP, headers: { 'x-forwarded-for': forwarded } });
 
@@ -647,8 +649,8 @@ describe('TRUST_PROXY', () => {
     });
   });
 
-  it('1: X-Forwarded-For malformado usa o endereço do socket e nunca lança', async () => {
-    await withHarness({ trustProxy: 1, profiles: profiles(quota1) }, async (h) => {
+  it('lista: X-Forwarded-For malformado usa o endereço do socket e nunca lança', async () => {
+    await withHarness({ trustProxy: PROXIES, profiles: profiles(quota1) }, async (h) => {
       for (const forwarded of ['garbage', '1.1.1.1, not-an-ip', '1.2.3.4.5', '[::1', ',,,']) {
         const response = await h.get('/test/sem-perfil', {
           ip: `10.1.${String(forwarded.length)}.1`,
@@ -661,8 +663,8 @@ describe('TRUST_PROXY', () => {
     });
   });
 
-  it('1: porta e colchetes no X-Forwarded-For são normalizados antes de virar chave', async () => {
-    await withHarness({ trustProxy: 1, profiles: profiles(quota1) }, async (h) => {
+  it('lista: porta e colchetes no X-Forwarded-For são normalizados antes de virar chave', async () => {
+    await withHarness({ trustProxy: PROXIES, profiles: profiles(quota1) }, async (h) => {
       const viaProxy = (forwarded: string): Promise<LightMyRequestResponse> =>
         h.get('/test/sem-perfil', { ip: PROXY_IP, headers: { 'x-forwarded-for': forwarded } });
       assert.equal((await viaProxy('198.51.100.5:51000')).statusCode, 200);
@@ -673,7 +675,7 @@ describe('TRUST_PROXY', () => {
   });
 
   it('lista de CIDRs: só proxies listados são confiados', async () => {
-    await withHarness({ trustProxy: ['10.0.0.0/8'], profiles: profiles(quota1) }, async (h) => {
+    await withHarness({ trustProxy: PROXIES, profiles: profiles(quota1) }, async (h) => {
       // Proxy listado (10.0.0.1): o X-Forwarded-For vale.
       const trusted = (forwarded: string): Promise<LightMyRequestResponse> =>
         h.get('/test/sem-perfil', { ip: PROXY_IP, headers: { 'x-forwarded-for': forwarded } });
@@ -687,6 +689,29 @@ describe('TRUST_PROXY', () => {
       assert.equal((await direct('198.51.100.77')).statusCode, 200);
       assert.equal((await direct('198.51.100.78')).statusCode, 429);
       assert.ok((await h.keys()).some((key) => key.endsWith('public:192.0.2.50')));
+    });
+  });
+
+  it('lista: conexão direta de IP fora da lista com X-Forwarded-For forjado cai no IP do socket e não esgota a cota de outro IP', async () => {
+    await withHarness({ trustProxy: PROXIES, profiles: profiles(quota1) }, async (h) => {
+      const attacker = '192.0.2.66';
+      const victim = '198.51.100.40';
+      const forge = (): Promise<LightMyRequestResponse> =>
+        h.get('/test/ip', { ip: attacker, headers: { 'x-forwarded-for': victim } });
+      // O cabeçalho é ignorado: request.ip é o socket do atacante.
+      assert.equal((await forge()).json<{ ip: string }>().ip, attacker);
+      // A cota consumida (e esgotada) é a do atacante...
+      assert.equal((await forge()).statusCode, 429);
+      // ...e a da vítima segue intacta, vinda pelo proxy confiável ou direto.
+      const viaProxy = await h.get('/test/sem-perfil', {
+        ip: PROXY_IP,
+        headers: { 'x-forwarded-for': victim },
+      });
+      assert.equal(viaProxy.statusCode, 200);
+      assert.deepEqual((await h.keys()).map((key) => key.slice(h.prefix.length)).sort(), [
+        `public:${attacker}`,
+        `public:${victim}`,
+      ]);
     });
   });
 
