@@ -122,7 +122,7 @@ Regra cruzada na config: `QUEUE_BACKOFF_MS × (2^(QUEUE_ATTEMPTS − 1) − 1)` 
 **Privacidade, observabilidade e geral**
 - [ ] Texto de mensagem, `from`/`contactRef`, destinatário, nome de perfil, persona e tokens **não aparecem em nenhuma linha de log** nem em label de métrica (captura de log em webhook, worker, sucesso e falhas).
 - [ ] As métricas acima aparecem em `/metrics` e as chaves do BullMQ nos testes usam prefixo único no Redis `/15`, sem `FLUSHALL`/`FLUSHDB` (cada teste remove só o que criou).
-- [ ] Config: habilitado sem os três segredos falha no boot; `WHATSAPP_ENABLED=false` literal não habilita; a regra cruzada de backoff × `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS` é validada.
+- [ ] Config: habilitado sem os três segredos, ou sem `TRUST_PROXY` definido explicitamente, falha no boot; `WHATSAPP_ENABLED=false` literal não habilita; a regra cruzada de backoff × `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS` é validada.
 - [ ] Migration aplicada em `soprei` e `soprei_test`; `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24; CI verde e revisão do `reviewer`.
 
 ## Teste manual com o número de teste da Meta (feito pelo dono, não é teste automatizado)
@@ -149,7 +149,7 @@ O `ClientId` nasce da resolução `phone_number_id` → cliente (assinada pela M
 
 ## Requisitos sobre a spec 005
 
-A 005 (hoje um esboço) precisa, antes de aprovada, cobrir: (a) o perfil `webhook` com limite **folgado e configurável**, porque a Meta entrega rajadas e um 429 aqui significa retentativa dela e, em excesso, risco de desativar a assinatura; (b) chave por IP de origem para o webhook (o `clientId` só existe depois de interpretar o corpo, o que acontece depois da assinatura); (c) `GET` e `POST` do webhook sujeitos ao limite, e `/health` e `/metrics` fora dele; (d) `trustProxy` correto atrás do túnel/proxy. Se a 005 não puder ser feita antes, esta spec pode ser implementada com um limite mínimo provisório declarado, mas isso precisa de decisão explícita do dono.
+A 005 (aprovada e implementada em 2026-10-27) já cobre o que segue; a lista fica como registro do que esta spec assume: (a) o perfil `webhook` com limite **folgado e configurável**, porque a Meta entrega rajadas e um 429 aqui significa retentativa dela e, em excesso, risco de desativar a assinatura; (b) chave por IP de origem para o webhook (o `clientId` só existe depois de interpretar o corpo, o que acontece depois da assinatura); (c) `GET` e `POST` do webhook sujeitos ao limite, e `/health` e `/metrics` fora dele; (d) `trustProxy` correto atrás do túnel/proxy: `TRUST_PROXY` aceita só `false`, `true` (nunca em produção) ou lista de IPs/CIDRs (túnel local: `127.0.0.1,::1`); **não existe inteiro** (o Fastify 5.12.7 o trata como fail-closed). Com `WHATSAPP_ENABLED=true`, `TRUST_PROXY` precisa estar **definido explicitamente** na config (mesmo que `false`), porque o valor padrão atrás de um túnel faria a Meta e qualquer atacante dividirem a cota do perfil `webhook`; o boot registra qual modo está ativo (sem IP). O implementer confirma, ao testar com o túnel, que ele acrescenta ao `X-Forwarded-For` em vez de repassar o cabeçalho do cliente. Se a 005 não puder ser feita antes, esta spec pode ser implementada com um limite mínimo provisório declarado, mas isso precisa de decisão explícita do dono.
 
 ## Fora de escopo
 

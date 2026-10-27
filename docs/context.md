@@ -108,7 +108,7 @@ prisma/
 
 **Próximas, nesta ordem**
 
-6. **Rate limiting ([spec 005](specs/005-rate-limiting.md), reescrita em 2026-10-27, rascunho aguardando aprovação):** `@fastify/rate-limit` em Redis, perfis `public`, `admin` e `webhook` por IP, `TRUST_PROXY`, fail-open, 429 padronizado. Escopo reduzido: perfis de usuário, login e limite adaptativo ficam para a 007.
+6. **Rate limiting ([spec 005](specs/005-rate-limiting.md), aprovada e implementada em 2026-10-27; aguarda CI verde e merge do dono):** `@fastify/rate-limit` em Redis, perfis `public`, `admin` e `webhook` por IP, `TRUST_PROXY` (só `false`, `true` fora de produção ou lista de proxies), fail-open, 429 padronizado. Escopo reduzido: perfis de usuário, login e limite adaptativo ficam para a 007.
 7. **Canal WhatsApp, parte A ([spec 011](specs/011-canal-whatsapp.md), aprovada em 2026-10-27):** webhook com verificação e assinatura, fila BullMQ, envio da resposta pela Cloud API, mapeamento `phone_number_id` → cliente, número de teste da Meta, LLM ainda `mock`. Só implementar depois da 005 concluída.
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
