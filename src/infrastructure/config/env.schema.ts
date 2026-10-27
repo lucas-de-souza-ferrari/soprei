@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const ADMIN_API_KEY_MIN_LENGTH = 32;
+export const METRICS_TOKEN_MIN_LENGTH = 32;
 
 export const envSchema = z
   .object({
@@ -26,8 +27,20 @@ export const envSchema = z
       .string()
       .optional()
       .transform((value) => (value === '' ? undefined : value)),
+    // Token de GET /metrics (spec 004). Sem ele a rota não existe (404); vazia vale como ausente.
+    METRICS_TOKEN: z
+      .string()
+      .optional()
+      .transform((value) => (value === '' ? undefined : value)),
   })
   .superRefine((env, ctx) => {
+    if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < METRICS_TOKEN_MIN_LENGTH) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['METRICS_TOKEN'],
+        message: `se informado, precisa ter no mínimo ${String(METRICS_TOKEN_MIN_LENGTH)} caracteres`,
+      });
+    }
     if (
       env.NODE_ENV === 'production' &&
       (env.ADMIN_API_KEY === undefined || env.ADMIN_API_KEY.length < ADMIN_API_KEY_MIN_LENGTH)

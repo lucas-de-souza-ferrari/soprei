@@ -149,4 +149,48 @@ describe('parseConfig', () => {
       }
     });
   });
+  describe('METRICS_TOKEN', () => {
+    const TOKEN = 'm'.repeat(32);
+
+    it('é opcional em qualquer ambiente; ausente ou vazio vale como ausente', () => {
+      for (const NODE_ENV of ['development', 'test']) {
+        const result = parseConfig({ ...VALID_ENV, NODE_ENV });
+        assert.ok(result.ok, NODE_ENV);
+        assert.equal(result.value.METRICS_TOKEN, undefined);
+      }
+      const empty = parseConfig({ ...VALID_ENV, METRICS_TOKEN: '' });
+      assert.ok(empty.ok);
+      assert.equal(empty.value.METRICS_TOKEN, undefined);
+    });
+
+    it('rejeita token com menos de 32 caracteres, sem ecoar o valor', () => {
+      const value = 'curto-demais-segredo';
+      const result = parseConfig({ ...VALID_ENV, METRICS_TOKEN: value });
+      assert.equal(result.ok, false);
+      assert.match(result.error.message, /METRICS_TOKEN: se informado, precisa ter no mínimo 32/);
+      assert.ok(!result.error.message.includes(value));
+      const edge = parseConfig({ ...VALID_ENV, METRICS_TOKEN: 'a'.repeat(31) });
+      assert.equal(edge.ok, false);
+    });
+
+    it('aceita 32 caracteres ou mais', () => {
+      for (const value of [TOKEN, TOKEN + 'x']) {
+        const result = parseConfig({ ...VALID_ENV, METRICS_TOKEN: value });
+        assert.ok(result.ok);
+        assert.equal(result.value.METRICS_TOKEN, value);
+      }
+    });
+
+    it('a regra vale também em produção, junto com a da ADMIN_API_KEY', () => {
+      const result = parseConfig({
+        ...VALID_ENV,
+        NODE_ENV: 'production',
+        ADMIN_API_KEY: 'a'.repeat(32),
+        METRICS_TOKEN: 'curto',
+      });
+      assert.equal(result.ok, false);
+      assert.match(result.error.message, /METRICS_TOKEN/);
+      assert.doesNotMatch(result.error.message, /ADMIN_API_KEY/);
+    });
+  });
 });
