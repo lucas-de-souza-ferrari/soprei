@@ -74,11 +74,13 @@ src/
 ├── infrastructure/
 │   ├── config/      # env validada com Zod (fail-fast)
 │   ├── database/    # Prisma singleton, transação com retry, erros, implementações de repositório
-│   ├── http/        # servidor Fastify, error handler central
+│   ├── http/        # servidor Fastify, error handler central, observabilidade (request id, log de requisição)
+│   ├── logger/      # Pino com mixin de contexto e redact
+│   ├── metrics/     # prom-client: Registry dedicado (spec 004)
 │   ├── cache/       # client Redis singleton (cache em si: spec 006)
 │   └── external-apis/  # LLM (mock + real), canal de mensagens
 ├── presentation/    # controllers/rotas, hooks, validators Zod
-├── shared/          # errors (BaseError...), types (Brand, Result), utils
+├── shared/          # errors (BaseError...), types (Brand, Result), request-context, utils
 └── index.ts         # bootstrap
 prisma/
 └── schema.prisma
@@ -101,7 +103,7 @@ prisma/
 
 **Próximas, em ordem**
 
-4. 004 — Observabilidade: logs com contexto por requisição e métricas (detalhada; reduzir o escopo ao que a fatia vertical precisa se fizer sentido)
+4. 004 — Observabilidade: logs com contexto por requisição e métricas (**implementada na branch `spec/004-observabilidade`; aguarda o CI e o merge do dono**)
 5. **Fatia vertical (spec a escrever, nº 010):** mensagem de entrada → conversa/mensagem do cliente → `LLMProvider` com `mock` → resposta, com isolamento por cliente e fallback de erro. Decisões a tomar nela: canal inicial (endpoint genérico/simulador antes de WhatsApp), processamento em background e fila (BullMQ ou não), persona por cliente.
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
@@ -129,8 +131,9 @@ prisma/
 - Versões fixadas na 001: TypeScript 6.0.x (o `typescript-eslint` ainda não suporta o 7) e Prisma 7.10.x (a tag `latest` do CLI aponta para um RC).
 - **Spec 002 (infra local e banco): concluída e mergeada**, CI verde em Node 22 e LTS. Postgres e Redis nativos (sem Docker; PostgreSQL 18.2 e Redis 8.0.1 na máquina do dono). Já existem: Prisma 7 com `@prisma/adapter-pg` (singleton, pool configurável, helper de transação com retry, `DatabaseError`, métricas do pool), client `ioredis` singleton, `GET /health/ready`, boot fail-fast e shutdown gracioso, testes unitários (`pnpm test`) separados dos de integração (`pnpm test:integration`, só contra `soprei_test` e Redis `/15`) e CI com services Postgres 18 e Redis 8.
 - **Spec 003 (base multi-tenant): concluída e mergeada**, CI verde no PR. Já existem: models `Client` (raiz, soft delete, slug único e reservado) e `Conversation` (mínima) com a primeira migration; `src/domain/` (`ClientId`, entidades, `TenantRepository`, `ClientRepository`) e `src/application/` (`ClientService`); base de repositório de tenant, que exige `ClientId` e injeta o filtro; segunda barreira no Prisma Client (extension `tenant-scope` com `MODEL_SCOPES` e `TenantScopeError`); regras de ESLint que proíbem Prisma e SQL cru fora de `infrastructure/database/`; `ConflictError`; rotas `/admin/clients` protegidas por `ADMIN_API_KEY` (credencial temporária entre clientes, sem rate limit até a spec 005). A RLS do Postgres fica para spec separada depois da 009.
-- **Pendência na `main` (bloqueia a 004):** o commit `a40eede` ("fix: shared errors") acrescentou outra cópia de `ConflictError` e `TenantScopeError` em `src/shared/errors/app.errors.ts`, que já as tinha; `pnpm typecheck` falha com `TS2300 Duplicate identifier`. A correção é remover o bloco duplicado (linhas ~66 a 86) em uma branch de fix, com `typecheck`, `lint` e testes verdes. O CI do push na `main` deve estar vermelho por isso.
-- Spec 004 em rascunho (reescrita contra o código real); specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: corrigir a `main`, aprovar a 004 e, em seguida, escrever a spec da fatia vertical.
+- A duplicidade de `ConflictError`/`TenantScopeError` que quebrava o `typecheck` foi corrigida na `main` pelo dono (commit `136af89`).
+- **Spec 004 (observabilidade): implementada na branch `spec/004-observabilidade`, status `aprovada` até o CI confirmar.** Já existem (na branch): contexto por requisição com `AsyncLocalStorage` (`src/shared/request-context/`), `x-request-id` reaproveitado ou UUID, logger com `mixin` de contexto e `redact` de segredos, log de requisição próprio com o padrão da rota, métricas `prom-client` num `Registry` dedicado (HTTP, queries do Prisma por model/operação via extensão aplicada depois da `tenant-scope`, pool de conexões, processo), `GET /metrics` só com `METRICS_TOKEN` (404 sem ele) e `bearerAuthHook` compartilhado com o admin. `clientId`/`userId` do contexto ficam vazios até a autenticação (spec 007). Dependência nova: `prom-client`.
+- Specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: o dono revisa e faz o merge da 004 e, em seguida, a spec da fatia vertical (nº 010).
 
 ## 7. Histórico de decisões
 

@@ -53,18 +53,18 @@ A `main` precisa compilar e ter `typecheck`, `lint`, `test` e `test:integration`
 
 ## Critérios de aceite
 
-- [ ] Teste: duas requisições **concorrentes**, com atrasos que se intercalam, geram logs (do hook e de um service que usa o logger raiz depois de um `await`) cada um com o seu `requestId` e `clientId`, sem mistura de contexto.
-- [ ] Teste: o contexto definido pelo setter dentro do handler chega ao log de requisição e ao log do error handler quando o handler lança.
-- [ ] Teste: `x-request-id` válido é reaproveitado e devolvido no header; inválido (curto, com espaço, longo demais) é substituído por UUID; o `requestId` do corpo de erro é o mesmo do header.
-- [ ] Teste: campos sensíveis (`authorization`, `cookie`, `password`, `refreshToken`, `apiKey`, `token`) aparecem como `[Redacted]` no log, em nível raiz e aninhado; a chave de admin usada numa requisição não aparece em nenhuma linha de log.
-- [ ] Teste: o log de requisição usa o padrão da rota (`/admin/clients/:id`), nunca o id real, e `/health` loga em `debug`.
-- [ ] Teste: `GET /metrics` retorna 404 sem `METRICS_TOKEN` configurado, 401 sem token ou com token errado e 200 com o correto; o corpo contém `http_requests_total` e `process_cpu_user_seconds_total` depois de uma requisição.
-- [ ] Teste: o label `route` é `/admin/clients/:id` (não o UUID) e `unmatched` para rota inexistente; nenhuma linha da saída de `/metrics` contém um UUID de cliente nem `clientId`.
-- [ ] Teste de integração: depois de operações reais com o Prisma, `db_query_duration_seconds` tem amostras por `model`/`operation`, e o gauge do pool reflete `poolMetrics()`.
-- [ ] Teste: a extensão de métricas do banco não enfraquece a `tenant-scope` (as suítes da 003 continuam passando sem alteração).
-- [ ] Teste: uma falha forçada ao registrar métrica não muda o status nem o corpo da resposta.
-- [ ] Teste: config rejeita `METRICS_TOKEN` com menos de 32 caracteres; o `adminAuthHook` refatorado mantém todos os testes existentes verdes.
-- [ ] Shutdown continua sem handles abertos (o teste de shutdown da 002 passa com as métricas padrão ligadas).
+- [x] Teste: duas requisições **concorrentes**, com atrasos que se intercalam, geram logs (do hook e de um service que usa o logger raiz depois de um `await`) cada um com o seu `requestId` e `clientId`, sem mistura de contexto.
+- [x] Teste: o contexto definido pelo setter dentro do handler chega ao log de requisição e ao log do error handler quando o handler lança.
+- [x] Teste: `x-request-id` válido é reaproveitado e devolvido no header; inválido (curto, com espaço, longo demais) é substituído por UUID; o `requestId` do corpo de erro é o mesmo do header.
+- [x] Teste: campos sensíveis (`authorization`, `cookie`, `password`, `refreshToken`, `apiKey`, `token`) aparecem como `[Redacted]` no log, em nível raiz e aninhado; a chave de admin usada numa requisição não aparece em nenhuma linha de log.
+- [x] Teste: o log de requisição usa o padrão da rota (`/admin/clients/:id`), nunca o id real, e `/health` loga em `debug`.
+- [x] Teste: `GET /metrics` retorna 404 sem `METRICS_TOKEN` configurado, 401 sem token ou com token errado e 200 com o correto; o corpo contém `http_requests_total` e `process_cpu_user_seconds_total` depois de uma requisição.
+- [x] Teste: o label `route` é `/admin/clients/:id` (não o UUID) e `unmatched` para rota inexistente; nenhuma linha da saída de `/metrics` contém um UUID de cliente nem `clientId`.
+- [x] Teste de integração: depois de operações reais com o Prisma, `db_query_duration_seconds` tem amostras por `model`/`operation`, e o gauge do pool reflete `poolMetrics()`.
+- [x] Teste: a extensão de métricas do banco não enfraquece a `tenant-scope` (as suítes da 003 continuam passando sem alteração).
+- [x] Teste: uma falha forçada ao registrar métrica não muda o status nem o corpo da resposta.
+- [x] Teste: config rejeita `METRICS_TOKEN` com menos de 32 caracteres; o `adminAuthHook` refatorado mantém todos os testes existentes verdes.
+- [x] Shutdown continua sem handles abertos (o teste de shutdown da 002 passa com as métricas padrão ligadas).
 - [ ] CI verde em Node 22 e na LTS (confirmado pelo dono).
 
 ## Casos de borda e erros
@@ -91,3 +91,25 @@ Contexto e logs são por requisição e nunca globais; o teste de concorrência 
 - **Decisão proposta:** `/metrics` só existe com `METRICS_TOKEN`; sem ele a rota responde 404.
 - **Decisão proposta:** log de requisição próprio em vez do padrão do Fastify, para ter padrão de rota, duração e contexto num único log por requisição.
 - Possível ajuste de escopo para a fatia vertical: se quiser, o implementer entrega primeiro contexto, request id, redação e log de requisição, e as métricas ficam como segunda metade da mesma spec; ambas as partes devem fechar antes do status `concluída`.
+
+### Registro da implementação (implementer, 2026-10-27)
+
+Status mantido em `aprovada` até o CI confirmar (critério final, não verificável localmente).
+
+**Verificado localmente:** `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test` (311 unitários), `pnpm test:integration` (74), `pnpm build`; unitários e integração também em Node v22.23.2 (binário do nvm, sem trocar a versão global); smoke manual com o servidor compilado (`/health`, `/admin/clients`, `/metrics` sem e com `METRICS_TOKEN`): chave e token ausentes de todas as linhas de log, rota sempre como padrão (`/admin/clients/:id`, `unmatched`), `/metrics` fora de `http_requests_total`. O cliente criado no banco de desenvolvimento no smoke foi removido.
+
+**Contexto (`AsyncLocalStorage`): resultado do ponto frágil.** O padrão `als.run(store, done)` no `onRequest` mantém o contexto em hooks posteriores, handler, `await`, error handler e `onResponse`, inclusive com POST com corpo e conexões keep-alive num servidor HTTP real (teste de concorrência com `fetch`, além de `inject`). Um teste de mutação (chamar `done()` fora do `run`) derruba 7 testes, então eles realmente detectam perda. **Exceção encontrada:** o `onRequestAbort` é disparado por um evento `close` do socket, que o Node entrega fora do `run`; o log de aborto saía sem `operation`/`clientId`. Correção: o store é guardado por requisição (`WeakMap`) e o fim da requisição (`onResponse` ou aborto) roda dentro dele (`runWithContext`), uma única vez.
+
+**Decisões e desvios:**
+- **Ordem das extensões do Prisma:** o Prisma executa as extensões de `query` na ordem em que foram adicionadas (a primeira é a mais externa; confirmado com um experimento de duas extensões). Por isso o client é `extendWithTenantScope(base).$extends(queryTimingExtension(observer))`: a `tenant-scope` roda primeiro e rejeita antes de qualquer coisa; a de tempo só mede o que ela deixou passar (inclusive queries que falham no banco). `tenant-scope.ts` não foi alterado. Teste: operação sem escopo lança `TenantScopeError` e não gera amostra. Só operações de model são medidas (o `SELECT 1` do health check e outros `$queryRaw` não).
+- **`LogController` no lugar das opções de topo:** no Fastify 5.12.7, `disableRequestLogging` e `requestIdLogLabel` no topo das opções emitem aviso de deprecação (removidas no Fastify 6). O mesmo efeito vem de `logController: new LogController({ disableRequestLogging: true, requestIdLogLabel: 'requestId' })`. Mais `requestIdHeader: false`, para `genReqId` decidir sozinho.
+- **`requestId` no mixin:** o teste de concorrência exige `requestId` em logs do logger raiz, então o mixin o acrescenta. Para não repetir a chave nos loggers filhos do Fastify (que já a têm nos bindings), o mixin consulta os bindings do logger (cache em `WeakMap`).
+- **Níveis do log de requisição:** `/health`, `/health/ready` e `/metrics` logam em `debug` só quando o status é menor que 400; 4xx e 5xx neles seguem `warn`/`error` (um 503 de readiness ou um 401 em `/metrics` não deve sumir).
+- **Cliente desconectado:** `onRequestAbort` registra o fim uma vez, com status 499 (convenção do nginx; `status_class` `4xx`); se o handler terminar depois, nada é registrado de novo.
+- **Estrutura:** `bearerAuthHook(token, onRejected?)` em `presentation/bearer-auth.hook.ts` (o `adminAuthHook` agora só o chama, comportamento e testes inalterados); `routePattern(request)` em `presentation/route-pattern.ts` (normaliza barra final: `/admin/clients/` vira `/admin/clients`); `presentation/metrics.controller.ts` depende da interface `MetricsSource`, não da infraestrutura; `buildServer` recebe `metrics` e `metricsToken`.
+- **Log do `adminAuthHook`:** o campo `path` (URL crua) virou `route` (padrão da rota).
+- **Gauges do pool:** criados em `createMetrics()` e ligados à fonte por `metrics.bindPool(() => database.poolMetrics())` (necessário porque o banco recebe o observer das queries e as métricas leem o pool dele). `createDatabase` aceita `{ queryObserver }`; a falha do observer vira só um `warn`.
+- **`METRICS_TOKEN`:** mínimo de 32 caracteres em qualquer ambiente quando informado; opcional também em produção (sem ele, `/metrics` simplesmente não existe).
+- **`createLogger(config, destination?)`:** com destino, o transporte `pino-pretty` de desenvolvimento não é usado (o Pino aceita só um dos dois). Helper de teste em `src/test-support/log-capture.ts`.
+- **Dependência adicionada:** `prom-client` 15.1.3 (versão estável mais recente resolvida pelo `pnpm add`).
+- **Não verificado:** CI do GitHub em Node 22 e na LTS (critério final), que depende do dono. Localmente, Node 22 e 24 passaram.
