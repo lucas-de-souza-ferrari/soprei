@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { ClientService } from '../../application/client.service.js';
+import { ClientService } from '../../application/clients/client.service.js';
 import { Result } from '../../shared/types/index.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';

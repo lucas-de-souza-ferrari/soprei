@@ -1,5 +1,5 @@
 import type { FastifyPluginCallback } from 'fastify';
-import type { ClientService } from '../../application/client.service.js';
+import type { ClientService } from '../../application/clients/client.service.js';
 import type { Client } from '../../domain/index.js';
 import { rateLimitProfile } from '../rate-limit.js';
 import { adminAuthHook } from './admin-auth.hook.js';

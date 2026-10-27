@@ -1,5 +1,5 @@
-import { AttendanceService } from './application/attendance.service.js';
-import { ClientService } from './application/client.service.js';
+import { AttendanceService } from './application/attendance/attendance.service.js';
+import { ClientService } from './application/clients/client.service.js';
 import { createRateLimitRedis } from './infrastructure/cache/rate-limit-redis.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
 import { loadConfig } from './infrastructure/config/index.js';

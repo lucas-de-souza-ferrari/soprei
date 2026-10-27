@@ -1,6 +1,6 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, LogController } from 'fastify';
-import type { AttendanceService } from '../../application/attendance.service.js';
-import type { ClientService } from '../../application/client.service.js';
+import type { AttendanceService } from '../../application/attendance/attendance.service.js';
+import type { ClientService } from '../../application/clients/client.service.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
 import { healthController, type ReadinessChecks } from '../../presentation/health.controller.js';

@@ -1,5 +1,5 @@
 import type { FastifyPluginCallback } from 'fastify';
-import type { AttendanceService } from '../../application/attendance.service.js';
+import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { Conversation, ListOptions, Message } from '../../domain/index.js';
 import { setClientId } from '../../shared/request-context/index.js';
 import { rateLimitProfile } from '../rate-limit.js';

@@ -3,7 +3,7 @@ import {
   CONTACT_REF_MAX_LENGTH,
   EXTERNAL_ID_MAX_LENGTH,
   MESSAGE_CONTENT_MAX_LENGTH,
-} from '../domain/index.js';
+} from '../../domain/index.js';
 
 /** Sem nenhum caractere de controle (categoria Unicode Cc: quebras de linha, tab, NUL...). */
 const NO_CONTROL_CHARS = /^[^\p{Cc}]*$/u;

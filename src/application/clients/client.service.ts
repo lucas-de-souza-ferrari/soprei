@@ -9,8 +9,8 @@ import {
   type NewClient,
   PERSONA_MAX_LENGTH,
   type Page,
-} from '../domain/index.js';
-import { ConflictError, ValidationError } from '../shared/errors/index.js';
+} from '../../domain/index.js';
+import { ConflictError, ValidationError } from '../../shared/errors/index.js';
 
 export const CLIENT_NAME_MAX_LENGTH = 120;
 

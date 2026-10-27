@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isUuid } from '../../shared/utils/index.js';
-import { inboundMessageSchema } from '../../application/attendance.schemas.js';
+import { inboundMessageSchema } from '../../application/attendance/attendance.schemas.js';
 import { clientIdSchema, listClientsQuerySchema } from './client.validators.js';
 
 /** `:clientId` vira `ClientId`; inválido é 400. */

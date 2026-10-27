@@ -2,26 +2,26 @@ import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, it } from 'node:test';
 import { ZodError } from 'zod';
-import type { Client } from '../domain/index.js';
+import type { Client } from '../../domain/index.js';
 import {
   MOCK_EMPTY_MARKER,
   MOCK_FAIL_MARKER,
   MOCK_HANG_MARKER,
   MOCK_HUGE_MARKER,
   MockLlmProvider,
-} from '../infrastructure/external-apis/llm/mock-llm.provider.js';
+} from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import {
   ConflictError,
   ExternalServiceError,
   ForbiddenError,
   NotFoundError,
-} from '../shared/errors/index.js';
-import { createRequestContext, runWithContext } from '../shared/request-context/index.js';
-import { Result } from '../shared/types/index.js';
-import { InMemoryAttendanceStore } from '../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../test-support/in-memory-client.repository.js';
-import { keepEventLoopAlive } from '../test-support/keep-alive.js';
-import { captureLogs } from '../test-support/log-capture.js';
+} from '../../shared/errors/index.js';
+import { createRequestContext, runWithContext } from '../../shared/request-context/index.js';
+import { Result } from '../../shared/types/index.js';
+import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
+import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
+import { captureLogs } from '../../test-support/log-capture.js';
 import {
   ATTENDANCE_FALLBACK_TEXT,
   type AttendanceMetrics,
@@ -30,7 +30,7 @@ import {
   buildSystemPrompt,
   type LlmRequestResult,
 } from './attendance.service.js';
-import type { LlmProvider, LlmReply } from './llm-provider.js';
+import type { LlmProvider, LlmReply } from '../ports/llm-provider.js';
 
 const IN_FLIGHT_MS = 60_000;
 

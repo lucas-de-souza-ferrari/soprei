@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, it } from 'node:test';
-import { ClientId, type NewClient } from '../domain/index.js';
-import { ConflictError, NotFoundError, ValidationError } from '../shared/errors/index.js';
-import { InMemoryClientRepository } from '../test-support/in-memory-client.repository.js';
+import { ClientId, type NewClient } from '../../domain/index.js';
+import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
+import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
 import { ClientService } from './client.service.js';
 
 let service: ClientService;

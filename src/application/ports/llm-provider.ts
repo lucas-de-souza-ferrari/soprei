@@ -1,5 +1,5 @@
-import type { ExternalServiceError } from '../shared/errors/index.js';
-import type { Result } from '../shared/types/index.js';
+import type { ExternalServiceError } from '../../shared/errors/index.js';
+import type { Result } from '../../shared/types/index.js';
 
 /** Um turno do histórico enviado ao modelo. */
 export interface LlmTurn {

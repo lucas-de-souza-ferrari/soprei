@@ -1,4 +1,4 @@
-import type { LlmProvider } from '../../../application/llm-provider.js';
+import type { LlmProvider } from '../../../application/ports/llm-provider.js';
 import type { Config } from '../../config/index.js';
 import { MockLlmProvider } from './mock-llm.provider.js';
 

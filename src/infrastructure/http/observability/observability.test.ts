@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../../application/client.service.js';
+import { ClientService } from '../../../application/clients/client.service.js';
 import { BaseError } from '../../../shared/errors/index.js';
 import { setClientId } from '../../../shared/request-context/index.js';
 import { Result } from '../../../shared/types/index.js';

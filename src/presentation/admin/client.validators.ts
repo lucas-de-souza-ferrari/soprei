@@ -6,7 +6,7 @@ import {
   MAX_LIST_LIMIT,
   PERSONA_MAX_LENGTH,
 } from '../../domain/index.js';
-import { CLIENT_NAME_MAX_LENGTH } from '../../application/client.service.js';
+import { CLIENT_NAME_MAX_LENGTH } from '../../application/clients/client.service.js';
 import { ValidationError } from '../../shared/errors/index.js';
 
 const nameSchema = z.string().trim().min(1).max(CLIENT_NAME_MAX_LENGTH);

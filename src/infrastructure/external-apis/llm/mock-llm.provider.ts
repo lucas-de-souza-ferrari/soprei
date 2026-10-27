@@ -1,4 +1,8 @@
-import type { LlmGenerateInput, LlmProvider, LlmReply } from '../../../application/llm-provider.js';
+import type {
+  LlmGenerateInput,
+  LlmProvider,
+  LlmReply,
+} from '../../../application/ports/llm-provider.js';
 import { ExternalServiceError } from '../../../shared/errors/index.js';
 import { Result } from '../../../shared/types/index.js';
 

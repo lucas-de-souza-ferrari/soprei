@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../application/client.service.js';
+import { ClientService } from '../../application/clients/client.service.js';
 import { buildTestServer } from '../../infrastructure/http/test-server.js';
 import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
 

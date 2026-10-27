@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import {
   ATTENDANCE_FALLBACK_TEXT,
   AttendanceService,
-} from '../../application/attendance.service.js';
+} from '../../application/attendance/attendance.service.js';
 import type { Client } from '../../domain/index.js';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';

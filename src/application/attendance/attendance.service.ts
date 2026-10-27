@@ -9,12 +9,12 @@ import type {
   Message,
   MessageRepository,
   Page,
-} from '../domain/index.js';
-import { MESSAGE_CONTENT_MAX_LENGTH } from '../domain/index.js';
-import { ConflictError, ExternalServiceError, ForbiddenError } from '../shared/errors/index.js';
-import { TimeoutError, withTimeout } from '../shared/utils/index.js';
+} from '../../domain/index.js';
+import { MESSAGE_CONTENT_MAX_LENGTH } from '../../domain/index.js';
+import { ConflictError, ExternalServiceError, ForbiddenError } from '../../shared/errors/index.js';
+import { TimeoutError, withTimeout } from '../../shared/utils/index.js';
 import { type InboundMessage, inboundMessageSchema } from './attendance.schemas.js';
-import type { LlmGenerateInput, LlmProvider, LlmTurn } from './llm-provider.js';
+import type { LlmGenerateInput, LlmProvider, LlmTurn } from '../ports/llm-provider.js';
 
 /** Quantas mensagens anteriores da conversa vão ao modelo. */
 export const ATTENDANCE_HISTORY_LIMIT = 20;
