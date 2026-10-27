@@ -2,7 +2,7 @@ import type { FastifyPluginCallback } from 'fastify';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { Conversation, ListOptions, Message } from '../../domain/index.js';
 import { setClientId } from '../../shared/request-context/index.js';
-import { rateLimitProfile } from '../rate-limit.js';
+import { rateLimitProfile } from '../common/rate-limit.js';
 import { adminAuthHook } from './admin-auth.hook.js';
 import {
   clientScopeParamsSchema,

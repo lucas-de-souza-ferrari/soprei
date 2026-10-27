@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import type { FastifyRequest } from 'fastify';
-import { buildTestServer } from '../infrastructure/http/test-server.js';
+import { buildTestServer } from '../../infrastructure/http/test-server.js';
 import { bearerAuthHook } from './bearer-auth.hook.js';
 
 const TOKEN = `t-${randomUUID()}-${randomUUID()}`;

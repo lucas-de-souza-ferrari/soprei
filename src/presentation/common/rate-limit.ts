@@ -1,4 +1,4 @@
-import type { RateLimitProfile } from '../shared/rate-limit/profiles.js';
+import type { RateLimitProfile } from '../../shared/rate-limit/profiles.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildTestServer } from '../infrastructure/http/test-server.js';
-import { DatabaseError, ExternalServiceError } from '../shared/errors/index.js';
-import { Result } from '../shared/types/index.js';
+import { buildTestServer } from '../../infrastructure/http/test-server.js';
+import { DatabaseError, ExternalServiceError } from '../../shared/errors/index.js';
+import { Result } from '../../shared/types/index.js';
 import type { ReadinessChecks } from './health.controller.js';
 
 const up = (): ReturnType<ReadinessChecks['database']> => Promise.resolve(Result.ok(undefined));

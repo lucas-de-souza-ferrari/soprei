@@ -6,7 +6,7 @@ import { AttendanceService } from '../../../application/attendance/attendance.se
 import { ClientService } from '../../../application/clients/client.service.js';
 import { Result } from '../../../shared/types/index.js';
 import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
-import { rateLimitProfile } from '../../../presentation/rate-limit.js';
+import { rateLimitProfile } from '../../../presentation/common/rate-limit.js';
 import { captureLogs, type LogLine } from '../../../test-support/log-capture.js';
 import { InMemoryAttendanceStore } from '../../../test-support/in-memory-attendance.js';
 import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';

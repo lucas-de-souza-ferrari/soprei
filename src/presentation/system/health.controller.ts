@@ -1,6 +1,6 @@
 import type { FastifyPluginCallback } from 'fastify';
-import type { Result } from '../shared/types/index.js';
-import { NO_RATE_LIMIT } from './rate-limit.js';
+import type { Result } from '../../shared/types/index.js';
+import { NO_RATE_LIMIT } from '../common/rate-limit.js';
 
 export interface ReadinessChecks {
   readonly database: () => Promise<Result<void>>;

@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyRequest, onRequestAsyncHookHandler } from 'fastify';
-import { UnauthorizedError } from '../shared/errors/index.js';
+import { UnauthorizedError } from '../../shared/errors/index.js';
 
 const BEARER = /^Bearer (\S+)$/i;
 

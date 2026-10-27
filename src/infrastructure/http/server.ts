@@ -3,8 +3,11 @@ import type { AttendanceService } from '../../application/attendance/attendance.
 import type { ClientService } from '../../application/clients/client.service.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
-import { healthController, type ReadinessChecks } from '../../presentation/health.controller.js';
-import { metricsController } from '../../presentation/metrics.controller.js';
+import {
+  healthController,
+  type ReadinessChecks,
+} from '../../presentation/system/health.controller.js';
+import { metricsController } from '../../presentation/system/metrics.controller.js';
 import type { TrustProxySetting } from '../config/trust-proxy.js';
 import type { Metrics } from '../metrics/index.js';
 import { errorHandler, notFoundHandler } from './error-handler.js';

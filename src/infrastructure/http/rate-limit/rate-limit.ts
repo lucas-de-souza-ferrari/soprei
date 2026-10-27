@@ -1,7 +1,7 @@
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
-import '../../../presentation/rate-limit.js';
+import '../../../presentation/common/rate-limit.js';
 import { RateLimitError } from '../../../shared/errors/index.js';
 import {
   DEFAULT_RATE_LIMIT_PROFILE,

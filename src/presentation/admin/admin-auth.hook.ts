@@ -1,6 +1,6 @@
 import type { onRequestAsyncHookHandler } from 'fastify';
-import { bearerAuthHook } from '../bearer-auth.hook.js';
-import { routePattern } from '../route-pattern.js';
+import { bearerAuthHook } from '../common/bearer-auth.hook.js';
+import { routePattern } from '../common/route-pattern.js';
 
 /**
  * Autenticação das rotas `/admin`: `Authorization: Bearer <ADMIN_API_KEY>` (comparação em

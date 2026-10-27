@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { ReadinessChecks } from '../../presentation/health.controller.js';
+import type { ReadinessChecks } from '../../presentation/system/health.controller.js';
 import { Result } from '../../shared/types/index.js';
 import { createLogger } from '../logger/logger.js';
 import { type AdminRoutesParams, type BuildServerParams, buildServer } from './server.js';

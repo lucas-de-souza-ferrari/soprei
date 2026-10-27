@@ -1,7 +1,7 @@
 import type { FastifyPluginCallback } from 'fastify';
-import { bearerAuthHook } from './bearer-auth.hook.js';
-import { NO_RATE_LIMIT } from './rate-limit.js';
-import { routePattern } from './route-pattern.js';
+import { bearerAuthHook } from '../common/bearer-auth.hook.js';
+import { NO_RATE_LIMIT } from '../common/rate-limit.js';
+import { routePattern } from '../common/route-pattern.js';
 
 /** O que o endpoint precisa de quem guarda as métricas (a infraestrutura implementa). */
 export interface MetricsSource {
