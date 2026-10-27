@@ -125,4 +125,17 @@ describe('createMetrics', () => {
     const body = await metrics.render();
     assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
   });
+
+  it('conta as recusas do rate limit por perfil e as falhas do store, sem IP nem chave em label', async () => {
+    const metrics = createMetrics();
+    metrics.countRateLimitRejected('admin');
+    metrics.countRateLimitRejected('admin');
+    metrics.countRateLimitRejected('webhook');
+    metrics.countRateLimitStoreError();
+    const body = await metrics.render();
+    assert.match(body, /rate_limit_rejected_total{profile="admin"} 2/);
+    assert.match(body, /rate_limit_rejected_total{profile="webhook"} 1/);
+    assert.match(body, /rate_limit_store_errors_total 1/);
+    assert.doesNotMatch(body, /ip=|key=|clientId|userId/i);
+  });
 });
