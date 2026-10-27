@@ -12,6 +12,12 @@ const REDACTED_KEYS = [
   'accessToken',
   'token',
   'apiKey',
+  // Canal WhatsApp (spec 011): segredo do app, token de verificação do webhook e token de envio.
+  'appSecret',
+  'verifyToken',
+  'WHATSAPP_APP_SECRET',
+  'WHATSAPP_VERIFY_TOKEN',
+  'WHATSAPP_ACCESS_TOKEN',
 ] as const;
 
 /**

@@ -16,6 +16,19 @@ const booleanLiteral = (defaultValue: boolean): z.ZodType<boolean> =>
 
 const emptyAsUndefined = (value: unknown): unknown => (value === '' ? undefined : value);
 
+/** Segredo opcional: vazio vale como ausente. */
+const optionalSecret = z
+  .string()
+  .optional()
+  .transform((value) => (value === '' ? undefined : value));
+
+/** Versão do Graph API no formato `vNN.N` (ex.: `v26.0`). */
+const GRAPH_API_VERSION_PATTERN = /^v\d{1,3}\.\d{1,2}$/;
+
+export const WHATSAPP_VERIFY_TOKEN_MIN_LENGTH = 16;
+/** Versão estável do Graph API vigente quando a spec 011 foi implementada (ver a spec). */
+export const DEFAULT_WHATSAPP_GRAPH_API_VERSION = 'v26.0';
+
 const rateLimitMax = (defaultValue: number): z.ZodType<number> =>
   z.coerce.number().int().min(1).max(1_000_000).default(defaultValue);
 const rateLimitWindowSeconds = (defaultValue: number): z.ZodType<number> =>
@@ -67,6 +80,28 @@ export const envSchema = z
     RATE_LIMIT_WEBHOOK_WINDOW_SECONDS: rateLimitWindowSeconds(60),
     // Prazo de cada comando da conexão Redis dedicada ao limiter; estourou: fail-open.
     RATE_LIMIT_REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(10_000).default(250),
+    // Canal WhatsApp (spec 011). Opt-in: sem `WHATSAPP_ENABLED=true` as rotas do webhook não existem.
+    WHATSAPP_ENABLED: z.preprocess(emptyAsUndefined, booleanLiteral(false)),
+    WHATSAPP_APP_SECRET: optionalSecret,
+    WHATSAPP_VERIFY_TOKEN: optionalSecret,
+    WHATSAPP_ACCESS_TOKEN: optionalSecret,
+    WHATSAPP_API_BASE_URL: z.preprocess(
+      emptyAsUndefined,
+      z.string().url().default('https://graph.facebook.com'),
+    ),
+    WHATSAPP_GRAPH_API_VERSION: z.preprocess(
+      emptyAsUndefined,
+      z
+        .string()
+        .regex(GRAPH_API_VERSION_PATTERN, 'deve ter o formato vNN.N, ex.: v26.0')
+        .default(DEFAULT_WHATSAPP_GRAPH_API_VERSION),
+    ),
+    WHATSAPP_SEND_TIMEOUT_MS: z.coerce.number().int().min(1).max(120_000).default(10_000),
+    // Fila de entrada do canal (BullMQ). Backoff exponencial: QUEUE_BACKOFF_MS, 2x, 4x...
+    QUEUE_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+    QUEUE_BACKOFF_MS: z.coerce.number().int().min(1).max(3_600_000).default(10_000),
+    QUEUE_KEEP_COMPLETED_SECONDS: z.coerce.number().int().min(1).max(2_592_000).default(3_600),
+    QUEUE_KEEP_FAILED_SECONDS: z.coerce.number().int().min(1).max(2_592_000).default(86_400),
     // IP atrás de proxy: false | true | lista de IPs/CIDRs dos proxies (ver trust-proxy.ts).
     TRUST_PROXY: z
       .string()
@@ -95,6 +130,7 @@ export const envSchema = z
         message: 'não pode ser "false" em produção (a proteção contra abuso ficaria desligada)',
       });
     }
+    refineWhatsapp(env, ctx);
     if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < METRICS_TOKEN_MIN_LENGTH) {
       ctx.addIssue({
         code: 'custom',
@@ -122,5 +158,82 @@ export const envSchema = z
       });
     }
   });
+
+/** Regras do canal WhatsApp (spec 011): só valem com `WHATSAPP_ENABLED=true`, salvo a URL base. */
+function refineWhatsapp(
+  env: {
+    readonly NODE_ENV: 'development' | 'test' | 'production';
+    readonly WHATSAPP_ENABLED: boolean;
+    readonly WHATSAPP_APP_SECRET: string | undefined;
+    readonly WHATSAPP_VERIFY_TOKEN: string | undefined;
+    readonly WHATSAPP_ACCESS_TOKEN: string | undefined;
+    readonly WHATSAPP_API_BASE_URL: string;
+    readonly QUEUE_ATTEMPTS: number;
+    readonly QUEUE_BACKOFF_MS: number;
+    readonly ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: number;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const baseUrl = parseBaseUrl(env.WHATSAPP_API_BASE_URL);
+  if (baseUrl === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WHATSAPP_API_BASE_URL'],
+      message: 'deve ser uma URL http(s) sem usuário, senha, query nem fragmento',
+    });
+  } else if (env.NODE_ENV === 'production' && baseUrl.protocol !== 'https:') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WHATSAPP_API_BASE_URL'],
+      message: 'precisa ser https:// em produção (o token de envio iria em texto claro)',
+    });
+  }
+  if (!env.WHATSAPP_ENABLED) return;
+
+  for (const name of [
+    'WHATSAPP_APP_SECRET',
+    'WHATSAPP_VERIFY_TOKEN',
+    'WHATSAPP_ACCESS_TOKEN',
+  ] as const) {
+    if (env[name] === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [name],
+        message: 'obrigatória com WHATSAPP_ENABLED=true',
+      });
+    }
+  }
+  if (
+    env.WHATSAPP_VERIFY_TOKEN !== undefined &&
+    env.WHATSAPP_VERIFY_TOKEN.length < WHATSAPP_VERIFY_TOKEN_MIN_LENGTH
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WHATSAPP_VERIFY_TOKEN'],
+      message: `precisa ter no mínimo ${String(WHATSAPP_VERIFY_TOKEN_MIN_LENGTH)} caracteres`,
+    });
+  }
+  // Tempo total de espera das retentativas (10 + 20 + 40 + 80 s com os padrões). Se não passar de
+  // "em andamento", uma retentativa depois de queda do processo bateria em 409 até acabarem.
+  const totalBackoffMs = env.QUEUE_BACKOFF_MS * (2 ** (env.QUEUE_ATTEMPTS - 1) - 1);
+  if (totalBackoffMs <= env.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['QUEUE_BACKOFF_MS'],
+      message: `QUEUE_BACKOFF_MS x (2^(QUEUE_ATTEMPTS - 1) - 1) = ${String(totalBackoffMs)} ms precisa ser maior que ATTENDANCE_IN_FLIGHT_TIMEOUT_MS (${String(env.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS)} ms), senão uma retentativa depois de queda do processo bateria em 409 até acabarem as tentativas`,
+    });
+  }
+}
+
+function parseBaseUrl(raw: string): URL | undefined {
+  try {
+    const url = new URL(raw);
+    const plain =
+      url.username === '' && url.password === '' && url.search === '' && url.hash === '';
+    return (url.protocol === 'https:' || url.protocol === 'http:') && plain ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type Config = z.infer<typeof envSchema>;

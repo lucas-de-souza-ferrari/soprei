@@ -6,6 +6,8 @@ import { parseConfig } from './parse-config.js';
 
 export type { Config } from './env.schema.js';
 export { ConfigError, parseConfig } from './parse-config.js';
+export { queueSettings, trustProxyMode, whatsappChannelConfig } from './whatsapp.js';
+export type { QueueSettings, WhatsappChannelConfig } from './whatsapp.js';
 
 const ENV_FILE = resolve(process.cwd(), '.env');
 

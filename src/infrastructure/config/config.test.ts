@@ -394,4 +394,148 @@ describe('parseConfig', () => {
       }
     });
   });
+
+  describe('canal WhatsApp (spec 011)', () => {
+    const SECRETS = {
+      WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
+      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
+      WHATSAPP_ACCESS_TOKEN: 'token-de-envio',
+    };
+    const PRODUCTION = { ...VALID_ENV, NODE_ENV: 'production', ADMIN_API_KEY: 'a'.repeat(32) };
+    const ENABLED = { ...VALID_ENV, ...SECRETS, WHATSAPP_ENABLED: 'true', TRUST_PROXY: 'false' };
+
+    it('por padrão o canal está desligado e as variáveis têm defaults', () => {
+      const result = parseConfig(VALID_ENV);
+      assert.ok(result.ok);
+      assert.equal(result.value.WHATSAPP_ENABLED, false);
+      assert.equal(result.value.WHATSAPP_API_BASE_URL, 'https://graph.facebook.com');
+      assert.match(result.value.WHATSAPP_GRAPH_API_VERSION, /^v\d+\.\d+$/);
+      assert.equal(result.value.WHATSAPP_SEND_TIMEOUT_MS, 10_000);
+      assert.equal(result.value.QUEUE_ATTEMPTS, 5);
+      assert.equal(result.value.QUEUE_BACKOFF_MS, 10_000);
+      assert.equal(result.value.QUEUE_KEEP_COMPLETED_SECONDS, 3_600);
+      assert.equal(result.value.QUEUE_KEEP_FAILED_SECONDS, 86_400);
+    });
+
+    it('WHATSAPP_ENABLED=false literal não habilita; só "true" e "false" são aceitos', () => {
+      const off = parseConfig({ ...VALID_ENV, WHATSAPP_ENABLED: 'false' });
+      assert.ok(off.ok);
+      assert.equal(off.value.WHATSAPP_ENABLED, false);
+      assert.equal(parseConfig({ ...VALID_ENV, WHATSAPP_ENABLED: '' }).ok, true);
+      for (const invalid of ['0', '1', 'yes', 'FALSE', 'on']) {
+        const result = parseConfig({ ...VALID_ENV, WHATSAPP_ENABLED: invalid });
+        assert.equal(result.ok, false, invalid);
+        assert.match(result.error.message, /WHATSAPP_ENABLED/);
+      }
+    });
+
+    it('habilitado com os três segredos e TRUST_PROXY explícito passa', () => {
+      const result = parseConfig(ENABLED);
+      assert.ok(result.ok);
+      assert.equal(result.value.WHATSAPP_ENABLED, true);
+    });
+
+    it('habilitado sem cada um dos três segredos (ou com ele vazio) falha citando a variável', () => {
+      for (const name of Object.keys(SECRETS)) {
+        const absent = parseConfig({ ...ENABLED, [name]: undefined });
+        assert.equal(absent.ok, false, name);
+        assert.match(absent.error.message, new RegExp(`${name}: obrigatória`));
+        const blank = parseConfig({ ...ENABLED, [name]: '' });
+        assert.equal(blank.ok, false, `${name} vazio`);
+      }
+    });
+
+    it('os segredos só são exigidos com o canal habilitado', () => {
+      assert.ok(parseConfig({ ...VALID_ENV, WHATSAPP_ENABLED: 'false' }).ok);
+      assert.ok(parseConfig(VALID_ENV).ok);
+    });
+
+    it('WHATSAPP_VERIFY_TOKEN exige no mínimo 16 caracteres', () => {
+      const short = parseConfig({ ...ENABLED, WHATSAPP_VERIFY_TOKEN: 'x'.repeat(15) });
+      assert.equal(short.ok, false);
+      assert.match(short.error.message, /WHATSAPP_VERIFY_TOKEN: precisa ter no mínimo 16/);
+      assert.ok(parseConfig({ ...ENABLED, WHATSAPP_VERIFY_TOKEN: 'x'.repeat(16) }).ok);
+    });
+
+    it('habilitado sem TRUST_PROXY definido explicitamente falha; "false" explícito passa', () => {
+      const { TRUST_PROXY: _omitted, ...withoutTrustProxy } = ENABLED;
+      const absent = parseConfig(withoutTrustProxy);
+      assert.equal(absent.ok, false);
+      assert.match(absent.error.message, /TRUST_PROXY: precisa ser definida explicitamente/);
+      assert.equal(parseConfig({ ...withoutTrustProxy, TRUST_PROXY: '' }).ok, false);
+      assert.ok(parseConfig({ ...withoutTrustProxy, TRUST_PROXY: 'false' }).ok);
+      assert.ok(parseConfig({ ...withoutTrustProxy, TRUST_PROXY: '127.0.0.1,::1' }).ok);
+      // Desligado, TRUST_PROXY segue opcional.
+      assert.ok(parseConfig(VALID_ENV).ok);
+    });
+
+    it('WHATSAPP_GRAPH_API_VERSION exige o formato vNN.N', () => {
+      assert.ok(parseConfig({ ...VALID_ENV, WHATSAPP_GRAPH_API_VERSION: 'v24.0' }).ok);
+      for (const invalid of ['26.0', 'v26', 'v26.0.1', 'latest', 'v26.0/../x']) {
+        const result = parseConfig({ ...VALID_ENV, WHATSAPP_GRAPH_API_VERSION: invalid });
+        assert.equal(result.ok, false, invalid);
+        assert.match(result.error.message, /WHATSAPP_GRAPH_API_VERSION/);
+      }
+    });
+
+    it('WHATSAPP_API_BASE_URL: http só fora de produção; sem credencial, query nem fragmento', () => {
+      const local = { ...VALID_ENV, WHATSAPP_API_BASE_URL: 'http://127.0.0.1:4010' };
+      assert.ok(parseConfig({ ...local, NODE_ENV: 'development' }).ok);
+      assert.ok(parseConfig({ ...local, NODE_ENV: 'test' }).ok);
+      const production = parseConfig({ ...PRODUCTION, WHATSAPP_API_BASE_URL: 'http://x.test' });
+      assert.equal(production.ok, false);
+      assert.match(production.error.message, /WHATSAPP_API_BASE_URL: precisa ser https/);
+      assert.ok(parseConfig({ ...PRODUCTION, WHATSAPP_API_BASE_URL: 'https://x.test' }).ok);
+      for (const invalid of [
+        'ftp://x.test',
+        'https://u:p@x.test',
+        'https://x.test?a=1',
+        'https://x.test#f',
+        'não é url',
+      ]) {
+        assert.equal(
+          parseConfig({ ...VALID_ENV, WHATSAPP_API_BASE_URL: invalid }).ok,
+          false,
+          invalid,
+        );
+      }
+    });
+
+    it('valida WHATSAPP_SEND_TIMEOUT_MS e as variáveis da fila', () => {
+      for (const [name, value] of [
+        ['WHATSAPP_SEND_TIMEOUT_MS', '0'],
+        ['QUEUE_ATTEMPTS', '0'],
+        ['QUEUE_ATTEMPTS', '21'],
+        ['QUEUE_BACKOFF_MS', '0'],
+        ['QUEUE_KEEP_COMPLETED_SECONDS', '-1'],
+        ['QUEUE_KEEP_FAILED_SECONDS', 'abc'],
+      ] as const) {
+        const result = parseConfig({ ...VALID_ENV, [name]: value });
+        assert.equal(result.ok, false, `${name}=${value}`);
+        assert.match(result.error.message, new RegExp(name));
+      }
+    });
+
+    it('regra cruzada: backoff x (2^(tentativas-1) - 1) precisa passar de ATTENDANCE_IN_FLIGHT_TIMEOUT_MS', () => {
+      // Padrões: 10 000 x 15 = 150 000 > 60 000.
+      assert.ok(parseConfig(ENABLED).ok);
+      // 5 tentativas x 1 000 ms: 15 000 <= 60 000.
+      const bad = parseConfig({ ...ENABLED, QUEUE_BACKOFF_MS: '1000' });
+      assert.equal(bad.ok, false);
+      assert.match(bad.error.message, /QUEUE_BACKOFF_MS x \(2\^\(QUEUE_ATTEMPTS - 1\) - 1\)/);
+      // Igual ao limite também falha (precisa ser MAIOR).
+      const equal = parseConfig({
+        ...ENABLED,
+        QUEUE_ATTEMPTS: '3',
+        QUEUE_BACKOFF_MS: '20000',
+        ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '60000',
+      });
+      assert.equal(equal.ok, false);
+      // Uma só tentativa não tem retentativa: soma 0, nunca passa.
+      assert.equal(parseConfig({ ...ENABLED, QUEUE_ATTEMPTS: '1' }).ok, false);
+      // Subir o backoff resolve; com o canal desligado a regra não se aplica.
+      assert.ok(parseConfig({ ...ENABLED, QUEUE_BACKOFF_MS: '5000', QUEUE_ATTEMPTS: '6' }).ok);
+      assert.ok(parseConfig({ ...VALID_ENV, QUEUE_BACKOFF_MS: '1000' }).ok);
+    });
+  });
 });
