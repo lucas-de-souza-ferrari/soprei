@@ -1,5 +1,6 @@
 import type { FastifyPluginCallback } from 'fastify';
 import { bearerAuthHook } from './bearer-auth.hook.js';
+import { NO_RATE_LIMIT } from './rate-limit.js';
 import { routePattern } from './route-pattern.js';
 
 /** O que o endpoint precisa de quem guarda as métricas (a infraestrutura implementa). */
@@ -25,6 +26,7 @@ export const metricsController: FastifyPluginCallback<MetricsControllerOptions> 
   app.get(
     METRICS_ROUTE,
     {
+      config: NO_RATE_LIMIT,
       onRequest: bearerAuthHook(token, (request) => {
         request.log.warn({ route: routePattern(request) }, 'acesso a /metrics recusado');
       }),

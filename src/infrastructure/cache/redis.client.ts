@@ -52,13 +52,13 @@ export function createRedis(config: RedisConfig, logger: FastifyBaseLogger): Red
       }
     },
     close() {
-      closing ??= closeClient(client);
+      closing ??= closeRedisClient(client);
       return closing;
     },
   };
 }
 
-async function closeClient(client: Redis): Promise<void> {
+export async function closeRedisClient(client: Redis): Promise<void> {
   if (client.status === 'end') return;
   if (client.status !== 'ready') {
     // Sem conexão ativa não há o que negociar: só cancela as tentativas de reconexão.

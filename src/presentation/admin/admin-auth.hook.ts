@@ -8,7 +8,8 @@ import { routePattern } from '../route-pattern.js';
  * a URL crua nem a chave.
  *
  * Credencial temporária e válida para TODOS os clientes; o destino dela fica para as
- * specs 007/008. Não há rate limit até a spec 005 (risco conhecido).
+ * specs 007/008. O rate limit do perfil `admin` (spec 005) roda antes deste hook (`onRequest` do plugin), então
+ * tentativas de adivinhar a chave também contam.
  */
 export function adminAuthHook(apiKey: string | undefined): onRequestAsyncHookHandler {
   return bearerAuthHook(apiKey, (request) => {

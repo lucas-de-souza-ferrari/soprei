@@ -1,10 +1,13 @@
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { Database } from './database/index.js';
+import type { RateLimitRedisHandle } from './cache/rate-limit-redis.js';
 import type { RedisHandle } from './cache/redis.client.js';
 
 export interface Infrastructure {
   readonly database: Database;
   readonly redis: RedisHandle;
+  /** Conexão Redis dedicada ao rate limit (spec 005); ausente com `RATE_LIMIT_ENABLED=false`. */
+  readonly rateLimitRedis?: RateLimitRedisHandle | undefined;
 }
 
 /**
@@ -31,12 +34,16 @@ export async function verifyInfrastructure(
   return failed;
 }
 
-/** Fecha o pool e o Redis; um não impede o outro de fechar. */
+/** Fecha o pool e os Redis; um não impede o outro de fechar. */
 export async function closeInfrastructure(
-  { database, redis }: Infrastructure,
+  { database, redis, rateLimitRedis }: Infrastructure,
   logger: FastifyBaseLogger,
 ): Promise<void> {
-  const results = await Promise.allSettled([database.close(), redis.close()]);
+  const results = await Promise.allSettled([
+    database.close(),
+    redis.close(),
+    rateLimitRedis?.close(),
+  ]);
   for (const result of results) {
     if (result.status === 'rejected') {
       logger.error({ err: result.reason }, 'falha ao fechar recurso de infraestrutura');

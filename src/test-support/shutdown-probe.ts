@@ -4,6 +4,7 @@
  * termina SEM chamar `process.exit`. Se sobrar algum
  * handle aberto, o processo não termina sozinho e o teste que o executa falha por timeout.
  */
+import { createRateLimitRedis } from '../infrastructure/cache/rate-limit-redis.js';
 import { createRedis } from '../infrastructure/cache/redis.client.js';
 import { createDatabase } from '../infrastructure/database/database.js';
 import { closeInfrastructure } from '../infrastructure/lifecycle.js';
@@ -22,9 +23,14 @@ const database = createDatabase(config, logger, {
 });
 metrics.bindPool(() => database.poolMetrics());
 const redis = createRedis(config, logger);
+const rateLimitRedis = createRateLimitRedis(config, logger);
 
-const [databaseResult, redisResult] = await Promise.all([database.check(), redis.check()]);
-if (!databaseResult.ok || !redisResult.ok) {
+const [databaseResult, redisResult, rateLimitReady] = await Promise.all([
+  database.check(),
+  redis.check(),
+  rateLimitRedis.waitUntilReady(5_000),
+]);
+if (!databaseResult.ok || !redisResult.ok || !rateLimitReady) {
   process.stderr.write('infraestrutura indisponível no probe\n');
   process.exitCode = 2;
 }
@@ -32,7 +38,7 @@ if (!databaseResult.ok || !redisResult.ok) {
 // Coleta as métricas (padrão do processo + pool) antes de fechar, como o /metrics faria.
 await metrics.render();
 const before = database.poolMetrics();
-await closeInfrastructure({ database, redis }, logger);
+await closeInfrastructure({ database, redis, rateLimitRedis }, logger);
 const after = database.poolMetrics();
 
 process.stdout.write(
@@ -40,5 +46,6 @@ process.stdout.write(
     poolTotalBefore: before.totalCount,
     poolTotalAfter: after.totalCount,
     redisStatus: redis.client.status,
+    rateLimitRedisStatus: rateLimitRedis.client.status,
   })}\n`,
 );

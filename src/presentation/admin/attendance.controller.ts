@@ -2,6 +2,7 @@ import type { FastifyPluginCallback } from 'fastify';
 import type { AttendanceService } from '../../application/attendance.service.js';
 import type { Conversation, ListOptions, Message } from '../../domain/index.js';
 import { setClientId } from '../../shared/request-context/index.js';
+import { rateLimitProfile } from '../rate-limit.js';
 import { adminAuthHook } from './admin-auth.hook.js';
 import {
   clientScopeParamsSchema,
@@ -72,8 +73,10 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
   done,
 ) => {
   app.addHook('onRequest', adminAuthHook(apiKey));
+  // Rate limit por perfil (spec 005): todas as rotas daqui são `admin`.
+  const config = rateLimitProfile('admin');
 
-  app.post('/:clientId/messages', async (request, reply) => {
+  app.post('/:clientId/messages', { config }, async (request, reply) => {
     const { clientId } = clientScopeParamsSchema.parse(request.params);
     setClientId(clientId);
     const body = inboundMessageBodySchema.parse(request.body);
@@ -81,7 +84,7 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
     return reply.status(result.duplicate ? 200 : 201).send(result);
   });
 
-  app.get('/:clientId/conversations', async (request) => {
+  app.get('/:clientId/conversations', { config }, async (request) => {
     const { clientId } = clientScopeParamsSchema.parse(request.params);
     setClientId(clientId);
     const query = listQuerySchema.parse(request.query);
@@ -89,7 +92,7 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
     return { items: page.items.map(toConversationResponse), nextCursor: page.nextCursor };
   });
 
-  app.get('/:clientId/conversations/:conversationId/messages', async (request) => {
+  app.get('/:clientId/conversations/:conversationId/messages', { config }, async (request) => {
     const { clientId, conversationId } = conversationParamsSchema.parse(request.params);
     setClientId(clientId);
     const query = listQuerySchema.parse(request.query);

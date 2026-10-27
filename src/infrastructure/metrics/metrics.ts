@@ -48,6 +48,10 @@ export interface Metrics {
   observeLlmRequest(sample: LlmRequestSample): void;
   /** O contato recebeu o texto padrão de falha em vez de uma resposta do modelo. */
   countAttendanceFallback(): void;
+  /** Uma requisição foi recusada com 429 (spec 005). `profile` é um dos perfis fixos, nunca IP. */
+  countRateLimitRejected(profile: string): void;
+  /** O store (Redis) do rate limit falhou e a requisição passou em fail-open (spec 005). */
+  countRateLimitStoreError(): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
 }
@@ -115,6 +119,18 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const rateLimitRejected = new Counter({
+    name: 'rate_limit_rejected_total',
+    help: 'Total de requisições recusadas com 429 pelo rate limit, por perfil',
+    labelNames: ['profile'] as const,
+    registers: [registry],
+  });
+  const rateLimitStoreErrors = new Counter({
+    name: 'rate_limit_store_errors_total',
+    help: 'Falhas do Redis no rate limit (a requisição passou em fail-open)',
+    registers: [registry],
+  });
+
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
     name: 'db_pool_connections',
@@ -148,6 +164,12 @@ export function createMetrics(): Metrics {
     },
     countAttendanceFallback() {
       attendanceFallbacks.inc();
+    },
+    countRateLimitRejected(profile) {
+      rateLimitRejected.inc({ profile });
+    },
+    countRateLimitStoreError() {
+      rateLimitStoreErrors.inc();
     },
     bindPool(source) {
       poolSource = source;

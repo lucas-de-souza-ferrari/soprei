@@ -1,6 +1,7 @@
 import type { FastifyPluginCallback } from 'fastify';
 import type { ClientService } from '../../application/client.service.js';
 import type { Client } from '../../domain/index.js';
+import { rateLimitProfile } from '../rate-limit.js';
 import { adminAuthHook } from './admin-auth.hook.js';
 import {
   clientParamsSchema,
@@ -47,15 +48,17 @@ export const adminClientsController: FastifyPluginCallback<AdminClientsControlle
   done,
 ) => {
   app.addHook('onRequest', adminAuthHook(apiKey));
+  // Rate limit por perfil (spec 005): todas as rotas daqui são `admin`.
+  const config = rateLimitProfile('admin');
 
-  app.post('/', async (request, reply) => {
+  app.post('/', { config }, async (request, reply) => {
     const body = createClientBodySchema.parse(request.body);
     const client = await clients.create(body);
     request.log.info({ clientId: client.id, slug: client.slug }, 'cliente criado');
     return reply.status(201).send(toResponse(client));
   });
 
-  app.get('/', async (request) => {
+  app.get('/', { config }, async (request) => {
     const { limit, cursor } = listClientsQuerySchema.parse(request.query);
     const page = await clients.list({
       ...(limit === undefined ? {} : { limit }),
@@ -64,12 +67,12 @@ export const adminClientsController: FastifyPluginCallback<AdminClientsControlle
     return { items: page.items.map(toResponse), nextCursor: page.nextCursor };
   });
 
-  app.get('/:id', async (request) => {
+  app.get('/:id', { config }, async (request) => {
     const { id } = clientParamsSchema.parse(request.params);
     return toResponse(await clients.getById(id));
   });
 
-  app.patch('/:id', async (request) => {
+  app.patch('/:id', { config }, async (request) => {
     const { id } = clientParamsSchema.parse(request.params);
     const body = updateClientBodySchema.parse(request.body);
     const client = await clients.update(id, body);
@@ -77,7 +80,7 @@ export const adminClientsController: FastifyPluginCallback<AdminClientsControlle
     return toResponse(client);
   });
 
-  app.delete('/:id', async (request, reply) => {
+  app.delete('/:id', { config }, async (request, reply) => {
     const { id } = clientParamsSchema.parse(request.params);
     await clients.remove(id);
     request.log.info({ clientId: id }, 'cliente removido');

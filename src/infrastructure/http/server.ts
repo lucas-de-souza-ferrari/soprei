@@ -5,9 +5,11 @@ import { adminAttendanceController } from '../../presentation/admin/attendance.c
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
 import { healthController, type ReadinessChecks } from '../../presentation/health.controller.js';
 import { metricsController } from '../../presentation/metrics.controller.js';
+import type { TrustProxySetting } from '../config/trust-proxy.js';
 import type { Metrics } from '../metrics/index.js';
 import { errorHandler, notFoundHandler } from './error-handler.js';
 import { generateRequestId, registerObservability } from './observability.js';
+import { type RateLimitParams, registerRateLimit } from './rate-limit.js';
 
 export interface AdminRoutesParams {
   /** `ADMIN_API_KEY`. Ausente: as rotas existem, mas respondem sempre 401. */
@@ -29,6 +31,31 @@ export interface BuildServerParams {
    * na config, mínimo 32 caracteres) estão presentes; sem ele a rota responde 404.
    */
   readonly metricsToken?: string | undefined;
+  /**
+   * Rate limiting (spec 005). Sem isto o plugin NÃO é registrado e nada é limitado (testes que
+   * não tratam de limite). Em produção o boot sempre passa (`RATE_LIMIT_ENABLED`).
+   */
+  readonly rateLimit?: RateLimitParams;
+  /**
+   * `TRUST_PROXY` (spec 005): de onde o Fastify tira `request.ip`. `false` (padrão) ignora
+   * `X-Forwarded-For`; ver `trust-proxy.ts` para os demais valores.
+   */
+  readonly trustProxy?: TrustProxySetting;
+}
+
+/**
+ * Converte a config no `trustProxy` do Fastify. A lista vira `string[]` mutável; o inteiro vira
+ * função porque os tipos do Fastify (5.12) não listam `number`, embora o runtime o aceite: a
+ * função `(address, hop) => hop < n` é exatamente o que o proxy-addr faz com um número (confia
+ * nos `n` saltos mais próximos do servidor e para na primeira entrada não confiada).
+ */
+function fastifyTrustProxy(
+  setting: TrustProxySetting,
+): boolean | string[] | ((address: string, hop: number) => boolean) {
+  if (typeof setting === 'number') {
+    return (_address, hop) => hop < setting;
+  }
+  return typeof setting === 'object' ? [...setting] : setting;
 }
 
 /** Monta o servidor sem escutar em porta, para que os testes usem `inject`. */
@@ -38,9 +65,13 @@ export function buildServer({
   admin,
   metrics,
   metricsToken,
+  rateLimit,
+  trustProxy = false,
 }: BuildServerParams): FastifyInstance {
   const app = Fastify({
     loggerInstance: logger,
+    // `request.ip` (chave do rate limit) vem do socket, ou do X-Forwarded-For só se confiado.
+    trustProxy: fastifyTrustProxy(trustProxy),
     // `x-request-id` válido é reaproveitado; senão UUID. `requestIdHeader: false` deixa a
     // decisão toda para `genReqId`.
     genReqId: generateRequestId,
@@ -55,6 +86,9 @@ export function buildServer({
   });
 
   registerObservability(app, { metrics });
+  // Depois da observabilidade (o 429 entra no log e nas métricas HTTP) e antes das rotas (o
+  // plugin liga o hook em cada rota registrada depois dele).
+  if (rateLimit !== undefined) registerRateLimit(app, rateLimit, metrics);
   app.setErrorHandler(errorHandler);
   app.setNotFoundHandler(notFoundHandler);
 

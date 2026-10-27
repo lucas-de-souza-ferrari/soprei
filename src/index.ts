@@ -1,5 +1,6 @@
 import { AttendanceService } from './application/attendance.service.js';
 import { ClientService } from './application/client.service.js';
+import { createRateLimitRedis } from './infrastructure/cache/rate-limit-redis.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
 import { loadConfig } from './infrastructure/config/index.js';
 import {
@@ -10,6 +11,7 @@ import {
   PrismaMessageRepository,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
+import { rateLimitProfilesFromConfig } from './infrastructure/http/rate-limit.js';
 import { buildServer } from './infrastructure/http/server.js';
 import {
   closeInfrastructure,
@@ -19,6 +21,9 @@ import {
 } from './infrastructure/lifecycle.js';
 import { createLogger } from './infrastructure/logger/logger.js';
 import { createMetrics } from './infrastructure/metrics/index.js';
+
+/** Espera da conexão Redis do rate limit no boot; passou disso, segue em fail-open com `warn`. */
+const RATE_LIMIT_READY_TIMEOUT_MS = 2_000;
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -35,6 +40,8 @@ async function main(): Promise<void> {
       },
     }),
     redis: getRedis({ config, logger }),
+    // Conexão própria do limiter (spec 005), com fila offline desligada e prazo curto por comando.
+    rateLimitRedis: config.RATE_LIMIT_ENABLED ? createRateLimitRedis(config, logger) : undefined,
   };
 
   metrics.bindPool(() => infrastructure.database.poolMetrics());
@@ -46,6 +53,20 @@ async function main(): Promise<void> {
     logger.fatal({ unavailable }, `dependência indisponível no boot: ${unavailable.join(', ')}`);
     await closeInfrastructure(infrastructure, logger);
     process.exit(1);
+  }
+
+  const { rateLimitRedis } = infrastructure;
+  if (rateLimitRedis === undefined) {
+    logger.warn('rate limiting desligado (RATE_LIMIT_ENABLED=false)');
+  } else if (!(await rateLimitRedis.waitUntilReady(RATE_LIMIT_READY_TIMEOUT_MS))) {
+    // O Redis principal respondeu há instantes, então isto é raro; o limiter fica em fail-open
+    // (com log e métrica por requisição) até a conexão dedicada subir.
+    logger.warn('conexão Redis do rate limit ainda não está pronta; seguindo em fail-open');
+  }
+  if (config.TRUST_PROXY === true) {
+    logger.warn(
+      'TRUST_PROXY=true confia em toda a cadeia X-Forwarded-For (o cliente escolhe o IP); use só em ambiente fechado',
+    );
   }
 
   const { prisma } = infrastructure.database;
@@ -68,6 +89,15 @@ async function main(): Promise<void> {
     logger,
     metrics,
     metricsToken: config.METRICS_TOKEN,
+    trustProxy: config.TRUST_PROXY,
+    ...(rateLimitRedis === undefined
+      ? {}
+      : {
+          rateLimit: {
+            redis: rateLimitRedis.client,
+            profiles: rateLimitProfilesFromConfig(config),
+          },
+        }),
     readiness: {
       database: () => infrastructure.database.check(),
       redis: () => infrastructure.redis.check(),

@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { getClosedPort, withPort } from '../test-support/closed-port.js';
 import { loadIntegrationConfig } from '../test-support/integration-env.js';
+import { createRateLimitRedis } from './cache/rate-limit-redis.js';
 import { createRedis } from './cache/redis.client.js';
 import { createDatabase } from './database/database.js';
 import { closeInfrastructure, verifyInfrastructure } from './lifecycle.js';
@@ -72,19 +73,24 @@ describe('shutdown', () => {
       poolTotalBefore: number;
       poolTotalAfter: number;
       redisStatus: string;
+      rateLimitRedisStatus: string;
     };
     assert.ok(report.poolTotalBefore >= 1, 'o pool deveria ter aberto conexão antes do close');
     assert.equal(report.poolTotalAfter, 0);
     assert.equal(report.redisStatus, 'end');
+    assert.equal(report.rateLimitRedisStatus, 'end');
   });
 
-  it('closeInfrastructure é idempotente', async () => {
+  it('closeInfrastructure é idempotente e fecha também a conexão do rate limit', async () => {
     const database = createDatabase(config, logger);
     const redis = createRedis(config, logger);
+    const rateLimitRedis = createRateLimitRedis(config, logger);
     assert.ok((await database.check()).ok);
     assert.ok((await redis.check()).ok);
-    await closeInfrastructure({ database, redis }, logger);
-    await closeInfrastructure({ database, redis }, logger);
+    assert.ok(await rateLimitRedis.waitUntilReady(5_000));
+    await closeInfrastructure({ database, redis, rateLimitRedis }, logger);
+    await closeInfrastructure({ database, redis, rateLimitRedis }, logger);
     assert.equal(redis.client.status, 'end');
+    assert.equal(rateLimitRedis.client.status, 'end');
   });
 });
