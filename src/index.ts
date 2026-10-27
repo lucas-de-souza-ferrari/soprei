@@ -11,7 +11,7 @@ import {
   PrismaMessageRepository,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
-import { rateLimitProfilesFromConfig } from './infrastructure/http/rate-limit.js';
+import { rateLimitProfilesFromConfig } from './infrastructure/http/rate-limit/rate-limit.js';
 import { buildServer } from './infrastructure/http/server.js';
 import {
   closeInfrastructure,

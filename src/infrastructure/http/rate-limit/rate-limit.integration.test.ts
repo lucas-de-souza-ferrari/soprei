@@ -2,21 +2,21 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { ClientService } from '../../application/client.service.js';
-import { rateLimitProfile } from '../../presentation/rate-limit.js';
-import { Result } from '../../shared/types/index.js';
-import { getClosedPort, withPort } from '../../test-support/closed-port.js';
-import { loadIntegrationConfig } from '../../test-support/integration-env.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
-import { captureLogs, type LogCapture } from '../../test-support/log-capture.js';
-import { TestKeyspace } from '../../test-support/test-keyspace.js';
-import { ToggleProxy } from '../../test-support/toggle-proxy.js';
-import { createRateLimitRedis, type RateLimitRedisHandle } from '../cache/rate-limit-redis.js';
-import { createRedis, type RedisHandle } from '../cache/redis.client.js';
-import type { TrustProxySetting } from '../config/trust-proxy.js';
-import { createMetrics, type Metrics } from '../metrics/index.js';
+import { ClientService } from '../../../application/client.service.js';
+import { rateLimitProfile } from '../../../presentation/rate-limit.js';
+import { Result } from '../../../shared/types/index.js';
+import { getClosedPort, withPort } from '../../../test-support/closed-port.js';
+import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
+import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
+import { captureLogs, type LogCapture } from '../../../test-support/log-capture.js';
+import { TestKeyspace } from '../../../test-support/test-keyspace.js';
+import { ToggleProxy } from '../../../test-support/toggle-proxy.js';
+import { createRateLimitRedis, type RateLimitRedisHandle } from '../../cache/rate-limit-redis.js';
+import { createRedis, type RedisHandle } from '../../cache/redis.client.js';
+import type { TrustProxySetting } from '../../config/trust-proxy.js';
+import { createMetrics, type Metrics } from '../../metrics/index.js';
 import { type RateLimitProfiles } from './rate-limit.js';
-import { buildServer } from './server.js';
+import { buildServer } from '../server.js';
 
 // Falha aqui (antes de abrir qualquer conexão) se o ambiente não for o de testes. Todo teste
 // usa o Redis /15 e um namespace único (TestKeyspace), e remove só as próprias chaves.

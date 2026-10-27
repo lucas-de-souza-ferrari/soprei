@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { METRICS_ROUTE } from '../../presentation/metrics.controller.js';
-import { routePattern } from '../../presentation/route-pattern.js';
+import { METRICS_ROUTE } from '../../../presentation/metrics.controller.js';
+import { routePattern } from '../../../presentation/route-pattern.js';
 import {
   createRequestContext,
   type RequestContext,
   runWithContext,
   setOperation,
-} from '../../shared/request-context/index.js';
-import type { Metrics } from '../metrics/index.js';
+} from '../../../shared/request-context/index.js';
+import type { Metrics } from '../../metrics/index.js';
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{8,128}$/;
 export const REQUEST_ID_HEADER = 'x-request-id';

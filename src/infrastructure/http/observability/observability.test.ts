@@ -3,14 +3,14 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../application/client.service.js';
-import { BaseError } from '../../shared/errors/index.js';
-import { setClientId } from '../../shared/request-context/index.js';
-import { Result } from '../../shared/types/index.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
-import { captureLogs, type LogCapture, type LogLine } from '../../test-support/log-capture.js';
-import { createMetrics, type Metrics } from '../metrics/index.js';
-import { buildServer } from './server.js';
+import { ClientService } from '../../../application/client.service.js';
+import { BaseError } from '../../../shared/errors/index.js';
+import { setClientId } from '../../../shared/request-context/index.js';
+import { Result } from '../../../shared/types/index.js';
+import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
+import { captureLogs, type LogCapture, type LogLine } from '../../../test-support/log-capture.js';
+import { createMetrics, type Metrics } from '../../metrics/index.js';
+import { buildServer } from '../server.js';
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {

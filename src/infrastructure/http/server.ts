@@ -8,8 +8,8 @@ import { metricsController } from '../../presentation/metrics.controller.js';
 import type { TrustProxySetting } from '../config/trust-proxy.js';
 import type { Metrics } from '../metrics/index.js';
 import { errorHandler, notFoundHandler } from './error-handler.js';
-import { generateRequestId, registerObservability } from './observability.js';
-import { type RateLimitParams, registerRateLimit } from './rate-limit.js';
+import { generateRequestId, registerObservability } from './observability/observability.js';
+import { type RateLimitParams, registerRateLimit } from './rate-limit/rate-limit.js';
 
 export interface AdminRoutesParams {
   /** `ADMIN_API_KEY`. Ausente: as rotas existem, mas respondem sempre 401. */

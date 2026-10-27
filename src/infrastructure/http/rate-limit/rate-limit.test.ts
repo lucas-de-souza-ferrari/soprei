@@ -2,23 +2,23 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import type { Redis } from 'ioredis';
-import { AttendanceService } from '../../application/attendance.service.js';
-import { ClientService } from '../../application/client.service.js';
-import { Result } from '../../shared/types/index.js';
-import { isRateLimitProfile } from '../../shared/rate-limit/profiles.js';
-import { rateLimitProfile } from '../../presentation/rate-limit.js';
-import { captureLogs, type LogLine } from '../../test-support/log-capture.js';
-import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
-import { createLogger } from '../logger/logger.js';
-import { createMetrics } from '../metrics/index.js';
-import { MockLlmProvider } from '../external-apis/llm/mock-llm.provider.js';
+import { AttendanceService } from '../../../application/attendance.service.js';
+import { ClientService } from '../../../application/client.service.js';
+import { Result } from '../../../shared/types/index.js';
+import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
+import { rateLimitProfile } from '../../../presentation/rate-limit.js';
+import { captureLogs, type LogLine } from '../../../test-support/log-capture.js';
+import { InMemoryAttendanceStore } from '../../../test-support/in-memory-attendance.js';
+import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
+import { createLogger } from '../../logger/logger.js';
+import { createMetrics } from '../../metrics/index.js';
+import { MockLlmProvider } from '../../external-apis/llm/mock-llm.provider.js';
 import {
   type RateLimitProfiles,
   rateLimitProfilesFromConfig,
   registerRateLimit,
 } from './rate-limit.js';
-import { buildServer } from './server.js';
+import { buildServer } from '../server.js';
 
 const logger = createLogger({ NODE_ENV: 'test', LOG_LEVEL: 'silent' });
 

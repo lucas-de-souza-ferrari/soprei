@@ -1,17 +1,17 @@
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
-import '../../presentation/rate-limit.js';
-import { RateLimitError } from '../../shared/errors/index.js';
+import '../../../presentation/rate-limit.js';
+import { RateLimitError } from '../../../shared/errors/index.js';
 import {
   DEFAULT_RATE_LIMIT_PROFILE,
   isRateLimitProfile,
   RATE_LIMIT_PROFILES,
   type RateLimitProfile,
-} from '../../shared/rate-limit/profiles.js';
-import { describeRedisError, observeStoreErrors } from '../cache/rate-limit-redis.js';
-import type { Config } from '../config/index.js';
-import type { Metrics } from '../metrics/index.js';
+} from '../../../shared/rate-limit/profiles.js';
+import { describeRedisError, observeStoreErrors } from '../../cache/rate-limit-redis.js';
+import type { Config } from '../../config/index.js';
+import type { Metrics } from '../../metrics/index.js';
 import { clientIpOf } from './client-ip.js';
 
 export interface RateLimitProfileLimits {
