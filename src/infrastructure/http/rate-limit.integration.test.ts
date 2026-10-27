@@ -176,13 +176,13 @@ describe('resposta 429', () => {
       { profiles: profiles({ public: { max: 2, windowSeconds: 30 } }) },
       async (h) => {
         const [first, second, third] = await repeat(h, 3, '/test/sem-perfil');
+        assert.ok(first && second && third);
         assert.equal(first.statusCode, 200);
         assert.equal(first.headers['x-ratelimit-limit'], '2');
         assert.equal(first.headers['x-ratelimit-remaining'], '1');
         assert.equal(second.statusCode, 200);
         assert.equal(second.headers['x-ratelimit-remaining'], '0');
 
-        assert.ok(third);
         assert.equal(third.statusCode, 429);
         const body = third.json<RateLimitedBody>();
         assert.deepEqual(Object.keys(body), ['error']);
