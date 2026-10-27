@@ -148,6 +148,8 @@ Decisões tomadas durante a implementação, dentro do espírito da spec; o dono
 - **Testes:** os testes de timeout e de `hang` precisam de `keepEventLoopAlive()` (`src/test-support/keep-alive.ts`): o timer de `withTimeout` é `unref()` e, sem nada mais vivo, o runner do Node 22 cancela o arquivo ("Promise resolution is still pending but the event loop has already resolved"). O `tenant-scope.test.ts` usava um model fictício chamado `Message`; foi renomeado para `Ticket`.
 - **Exercício manual (curl) contra o servidor compilado com `.env` e o banco `soprei`:** cliente com persona, duas mensagens, duplicata (200), mesmo contato e `externalId` em outro cliente, falha forçada, timeout (`LLM_TIMEOUT_MS=600`), cliente inexistente (404), malformado (400), suspenso (403), conversa de outro cliente (404), sem chave (401) e `/metrics`. Varredura do log em nível `debug`: nenhum texto de mensagem, persona nem `contactRef` apareceu. Os dados criados em `soprei` foram removidos (o banco voltou a ter 0 clientes, conversas e mensagens).
 - **Ainda sem política:** retenção e exclusão de mensagens e `contactRef` (dado pessoal), conforme a decisão 8; entra antes de dados reais, junto com a RLS.
+- **Ajustes pós-revisão:** `text` e `persona` com o caractere NUL são 400 (o Postgres recusa NUL em texto e viraria 500); resposta do provider com NUL é inutilizável (fallback, motivo `invalid_reply`); `
+` e `	` seguem aceitos. A config exige `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS > LLM_TIMEOUT_MS` (os padrões 15 000 e 60 000 e os `.env*.example` cumprem).
 
 ### Pendências para as specs do canal e do provedor real
 
