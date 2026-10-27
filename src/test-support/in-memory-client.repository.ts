@@ -30,6 +30,13 @@ export class InMemoryClientRepository implements ClientRepository {
     return Promise.resolve(row.client);
   }
 
+  findByWhatsappPhoneNumberId(phoneNumberId: string): Promise<Client | null> {
+    const row = this.rows.find(
+      (candidate) => !candidate.deleted && candidate.client.whatsappPhoneNumberId === phoneNumberId,
+    );
+    return Promise.resolve(row?.client ?? null);
+  }
+
   list(options: ListOptions = {}): Promise<Page<Client>> {
     const limit = options.limit ?? DEFAULT_LIST_LIMIT;
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIST_LIMIT) {
@@ -56,6 +63,7 @@ export class InMemoryClientRepository implements ClientRepository {
       slug: data.slug,
       status: data.status ?? 'ACTIVE',
       persona: null,
+      whatsappPhoneNumberId: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -66,6 +74,14 @@ export class InMemoryClientRepository implements ClientRepository {
   update(id: ClientId, data: ClientUpdate): Promise<Client> {
     return attempt(() => {
       const row = this.alive(id);
+      const number = data.whatsappPhoneNumberId;
+      if (
+        number !== undefined &&
+        number !== null &&
+        this.rows.some((other) => other !== row && other.client.whatsappPhoneNumberId === number)
+      ) {
+        throw new ConflictError('Já existe um registro com estes dados');
+      }
       row.client = { ...row.client, ...data, updatedAt: new Date() };
       return row.client;
     });
@@ -73,7 +89,10 @@ export class InMemoryClientRepository implements ClientRepository {
 
   delete(id: ClientId): Promise<void> {
     return attempt(() => {
-      this.alive(id).deleted = true;
+      const row = this.alive(id);
+      row.deleted = true;
+      // Como o repositório real: o número do WhatsApp é liberado junto.
+      row.client = { ...row.client, whatsappPhoneNumberId: null };
     });
   }
 

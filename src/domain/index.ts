@@ -1,4 +1,9 @@
-export { CLIENT_SLUG_PATTERN, CLIENT_STATUSES, PERSONA_MAX_LENGTH } from './entities/client.js';
+export {
+  CLIENT_SLUG_PATTERN,
+  CLIENT_STATUSES,
+  PERSONA_MAX_LENGTH,
+  WHATSAPP_PHONE_NUMBER_ID_PATTERN,
+} from './entities/client.js';
 export type { Client, ClientStatus, ClientUpdate, NewClient } from './entities/client.js';
 export { CONTACT_REF_MAX_LENGTH } from './entities/conversation.js';
 export type { Conversation, ConversationUpdate, NewConversation } from './entities/conversation.js';
@@ -7,7 +12,13 @@ export {
   MESSAGE_CONTENT_MAX_LENGTH,
   MESSAGE_ROLES,
 } from './entities/message.js';
-export type { Message, MessageRole, MessageUpdate, NewMessage } from './entities/message.js';
+export type {
+  Message,
+  MessageRole,
+  MessageSentMark,
+  MessageUpdate,
+  NewMessage,
+} from './entities/message.js';
 export { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT } from './pagination.js';
 export type { ListOptions, Page } from './pagination.js';
 export type { ClientRepository } from './repositories/client.repository.js';

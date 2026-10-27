@@ -87,7 +87,7 @@ export const envSchema = z
     WHATSAPP_ACCESS_TOKEN: optionalSecret,
     WHATSAPP_API_BASE_URL: z.preprocess(
       emptyAsUndefined,
-      z.string().url().default('https://graph.facebook.com'),
+      z.url().default('https://graph.facebook.com'),
     ),
     WHATSAPP_GRAPH_API_VERSION: z.preprocess(
       emptyAsUndefined,

@@ -9,6 +9,7 @@ import {
   type NewClient,
   PERSONA_MAX_LENGTH,
   type Page,
+  WHATSAPP_PHONE_NUMBER_ID_PATTERN,
 } from '../../domain/index.js';
 import { ConflictError, ValidationError } from '../../shared/errors/index.js';
 
@@ -55,17 +56,26 @@ export class ClientService {
   }
 
   /**
-   * Atualiza nome, status e/ou persona (`null` limpa a persona). O slug não muda: ele
-   * identifica o cliente para sempre.
+   * Atualiza nome, status, persona e/ou número do WhatsApp (`null` limpa a persona e o número).
+   * O slug não muda: ele identifica o cliente para sempre. Número já usado por outro cliente:
+   * `ConflictError`.
    */
   async update(id: ClientId, input: ClientUpdate): Promise<Client> {
-    if (input.name === undefined && input.status === undefined && input.persona === undefined) {
-      throw new ValidationError('Informe name, status ou persona para atualizar');
+    if (
+      input.name === undefined &&
+      input.status === undefined &&
+      input.persona === undefined &&
+      input.whatsappPhoneNumberId === undefined
+    ) {
+      throw new ValidationError('Informe name, status, persona ou whatsappPhoneNumberId');
     }
     const data: ClientUpdate = {
       ...(input.name === undefined ? {} : { name: parseName(input.name) }),
       ...(input.status === undefined ? {} : { status: parseStatus(input.status) }),
       ...(input.persona === undefined ? {} : { persona: parsePersona(input.persona) }),
+      ...(input.whatsappPhoneNumberId === undefined
+        ? {}
+        : { whatsappPhoneNumberId: parsePhoneNumberId(input.whatsappPhoneNumberId) }),
     };
     return await this.clients.update(id, data);
   }
@@ -94,6 +104,15 @@ function parsePersona(value: string | null): string | null {
     );
   }
   return persona;
+}
+
+/** `null` desliga o número; senão 1 a 32 dígitos (o `phone_number_id` da Meta). */
+function parsePhoneNumberId(value: string | null): string | null {
+  if (value === null) return null;
+  if (!WHATSAPP_PHONE_NUMBER_ID_PATTERN.test(value)) {
+    throw new ValidationError('whatsappPhoneNumberId deve ter de 1 a 32 dígitos (ou null)');
+  }
+  return value;
 }
 
 function parseSlug(value: string): string {

@@ -72,6 +72,8 @@ export interface AttendanceReply {
   readonly id: string;
   readonly text: string;
   readonly isFallback: boolean;
+  /** Quando a resposta foi entregue ao canal; nulo = ainda não enviada (spec 011). */
+  readonly sentAt: Date | null;
 }
 
 export interface AttendanceResult {
@@ -300,15 +302,14 @@ export class AttendanceService {
   }
 
   private async loadHistory(clientId: ClientId, current: Message): Promise<readonly LlmTurn[]> {
-    // Uma a mais que o limite: a mensagem atual, já gravada, também vem na lista.
-    const recent = await this.deps.messages.listRecent(
+    // Consulta já "anterior a esta mensagem": vale também ao retomar uma mensagem antiga, mesmo
+    // com muitas mais novas na conversa (spec 011).
+    const before = await this.deps.messages.listBefore(
       clientId,
       current.conversationId,
-      this.historyLimit + 1,
+      current.id,
+      this.historyLimit,
     );
-    const before = recent
-      .filter((candidate) => isBefore(candidate, current))
-      .slice(-this.historyLimit);
 
     // Teto de caracteres: corta as mais antigas, mantém as mais recentes.
     const kept: Message[] = [];
@@ -413,18 +414,16 @@ export class AttendanceService {
   }
 }
 
-/** A mensagem `candidate` vem antes de `current` na ordem da conversa (`createdAt`, depois `id`). */
-function isBefore(candidate: Message, current: Message): boolean {
-  if (candidate.id === current.id) return false;
-  const delta = candidate.createdAt.getTime() - current.createdAt.getTime();
-  return delta < 0 || (delta === 0 && candidate.id < current.id);
-}
-
 function toResult(message: Message, reply: Message, duplicate: boolean): AttendanceResult {
   return {
     conversationId: message.conversationId,
     messageId: message.id,
-    reply: { id: reply.id, text: reply.content, isFallback: reply.isFallback },
+    reply: {
+      id: reply.id,
+      text: reply.content,
+      isFallback: reply.isFallback,
+      sentAt: reply.sentAt,
+    },
     duplicate,
   };
 }

@@ -755,3 +755,80 @@ describe('AttendanceService: provider que devolve Result.err direto', () => {
     assert.deepEqual(h.metrics.llm, [{ provider: 'falho', result: 'error' }]);
   });
 });
+
+describe('AttendanceService: retomada com histórico (listBefore) e marca de envio (spec 011)', () => {
+  it('retomar uma mensagem antiga com 21 ou mais mensagens mais novas devolve o histórico correto', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    const conversation = await h.store.conversations.findOrCreateByContact(client.id, 'c1');
+    // 3 mensagens antigas (a última é a órfã, sem resposta) e depois 25 mais novas.
+    const old: string[] = [];
+    for (const text of ['antiga 1', 'antiga 2']) {
+      const message = await h.store.messages.create(client.id, {
+        conversationId: conversation.id,
+        role: 'USER',
+        content: text,
+      });
+      old.push(message.content);
+      h.advance(5);
+    }
+    const orphan = await h.store.messages.create(client.id, {
+      conversationId: conversation.id,
+      role: 'USER',
+      content: 'a órfã',
+      externalId: 'ext-orfa',
+    });
+    h.advance(5);
+    for (let i = 0; i < 25; i += 1) {
+      await h.store.messages.create(client.id, {
+        conversationId: conversation.id,
+        role: 'USER',
+        content: `mais nova ${String(i)}`,
+      });
+      h.advance(5);
+    }
+
+    h.advance(IN_FLIGHT_MS + 1);
+    const result = await h.service.handleInboundMessage(client.id, {
+      contactRef: 'c1',
+      text: 'a órfã',
+      externalId: 'ext-orfa',
+    });
+
+    assert.equal(result.messageId, orphan.id);
+    const call = h.llm.calls.at(-1);
+    assert.equal(call?.userMessage, 'a órfã');
+    // Só as duas anteriores à órfã, em ordem; nenhuma das 25 mais novas.
+    assert.deepEqual(
+      call.history.map((turn) => turn.content),
+      old,
+    );
+  });
+
+  it('a resposta devolvida traz sentAt nulo ao responder e o valor gravado na duplicata', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    const first = await h.service.handleInboundMessage(client.id, {
+      contactRef: 'c1',
+      text: 'oi',
+      externalId: 'ext-1',
+    });
+    assert.equal(first.reply.sentAt, null);
+
+    const sentAt = new Date('2026-10-27T10:00:00.000Z');
+    assert.equal(
+      await h.store.messages.markSent(client.id, first.reply.id, {
+        channelMessageId: 'wamid.abc',
+        sentAt,
+      }),
+      true,
+    );
+    const again = await h.service.handleInboundMessage(client.id, {
+      contactRef: 'c1',
+      text: 'oi',
+      externalId: 'ext-1',
+    });
+    assert.equal(again.duplicate, true);
+    assert.equal(again.reply.sentAt?.toISOString(), sentAt.toISOString());
+  });
+});

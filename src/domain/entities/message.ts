@@ -26,6 +26,16 @@ export interface Message {
   /** Na resposta do assistente, o id da mensagem do contato a que ela responde. */
   readonly replyToId: string | null;
   readonly createdAt: Date;
+  /** Id da mensagem enviada no canal; só em resposta do assistente já enviada. */
+  readonly channelMessageId: string | null;
+  /** Quando a resposta foi entregue ao canal; nulo = ainda não enviada. */
+  readonly sentAt: Date | null;
+}
+
+/** Marca de envio de uma resposta do assistente (`MessageRepository.markSent`). */
+export interface MessageSentMark {
+  readonly channelMessageId: string;
+  readonly sentAt: Date;
 }
 
 /** Dados de criação. Não há `clientId` aqui: ele vem sempre do parâmetro do repositório. */

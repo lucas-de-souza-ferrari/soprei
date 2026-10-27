@@ -16,6 +16,7 @@ interface ClientBody {
   slug: string;
   status: string;
   persona: string | null;
+  whatsappPhoneNumberId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,6 +71,7 @@ describe('rotas /admin/clients', () => {
         'slug',
         'status',
         'updatedAt',
+        'whatsappPhoneNumberId',
       ]);
       assert.equal(body.name, 'Acme');
       assert.equal(body.status, 'ACTIVE');
@@ -134,6 +136,65 @@ describe('rotas /admin/clients', () => {
       });
       assert.equal(cleared.statusCode, 200);
       assert.equal(cleared.json<ClientBody>().persona, null);
+    });
+
+    it('PATCH define o whatsappPhoneNumberId, o devolve no GET e null o limpa (spec 011)', async () => {
+      const created = await createClient('acme-wa');
+      assert.equal(created.whatsappPhoneNumberId, null);
+
+      const set = await app.inject({
+        method: 'PATCH',
+        url: `/admin/clients/${created.id}`,
+        headers: auth,
+        payload: { whatsappPhoneNumberId: '106540352242922' },
+      });
+      assert.equal(set.statusCode, 200);
+      assert.equal(set.json<ClientBody>().whatsappPhoneNumberId, '106540352242922');
+      assert.equal(set.json<ClientBody>().name, created.name);
+      const read = await app.inject({
+        method: 'GET',
+        url: `/admin/clients/${created.id}`,
+        headers: auth,
+      });
+      assert.equal(read.json<ClientBody>().whatsappPhoneNumberId, '106540352242922');
+
+      const cleared = await app.inject({
+        method: 'PATCH',
+        url: `/admin/clients/${created.id}`,
+        headers: auth,
+        payload: { whatsappPhoneNumberId: null },
+      });
+      assert.equal(cleared.statusCode, 200);
+      assert.equal(cleared.json<ClientBody>().whatsappPhoneNumberId, null);
+    });
+
+    it('PATCH recusa número com formato inválido (400) e número já usado por outro cliente (409)', async () => {
+      const first = await createClient('acme-wa-1');
+      const second = await createClient('acme-wa-2');
+      for (const invalid of ['', 'abc', '12 34', '+5511999999999', '1'.repeat(33), 123]) {
+        const response = await app.inject({
+          method: 'PATCH',
+          url: `/admin/clients/${first.id}`,
+          headers: auth,
+          payload: { whatsappPhoneNumberId: invalid },
+        });
+        assert.equal(response.statusCode, 400, String(invalid));
+      }
+      const ok = await app.inject({
+        method: 'PATCH',
+        url: `/admin/clients/${first.id}`,
+        headers: auth,
+        payload: { whatsappPhoneNumberId: '555000111' },
+      });
+      assert.equal(ok.statusCode, 200);
+      const conflict = await app.inject({
+        method: 'PATCH',
+        url: `/admin/clients/${second.id}`,
+        headers: auth,
+        payload: { whatsappPhoneNumberId: '555000111' },
+      });
+      assert.equal(conflict.statusCode, 409);
+      assert.equal(conflict.json<ErrorBody>().error.code, 'CONFLICT');
     });
 
     it('persona de 4000 caracteres é aceita', async () => {

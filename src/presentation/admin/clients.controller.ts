@@ -23,6 +23,7 @@ function toResponse(client: Client): {
   slug: string;
   status: string;
   persona: string | null;
+  whatsappPhoneNumberId: string | null;
   createdAt: string;
   updatedAt: string;
 } {
@@ -32,6 +33,7 @@ function toResponse(client: Client): {
     slug: client.slug,
     status: client.status,
     persona: client.persona,
+    whatsappPhoneNumberId: client.whatsappPhoneNumberId,
     createdAt: client.createdAt.toISOString(),
     updatedAt: client.updatedAt.toISOString(),
   };

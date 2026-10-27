@@ -7,6 +7,7 @@ import type {
   NewClient,
   Page,
 } from '../../../domain/index.js';
+import { WHATSAPP_PHONE_NUMBER_ID_PATTERN } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import { buildPageQuery, stableOrderBy, toPage } from './cursor.js';
 import { toClient } from './mappers.js';
@@ -39,6 +40,17 @@ export class PrismaClientRepository implements ClientRepository {
       const row = await this.db.client.findFirst({ where: { slug, deletedAt: null } });
       if (row === null) throw notFound();
       return toClient(row);
+    });
+  }
+
+  findByWhatsappPhoneNumberId(phoneNumberId: string): Promise<Client | null> {
+    return withRepositoryErrors('Client.findByWhatsappPhoneNumberId', async () => {
+      // Formato inválido nunca casa com nada: não vai ao banco. Cliente removido não aparece.
+      if (!WHATSAPP_PHONE_NUMBER_ID_PATTERN.test(phoneNumberId)) return null;
+      const row = await this.db.client.findFirst({
+        where: { whatsappPhoneNumberId: phoneNumberId, deletedAt: null },
+      });
+      return row === null ? null : toClient(row);
     });
   }
 
@@ -75,6 +87,9 @@ export class PrismaClientRepository implements ClientRepository {
           ...(data.name === undefined ? {} : { name: data.name }),
           ...(data.status === undefined ? {} : { status: data.status }),
           ...(data.persona === undefined ? {} : { persona: data.persona }),
+          ...(data.whatsappPhoneNumberId === undefined
+            ? {}
+            : { whatsappPhoneNumberId: data.whatsappPhoneNumberId }),
         },
       });
       if (count === 0) throw notFound();
@@ -88,7 +103,9 @@ export class PrismaClientRepository implements ClientRepository {
     return withRepositoryErrors('Client.delete', async () => {
       const { count } = await this.db.client.updateMany({
         where: { id, deletedAt: null },
-        data: { deletedAt: new Date() },
+        // O número do WhatsApp é liberado junto: um cliente removido não recebe mais mensagens e o
+        // número pode ser ligado a outro cliente.
+        data: { deletedAt: new Date(), whatsappPhoneNumberId: null },
       });
       if (count === 0) throw notFound();
     });

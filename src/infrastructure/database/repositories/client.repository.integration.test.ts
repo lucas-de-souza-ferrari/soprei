@@ -178,3 +178,82 @@ describe('repositório de Client (raiz do tenant)', () => {
     await assert.rejects(repo.findBySlug(wanted), NotFoundError);
   });
 });
+
+describe('findByWhatsappPhoneNumberId (spec 011)', () => {
+  /** Número único por execução (1 a 32 dígitos), para não colidir com dados de outros testes. */
+  const phoneId = (): string => `9${randomBytes(6).readUIntBE(0, 6).toString().padStart(15, '0')}`;
+
+  it('devolve o cliente dono do número e null para número desconhecido', async () => {
+    const number = phoneId();
+    const client = await createTracked('wa-find');
+    await repo.update(client.id, { whatsappPhoneNumberId: number });
+    const found = await repo.findByWhatsappPhoneNumberId(number);
+    assert.equal(found?.id, client.id);
+    assert.equal(found.whatsappPhoneNumberId, number);
+    assert.equal(await repo.findByWhatsappPhoneNumberId(phoneId()), null);
+  });
+
+  it('formato inválido nunca casa (e não vai ao banco): vazio, letras, mais de 32 dígitos, curinga', async () => {
+    for (const invalid of ['', 'abc', '1'.repeat(33), '%', '12 3', "1' OR '1'='1"]) {
+      assert.equal(await repo.findByWhatsappPhoneNumberId(invalid), null, invalid);
+    }
+  });
+
+  it('não devolve cliente removido, e remover libera o número para outro cliente', async () => {
+    const number = phoneId();
+    const removed = await createTracked('wa-removed');
+    await repo.update(removed.id, { whatsappPhoneNumberId: number });
+    await repo.delete(removed.id);
+    assert.equal(await repo.findByWhatsappPhoneNumberId(number), null);
+
+    const next = await createTracked('wa-reuse');
+    const updated = await repo.update(next.id, { whatsappPhoneNumberId: number });
+    assert.equal(updated.whatsappPhoneNumberId, number);
+    assert.equal((await repo.findByWhatsappPhoneNumberId(number))?.id, next.id);
+  });
+
+  it('mesmo se um cliente removido ainda guardasse o número, ele não seria devolvido (filtro de removidos)', async () => {
+    const number = phoneId();
+    const client = await createTracked('wa-ghost');
+    await repo.update(client.id, { whatsappPhoneNumberId: number });
+    // Soft delete "à mão", sem liberar o número: o filtro do repositório é a barreira.
+    await database.prisma.client.updateMany({
+      where: { id: client.id },
+      data: { deletedAt: new Date() },
+    });
+    assert.equal(await repo.findByWhatsappPhoneNumberId(number), null);
+  });
+
+  it('dois clientes não podem ter o mesmo número (ConflictError); null libera e vários podem não ter', async () => {
+    const number = phoneId();
+    const first = await createTracked('wa-dup-1');
+    const second = await createTracked('wa-dup-2');
+    await repo.update(first.id, { whatsappPhoneNumberId: number });
+    await assert.rejects(
+      repo.update(second.id, { whatsappPhoneNumberId: number }),
+      (error: unknown) => error instanceof ConflictError,
+    );
+    assert.equal((await repo.findByWhatsappPhoneNumberId(number))?.id, first.id);
+
+    const cleared = await repo.update(first.id, { whatsappPhoneNumberId: null });
+    assert.equal(cleared.whatsappPhoneNumberId, null);
+    assert.equal(await repo.findByWhatsappPhoneNumberId(number), null);
+    // Vários clientes sem número convivem (NULL não colide).
+    const third = await createTracked('wa-null-1');
+    const fourth = await createTracked('wa-null-2');
+    assert.equal(third.whatsappPhoneNumberId, null);
+    assert.equal(fourth.whatsappPhoneNumberId, null);
+  });
+
+  it('SQL cru: o banco recusa número com formato inválido (CHECK)', async () => {
+    const client = await createTracked('wa-check');
+    for (const invalid of ['abc', '', '1'.repeat(33), '+5511999999999']) {
+      await assert.rejects(
+        database.prisma
+          .$executeRaw`UPDATE clients SET whatsapp_phone_number_id = ${invalid} WHERE id = ${client.id}::uuid`,
+        /format_check|check/i,
+        invalid,
+      );
+    }
+  });
+});

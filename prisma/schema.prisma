@@ -23,15 +23,18 @@ enum ClientStatus {
 /// Raiz do tenant (GLOBAL: não é filtrado por clientId). Soft delete por `deletedAt`;
 /// o slug segue único mesmo depois da remoção (fica reservado).
 model Client {
-  id        String       @id @default(uuid(7)) @db.Uuid
-  name      String
-  slug      String       @unique
-  status    ClientStatus @default(ACTIVE)
-  createdAt DateTime     @default(now()) @map("created_at")
-  updatedAt DateTime     @updatedAt @map("updated_at")
-  deletedAt DateTime?    @map("deleted_at")
+  id                    String       @id @default(uuid(7)) @db.Uuid
+  name                  String
+  slug                  String       @unique
+  status                ClientStatus @default(ACTIVE)
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  deletedAt             DateTime?    @map("deleted_at")
   /// Persona do assistente (até 4000 caracteres; nulo = persona padrão). Nunca vai para log.
-  persona   String?
+  persona               String?
+  /// phone_number_id do número do WhatsApp (Cloud API da Meta) deste cliente: 1 a 32 dígitos, único.
+  /// Único ponto do sistema que leva de um identificador externo ao cliente (spec 011).
+  whatsappPhoneNumberId String?      @unique @map("whatsapp_phone_number_id")
 
   conversations Conversation[]
   messages      Message[]
@@ -70,17 +73,21 @@ model Conversation {
 /// então uma mensagem nunca aponta para conversa nem para outra mensagem de outro cliente.
 /// `content` nunca vai para log nem para label de métrica.
 model Message {
-  id             String      @id @default(uuid(7)) @db.Uuid
-  clientId       String      @map("client_id") @db.Uuid
-  conversationId String      @map("conversation_id") @db.Uuid
-  role           MessageRole
-  content        String
-  isFallback     Boolean     @default(false) @map("is_fallback")
+  id               String      @id @default(uuid(7)) @db.Uuid
+  clientId         String      @map("client_id") @db.Uuid
+  conversationId   String      @map("conversation_id") @db.Uuid
+  role             MessageRole
+  content          String
+  isFallback       Boolean     @default(false) @map("is_fallback")
   /// Id da mensagem no canal, para idempotência (único por cliente quando presente).
-  externalId     String?     @map("external_id")
+  externalId       String?     @map("external_id")
   /// Na resposta do assistente, a mensagem do contato a que ela responde.
-  replyToId      String?     @map("reply_to_id") @db.Uuid
-  createdAt      DateTime    @default(now()) @map("created_at")
+  replyToId        String?     @map("reply_to_id") @db.Uuid
+  createdAt        DateTime    @default(now()) @map("created_at")
+  /// Id da mensagem enviada no canal (wamid), só em resposta do assistente já enviada.
+  channelMessageId String?     @map("channel_message_id")
+  /// Quando a resposta foi entregue ao canal; nulo = ainda não enviada (ou o envio falhou).
+  sentAt           DateTime?   @map("sent_at")
 
   client       Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
   conversation Conversation @relation(fields: [conversationId, clientId], references: [id, clientId], onDelete: NoAction)

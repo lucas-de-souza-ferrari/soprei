@@ -458,7 +458,9 @@ describe('parseConfig', () => {
     });
 
     it('habilitado sem TRUST_PROXY definido explicitamente falha; "false" explícito passa', () => {
-      const { TRUST_PROXY: _omitted, ...withoutTrustProxy } = ENABLED;
+      const withoutTrustProxy = Object.fromEntries(
+        Object.entries(ENABLED).filter(([name]) => name !== 'TRUST_PROXY'),
+      );
       const absent = parseConfig(withoutTrustProxy);
       assert.equal(absent.ok, false);
       assert.match(absent.error.message, /TRUST_PROXY: precisa ser definida explicitamente/);

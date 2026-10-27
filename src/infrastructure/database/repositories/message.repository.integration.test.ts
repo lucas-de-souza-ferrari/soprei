@@ -469,3 +469,176 @@ describe('forTransaction e segunda barreira', () => {
     );
   });
 });
+
+describe('markSent (spec 011): marca de envio da resposta do assistente', () => {
+  const markOf = (channelMessageId: string) => ({
+    channelMessageId,
+    sentAt: new Date('2026-10-27T12:00:00.000Z'),
+  });
+
+  async function freshReply(client: Client, contact: string) {
+    const conversation = await conversations.findOrCreateByContact(client.id, contact);
+    const user = await repo.create(client.id, {
+      conversationId: conversation.id,
+      role: 'USER',
+      content: 'pergunta',
+    });
+    const reply = await repo.create(client.id, {
+      conversationId: conversation.id,
+      role: 'ASSISTANT',
+      content: 'resposta',
+      replyToId: user.id,
+      createdAt: new Date(user.createdAt.getTime() + 1),
+    });
+    return { conversation, user, reply };
+  }
+
+  it('marca a resposta do próprio cliente e é idempotente (a segunda marca não muda nada)', async () => {
+    const { reply } = await freshReply(clientA, 'sent-ok');
+    assert.equal(reply.sentAt, null);
+    assert.equal(reply.channelMessageId, null);
+
+    assert.equal(await repo.markSent(clientA.id, reply.id, markOf('wamid.primeiro')), true);
+    const marked = await repo.findById(clientA.id, reply.id);
+    assert.equal(marked.channelMessageId, 'wamid.primeiro');
+    assert.equal(marked.sentAt?.toISOString(), '2026-10-27T12:00:00.000Z');
+    assert.equal(marked.content, 'resposta');
+
+    // Já marcada: não sobrescreve nem conta como alteração.
+    assert.equal(await repo.markSent(clientA.id, reply.id, markOf('wamid.segundo')), false);
+    assert.equal((await repo.findById(clientA.id, reply.id)).channelMessageId, 'wamid.primeiro');
+  });
+
+  it('isolamento: o ClientId de B não marca a resposta de A, e a de A fica intacta', async () => {
+    const { reply } = await freshReply(clientA, 'sent-iso');
+    assert.equal(await repo.markSent(clientB.id, reply.id, markOf('wamid.intruso')), false);
+    const untouched = await repo.findById(clientA.id, reply.id);
+    assert.equal(untouched.sentAt, null);
+    assert.equal(untouched.channelMessageId, null);
+    // E o inverso: marcar a resposta de B com o ClientId de A também não faz nada.
+    assert.equal(await repo.markSent(clientA.id, replyB.id, markOf('wamid.intruso')), false);
+    assert.equal((await repo.findById(clientB.id, replyB.id)).sentAt, null);
+  });
+
+  it('só a resposta do assistente é marcada: mensagem do contato e id inexistente ou malformado, não', async () => {
+    const { user } = await freshReply(clientA, 'sent-role');
+    assert.equal(await repo.markSent(clientA.id, user.id, markOf('wamid.x')), false);
+    assert.equal((await repo.findById(clientA.id, user.id)).sentAt, null);
+    assert.equal(await repo.markSent(clientA.id, randomUUID(), markOf('wamid.x')), false);
+    assert.equal(await repo.markSent(clientA.id, 'nao-e-uuid', markOf('wamid.x')), false);
+  });
+
+  it('SQL cru: o banco recusa marca de envio em mensagem do contato e id de canal fora do tamanho', async () => {
+    const { user, reply } = await freshReply(clientA, 'sent-check');
+    await assert.rejects(
+      database.prisma.$executeRaw`UPDATE messages SET sent_at = now() WHERE id = ${user.id}::uuid`,
+      /sent_only_assistant_check|check/i,
+    );
+    await assert.rejects(
+      database.prisma
+        .$executeRaw`UPDATE messages SET channel_message_id = ${'x'.repeat(129)}, sent_at = now() WHERE id = ${reply.id}::uuid`,
+      /channel_message_id_length_check|check/i,
+    );
+    await assert.rejects(
+      database.prisma
+        .$executeRaw`UPDATE messages SET channel_message_id = '' WHERE id = ${reply.id}::uuid`,
+      /check/i,
+    );
+  });
+
+  it('a tenant-scope exige clientId no where do updateMany (TenantScopeError)', async () => {
+    await assert.rejects(
+      database.prisma.message.updateMany({
+        where: { id: replyA.id },
+        data: { sentAt: new Date() },
+      }),
+      (error: unknown) => error instanceof TenantScopeError,
+    );
+  });
+});
+
+describe('listBefore (spec 011): histórico anterior a uma mensagem', () => {
+  it('devolve as N anteriores em ordem cronológica, sem a âncora nem as posteriores', async () => {
+    const conversation = await conversations.findOrCreateByContact(clientA.id, 'before-order');
+    const base = Date.UTC(2026, 0, 1);
+    const created: Message[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      created.push(
+        await repo.create(clientA.id, {
+          conversationId: conversation.id,
+          role: i % 2 === 0 ? 'USER' : 'ASSISTANT',
+          content: `m${String(i)}`,
+          createdAt: new Date(base + i * 1_000),
+        }),
+      );
+    }
+    const anchor = created[5];
+    assert.ok(anchor !== undefined);
+    const five = await repo.listBefore(clientA.id, conversation.id, anchor.id, 20);
+    assert.deepEqual(
+      five.map((message) => message.content),
+      ['m0', 'm1', 'm2', 'm3', 'm4'],
+    );
+    // Limite menor que o disponível: as mais próximas da âncora, em ordem cronológica.
+    const lastThree = await repo.listBefore(clientA.id, conversation.id, anchor.id, 3);
+    assert.deepEqual(
+      lastThree.map((message) => message.content),
+      ['m2', 'm3', 'm4'],
+    );
+    // Retomar uma mensagem com mensagens mais novas na conversa (era o defeito do filtro em
+    // memória sobre `listRecent(limit + 1)`): o histórico continua completo.
+    const tail = created[29];
+    assert.ok(tail !== undefined);
+    const window = await repo.listBefore(clientA.id, conversation.id, tail.id, 20);
+    assert.equal(window.length, 20);
+    assert.equal(window[0]?.content, 'm9');
+    assert.equal(window[19]?.content, 'm28');
+    // A primeira mensagem não tem anterior.
+    const first = created[0];
+    assert.ok(first !== undefined);
+    assert.deepEqual(await repo.listBefore(clientA.id, conversation.id, first.id, 20), []);
+  });
+
+  it('empate de createdAt desempata por id (a anterior na ordem da conversa)', async () => {
+    const conversation = await conversations.findOrCreateByContact(clientA.id, 'before-tie');
+    const instant = new Date(Date.UTC(2026, 1, 1));
+    const rows: Message[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      rows.push(
+        await repo.create(clientA.id, {
+          conversationId: conversation.id,
+          role: 'USER',
+          content: `t${String(i)}`,
+          createdAt: instant,
+        }),
+      );
+    }
+    const ordered = [...rows].sort((left, right) => (left.id < right.id ? -1 : 1));
+    const third = ordered[2];
+    assert.ok(third !== undefined);
+    const before = await repo.listBefore(clientA.id, conversation.id, third.id, 20);
+    assert.deepEqual(
+      before.map((message) => message.id),
+      [ordered[0]?.id, ordered[1]?.id],
+    );
+  });
+
+  it('isolamento: o ClientId de B não enxerga o histórico de A, nem com a âncora e a conversa certas', async () => {
+    assert.deepEqual(await repo.listBefore(clientB.id, conversationA.id, replyA.id, 20), []);
+    // Âncora de um cliente com a conversa do outro: não existe nessa conversa.
+    assert.deepEqual(await repo.listBefore(clientA.id, conversationB.id, replyB.id, 20), []);
+    assert.deepEqual(await repo.listBefore(clientB.id, conversationB.id, replyA.id, 20), []);
+    // O caminho feliz continua devolvendo só o que é do cliente.
+    const own = await repo.listBefore(clientB.id, conversationB.id, replyB.id, 20);
+    assert.ok(own.length >= 1);
+    assert.ok(own.every((message) => message.clientId === clientB.id));
+    assert.ok(own.some((message) => message.id === userB.id));
+  });
+
+  it('entradas inválidas devolvem lista vazia (limite, ids malformados)', async () => {
+    assert.deepEqual(await repo.listBefore(clientA.id, conversationA.id, replyA.id, 0), []);
+    assert.deepEqual(await repo.listBefore(clientA.id, 'x', replyA.id, 5), []);
+    assert.deepEqual(await repo.listBefore(clientA.id, conversationA.id, 'x', 5), []);
+    assert.deepEqual(await repo.listBefore(clientA.id, conversationA.id, randomUUID(), 5), []);
+  });
+});

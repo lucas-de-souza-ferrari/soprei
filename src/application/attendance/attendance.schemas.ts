@@ -17,6 +17,14 @@ const NO_CONTROL_MESSAGE = 'não pode conter caracteres de controle';
  * - `text`: 1 a 4000 caracteres e não vazio depois de `trim`; guardado como veio.
  * - `externalId`: id da mensagem no canal, para idempotência.
  */
+/** Texto de uma mensagem do contato: 1 a 4000 caracteres, não vazio depois de `trim`, sem NUL. */
+export const messageTextSchema = z
+  .string()
+  .max(MESSAGE_CONTENT_MAX_LENGTH)
+  .refine((value) => value.trim().length > 0, 'não pode ser vazio')
+  // O Postgres recusa NUL em texto (22021): vira 400 aqui, não 500 no banco.
+  .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL');
+
 export const inboundMessageSchema = z
   .object({
     contactRef: z
@@ -25,12 +33,7 @@ export const inboundMessageSchema = z
       .trim()
       .min(1)
       .max(CONTACT_REF_MAX_LENGTH),
-    text: z
-      .string()
-      .max(MESSAGE_CONTENT_MAX_LENGTH)
-      .refine((value) => value.trim().length > 0, 'não pode ser vazio')
-      // O Postgres recusa NUL em texto (22021): vira 400 aqui, não 500 no banco.
-      .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL'),
+    text: messageTextSchema,
     externalId: z
       .string()
       .regex(NO_CONTROL_CHARS, NO_CONTROL_MESSAGE)

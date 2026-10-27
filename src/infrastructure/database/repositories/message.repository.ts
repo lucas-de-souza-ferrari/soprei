@@ -3,6 +3,7 @@ import type {
   ListOptions,
   Message,
   MessageRepository,
+  MessageSentMark,
   MessageUpdate,
   NewMessage,
   Page,
@@ -86,6 +87,51 @@ export class PrismaMessageRepository
         take: limit,
       });
       return rows.reverse().map(toMessage);
+    });
+  }
+
+  listBefore(
+    clientId: ClientId,
+    conversationId: string,
+    messageId: string,
+    limit: number,
+  ): Promise<readonly Message[]> {
+    return this.run('listBefore', async () => {
+      if (!Number.isInteger(limit) || limit < 1 || !isUuid(conversationId) || !isUuid(messageId)) {
+        return [];
+      }
+      // A âncora precisa ser DESTA conversa e DESTE cliente; senão não há "anterior" a ela.
+      const anchor = await this.db.message.findFirst({
+        where: { clientId, conversationId, id: messageId },
+      });
+      if (anchor === null) return [];
+      const rows = await this.db.message.findMany({
+        where: {
+          clientId,
+          conversationId,
+          // Antes da âncora na ordem da conversa: `createdAt` e, no mesmo instante, `id`.
+          OR: [
+            { createdAt: { lt: anchor.createdAt } },
+            { createdAt: anchor.createdAt, id: { lt: anchor.id } },
+          ],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit,
+      });
+      return rows.reverse().map(toMessage);
+    });
+  }
+
+  markSent(clientId: ClientId, messageId: string, mark: MessageSentMark): Promise<boolean> {
+    return this.run('markSent', async () => {
+      if (!isUuid(messageId)) return false;
+      // O `where` carrega o cliente, o papel e a ausência de marca: só a resposta do assistente
+      // deste cliente que ainda não foi marcada muda (idempotente; mensagem alheia é intocável).
+      const { count } = await this.db.message.updateMany({
+        where: { clientId, id: messageId, role: 'ASSISTANT', sentAt: null },
+        data: { channelMessageId: mark.channelMessageId, sentAt: mark.sentAt },
+      });
+      return count > 0;
     });
   }
 

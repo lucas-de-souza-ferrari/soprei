@@ -1,4 +1,4 @@
-import type { Message, NewMessage } from '../entities/message.js';
+import type { Message, MessageSentMark, NewMessage } from '../entities/message.js';
 import type { ListOptions, Page } from '../pagination.js';
 import type { ClientId } from '../value-objects/client-id.js';
 
@@ -23,6 +23,22 @@ export interface MessageRepository {
     conversationId: string,
     limit: number,
   ): Promise<readonly Message[]>;
+  /**
+   * As até `limit` mensagens da conversa **anteriores** a `messageId` (na ordem `createdAt`, `id`),
+   * em ordem cronológica. Vazio se a mensagem não existe nesta conversa deste cliente.
+   */
+  listBefore(
+    clientId: ClientId,
+    conversationId: string,
+    messageId: string,
+    limit: number,
+  ): Promise<readonly Message[]>;
+  /**
+   * Marca a resposta do assistente como enviada ao canal. Só altera mensagem deste cliente, do
+   * papel `ASSISTANT` e ainda sem marca (idempotente). Devolve `true` se marcou, `false` se não
+   * havia o que marcar (inexistente, de outro cliente, do contato ou já marcada).
+   */
+  markSent(clientId: ClientId, messageId: string, mark: MessageSentMark): Promise<boolean>;
   /** Histórico paginado da conversa, em ordem cronológica. */
   listByConversation(
     clientId: ClientId,

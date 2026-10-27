@@ -14,6 +14,7 @@ export function toClient(row: ClientRow): Client {
     // O enum do Prisma e o tipo do domínio têm os mesmos valores: o compilador confere.
     status: row.status,
     persona: row.persona,
+    whatsappPhoneNumberId: row.whatsappPhoneNumberId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -41,5 +42,7 @@ export function toMessage(row: MessageRow): Message {
     externalId: row.externalId,
     replyToId: row.replyToId,
     createdAt: row.createdAt,
+    channelMessageId: row.channelMessageId,
+    sentAt: row.sentAt,
   };
 }

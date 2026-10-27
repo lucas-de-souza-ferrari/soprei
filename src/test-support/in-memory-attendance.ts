@@ -11,6 +11,7 @@ import {
   MAX_LIST_LIMIT,
   type Message,
   type MessageRepository,
+  type MessageSentMark,
   type NewConversation,
   type NewMessage,
   type Page,
@@ -90,6 +91,14 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         ),
       listRecent: (clientId, conversationId, limit) =>
         this.step(() => this.inConversation(clientId, conversationId).slice(-limit)),
+      listBefore: (clientId, conversationId, messageId, limit) =>
+        this.step(() => {
+          const ordered = this.inConversation(clientId, conversationId);
+          const index = ordered.findIndex((row) => row.id === messageId);
+          return index === -1 ? [] : ordered.slice(Math.max(0, index - limit), index);
+        }),
+      markSent: (clientId, messageId, mark) =>
+        this.step(() => this.applyMark(clientId, messageId, mark)),
       listByConversation: (clientId, conversationId, options) =>
         this.step(() => page(this.inConversation(clientId, conversationId), options)),
     } satisfies MessageRepository;
@@ -195,10 +204,31 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       externalId: data.externalId ?? null,
       replyToId: data.replyToId ?? null,
       createdAt: data.createdAt ?? this.now(),
+      channelMessageId: null,
+      sentAt: null,
     };
     this.messageRows.push(row);
     this.transactionLog.getStore()?.messages.push(row);
     return row;
+  }
+
+  /** Como o `markSent` do banco: só ASSISTANT deste cliente e ainda sem marca. */
+  private applyMark(clientId: ClientId, messageId: string, mark: MessageSentMark): boolean {
+    const index = this.messageRows.findIndex(
+      (row) =>
+        row.clientId === clientId &&
+        row.id === messageId &&
+        row.role === 'ASSISTANT' &&
+        row.sentAt === null,
+    );
+    const row = this.messageRows[index];
+    if (row === undefined) return false;
+    this.messageRows[index] = {
+      ...row,
+      channelMessageId: mark.channelMessageId,
+      sentAt: mark.sentAt,
+    };
+    return true;
   }
 
   private inConversation(clientId: ClientId, conversationId: string): Message[] {

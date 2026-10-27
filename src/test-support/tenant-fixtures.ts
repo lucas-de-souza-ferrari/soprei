@@ -11,9 +11,15 @@ export class TestTenants {
 
   constructor(private readonly db: TenantScopedPrisma) {}
 
-  async createClient(label = 'it'): Promise<Client> {
+  async createClient(label = 'it', whatsappPhoneNumberId?: string): Promise<Client> {
     const slug = `${label}-${randomBytes(6).toString('hex')}`;
-    const row = await this.db.client.create({ data: { name: `Teste ${slug}`, slug } });
+    const row = await this.db.client.create({
+      data: {
+        name: `Teste ${slug}`,
+        slug,
+        ...(whatsappPhoneNumberId === undefined ? {} : { whatsappPhoneNumberId }),
+      },
+    });
     this.created.add(row.id);
     return {
       id: ClientId.parse(row.id),
@@ -21,6 +27,7 @@ export class TestTenants {
       slug: row.slug,
       status: row.status,
       persona: row.persona,
+      whatsappPhoneNumberId: row.whatsappPhoneNumberId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

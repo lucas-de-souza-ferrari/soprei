@@ -11,6 +11,12 @@ export interface ClientRepository {
   findById(id: ClientId): Promise<Client>;
   /** Lança `NotFoundError` se não existe ou foi removido. */
   findBySlug(slug: string): Promise<Client>;
+  /**
+   * O cliente dono deste `phone_number_id` do WhatsApp, ou `null` (número desconhecido ou cliente
+   * removido). É o **único** ponto do sistema que sai de um identificador externo para o cliente:
+   * o webhook resolve o `ClientId` aqui e dali em diante só o `ClientId` circula.
+   */
+  findByWhatsappPhoneNumberId(phoneNumberId: string): Promise<Client | null>;
   list(options?: ListOptions): Promise<Page<Client>>;
   /** Lança `ConflictError` se o slug já foi usado (inclusive por cliente removido). */
   create(data: NewClient): Promise<Client>;
