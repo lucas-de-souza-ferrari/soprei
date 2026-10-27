@@ -7,6 +7,7 @@ import {
   ExternalServiceError,
   ForbiddenError,
   NotFoundError,
+  RateLimitError,
   TenantScopeError,
   UnauthorizedError,
   ValidationError,
@@ -14,6 +15,7 @@ import {
 
 describe('hierarquia de erros', () => {
   const cases = [
+    { create: () => new RateLimitError(30), statusCode: 429, code: 'RATE_LIMITED' },
     { create: () => new ValidationError(), statusCode: 400, code: 'VALIDATION_ERROR' },
     { create: () => new UnauthorizedError(), statusCode: 401, code: 'UNAUTHORIZED' },
     { create: () => new ForbiddenError(), statusCode: 403, code: 'FORBIDDEN' },
@@ -50,5 +52,15 @@ describe('hierarquia de erros', () => {
     assert.equal(new DatabaseError().isOperational, false);
     assert.equal(new TenantScopeError().isOperational, false);
     assert.equal(new ConflictError().isOperational, true);
+  });
+
+  it('RateLimitError guarda retryAfterSeconds inteiro >= 1 no erro e no context', () => {
+    const error = new RateLimitError(12.2);
+    assert.equal(error.retryAfterSeconds, 13);
+    assert.deepEqual(error.context, { retryAfterSeconds: 13 });
+    assert.equal(error.isOperational, true);
+    assert.equal(new RateLimitError(0).retryAfterSeconds, 1);
+    assert.equal(new RateLimitError(-5).retryAfterSeconds, 1);
+    assert.equal(new RateLimitError(Number.NaN).retryAfterSeconds, 1);
   });
 });

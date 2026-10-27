@@ -6,6 +6,7 @@ import {
   ConflictError,
   ExternalServiceError,
   NotFoundError,
+  RateLimitError,
   TenantScopeError,
 } from '../../shared/errors/index.js';
 import { buildTestServer } from './test-server.js';
@@ -13,7 +14,13 @@ import { buildTestServer } from './test-server.js';
 const SEGREDO = 'senha-do-banco-postgres://admin:123@10.0.0.5';
 
 interface ErrorResponse {
-  error: { code: string; message: string; requestId: string; details?: unknown[] };
+  error: {
+    code: string;
+    message: string;
+    requestId: string;
+    details?: unknown[];
+    retryAfter?: number;
+  };
 }
 
 describe('error handler central', () => {
@@ -40,6 +47,11 @@ describe('error handler central', () => {
         context: { model: 'Conversation', operation: 'findMany', segredo: SEGREDO },
       });
     });
+    app.get('/test/rate-limited', () => {
+      throw new RateLimitError(7, 'Muitas requisições. Tente novamente em instantes.', {
+        context: { segredo: SEGREDO },
+      });
+    });
     app.get('/test/unexpected', () => {
       throw new Error(SEGREDO);
     });
@@ -60,6 +72,18 @@ describe('error handler central', () => {
     assert.ok(!response.body.includes('stack'));
     assert.ok(!response.body.includes(SEGREDO));
     assert.ok(!response.body.includes('.ts'));
+  });
+
+  it('RateLimitError vira 429 RATE_LIMITED com retryAfter e Retry-After iguais', async () => {
+    const response = await app.inject({ method: 'GET', url: '/test/rate-limited' });
+    assert.equal(response.statusCode, 429);
+    const body = response.json<ErrorResponse>();
+    assert.equal(body.error.code, 'RATE_LIMITED');
+    assert.equal(body.error.message, 'Muitas requisições. Tente novamente em instantes.');
+    assert.equal(typeof body.error.requestId, 'string');
+    assert.equal(body.error.retryAfter, 7);
+    assert.equal(response.headers['retry-after'], '7');
+    assert.ok(!response.body.includes(SEGREDO));
   });
 
   it('erro de validação Zod vira 400 com os campos inválidos', async () => {

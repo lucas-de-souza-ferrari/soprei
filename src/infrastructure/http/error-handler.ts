@@ -1,6 +1,6 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
-import { BaseError } from '../../shared/errors/index.js';
+import { BaseError, RateLimitError } from '../../shared/errors/index.js';
 
 interface ErrorBody {
   readonly error: {
@@ -8,6 +8,8 @@ interface ErrorBody {
     readonly message: string;
     readonly requestId: string;
     readonly details?: readonly { readonly path: string; readonly message: string }[];
+    /** Só no 429 (RATE_LIMITED): segundos até poder tentar de novo, inteiro >= 1. */
+    readonly retryAfter?: number;
   };
 }
 
@@ -52,6 +54,20 @@ export function errorHandler(
     return reply
       .status(400)
       .send(buildBody(request, 'VALIDATION_ERROR', 'Dados inválidos', details));
+  }
+
+  if (error instanceof RateLimitError) {
+    // A linha de requisição (observability.ts) já registra o 429 como warn com o padrão da
+    // rota; aqui só debug, para uma rajada recusada não gerar duas linhas por requisição.
+    // Nenhum IP nem chave no log: o contexto do erro só tem o tempo de espera.
+    request.log.debug({ errorContext: error.context }, 'limite de requisições excedido');
+    // Fonte única do Retry-After: bate sempre com `retryAfter` do corpo (os demais cabeçalhos
+    // X-RateLimit-* já foram postos pelo plugin).
+    void reply.header('retry-after', error.retryAfterSeconds);
+    const body = buildBody(request, error.code, error.message);
+    return reply
+      .status(error.statusCode)
+      .send({ error: { ...body.error, retryAfter: error.retryAfterSeconds } });
   }
 
   if (error instanceof BaseError) {

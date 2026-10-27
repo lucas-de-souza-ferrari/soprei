@@ -62,3 +62,29 @@ export class TenantScopeError extends BaseError {
     });
   }
 }
+
+/**
+ * Limite de requisições excedido (spec 005): 429. `retryAfterSeconds` (inteiro >= 1) também
+ * vai no `context`, para o log, e é o que o handler central devolve como `retryAfter`.
+ */
+export class RateLimitError extends BaseError {
+  readonly retryAfterSeconds: number;
+
+  constructor(
+    retryAfterSeconds: number,
+    message = 'Muitas requisições. Tente novamente em instantes.',
+    options: AppErrorOptions = {},
+  ) {
+    const seconds = Number.isFinite(retryAfterSeconds)
+      ? Math.max(1, Math.ceil(retryAfterSeconds))
+      : 1;
+    super({
+      message,
+      code: 'RATE_LIMITED',
+      statusCode: 429,
+      ...options,
+      context: { ...options.context, retryAfterSeconds: seconds },
+    });
+    this.retryAfterSeconds = seconds;
+  }
+}
