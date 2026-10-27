@@ -35,7 +35,7 @@ O canal é **opt-in**: sem `WHATSAPP_ENABLED=true` as rotas do webhook **não ex
 
 Regra cruzada na config: `QUEUE_BACKOFF_MS × (2^(QUEUE_ATTEMPTS − 1) − 1)` precisa ser maior que `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS`; senão uma retentativa depois de queda do processo bateria em 409 até acabar as tentativas. Os três segredos nunca vão para log (`redact`), resposta nem métrica.
 
-### Webhook (`src/presentation/`, rotas finas)
+### Webhook (`src/presentation/webhooks/`, pasta criada nesta spec; rotas finas)
 
 - **`GET /webhooks/whatsapp`** (verificação): com `hub.mode=subscribe` e `hub.verify_token` igual a `WHATSAPP_VERIFY_TOKEN` (comparação em tempo constante), responde 200 `text/plain` com o `hub.challenge` e nada mais; caso contrário 403. O `hub.verify_token` vem na URL: nenhum log pode conter a query string.
 - **`POST /webhooks/whatsapp`** (eventos):
@@ -52,11 +52,11 @@ Regra cruzada na config: `QUEUE_BACKOFF_MS × (2^(QUEUE_ATTEMPTS − 1) − 1)` 
 
 ### Fila e processamento em segundo plano
 
-- **BullMQ sobre o Redis existente** (decisão 1). Fila `channel-inbound`, `src/infrastructure/queue/`; o código de `application` e `presentation` conhece só uma porta (`InboundJobQueue.enqueue`), nunca o BullMQ.
+- **BullMQ sobre o Redis existente** (decisão 1). Fila `channel-inbound`, `src/infrastructure/queue/`; o código de `application` e `presentation` conhece só uma porta (`InboundJobQueue.enqueue`, em `src/application/ports/`), nunca o BullMQ.
 - Job: `{ kind: 'text', clientId, contactRef, text, externalId, requestId }` ou `{ kind: 'notice', clientId, contactRef, externalId, reason, requestId }`. O `jobId` é `<clientId>_<externalId>` (sem `:`; o implementer confirma as restrições de id da versão do BullMQ), o que dá dedupe de reentregas da Meta. A idempotência definitiva continua sendo a do banco (`externalId`).
 - O `requestId` do webhook acompanha o job: o worker roda dentro de `runWithContext` com esse `requestId` e `setClientId(clientId)`, então log do webhook e log do atendimento se correlacionam e todo log do worker leva `clientId`.
 - O worker roda **no mesmo processo** da API, com **concorrência 1** (decisão 2), e é encerrado de forma graciosa no `shutdown` (espera o job ativo, antes de fechar Redis e banco).
-- **Processamento de um job `text`** (`ChannelInboundProcessor`, em `application`, sobre portas):
+- **Processamento de um job `text`** (`ChannelInboundProcessor`, em `src/application/`, em subpasta de área própria criada nesta spec, sobre portas):
   1. `attendance.handleInboundMessage(clientId, { contactRef, text, externalId })`.
   2. Se a resposta já tem `sentAt` (retentativa depois de envio concluído), termina sem enviar de novo.
   3. Resolve o número do cliente **no banco, pelo `clientId` do job** (`Client.whatsappPhoneNumberId`), nunca o do payload; sem número, descarta com log. Envia `reply.text` a `contactRef` por esse número.
@@ -67,7 +67,7 @@ Regra cruzada na config: `QUEUE_BACKOFF_MS × (2^(QUEUE_ATTEMPTS − 1) − 1)` 
 
 ### Envio (`WhatsappCloudApiClient`, `src/infrastructure/external-apis/whatsapp/`)
 
-- Porta em `application`: `MessageSender.sendText({ phoneNumberId, to, text }): Promise<Result<{ channelMessageId: string }, ExternalServiceError>>`; erro esperado volta como `Result`, nunca exceção.
+- Porta em `src/application/ports/`: `MessageSender.sendText({ phoneNumberId, to, text }): Promise<Result<{ channelMessageId: string }, ExternalServiceError>>`; erro esperado volta como `Result`, nunca exceção.
 - `POST {base}/{version}/{phoneNumberId}/messages` com `Authorization: Bearer <WHATSAPP_ACCESS_TOKEN>` e corpo `{ messaging_product: 'whatsapp', to, type: 'text', text: { body } }`, usando `fetch` nativo (sem dependência nova), com `AbortSignal.timeout(WHATSAPP_SEND_TIMEOUT_MS)`.
 - O `ExternalServiceError` leva só o status HTTP, o `code` e o `type` do erro da Meta e se é retentável; **nunca** o corpo da requisição, o texto, o destinatário nem o token. A mensagem de erro da Meta (`message`) também não entra no log (pode citar o número).
 
@@ -116,7 +116,7 @@ Regra cruzada na config: `QUEUE_BACKOFF_MS × (2^(QUEUE_ATTEMPTS − 1) − 1)` 
 - [ ] Mensagens e respostas intercaladas dos dois clientes saem cada uma pelo `phone_number_id` do seu cliente (servidor Graph falso registra o par número/destinatário).
 - [ ] O mesmo `wamid` não colide entre clientes (jobId e `externalId` são por cliente).
 - [ ] `findByWhatsappPhoneNumberId` não devolve cliente removido; dois clientes não podem ter o mesmo `whatsappPhoneNumberId` (409 no PATCH e `@unique` no banco).
-- [ ] `markSent` só altera mensagem do cliente informado (teste de isolamento no modelo de `message.repository.integration.test.ts`) e `listBefore` não enxerga outro cliente.
+- [ ] `markSent` só altera mensagem do cliente informado (teste de isolamento no modelo de `src/infrastructure/database/repositories/message.repository.integration.test.ts`) e `listBefore` não enxerga outro cliente.
 - [ ] Jobs de dois clientes processados em sequência mantêm cada um o seu `clientId` nos logs.
 
 **Privacidade, observabilidade e geral**

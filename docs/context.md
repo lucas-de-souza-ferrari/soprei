@@ -40,7 +40,7 @@ Resolver cada uma por spec antes de implementar o que depende dela.
 
 ## 3.1. Modelo de IA em desenvolvimento
 
-- Interface única `LlmProvider` (`src/application/llm-provider.ts`; gerar resposta, e mais tarde gerar embedding). Hoje só `generate`, que devolve `Result<LlmReply, ExternalServiceError>`.
+- Interface única `LlmProvider` (`src/application/ports/llm-provider.ts`; gerar resposta, e mais tarde gerar embedding). Hoje só `generate`, que devolve `Result<LlmReply, ExternalServiceError>`.
 - Três implementações previstas: `mock` (respostas determinísticas, usada nos testes e no CI; **já existe**, em `src/infrastructure/external-apis/llm/`), um modelo barato ou gratuito para dev manual, e o modelo de produção (as duas últimas entram em spec própria).
 - A escolha vem de `LLM_PROVIDER` (por ora só `mock`), validada na config, junto de `LLM_TIMEOUT_MS`.
 
@@ -70,21 +70,39 @@ Desvios deliberados em relação ao guia:
 ```
 src/
 ├── domain/          # entities, value-objects (ClientId...), interfaces de repositório
-├── application/     # services/use-cases, interfaces (LLMProvider)
+├── application/     # services/use-cases e portas
+│   ├── attendance/  # AttendanceService e schemas
+│   ├── clients/     # ClientService
+│   └── ports/       # interfaces para o exterior (LlmProvider; a 011 acrescenta canal e fila)
 ├── infrastructure/
 │   ├── config/      # env validada com Zod (fail-fast)
-│   ├── database/    # Prisma singleton, transação com retry, erros, implementações de repositório
-│   ├── http/        # servidor Fastify, error handler central, observabilidade (request id, log de requisição)
+│   ├── database/    # raiz: Prisma singleton, transação com retry, erros, barrel (index.ts)
+│   │   ├── extensions/    # Prisma Client Extensions: tenant-scope, query-timing, schema-info
+│   │   └── repositories/  # base de tenant, implementações de repositório, unit of work, cursor, mappers
+│   ├── http/        # raiz: servidor Fastify, error handler central, testes de rota de ponta a ponta
+│   │   ├── observability/ # request id, contexto, log de requisição, métricas HTTP
+│   │   └── rate-limit/    # registerRateLimit e IP do cliente
 │   ├── logger/      # Pino com mixin de contexto e redact
 │   ├── metrics/     # prom-client: Registry dedicado (spec 004)
 │   ├── cache/       # client Redis singleton (cache em si: spec 006)
 │   └── external-apis/  # LLM (mock + real), canal de mensagens
 ├── presentation/    # controllers/rotas, hooks, validators Zod
+│   ├── admin/       # rotas /admin/*
+│   ├── system/      # /health, /health/ready, /metrics
+│   └── common/      # bearer auth hook, route pattern, perfil de rate limit
 ├── shared/          # errors (BaseError...), types (Brand, Result), request-context, utils
 └── index.ts         # bootstrap
 prisma/
 └── schema.prisma
 ```
+
+Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md); versão operacional no `CLAUDE.md`):
+
+1. Pasta por área quando passar de uns 10 arquivos ou juntar duas responsabilidades; não criar pasta para o futuro (as pastas da 011 nascem na 011).
+2. Teste ao lado do arquivo que testa, na mesma subpasta; teste que atravessa várias partes fica na pasta pai.
+3. Barrels só onde já existem (`database/index.ts`, `domain/index.ts`); imports de fora de uma camada usam o barrel quando ele exporta o símbolo.
+4. Sem aliases de caminho (`@/...`): imports relativos.
+5. Nomes de arquivo não mudam ao mover (sufixos `.service.ts`, `.repository.ts`, `.controller.ts`).
 
 ## 5. Roadmap (fatias)
 

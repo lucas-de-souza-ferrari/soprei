@@ -1,7 +1,7 @@
 // A URL do banco é lida de DATABASE_URL em prisma.config.ts (Prisma 7).
 //
 // Isolamento entre clientes: todo model é de TENANT (tem `clientId`) ou GLOBAL (sem
-// `clientId`) e precisa estar classificado em src/infrastructure/database/tenant-scope.ts;
+// `clientId`) e precisa estar classificado em src/infrastructure/database/extensions/tenant-scope.ts;
 // um teste lê este schema e falha se algum model ficar sem classificação.
 
 generator client {
