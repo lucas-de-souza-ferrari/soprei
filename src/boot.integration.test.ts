@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -194,16 +194,23 @@ async function startServer(extra: Record<string, string>): Promise<RunningServer
   };
 }
 
+/**
+ * Grupo IPv6 aleatório de 4 dígitos hex SEM zero à esquerda (1000 a ffff): a forma canônica que vira
+ * chave no Redis tira zeros à esquerda e comprime grupos zerados, e o teste monta o nome da chave
+ * a partir do texto.
+ */
+const hextet = (): string => randomInt(0x1000, 0x10000).toString(16);
+
 describe('boot com rate limiting (spec 005)', () => {
   it('liga o limite por IP de ponta a ponta, com TRUST_PROXY=127.0.0.1,::1 e o Redis dedicado', async () => {
     // IPv6 aleatório (documentação, 2001:db8::/32) de /64 próprio: a chave do contador no Redis
     // é só deste teste (`soprei:ratelimit:admin:2001:db8:xxxx:yyyy::`) e expira em 5 s.
-    const a = randomBytes(2).toString('hex');
-    const b = randomBytes(2).toString('hex');
+    const a = hextet();
+    const b = hextet();
     const clientIp = `2001:db8:${a}:${b}::1`;
     // Segundo IP, também aleatório e de /64 próprio.
-    const c = randomBytes(2).toString('hex');
-    const d = randomBytes(2).toString('hex');
+    const c = hextet();
+    const d = hextet();
     const otherIp = `2001:db8:${c}:${d}::1`;
     const server = await startServer({
       // Túnel/proxy local: o peer imediato (127.0.0.1) é confiável, o IP é o que ele acrescenta.
