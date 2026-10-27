@@ -9,7 +9,7 @@ import {
   RATE_LIMIT_PROFILES,
   type RateLimitProfile,
 } from '../../shared/rate-limit/profiles.js';
-import { observeStoreErrors } from '../cache/rate-limit-redis.js';
+import { describeRedisError, observeStoreErrors } from '../cache/rate-limit-redis.js';
 import type { Config } from '../config/index.js';
 import type { Metrics } from '../metrics/index.js';
 import { clientIpOf } from './client-ip.js';
@@ -109,8 +109,11 @@ export function registerRateLimit(
   }
 
   const store = observeStoreErrors(redis, (err) => {
-    // Sem IP nem chave no log: o erro do Redis não os carrega e nada mais é anexado.
-    app.log.error({ err }, 'rate limit: falha no Redis, requisição liberada (fail-open)');
+    // Nunca `{ err }`: o ioredis anexa `command.args` (a chave, com o IP) ao erro e o Pino o copiaria.
+    app.log.error(
+      describeRedisError(err),
+      'rate limit: falha no Redis, requisição liberada (fail-open)',
+    );
     try {
       metrics?.countRateLimitStoreError();
     } catch (metricError) {

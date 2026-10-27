@@ -20,6 +20,43 @@ export interface RateLimitRedisHandle {
 const CONNECT_TIMEOUT_MS = 2_000;
 
 /**
+ * Mensagens do próprio ioredis (constantes, sem dado da requisição) que podem ir ao log. Qualquer
+ * outra (resposta do servidor, por exemplo) fica de fora: não há garantia de que não cite a chave.
+ */
+const SAFE_MESSAGES: readonly RegExp[] = [
+  /^Command timed out$/,
+  /^Stream isn't writeable and enableOfflineQueue options is false$/,
+  /^Connection is closed.$/,
+  /^Command aborted due to connection close$/,
+  /^Socket timeout./,
+  /^connect ETIMEDOUT$/,
+];
+
+export interface LoggableRedisError {
+  readonly errName: string;
+  readonly errCode?: string;
+  readonly errMessage?: string;
+}
+
+/**
+ * Campos controlados de um erro do ioredis para o log. NUNCA logue o erro inteiro (`{ err }`): o
+ * ioredis anexa `command: { name, args }` aos erros de comando (`ReplyError`, `AbortError`) e o
+ * serializer do Pino o copiaria, vazando a chave do contador, que carrega o IP do cliente (dado
+ * pessoal). Aqui saem só o nome, o `code` (ex.: `ECONNREFUSED`) e, se for uma das mensagens
+ * constantes conhecidas do ioredis, a mensagem.
+ */
+export function describeRedisError(error: unknown): LoggableRedisError {
+  if (!(error instanceof Error)) return { errName: 'NonError' };
+  const code = (error as { code?: unknown }).code;
+  const safeMessage = SAFE_MESSAGES.some((pattern) => pattern.test(error.message));
+  return {
+    errName: error.name,
+    ...(typeof code === 'string' && /^[A-Z0-9_]{1,40}$/.test(code) ? { errCode: code } : {}),
+    ...(safeMessage ? { errMessage: error.message } : {}),
+  };
+}
+
+/**
  * Conexão Redis DEDICADA ao limiter (spec 005), separada do singleton do resto do sistema.
  * O singleton enfileira comandos enquanto reconecta, o que seguraria cada requisição com o
  * Redis fora. Aqui a fila offline é desligada (comando sem conexão falha na hora) e cada
@@ -39,7 +76,8 @@ export function createRateLimitRedis(
     retryStrategy: (times) => Math.min(times * 200, 2_000),
   });
   client.on('error', (err: Error) => {
-    logger.error({ err }, 'erro na conexão Redis do rate limit');
+    // Só campos controlados: o erro inteiro pode carregar `command.args` (a chave, com o IP).
+    logger.error(describeRedisError(err), 'erro na conexão Redis do rate limit');
   });
 
   let closing: Promise<void> | undefined;

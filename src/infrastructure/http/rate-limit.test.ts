@@ -6,6 +6,8 @@ import { AttendanceService } from '../../application/attendance.service.js';
 import { ClientService } from '../../application/client.service.js';
 import { Result } from '../../shared/types/index.js';
 import { isRateLimitProfile } from '../../shared/rate-limit/profiles.js';
+import { rateLimitProfile } from '../../presentation/rate-limit.js';
+import { captureLogs, type LogLine } from '../../test-support/log-capture.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
 import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
 import { createLogger } from '../logger/logger.js';
@@ -146,5 +148,86 @@ describe('registerRateLimit', () => {
         webhook: { max: 5, windowSeconds: 6 },
       },
     );
+  });
+});
+
+describe('log do fail-open não vaza o IP', () => {
+  const IP = '203.0.113.9';
+  const PREFIX = 'soprei:ratelimit:';
+
+  /** Client de mentira cujo script sempre falha com um erro no formato do ioredis (`command.args`). */
+  function failingClient(makeError: () => Error): Redis {
+    const client = {
+      defineCommand(name: string): void {
+        (client as unknown as Record<string, unknown>)[name] = (...args: unknown[]): void => {
+          const callback = args.at(-1) as (error: Error) => void;
+          const error = makeError();
+          (error as Error & { command?: unknown }).command = {
+            name: 'rateLimit',
+            args: [`${PREFIX}webhook:${IP}`, 60_000],
+          };
+          callback(error);
+        };
+      },
+    };
+    return client as unknown as Redis;
+  }
+
+  async function requestWith(makeError: () => Error): Promise<{ raw: string; lines: LogLine[] }> {
+    const logs = captureLogs();
+    const app = buildServer({
+      logger: logs.logger,
+      readiness: ALL_UP,
+      rateLimit: { redis: failingClient(makeError), profiles: PROFILES, keyPrefix: PREFIX },
+    });
+    void app.register((instance, _options, done) => {
+      instance.get('/test/webhook', { config: rateLimitProfile('webhook') }, () => ({ ok: true }));
+      done();
+    });
+    await app.ready();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/test/webhook',
+        remoteAddress: IP,
+      });
+      assert.equal(response.statusCode, 200, 'fail-open');
+    } finally {
+      await app.close();
+    }
+    return { raw: logs.raw(), lines: logs.lines() };
+  }
+
+  it('erro com command.args (AbortError do ioredis): nem o IP nem o prefixo aparecem em log', async () => {
+    const { raw, lines } = await requestWith(() => {
+      const error = new Error('Command aborted due to connection close');
+      error.name = 'AbortError';
+      return error;
+    });
+    assert.ok(!raw.includes(IP), 'IP no log');
+    assert.ok(!raw.includes(PREFIX), 'prefixo no log');
+    assert.ok(!raw.includes('args'), 'command.args no log');
+    const line = lines.find((entry) => String(entry.msg).includes('fail-open'));
+    assert.ok(line);
+    assert.equal(line.level, 50);
+    assert.equal(line.errName, 'AbortError');
+    assert.equal(line.errMessage, 'Command aborted due to connection close');
+    assert.equal(line.err, undefined);
+  });
+
+  it('mensagem que cita a chave (ReplyError do servidor) não é logada; sobra o nome e o code', async () => {
+    const { raw, lines } = await requestWith(() => {
+      const error = new Error(`ERR falha em ${PREFIX}webhook:${IP}`);
+      error.name = 'ReplyError';
+      (error as Error & { code?: string }).code = 'ERR';
+      return error;
+    });
+    assert.ok(!raw.includes(IP), 'IP no log');
+    assert.ok(!raw.includes(PREFIX), 'prefixo no log');
+    const line = lines.find((entry) => String(entry.msg).includes('fail-open'));
+    assert.ok(line);
+    assert.equal(line.errName, 'ReplyError');
+    assert.equal(line.errCode, 'ERR');
+    assert.equal(line.errMessage, undefined);
   });
 });
