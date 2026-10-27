@@ -164,6 +164,9 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     const firstBody = first.json<ReplyBody>();
     assert.match(firstBody.reply.text, /Persona-Fluxo-HTTP/);
 
+    // A ordem do histórico é por `createdAt` (ms): sem folga, a pergunta seguinte pode cair no
+    // mesmo milissegundo da resposta anterior e inverter a ordem conferida mais abaixo.
+    await sleep(5);
     const second = await send(clientId, { contactRef: 'tel-1', text: 'fluxo-dois' });
     assert.equal(second.statusCode, 201);
     assert.equal(second.json<ReplyBody>().conversationId, firstBody.conversationId);

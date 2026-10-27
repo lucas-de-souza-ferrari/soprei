@@ -72,6 +72,9 @@ describe('atendimento contra o PostgreSQL de testes', () => {
       contactRef: 'contato-e2e',
       text: 'e2e-um',
     });
+    // A ordem da conversa é por `createdAt` (ms): sem uma folga, a pergunta seguinte pode cair no
+    // mesmo milissegundo da resposta anterior e inverter a ordem que este teste confere.
+    await sleep(5);
     const second = await service.handleInboundMessage(client.id, {
       contactRef: 'contato-e2e',
       text: 'e2e-dois',

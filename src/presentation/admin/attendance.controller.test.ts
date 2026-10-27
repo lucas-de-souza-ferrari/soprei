@@ -6,6 +6,7 @@ import { AttendanceService } from '../../application/attendance.service.js';
 import { ClientService } from '../../application/client.service.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { buildServer } from '../../infrastructure/http/server.js';
+import { steppingClock } from '../../test-support/clock.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
 import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
 import { captureLogs } from '../../test-support/log-capture.js';
@@ -47,7 +48,10 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
 
   before(async () => {
     const clients = new InMemoryClientRepository();
-    const store = new InMemoryAttendanceStore();
+    // Relógio determinístico: com o real, dois pedidos no mesmo milissegundo invertem a ordem
+    // da resposta e da pergunta seguinte (falhou no CI, ora no Node 22, ora na LTS).
+    const clock = steppingClock();
+    const store = new InMemoryAttendanceStore(clock);
     app = buildServer({
       logger: logs.logger,
       readiness: {
@@ -64,7 +68,7 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
           unitOfWork: store,
           llm,
           logger: logs.logger,
-          options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000 },
+          options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000, now: clock },
         }),
       },
     });
