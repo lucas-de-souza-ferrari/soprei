@@ -1,6 +1,6 @@
 # 010 — Fatia vertical: atendimento ponta a ponta com LLM mock
 
-- **Status:** aprovada (o dono aprovou em 2026-10-27 com todas as recomendações da seção "Decisões"). Implementada na branch; segue `aprovada` até o CI confirmar e o `reviewer` revisar (então vira `concluída`)
+- **Status:** concluída (aprovada pelo dono em 2026-10-27 com todas as recomendações da seção "Decisões"; revisada pelo agente `reviewer` sem bloqueantes; CI verde confirmado pelo dono, unitários e integração, em Node 22 e na LTS)
 - **Branch:** `spec/010-fatia-vertical-atendimento`
 - **Depende de:** 003 e 004 (concluídas e na `main`)
 
@@ -88,7 +88,7 @@ O "canal" desta fatia é um **simulador por API administrativa**: quem chama (vo
 
 **Geral**
 - [x] Migration aplicada em `soprei` e `soprei_test` (incremental, sobre a migration inicial) com `prisma migrate deploy`; `migrate dev` reproduz o histórico inteiro no shadow database e confirma "Already in sync"; `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes localmente em Node 22.23.2 e Node 24.18.0.
-- [ ] CI verde no GitHub (Node 22 e LTS mais recente, com `db:migrate:deploy` em banco limpo), revisão do agente `reviewer` e confirmação do dono. Não verificável daqui (sem remoto nem `gh`).
+- [x] CI verde no GitHub (Node 22 e LTS mais recente, com `db:migrate:deploy` em banco limpo, unitários e integração), revisão do agente `reviewer` (sem bloqueantes; ajustes aplicados) e confirmação do dono. O CI falhou duas vezes de forma intermitente por um teste que supunha alternação pergunta/resposta com o relógio real; corrigido em `e292ef9` (ver "Pendências").
 
 ## Casos de borda e erros
 

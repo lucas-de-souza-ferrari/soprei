@@ -35,7 +35,7 @@ Resolver cada uma por spec antes de implementar o que depende dela.
 | --- | --- | --- |
 | Fila de jobs | BullMQ sobre Redis | Redis já é decisão (ver abaixo); resta decidir BullMQ para processar mensagens fora do webhook. |
 | Provedor de LLM | Gemini, Claude, OpenAI | Seja qual for, fica atrás da interface `LLMProvider`. |
-| Canal | WhatsApp Cloud API (Meta), outros | Protótipo usou Cloud API oficial com Embedded Signup. |
+| Canal | **WhatsApp Cloud API oficial (decidido)** | Estado da conta Meta (informado pelo dono em 2026-10-27): empresa com verificação de negócio concluída, app Business publicado (live), já é Tech Provider, número de teste da Meta para desenvolver, e quer o fluxo de onboarding de vários clientes (Embedded Signup). A confirmar: moeda e forma de pagamento da conta de cobrança (BRL), onde roda o webhook. Desde 01/10/2026 só as 1 000 primeiras mensagens de serviço por número ao mês são grátis. |
 | Hospedagem | VPS (protótipo: Hetzner) | — |
 
 ## 3.1. Modelo de IA em desenvolvimento
@@ -102,15 +102,19 @@ prisma/
 3. 003 — Base multi-tenant e isolamento
 4. 004 — Observabilidade: logs com contexto por requisição e métricas
 
-**Próxima, implementada (aguardando CI e revisão)**
+**Fatia vertical (concluída)**
 
-5. **Fatia vertical ([spec 010](specs/010-fatia-vertical-atendimento.md), implementada na branch `spec/010-fatia-vertical-atendimento`; aprovada até o CI confirmar):** mensagem de entrada → conversa/mensagem do cliente → `LLMProvider` com `mock` → resposta, com isolamento por cliente e fallback de erro. Decisões do dono (todas conforme a recomendação): simulador por API administrativa, processamento síncrono, persona em `Client`, `contactRef` livre, histórico de 20 mensagens e 12 000 caracteres, fallback constante, nunca logar conteúdo de mensagens, política de retenção de dados pessoais só antes de dados reais. Passa pelo `reviewer` antes do merge.
+5. **Fatia vertical ([spec 010](specs/010-fatia-vertical-atendimento.md), concluída):** mensagem de entrada → conversa/mensagem do cliente → `LLMProvider` com `mock` → resposta, com isolamento por cliente e fallback de erro. Decisões do dono (todas conforme a recomendação): simulador por API administrativa, processamento síncrono, persona em `Client`, `contactRef` livre, histórico de 20 mensagens e 12 000 caracteres, fallback constante, nunca logar conteúdo de mensagens, política de retenção de dados pessoais só antes de dados reais. Passa pelo `reviewer` antes do merge.
+
+**Próximas, nesta ordem**
+
+6. **Rate limiting ([spec 005](specs/005-rate-limiting.md), reescrita em 2026-10-27, rascunho aguardando aprovação):** `@fastify/rate-limit` em Redis, perfis `public`, `admin` e `webhook` por IP, `TRUST_PROXY`, fail-open, 429 padronizado. Escopo reduzido: perfis de usuário, login e limite adaptativo ficam para a 007.
+7. **Canal WhatsApp, parte A ([spec 011](specs/011-canal-whatsapp.md), aprovada em 2026-10-27):** webhook com verificação e assinatura, fila BullMQ, envio da resposta pela Cloud API, mapeamento `phone_number_id` → cliente, número de teste da Meta, LLM ainda `mock`. Só implementar depois da 005 concluída.
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
 
 | Item | Spec | Gatilho |
 | --- | --- | --- |
-| Rate limiting | 005 | antes de expor qualquer endpoint público (webhook do canal) |
 | Autenticação JWT + refresh | 007 | antes de existir usuário humano (painel ou atendente) |
 | RBAC | 008 | junto com a autenticação, quando houver mais de um papel |
 | Cache L1/L2 | 006 | quando medição mostrar leitura repetida custosa |
@@ -120,7 +124,7 @@ prisma/
 **Produto (esboço, depois da fatia vertical)**
 
 - Provedor real de LLM atrás do `LLMProvider`
-- Integração real com o canal (ex.: WhatsApp Cloud API) e webhook
+- Canal WhatsApp, em duas specs: (A) webhook de entrada com validação de assinatura, envio da resposta e mapeamento `phone_number_id` → cliente, com número de teste da Meta, fila e rate limit (spec 005 como pré-requisito); (B) onboarding de vários clientes com Embedded Signup, que exige autenticação (spec 007/008), tela de onboarding e tokens por cliente guardados cifrados
 - Base de conhecimento (ingestão de documentos + busca)
 - Painel admin (separado)
 - Deploy
@@ -133,7 +137,7 @@ prisma/
 - **Spec 003 (base multi-tenant): concluída e mergeada**, CI verde no PR. Já existem: models `Client` (raiz, soft delete, slug único e reservado) e `Conversation` (mínima) com a primeira migration; `src/domain/` (`ClientId`, entidades, `TenantRepository`, `ClientRepository`) e `src/application/` (`ClientService`); base de repositório de tenant, que exige `ClientId` e injeta o filtro; segunda barreira no Prisma Client (extension `tenant-scope` com `MODEL_SCOPES` e `TenantScopeError`); regras de ESLint que proíbem Prisma e SQL cru fora de `infrastructure/database/`; `ConflictError`; rotas `/admin/clients` protegidas por `ADMIN_API_KEY` (credencial temporária entre clientes, sem rate limit até a spec 005). A RLS do Postgres fica para spec separada depois da 009.
 - A duplicidade de `ConflictError`/`TenantScopeError` que quebrava o `typecheck` foi corrigida na `main` pelo dono (commit `136af89`).
 - **Spec 004 (observabilidade): concluída e mergeada**, CI verde. Já existem: contexto por requisição com `AsyncLocalStorage` (`src/shared/request-context/`), `x-request-id` reaproveitado ou UUID, logger com `mixin` de contexto e `redact` de segredos, log de requisição próprio com o padrão da rota, métricas `prom-client` num `Registry` dedicado (HTTP, queries do Prisma por model/operação via extensão aplicada depois da `tenant-scope`, pool de conexões, processo), `GET /metrics` só com `METRICS_TOKEN` (404 sem ele) e `bearerAuthHook` compartilhado com o admin. `clientId`/`userId` do contexto ficam vazios até a autenticação (spec 007). Dependência nova: `prom-client`.
-- **Spec 010 (fatia vertical): implementada na branch `spec/010-fatia-vertical-atendimento`**, aguardando CI e o agente `reviewer` antes do merge. Já existem: migration aditiva (`Client.persona`, `Conversation.contactRef` e o model `Message`, de tenant, com chaves estrangeiras compostas por `clientId`); `LlmProvider` + `MockLlmProvider` (modo de falha, marcadores `[[mock:fail]]`, `[[mock:hang]]`, `[[mock:empty]]`, `[[mock:huge]]`, registro de entradas só para testes); `AttendanceService` (idempotência por `externalId`, histórico de 20 mensagens e 12 000 caracteres, fallback constante gravado com `isFallback`, LLM fora da transação, timeout por `withTimeout`/`TimeoutError`); rotas `POST /admin/clients/:clientId/messages`, `GET .../conversations`, `GET .../conversations/:conversationId/messages` e `persona` no `PATCH /admin/clients/:id`; métricas `llm_requests_total`, `llm_request_duration_seconds`, `attendance_fallbacks_total`; regra de nunca logar conteúdo de mensagem nem persona, com teste de captura de log. Retenção de dados pessoais (mensagens e `contactRef`) segue sem política: decidir antes de dados reais, junto com a RLS. Specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: CI, `reviewer`, merge; depois a spec do provedor real de LLM.
+- **Spec 010 (fatia vertical): concluída e mergeada**, revisada pelo `reviewer` e com CI verde (unitários e integração, Node 22 e LTS). Já existem: migration aditiva (`Client.persona`, `Conversation.contactRef` e o model `Message`, de tenant, com chaves estrangeiras compostas por `clientId`); `LlmProvider` + `MockLlmProvider` (modo de falha, marcadores `[[mock:fail]]`, `[[mock:hang]]`, `[[mock:empty]]`, `[[mock:huge]]`, registro de entradas só para testes); `AttendanceService` (idempotência por `externalId`, histórico de 20 mensagens e 12 000 caracteres, fallback constante gravado com `isFallback`, LLM fora da transação, timeout por `withTimeout`/`TimeoutError`); rotas `POST /admin/clients/:clientId/messages`, `GET .../conversations`, `GET .../conversations/:conversationId/messages` e `persona` no `PATCH /admin/clients/:id`; métricas `llm_requests_total`, `llm_request_duration_seconds`, `attendance_fallbacks_total`; regra de nunca logar conteúdo de mensagem nem persona, com teste de captura de log. Retenção de dados pessoais (mensagens e `contactRef`) segue sem política: decidir antes de dados reais, junto com a RLS. Specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: escolher o provedor real de LLM (e, junto, decidir o canal) e escrever a spec seguinte. Lição do CI: testes que conferem ordem por tempo precisam de relógio injetável (`src/test-support/clock.ts`), nunca do relógio real.
 
 ## 7. Histórico de decisões
 

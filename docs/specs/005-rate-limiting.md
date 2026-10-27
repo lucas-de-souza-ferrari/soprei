@@ -1,55 +1,107 @@
 # 005 — Rate limiting
 
-- **Status:** esboço (sob demanda: reler contra o código antes de aprovar; gatilho: antes de expor endpoint público)
+- **Status:** aprovada pelo dono em 2026-10-27, com todas as recomendações da seção "Decisões" (reescrita no mesmo dia contra o código real e contra o que a spec 011 exige)
 - **Branch:** `spec/005-rate-limiting`
-- **Depende de:** 002, 004
+- **Depende de:** 002 e 004 (concluídas); é pré-requisito da 011 (canal WhatsApp, primeiro endpoint público)
 
 ## Objetivo
 
-Proteger a API contra abuso com limites por contexto, armazenados em Redis para valer entre várias instâncias.
+Proteger a API contra abuso e rajada, com limites por perfil guardados no Redis (valem entre várias instâncias), antes de existir qualquer endpoint público. Escopo deliberadamente reduzido ao que existe hoje: rotas `/admin`, rotas de infraestrutura e o futuro webhook. Perfis de usuário autenticado, login e upload ficam para quando existirem (spec 007).
+
+## Estado de partida (herdado)
+
+- O Fastify (`infrastructure/http/server.ts`) não tem `trustProxy`: `request.ip` é sempre o endereço do socket. Atrás de um túnel ou proxy todos os clientes teriam o mesmo IP.
+- Não há `RateLimitError`. O `errorHandler` central devolve `{ error: { code, message, requestId, details? } }` e, para `BaseError`, usa `statusCode`/`code`/`message` do erro.
+- `registerObservability` (spec 004) registra o `onRequest` que abre o contexto e o log de requisição ao fim (`onResponse`), que já registra 4xx como `warn` com o padrão da rota. O registry de métricas é o `Metrics` da 004; labels sem `clientId`, id de recurso ou URL crua.
+- Redis: client `ioredis` singleton (`getRedis`) com `maxRetriesPerRequest: 2` e fila offline ligada, adequado ao resto do sistema mas não a um limiter (um Redis fora seguraria a requisição esperando reconexão). O boot já exige Redis (`verifyInfrastructure`); o `shutdown` fecha as conexões (`lifecycle.ts`).
+- Rotas existentes: `/health`, `/health/ready`, `/metrics` (só com token) e `/admin/clients...` (`ADMIN_API_KEY`, hook de auth). O webhook chega na 011.
+- Dependências hoje: `fastify` 5.12, `ioredis` 6. `@fastify/rate-limit` **não** está instalado (verificado: a versão 11.2.1 suporta Fastify 5).
 
 ## Comportamento esperado
 
-- Implementação sobre `@fastify/rate-limit` com store Redis e `keyGenerator` próprio, em vez de limiter escrito à mão. Se o plugin não atender a algum critério, justificar na spec antes de escrever código próprio.
-- Perfis de limite configuráveis (valores iniciais do guia, ajustáveis por env):
-  - `public`: 100 requisições por 15 min por IP;
-  - `authenticated`: 1000 por 15 min por usuário;
-  - `critical` (login, refresh, troca de senha): 5 por minuto, por IP e por identificador da conta;
-  - `upload`: 50 por hora por usuário;
-  - `webhook`: por chave/identificador do remetente.
-- Cada rota declara seu perfil; rota sem perfil usa `public`.
-- Chave sempre inclui o `clientId` quando o contexto existir, para um cliente não consumir a cota de outro.
-- Resposta `429` com `retryAfter` no corpo (via erro tipado `RateLimitError` no formato padrão da API) e headers `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
-- **Limite adaptativo:** o máximo efetivo é reduzido quando o atraso do event loop (`perf_hooks.monitorEventLoopDelay`) passa de um limiar configurável, e volta ao normal quando se recupera.
-- **Redis indisponível:** fail-open (a requisição passa), com log de erro e métrica; configurável para fail-closed nos perfis `critical`.
-- IP correto atrás de proxy: `trustProxy` configurável e testado.
-- Métrica `rate_limit_hits_total{profile}` alimentada.
+### Plugin e perfis
+
+- Implementação sobre **`@fastify/rate-limit` 11.x** com store Redis (`redis` do plugin) e `global: true`: **toda rota é limitada por padrão**; uma rota nova esquecida cai no perfil `public`, em vez de ficar sem proteção. O plugin roda no hook `onRequest` (padrão), antes de ler o corpo e de autenticar, então requisição acima do limite é recusada barato e tentativa de adivinhar a `ADMIN_API_KEY` também conta.
+- Uma rota escolhe o perfil por `config: { rateLimitProfile: 'admin' }` (o tipo da config da rota é ampliado por declaration merging). A camada `presentation` só **nomeia** o perfil; os números vivem na config e são lidos pelo plugin (`max` e `timeWindow` como funções do perfil da rota). Rota sem perfil: `public`. Rota de infraestrutura: `config: { rateLimit: false }` (opt-out do plugin).
+- Perfis desta spec, todos **por IP** (não existe contexto de cliente nem de usuário antes da autenticação), com valores iniciais ajustáveis por variável de ambiente:
+
+| Perfil | Rotas | Padrão | Variáveis |
+| --- | --- | --- | --- |
+| `public` | qualquer rota sem perfil (rede de segurança) | 100 por 15 min | `RATE_LIMIT_PUBLIC_MAX`, `RATE_LIMIT_PUBLIC_WINDOW_SECONDS` |
+| `admin` | `/admin/*` | 600 por 1 min | `RATE_LIMIT_ADMIN_MAX`, `RATE_LIMIT_ADMIN_WINDOW_SECONDS` |
+| `webhook` | webhook do canal (declarado pela 011) | 600 por 1 min | `RATE_LIMIT_WEBHOOK_MAX`, `RATE_LIMIT_WEBHOOK_WINDOW_SECONDS` |
+
+- Sem limite: `/health`, `/health/ready` e `/metrics`. Rotas inexistentes (404) também ficam fora do limite (o plugin não cobre o handler de 404; custo baixo).
+- **Contadores independentes por perfil e por IP**: esgotar `admin` não consome `webhook` do mesmo IP, e um IP não consome a cota de outro. Isso é requisito de segurança da 011: um atacante sozinho não pode esgotar a cota da Meta (outro IP). Se o `keyGenerator` precisar ser próprio para separar por perfil, ele **mantém a normalização do padrão do plugin** (IPv4 mapeado em IPv6 vira IPv4; IPv6 agrupado em `/64`), com teste. A chave (e o namespace) leva o perfil e o IP, nunca `clientId`: antes da autenticação ele não existe, e a regra "chave de rate limit deriva do `ClientId`" passa a valer na 007, quando houver perfis autenticados. O IP em chave do Redis é dado pessoal com TTL de no máximo a janela do perfil.
+- Resposta **429** pelo erro central: novo `RateLimitError` (`BaseError`, `statusCode` 429, `code` `RATE_LIMITED`, mensagem em português, `retryAfterSeconds` no contexto) devolvido pelo `errorResponseBuilder`. O `errorHandler` o converte em `{ error: { code: 'RATE_LIMITED', message, requestId, retryAfter } }` (`retryAfter` em segundos, inteiro) e os headers `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (os do plugin, sem a variante `draft`) chegam na resposta. O resto das respostas de erro não muda de formato.
+- **Redis indisponível: fail-open para todos os perfis** (`skipOnError: true`): a requisição passa, com log `error` e a métrica `rate_limit_store_errors_total`. Não há perfil crítico nesta spec (login, refresh etc. entram com a 007, que decide fail-closed para eles). Se o plugin não der como observar a falha do store, o implementer envolve o acesso ao Redis de forma fina para contá-la e registra a escolha aqui; só escreve limiter próprio se o plugin não atender, justificando na spec antes.
+- **Conexão Redis dedicada** ao limiter (`src/infrastructure/cache/`), separada do singleton: `enableOfflineQueue: false`, `commandTimeout` curto (`RATE_LIMIT_REDIS_TIMEOUT_MS`, padrão 250), `maxRetriesPerRequest: 1`, mesma estratégia de reconexão e listener de erro em log. Assim, Redis fora custa no máximo o timeout por requisição, não segura a requisição. O boot espera a conexão ficar pronta (limite curto) e, se não ficar, segue com `warn` (fail-open); ela é fechada no `shutdown`.
+- **IP atrás de proxy:** `TRUST_PROXY` na config, aplicado ao `trustProxy` do Fastify: `false` (padrão; `X-Forwarded-For` é ignorado), `true` (confia em toda a cadeia; spoofável, só para ambiente fechado), um inteiro (número de proxies confiáveis à frente, ex.: `1` para um túnel) ou uma lista de IPs/CIDRs separados por vírgula. Documentar nos `.env*.example` que `true` não deve ir para produção.
+- **Config:** `RATE_LIMIT_ENABLED` (`true`/`false` literais, padrão `true`; `false` é rejeitado com `NODE_ENV=production`, para não desligar a proteção por engano) e as variáveis acima, todas validadas (inteiros positivos, janela de 1 a 86 400 s). `buildServer` recebe um parâmetro opcional `rateLimit`; **sem ele o plugin não é registrado**, e os testes existentes não mudam. O limiter é registrado depois de `registerObservability`, de modo que o `429` entra no log de requisição e nas métricas HTTP como qualquer resposta.
+- **Métricas** (registry da 004, label só `profile`, que é um conjunto fixo): `rate_limit_rejected_total{profile}` (requisições recusadas com 429) e `rate_limit_store_errors_total`. O nome `rate_limit_hits_total` do esboço foi trocado por `rate_limit_rejected_total`, que diz o que conta. O IP não vai em label nem em log desta spec (a linha de requisição da 004 já registra o 429 como `warn`, com método, rota e status).
+- Rotas existentes ganham o perfil: `/admin/*` → `admin`; `/health`, `/health/ready`, `/metrics` → sem limite. A 011 declara `webhook` nas suas rotas.
 
 ## Critérios de aceite
 
-- [ ] Teste: a requisição seguinte ao limite recebe 429 com `retryAfter` e os 4 headers.
-- [ ] Teste: cada perfil aplica o seu limite (usar valores pequenos em teste).
-- [ ] Teste: cotas de dois clientes diferentes são independentes.
-- [ ] Teste: a janela expira e o contador zera (sem chave sem TTL no Redis).
-- [ ] Teste: com Redis fora, rota `public` passa e rota `critical` segue a política configurada.
-- [ ] Teste: o limite adaptativo reduz o máximo sob atraso simulado de event loop.
-- [ ] Teste: `X-Forwarded-For` só é respeitado com `trustProxy` ligado.
+**Comportamento**
+- [ ] Teste: a requisição seguinte ao limite recebe 429 no formato `{ error: { code: 'RATE_LIMITED', message, requestId, retryAfter } }` e os headers `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`; `retryAfter` e `Retry-After` batem e são inteiros ≥ 1.
+- [ ] Teste: cada perfil (`public`, `admin`, `webhook`) aplica o seu limite (valores pequenos em teste); rota sem perfil usa `public`.
+- [ ] Teste: perfis independentes: esgotar `admin` para um IP não limita `webhook` para o mesmo IP.
+- [ ] Teste: IPs diferentes têm cotas independentes (o `webhook` de um IP esgotado não limita outro IP).
+- [ ] Teste: `/health`, `/health/ready` e `/metrics` respondem normalmente acima de qualquer limite configurado; 404 de rota inexistente também.
+- [ ] Teste: `/admin/*` é limitado antes da autenticação (requisições sem credencial contam e, esgotado o limite, a resposta é 429, não 401).
+- [ ] Teste: IPv4 mapeado em IPv6 e IPv6 do mesmo `/64` compartilham chave; IPv6 de redes diferentes, não.
+
+**Redis e janela**
+- [ ] Teste de integração (Redis `/15`, namespace único por teste, limpeza só das próprias chaves): a janela expira e o contador volta a zero; **toda chave criada tem TTL** (nenhuma com `PTTL` de -1), inclusive sob várias requisições concorrentes.
+- [ ] Teste: com o Redis fora (conexão para porta fechada, `src/test-support/closed-port.ts`), requisições de todos os perfis passam, cada uma dentro de um limite de tempo próximo do `RATE_LIMIT_REDIS_TIMEOUT_MS`, com log `error` e `rate_limit_store_errors_total` incrementada; ao voltar o Redis, o limite volta a valer.
+- [ ] Teste: a conexão dedicada é fechada no `shutdown` (sem handle aberto).
+
+**Proxy**
+- [ ] Teste: com `TRUST_PROXY=false`, `X-Forwarded-For` é ignorado (dois valores diferentes do cabeçalho compartilham a cota do socket).
+- [ ] Teste: com `TRUST_PROXY=1`, o IP vem do `X-Forwarded-For` acrescentado pelo proxy; um valor forjado à esquerda no cabeçalho **não** muda a chave (o atacante não escapa do limite nem esgota a cota de outro IP). Com lista de CIDRs, só proxies listados são confiados.
+- [ ] Teste de config: `TRUST_PROXY` aceita `false`, `true`, inteiro e lista de IPs/CIDRs, e rejeita lixo.
+
+**Config, métricas e geral**
+- [ ] Teste de config: valores inválidos (zero, negativo, não numérico, janela acima de 86 400) falham no boot; `RATE_LIMIT_ENABLED=false` é rejeitado em produção; `"false"` literal desliga fora de produção (não é tratado como verdadeiro).
+- [ ] Teste: `rate_limit_rejected_total{profile}` aparece em `/metrics` depois de um 429; nenhum IP, chave ou id em label e nenhum IP em linha de log gerada por esta spec.
+- [ ] Teste: sem o parâmetro `rateLimit` o `buildServer` não limita nada (suítes existentes continuam verdes sem alteração).
+- [ ] `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24; CI verde.
 
 ## Casos de borda e erros
 
-- IPv6 e IPs com porta normalizados antes de virar chave.
-- Rate limit não deve contar requisições de health check e métricas.
+- Redis lento ou fora: fail-open limitado pelo `commandTimeout`; nunca derruba nem trava a requisição.
+- Rajada legítima da Meta: o limite do `webhook` é folgado e configurável. Recusar com 429 faz a Meta retentar e, em excesso, pode levar à desativação da assinatura do webhook; por isso o valor padrão tem folga grande sobre o tráfego esperado, e o limite existe contra abuso de um único IP, não para dosar a Meta.
+- Atrás de túnel/proxy sem `TRUST_PROXY`: todos os clientes parecem um IP só e o `webhook` seria compartilhado entre Meta e qualquer atacante. A documentação da 011 e os `.env*.example` mandam `TRUST_PROXY=1` com túnel.
+- Cabeçalho `X-Forwarded-For` malformado ou múltiplo: usa o endereço do socket, nunca lança.
+- Chave de IP em IPv6 com porta ou zona: normalizada antes de virar chave.
 
 ## Isolamento entre clientes
 
-Chaves namespaced por cliente; teste de cotas independentes acima.
+Não toca em dados de tenant. Os contadores são por perfil e por IP, e o `clientId` não existe nesse ponto; nada aqui lê ou grava dado de cliente. A regra de que chaves de limite derivam do `ClientId` assinado vale para os perfis autenticados da 007.
 
 ## Fora de escopo
 
-- Bloqueio permanente de IP, WAF, CAPTCHA.
-- Limites por plano comercial (spec futura).
+- Perfis `authenticated`, `critical` (login, refresh, troca de senha, com fail-closed) e `upload`: entram com a 007 e quando houver upload.
+- Limite adaptativo por atraso do event loop (`monitorEventLoopDelay`): sem medição que o justifique; entra quando houver carga real.
+- `ban`, backoff exponencial, bloqueio permanente de IP, lista de IPs permitidos, WAF, CAPTCHA.
+- Limite por cliente, por plano comercial ou por `phone_number_id`; limite de worker/fila.
+- Log do IP de requisições recusadas (decisão de privacidade futura).
+
+## Decisões (propostas; o dono decide)
+
+1. **Padrão global com perfil `public` [recomendado]** (rota esquecida fica protegida) em vez de limite só nas rotas que optam. Custo: toda rota nova precisa declarar o perfil certo ou será tratada com `public`.
+2. **Só três perfis agora [recomendado]** (`public`, `admin`, `webhook`), sem os perfis de usuário do esboço, porque não existe usuário nem login; evita código sem uso.
+3. **Fail-open em todos os perfis [recomendado]**: disponibilidade do atendimento acima da proteção quando o Redis cai. O fail-closed de rotas críticas é decidido na 007.
+4. **Conexão Redis dedicada com timeout curto [recomendado]**, em vez de reaproveitar o singleton: evita que um Redis fora segure cada requisição.
+5. **Valores iniciais:** `public` 100 por 15 min; `admin` 600 por min; `webhook` 600 por min, por IP. Quer outros? (Tudo é ajustável por variável.)
+6. **Limite adaptativo adiado [recomendado]**, e a métrica renomeada para `rate_limit_rejected_total`.
+7. **`RATE_LIMIT_ENABLED=false` proibido em produção [recomendado].**
+8. **Revisão pelo `reviewer` [recomendado]**, com foco em `trustProxy` (spoofing de `X-Forwarded-For`), fail-open e no isolamento de cotas por IP, embora a spec não toque em dados de tenant.
 
 ## Decisões e dependências novas
 
-- Dependência: `@fastify/rate-limit`.
-- O guia usa `INCR` + `EXPIRE` em pipeline; o plugin cobre isso. Atenção a chaves sem TTL se o processo cair entre os dois comandos (por isso o teste acima).
+- **Dependência nova: `@fastify/rate-limit` ^11.2.1** (plugin oficial do Fastify, compatível com Fastify 5; traz `ip-address`, `toad-cache` e `@lukeed/ms`). Justificativa: o guia escreve o limiter à mão com `INCR` + `EXPIRE`; o plugin cobre isso de forma atômica no store Redis e os testes acima provam que não sobra chave sem TTL.
+- O `ioredis` já existe; a conexão dedicada não adiciona dependência.
+- Atualizar o `CLAUDE.md` (rate limiting, `TRUST_PROXY`, perfis e a regra de que rota nova declara perfil) e os `.env*.example` na implementação.
+- Sem migration.
