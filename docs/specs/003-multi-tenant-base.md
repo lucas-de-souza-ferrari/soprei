@@ -1,9 +1,9 @@
 # 003 — Base multi-tenant e isolamento entre clientes
 
-- **Status:** aprovada
+- **Status:** concluída
 - **Branch:** `spec/003-multi-tenant-base`
 - **Depende de:** 002 (concluída)
-- **Implementação:** feita na branch e verificada localmente (ver critérios); falta só a confirmação do CI no GitHub, que não é acessível ao implementer. O status muda para `concluída` depois dela.
+- **Implementação:** feita na branch e verificada localmente; CI confirmado como verde pelo dono no GitHub (PR da 003). Depois do merge, o commit `a40eede` ("fix: shared errors") duplicou `ConflictError` e `TenantScopeError` em `src/shared/errors/app.errors.ts` e quebrou o `typecheck` da `main`; correção pendente (ver `docs/context.md`).
 
 ## Objetivo
 
@@ -80,7 +80,7 @@ Garantir por design que nenhum cliente (tenant) acessa dado de outro. Esta spec 
 - [x] Teste: config em produção sem `ADMIN_API_KEY` ou com menos de 32 caracteres impede o boot com mensagem clara.
 - [x] Teste: respostas de erro de banco e de `TenantScopeError` não vazam SQL nem detalhes internos.
 - [x] Migration criada e aplicada em `soprei` e em `soprei_test` (que estava vazio) com `prisma migrate deploy`; `prisma migrate status` confirma os dois em dia. _(No `soprei_test` foi usado `node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy`, o comando documentado no CLAUDE.md, equivalente a `pnpm db:migrate:deploy` com `.env.test`.)_
-- [ ] CI verde no GitHub (services com Postgres 18 e Redis 8, `db:generate` antes do typecheck, `db:migrate:deploy` com a migration nova). **Pendente:** o CI não é acessível ao implementer; o workflow não precisou mudar.
+- [x] CI verde no GitHub (services com Postgres 18 e Redis 8, `db:generate` antes do typecheck, `db:migrate:deploy` com a migration nova). Confirmado pelo dono; o workflow não precisou mudar.
 
 ## Casos de borda e erros
 

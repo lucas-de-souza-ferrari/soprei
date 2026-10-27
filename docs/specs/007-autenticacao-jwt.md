@@ -1,6 +1,6 @@
 # 007 — Autenticação com JWT e refresh token
 
-- **Status:** rascunho
+- **Status:** esboço (sob demanda: reler contra o código antes de aprovar; gatilho: antes de existir usuário humano; exige revisão do `reviewer`)
 - **Branch:** `spec/007-autenticacao-jwt`
 - **Depende de:** 002, 003, 004, 005
 

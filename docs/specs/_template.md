@@ -1,6 +1,6 @@
 # NNN — Título curto
 
-- **Status:** rascunho | aprovada | em implementação | concluída
+- **Status:** esboço | rascunho | aprovada | em implementação | concluída
 - **Branch:** `spec/NNN-nome`
 - **Depende de:** (specs anteriores, se houver)
 

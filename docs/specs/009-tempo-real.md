@@ -1,6 +1,6 @@
 # 009 — Tempo real: SSE e WebSocket
 
-- **Status:** rascunho
+- **Status:** esboço (sob demanda: reler contra o código antes de aprovar; gatilho: painel precisar de eventos ao vivo)
 - **Branch:** `spec/009-tempo-real`
 - **Depende de:** 002, 004, 005, 007, 008
 

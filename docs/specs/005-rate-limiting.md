@@ -1,6 +1,6 @@
 # 005 — Rate limiting
 
-- **Status:** rascunho
+- **Status:** esboço (sob demanda: reler contra o código antes de aprovar; gatilho: antes de expor endpoint público)
 - **Branch:** `spec/005-rate-limiting`
 - **Depende de:** 002, 004
 

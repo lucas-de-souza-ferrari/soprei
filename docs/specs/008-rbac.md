@@ -1,6 +1,6 @@
 # 008 — Autorização por papéis e permissões (RBAC)
 
-- **Status:** rascunho
+- **Status:** esboço (sob demanda: reler contra o código antes de aprovar; gatilho: junto com a autenticação, com mais de um papel; exige revisão do `reviewer`)
 - **Branch:** `spec/008-rbac`
 - **Depende de:** 007
 

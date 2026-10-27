@@ -86,39 +86,54 @@ prisma/
 
 ## 5. Roadmap (fatias)
 
-Cada item vira uma ou mais specs em `docs/specs/`. Não pular a ordem sem motivo.
+**Como o roadmap funciona (revisado em 2026-10-27, decisão do dono):**
 
-Base de engenharia (specs escritas em `docs/specs/`):
+- **Specs sob demanda:** só a próxima spec é detalhada e aprovada. As demais ficam como esboço (uma linha aqui; os arquivos já escritos para 005 a 009 têm status `esboço` e **devem ser relidos contra o código real antes de aprovar**, como aconteceu com a 002 e a 003).
+- **Fatia vertical cedo:** em vez de construir toda a base de engenharia antes do produto, entra logo depois da 004 uma fatia fina que prova o produto de ponta a ponta. Rate limit, cache, autenticação, RBAC e tempo real entram quando uma funcionalidade real pedir.
+- **Revisão obrigatória pelo agente `reviewer`** antes do merge nas specs de segurança (autenticação, autorização, isolamento e RLS).
+- A numeração dos arquivos de spec é só identificador; **a ordem de execução é a deste roadmap**.
+
+**Concluídas**
 
 1. 001 — Bootstrap (camadas, config, erros, Result, `/health`)
 2. 002 — Infra local, Postgres, Redis, Prisma singleton
-3. 003 — Base multi-tenant e isolamento
-4. 004 — Observabilidade (logs com contexto, métricas)
-5. 005 — Rate limiting
-6. 006 — Cache L1/L2
-7. 007 — Autenticação JWT + refresh
-8. 008 — RBAC
-9. 009 — Tempo real (SSE + WebSocket)
-10. Row Level Security do Postgres como terceira barreira de isolamento (spec a escrever; decidido pelo dono para depois da 009 e antes de dados reais de clientes)
+3. 003 — Base multi-tenant e isolamento (mergeada; CI a confirmar para fechar)
 
-Produto (specs a escrever quando a base estiver pronta):
+**Próximas, em ordem**
 
-11. `LLMProvider` com `mock` e um provedor real
-12. Entrada de mensagens (webhook/canal) + fila
-13. Pipeline de resposta com persona e fallback de erro
-14. Base de conhecimento (ingestão de documentos + busca)
-15. Painel admin (separado, depois do backend)
-16. Deploy
+4. 004 — Observabilidade: logs com contexto por requisição e métricas (detalhada; reduzir o escopo ao que a fatia vertical precisa se fizer sentido)
+5. **Fatia vertical (spec a escrever, nº 010):** mensagem de entrada → conversa/mensagem do cliente → `LLMProvider` com `mock` → resposta, com isolamento por cliente e fallback de erro. Decisões a tomar nela: canal inicial (endpoint genérico/simulador antes de WhatsApp), processamento em background e fila (BullMQ ou não), persona por cliente.
+
+**Sob demanda (esboço; entra quando o gatilho acontecer)**
+
+| Item | Spec | Gatilho |
+| --- | --- | --- |
+| Rate limiting | 005 | antes de expor qualquer endpoint público (webhook do canal) |
+| Autenticação JWT + refresh | 007 | antes de existir usuário humano (painel ou atendente) |
+| RBAC | 008 | junto com a autenticação, quando houver mais de um papel |
+| Cache L1/L2 | 006 | quando medição mostrar leitura repetida custosa |
+| Tempo real (SSE/WebSocket) | 009 | quando o painel precisar de eventos ao vivo |
+| Row Level Security do Postgres | a escrever | **antes de dados reais de clientes** (decisão do dono); revisão pelo `reviewer` |
+
+**Produto (esboço, depois da fatia vertical)**
+
+- Provedor real de LLM atrás do `LLMProvider`
+- Integração real com o canal (ex.: WhatsApp Cloud API) e webhook
+- Base de conhecimento (ingestão de documentos + busca)
+- Painel admin (separado)
+- Deploy
 
 ## 6. Estado atual
 
 - **Spec 001 (bootstrap): concluída e mergeada**, CI verde em Node 22 e LTS. Já existem: Fastify com `GET /health`, config validada com Zod (fail-fast), Pino, hierarquia de erros com error handler central, `Brand` e `Result`, ESLint + Prettier, Prisma 7 sem models e CI. Camadas `shared`, `infrastructure` e `presentation`; `domain` e `application` nascem quando houver conteúdo.
 - Versões fixadas na 001: TypeScript 6.0.x (o `typescript-eslint` ainda não suporta o 7) e Prisma 7.10.x (a tag `latest` do CLI aponta para um RC).
 - **Spec 002 (infra local e banco): concluída e mergeada**, CI verde em Node 22 e LTS. Postgres e Redis nativos (sem Docker; PostgreSQL 18.2 e Redis 8.0.1 na máquina do dono). Já existem: Prisma 7 com `@prisma/adapter-pg` (singleton, pool configurável, helper de transação com retry, `DatabaseError`, métricas do pool), client `ioredis` singleton, `GET /health/ready`, boot fail-fast e shutdown gracioso, testes unitários (`pnpm test`) separados dos de integração (`pnpm test:integration`, só contra `soprei_test` e Redis `/15`) e CI com services Postgres 18 e Redis 8.
-- **Spec 003 (base multi-tenant): implementada na branch `spec/003-multi-tenant-base`, aguardando o CI e o merge** (status `aprovada` até o CI confirmar). Já existem: models `Client` (raiz, soft delete, slug único e reservado) e `Conversation` (mínima) com a primeira migration; `src/domain/` (`ClientId`, entidades, `TenantRepository`, `ClientRepository`) e `src/application/` (`ClientService`); base de repositório de tenant, que exige `ClientId` e injeta o filtro; segunda barreira no Prisma Client (extension `tenant-scope` com `MODEL_SCOPES` e `TenantScopeError`); regras de ESLint que proíbem Prisma e SQL cru fora de `infrastructure/database/`; `ConflictError`; rotas `/admin/clients` protegidas por `ADMIN_API_KEY` (credencial temporária entre clientes, sem rate limit até a spec 005). A RLS do Postgres fica para spec separada depois da 009.
-- Specs 004 a 009 em rascunho. Próximo passo: o dono revisa e faz o merge da 003 (depois do CI verde) e segue para `docs/specs/004-*.md`, na ordem numérica.
+- **Spec 003 (base multi-tenant): concluída e mergeada**, CI verde no PR. Já existem: models `Client` (raiz, soft delete, slug único e reservado) e `Conversation` (mínima) com a primeira migration; `src/domain/` (`ClientId`, entidades, `TenantRepository`, `ClientRepository`) e `src/application/` (`ClientService`); base de repositório de tenant, que exige `ClientId` e injeta o filtro; segunda barreira no Prisma Client (extension `tenant-scope` com `MODEL_SCOPES` e `TenantScopeError`); regras de ESLint que proíbem Prisma e SQL cru fora de `infrastructure/database/`; `ConflictError`; rotas `/admin/clients` protegidas por `ADMIN_API_KEY` (credencial temporária entre clientes, sem rate limit até a spec 005). A RLS do Postgres fica para spec separada depois da 009.
+- **Pendência na `main` (bloqueia a 004):** o commit `a40eede` ("fix: shared errors") acrescentou outra cópia de `ConflictError` e `TenantScopeError` em `src/shared/errors/app.errors.ts`, que já as tinha; `pnpm typecheck` falha com `TS2300 Duplicate identifier`. A correção é remover o bloco duplicado (linhas ~66 a 86) em uma branch de fix, com `typecheck`, `lint` e testes verdes. O CI do push na `main` deve estar vermelho por isso.
+- Spec 004 em rascunho (reescrita contra o código real); specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: corrigir a `main`, aprovar a 004 e, em seguida, escrever a spec da fatia vertical.
 
 ## 7. Histórico de decisões
 
 - Stack Node 22+ + TypeScript + Fastify + Prisma + Pino definida pelo dono do projeto.
+- 2026-10-27: o dono aprovou mudar o processo para specs sob demanda, fatia vertical cedo e `reviewer` obrigatório em specs de segurança. Motivo: as specs 002 e 003, escritas antes do código, precisaram ser reescritas, e a base completa (JWT, RBAC, cache, tempo real) estava sendo construída antes de existir produto.
 - O protótipo `customer-service` usava TypeORM; o Soprei usa Prisma. As regras de arquitetura do protótipo (isolamento por cliente, webhook rápido, LLM trocável) foram mantidas.

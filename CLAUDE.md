@@ -13,7 +13,7 @@ Sistema de atendimento via IA. Contexto completo, decisões e roadmap em [docs/c
 
 Ainda não decididos: fila de jobs, provedor de LLM, canal de mensagens, hospedagem. Ver "Decisões em aberto" em `docs/context.md`. Não assuma nenhum deles; proponha em uma spec.
 
-As specs 001 a 009 formam a base de engenharia e são implementadas **em ordem numérica**; não pule specs.
+A ordem de execução das specs é a do **roadmap em `docs/context.md` (seção 5)**, não a numeração dos arquivos. Só a próxima spec é detalhada; specs com status `esboço` (hoje 005 a 009) **não são implementadas** até serem relidas contra o código real, reescritas se preciso, e aprovadas. Specs de segurança (autenticação, autorização, isolamento, RLS) passam pelo agente `reviewer` antes do merge.
 
 ## Como trabalhamos (Agent-Driven Development)
 

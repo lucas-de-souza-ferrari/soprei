@@ -1,6 +1,6 @@
 # 006 — Cache em duas camadas
 
-- **Status:** rascunho
+- **Status:** esboço (sob demanda: reler contra o código antes de aprovar; gatilho: medição mostrar leitura repetida custosa)
 - **Branch:** `spec/006-cache`
 - **Depende de:** 002, 003, 004
 
