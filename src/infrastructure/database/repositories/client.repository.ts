@@ -6,12 +6,12 @@ import type {
   ListOptions,
   NewClient,
   Page,
-} from '../../domain/index.js';
-import { NotFoundError } from '../../shared/errors/index.js';
+} from '../../../domain/index.js';
+import { NotFoundError } from '../../../shared/errors/index.js';
 import { buildPageQuery, stableOrderBy, toPage } from './cursor.js';
 import { toClient } from './mappers.js';
 import { withRepositoryErrors } from './repository-errors.js';
-import type { TenantScopedDb } from './tenant-scope.js';
+import type { TenantScopedDb } from '../extensions/tenant-scope.js';
 
 /**
  * `Client` é a raiz do tenant (model global): não é filtrado por `clientId`. Clientes

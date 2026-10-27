@@ -1,9 +1,9 @@
-import { type Client, ClientId, type Conversation, type Message } from '../../domain/index.js';
+import { type Client, ClientId, type Conversation, type Message } from '../../../domain/index.js';
 import type {
   Client as ClientRow,
   Conversation as ConversationRow,
   Message as MessageRow,
-} from '../../generated/prisma/client.js';
+} from '../../../generated/prisma/client.js';
 
 /** Linha do Prisma para entidade de domínio. Nada do Prisma sai desta pasta. */
 export function toClient(row: ClientRow): Client {

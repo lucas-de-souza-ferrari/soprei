@@ -12,11 +12,11 @@ import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { MOCK_FAIL_MARKER, MockLlmProvider } from '../external-apis/llm/mock-llm.provider.js';
 import { createLogger } from '../logger/logger.js';
-import { PrismaAttendanceUnitOfWork } from './attendance-unit-of-work.js';
-import { PrismaClientRepository } from './client.repository.js';
-import { PrismaConversationRepository } from './conversation.repository.js';
+import { PrismaAttendanceUnitOfWork } from './repositories/attendance-unit-of-work.js';
+import { PrismaClientRepository } from './repositories/client.repository.js';
+import { PrismaConversationRepository } from './repositories/conversation.repository.js';
 import { createDatabase, type Database } from './database.js';
-import { PrismaMessageRepository } from './message.repository.js';
+import { PrismaMessageRepository } from './repositories/message.repository.js';
 import { runInTransaction } from './transaction.js';
 
 const config = loadIntegrationConfig();

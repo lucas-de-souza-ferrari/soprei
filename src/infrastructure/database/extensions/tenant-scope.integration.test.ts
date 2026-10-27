@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
-import { type Client } from '../../domain/index.js';
-import { TenantScopeError } from '../../shared/errors/index.js';
-import { loadIntegrationConfig } from '../../test-support/integration-env.js';
-import { TestTenants } from '../../test-support/tenant-fixtures.js';
-import { createLogger } from '../logger/logger.js';
-import { createDatabase, type Database } from './database.js';
-import { runInTransaction } from './transaction.js';
+import { type Client } from '../../../domain/index.js';
+import { TenantScopeError } from '../../../shared/errors/index.js';
+import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
+import { TestTenants } from '../../../test-support/tenant-fixtures.js';
+import { createLogger } from '../../logger/logger.js';
+import { createDatabase, type Database } from '../database.js';
+import { runInTransaction } from '../transaction.js';
 import type { TenantScopedDb } from './tenant-scope.js';
 
 const config = loadIntegrationConfig();

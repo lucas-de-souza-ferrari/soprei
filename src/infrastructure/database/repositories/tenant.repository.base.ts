@@ -4,9 +4,9 @@ import type {
   Page,
   TenantRepository,
   WithoutClientId,
-} from '../../domain/index.js';
-import { NotFoundError } from '../../shared/errors/index.js';
-import { isUuid } from '../../shared/utils/index.js';
+} from '../../../domain/index.js';
+import { NotFoundError } from '../../../shared/errors/index.js';
+import { isUuid } from '../../../shared/utils/index.js';
 import {
   type AfterCursor,
   buildPageQuery,
@@ -16,7 +16,7 @@ import {
   toPage,
 } from './cursor.js';
 import { withRepositoryErrors } from './repository-errors.js';
-import type { TenantScopedDb } from './tenant-scope.js';
+import type { TenantScopedDb } from '../extensions/tenant-scope.js';
 
 /** Filtro que a base monta: o `clientId` está sempre presente. */
 export interface TenantWhere {

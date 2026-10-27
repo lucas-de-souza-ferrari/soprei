@@ -6,14 +6,14 @@ import type {
   MessageUpdate,
   NewMessage,
   Page,
-} from '../../domain/index.js';
-import type { Message as MessageRow } from '../../generated/prisma/client.js';
-import { NotFoundError } from '../../shared/errors/index.js';
-import { isUuid } from '../../shared/utils/index.js';
+} from '../../../domain/index.js';
+import type { Message as MessageRow } from '../../../generated/prisma/client.js';
+import { NotFoundError } from '../../../shared/errors/index.js';
+import { isUuid } from '../../../shared/utils/index.js';
 import { buildPageQuery, stableOrderBy, toPage } from './cursor.js';
 import { toMessage } from './mappers.js';
 import { PrismaTenantRepository, type TenantModelOps } from './tenant.repository.base.js';
-import type { TenantScopedDb } from './tenant-scope.js';
+import type { TenantScopedDb } from '../extensions/tenant-scope.js';
 
 function messageOps(db: TenantScopedDb): TenantModelOps<MessageRow, NewMessage, MessageUpdate> {
   return {

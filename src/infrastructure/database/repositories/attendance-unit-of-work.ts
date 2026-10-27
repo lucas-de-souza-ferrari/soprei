@@ -1,8 +1,8 @@
-import type { AttendanceTransaction, AttendanceUnitOfWork } from '../../domain/index.js';
+import type { AttendanceTransaction, AttendanceUnitOfWork } from '../../../domain/index.js';
 import { PrismaConversationRepository } from './conversation.repository.js';
 import { PrismaMessageRepository } from './message.repository.js';
-import { runInTransaction, type TransactionOptions } from './transaction.js';
-import type { TenantScopedPrisma } from './tenant-scope.js';
+import { runInTransaction, type TransactionOptions } from '../transaction.js';
+import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 
 /**
  * Transação do atendimento: os repositórios de conversa e de mensagem sobre o mesmo client

@@ -1,6 +1,6 @@
 import type { ITXClientDenyList } from '@prisma/client/runtime/client';
-import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
-import { TenantScopeError } from '../../shared/errors/index.js';
+import type { Prisma, PrismaClient } from '../../../generated/prisma/client.js';
+import { TenantScopeError } from '../../../shared/errors/index.js';
 import { type ModelInfo, readModels } from './schema-info.js';
 
 /**

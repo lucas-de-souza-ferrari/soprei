@@ -4,12 +4,12 @@ import type {
   ConversationRepository,
   ConversationUpdate,
   NewConversation,
-} from '../../domain/index.js';
-import type { Conversation as ConversationRow } from '../../generated/prisma/client.js';
-import { DatabaseError } from '../../shared/errors/index.js';
+} from '../../../domain/index.js';
+import type { Conversation as ConversationRow } from '../../../generated/prisma/client.js';
+import { DatabaseError } from '../../../shared/errors/index.js';
 import { toConversation } from './mappers.js';
 import { PrismaTenantRepository, type TenantModelOps } from './tenant.repository.base.js';
-import type { TenantScopedDb } from './tenant-scope.js';
+import type { TenantScopedDb } from '../extensions/tenant-scope.js';
 
 function conversationOps(
   db: TenantScopedDb,

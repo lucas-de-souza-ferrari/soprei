@@ -10,11 +10,14 @@ import { Result } from '../../shared/types/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
-import { PrismaAttendanceUnitOfWork } from '../database/attendance-unit-of-work.js';
-import { PrismaClientRepository } from '../database/client.repository.js';
-import { PrismaConversationRepository } from '../database/conversation.repository.js';
-import { createDatabase, type Database } from '../database/database.js';
-import { PrismaMessageRepository } from '../database/message.repository.js';
+import {
+  createDatabase,
+  PrismaAttendanceUnitOfWork,
+  PrismaClientRepository,
+  PrismaConversationRepository,
+  PrismaMessageRepository,
+  type Database,
+} from '../database/index.js';
 import {
   MOCK_FAIL_MARKER,
   MOCK_HANG_MARKER,

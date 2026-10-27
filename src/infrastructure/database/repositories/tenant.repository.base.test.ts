@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { ClientId, type TenantRepository } from '../../domain/index.js';
-import { Prisma } from '../../generated/prisma/client.js';
+import { ClientId, type TenantRepository } from '../../../domain/index.js';
+import { Prisma } from '../../../generated/prisma/client.js';
 import {
   ConflictError,
   DatabaseError,
   NotFoundError,
   ValidationError,
-} from '../../shared/errors/index.js';
+} from '../../../shared/errors/index.js';
 import {
   PrismaTenantRepository,
   type TenantModelOps,

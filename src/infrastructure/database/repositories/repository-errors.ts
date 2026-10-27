@@ -1,6 +1,6 @@
-import { Prisma } from '../../generated/prisma/client.js';
-import { ConflictError, DatabaseError } from '../../shared/errors/index.js';
-import { withDatabaseErrors } from './database-errors.js';
+import { Prisma } from '../../../generated/prisma/client.js';
+import { ConflictError, DatabaseError } from '../../../shared/errors/index.js';
+import { withDatabaseErrors } from '../database-errors.js';
 
 /**
  * Como `withDatabaseErrors`, mas violação de unicidade (`P2002`) vira `ConflictError` (409),

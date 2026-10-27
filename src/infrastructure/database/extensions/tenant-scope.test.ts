@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, describe, it } from 'node:test';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { Prisma, PrismaClient } from '../../generated/prisma/client.js';
-import { TenantScopeError } from '../../shared/errors/index.js';
+import { Prisma, PrismaClient } from '../../../generated/prisma/client.js';
+import { TenantScopeError } from '../../../shared/errors/index.js';
 import { type ModelInfo, readModels } from './schema-info.js';
 import {
   createTenantScopeGuard,

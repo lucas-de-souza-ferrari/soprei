@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createRedis } from '../cache/redis.client.js';
-import { createDatabase } from '../database/database.js';
+import { createDatabase } from '../database/index.js';
 import { buildServer } from './server.js';
 import { createLogger } from '../logger/logger.js';
 import { getClosedPort, withPort } from '../../test-support/closed-port.js';

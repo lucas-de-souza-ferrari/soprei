@@ -12,8 +12,8 @@ export type {
   GetDatabaseOptions,
   PoolMetrics,
 } from './database.js';
-export { queryTimingExtension } from './query-timing.js';
-export type { QueryObserver, QueryTimingSample } from './query-timing.js';
+export { queryTimingExtension } from './extensions/query-timing.js';
+export type { QueryObserver, QueryTimingSample } from './extensions/query-timing.js';
 export {
   isDatabaseFailure,
   isRecoverableTransactionError,
@@ -22,12 +22,12 @@ export {
 } from './database-errors.js';
 export { retryOnRecoverable, runInTransaction } from './transaction.js';
 export type { RetryOptions, TransactionOptions } from './transaction.js';
-export { PrismaAttendanceUnitOfWork } from './attendance-unit-of-work.js';
-export { PrismaClientRepository } from './client.repository.js';
-export { PrismaConversationRepository } from './conversation.repository.js';
-export { PrismaMessageRepository } from './message.repository.js';
-export { withRepositoryErrors } from './repository-errors.js';
-export { PrismaTenantRepository } from './tenant.repository.base.js';
-export type { TenantModelOps, TenantWhere } from './tenant.repository.base.js';
-export { extendWithTenantScope, MODEL_SCOPES } from './tenant-scope.js';
-export type { ModelScope, TenantScopedDb, TenantScopedPrisma } from './tenant-scope.js';
+export { PrismaAttendanceUnitOfWork } from './repositories/attendance-unit-of-work.js';
+export { PrismaClientRepository } from './repositories/client.repository.js';
+export { PrismaConversationRepository } from './repositories/conversation.repository.js';
+export { PrismaMessageRepository } from './repositories/message.repository.js';
+export { withRepositoryErrors } from './repositories/repository-errors.js';
+export { PrismaTenantRepository } from './repositories/tenant.repository.base.js';
+export type { TenantModelOps, TenantWhere } from './repositories/tenant.repository.base.js';
+export { extendWithTenantScope, MODEL_SCOPES } from './extensions/tenant-scope.js';
+export type { ModelScope, TenantScopedDb, TenantScopedPrisma } from './extensions/tenant-scope.js';

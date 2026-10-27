@@ -1,27 +1,27 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
-import type { ClientId } from '../../domain/index.js';
+import type { ClientId } from '../../../domain/index.js';
 import {
   type Client,
   type Conversation,
   type Message,
   type NewMessage,
-} from '../../domain/index.js';
+} from '../../../domain/index.js';
 import {
   ConflictError,
   DatabaseError,
   NotFoundError,
   TenantScopeError,
   ValidationError,
-} from '../../shared/errors/index.js';
-import { loadIntegrationConfig } from '../../test-support/integration-env.js';
-import { TestTenants } from '../../test-support/tenant-fixtures.js';
-import { createLogger } from '../logger/logger.js';
+} from '../../../shared/errors/index.js';
+import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
+import { TestTenants } from '../../../test-support/tenant-fixtures.js';
+import { createLogger } from '../../logger/logger.js';
 import { PrismaConversationRepository } from './conversation.repository.js';
-import { createDatabase, type Database } from './database.js';
+import { createDatabase, type Database } from '../database.js';
 import { PrismaMessageRepository } from './message.repository.js';
-import { runInTransaction } from './transaction.js';
+import { runInTransaction } from '../transaction.js';
 
 const config = loadIntegrationConfig();
 

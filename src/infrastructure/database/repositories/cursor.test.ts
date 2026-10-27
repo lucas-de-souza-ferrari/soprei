@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { ValidationError } from '../../shared/errors/index.js';
+import { ValidationError } from '../../../shared/errors/index.js';
 import { buildPageQuery, decodeCursor, encodeCursor, resolveLimit, toPage } from './cursor.js';
 
 describe('cursor', () => {

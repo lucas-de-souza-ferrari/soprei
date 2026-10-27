@@ -6,7 +6,7 @@ import { getClosedPort, withPort } from '../test-support/closed-port.js';
 import { loadIntegrationConfig } from '../test-support/integration-env.js';
 import { createRateLimitRedis } from './cache/rate-limit-redis.js';
 import { createRedis } from './cache/redis.client.js';
-import { createDatabase } from './database/database.js';
+import { createDatabase } from './database/index.js';
 import { closeInfrastructure, verifyInfrastructure } from './lifecycle.js';
 import { createLogger } from './logger/logger.js';
 

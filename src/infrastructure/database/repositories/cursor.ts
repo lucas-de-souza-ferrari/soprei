@@ -3,9 +3,9 @@ import {
   MAX_LIST_LIMIT,
   type ListOptions,
   type Page,
-} from '../../domain/index.js';
-import { ValidationError } from '../../shared/errors/index.js';
-import { isUuid } from '../../shared/utils/index.js';
+} from '../../../domain/index.js';
+import { ValidationError } from '../../../shared/errors/index.js';
+import { isUuid } from '../../../shared/utils/index.js';
 
 /** Posição numa listagem ordenada por `createdAt` e `id` (ambos crescentes). */
 export interface CursorPosition {

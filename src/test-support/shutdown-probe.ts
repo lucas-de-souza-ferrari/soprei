@@ -6,7 +6,7 @@
  */
 import { createRateLimitRedis } from '../infrastructure/cache/rate-limit-redis.js';
 import { createRedis } from '../infrastructure/cache/redis.client.js';
-import { createDatabase } from '../infrastructure/database/database.js';
+import { createDatabase } from '../infrastructure/database/index.js';
 import { closeInfrastructure } from '../infrastructure/lifecycle.js';
 import { createLogger } from '../infrastructure/logger/logger.js';
 import { createMetrics } from '../infrastructure/metrics/index.js';

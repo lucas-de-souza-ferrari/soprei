@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, describe, it } from 'node:test';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../../generated/prisma/client.js';
-import { TenantScopeError } from '../../shared/errors/index.js';
+import { PrismaClient } from '../../../generated/prisma/client.js';
+import { TenantScopeError } from '../../../shared/errors/index.js';
 import { type QueryTimingSample, queryTimingExtension } from './query-timing.js';
 import { extendWithTenantScope } from './tenant-scope.js';
 

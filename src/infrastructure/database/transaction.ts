@@ -5,7 +5,7 @@ import {
   isRecoverableTransactionError,
   toDatabaseError,
 } from './database-errors.js';
-import type { TenantScopedDb, TenantScopedPrisma } from './tenant-scope.js';
+import type { TenantScopedDb, TenantScopedPrisma } from './extensions/tenant-scope.js';
 
 export interface RetryOptions {
   /** Repetições depois da primeira tentativa. */

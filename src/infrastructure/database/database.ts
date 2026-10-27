@@ -8,8 +8,8 @@ import { withTimeout } from '../../shared/utils/index.js';
 import { type Config, loadConfig } from '../config/index.js';
 import { createLogger } from '../logger/logger.js';
 import { toDatabaseError } from './database-errors.js';
-import { type QueryObserver, queryTimingExtension } from './query-timing.js';
-import { extendWithTenantScope, type TenantScopedPrisma } from './tenant-scope.js';
+import { type QueryObserver, queryTimingExtension } from './extensions/query-timing.js';
+import { extendWithTenantScope, type TenantScopedPrisma } from './extensions/tenant-scope.js';
 
 export type DatabaseConfig = Pick<
   Config,

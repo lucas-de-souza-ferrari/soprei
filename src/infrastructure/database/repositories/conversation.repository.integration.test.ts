@@ -5,19 +5,19 @@ import {
   ClientId,
   type Conversation,
   type NewConversation,
-} from '../../domain/index.js';
+} from '../../../domain/index.js';
 import {
   ConflictError,
   NotFoundError,
   TenantScopeError,
   ValidationError,
-} from '../../shared/errors/index.js';
-import { loadIntegrationConfig } from '../../test-support/integration-env.js';
-import { TestTenants } from '../../test-support/tenant-fixtures.js';
-import { createLogger } from '../logger/logger.js';
-import { createDatabase, type Database } from './database.js';
+} from '../../../shared/errors/index.js';
+import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
+import { TestTenants } from '../../../test-support/tenant-fixtures.js';
+import { createLogger } from '../../logger/logger.js';
+import { createDatabase, type Database } from '../database.js';
 import { PrismaConversationRepository } from './conversation.repository.js';
-import { runInTransaction } from './transaction.js';
+import { runInTransaction } from '../transaction.js';
 
 const config = loadIntegrationConfig();
 let refCounter = 0;
