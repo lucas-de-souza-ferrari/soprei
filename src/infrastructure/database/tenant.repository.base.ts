@@ -34,7 +34,7 @@ export interface TenantModelOps<TRow extends PagedRow, TCreate, TUpdate> {
   findFirst(where: TenantWhere): Promise<TRow | null>;
   findMany(query: { where: TenantWhere; orderBy: StableOrderBy; take: number }): Promise<TRow[]>;
   /** `data.clientId` é o do parâmetro do repositório; use só ele, nunca outra origem. */
-  create(data: TCreate & { readonly clientId: ClientId }): Promise<TRow>;
+  create(data: Omit<TCreate, 'clientId'> & { readonly clientId: ClientId }): Promise<TRow>;
   updateMany(where: TenantWhere, data: TUpdate): Promise<{ count: number }>;
   deleteMany(where: TenantWhere): Promise<{ count: number }>;
   count(where: TenantWhere): Promise<number>;
@@ -134,7 +134,7 @@ export abstract class PrismaTenantRepository<
     });
   }
 
-  private run<R>(operation: string, fn: () => Promise<R>): Promise<R> {
+  protected run<R>(operation: string, fn: () => Promise<R>): Promise<R> {
     return withRepositoryErrors(`${this.entity}.${operation}`, fn);
   }
 }

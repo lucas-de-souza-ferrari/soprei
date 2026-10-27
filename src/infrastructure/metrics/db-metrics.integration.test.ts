@@ -67,7 +67,7 @@ describe('métricas do banco contra o PostgreSQL de testes', () => {
   it('operações reais com o Prisma geram amostras por model e operation', async () => {
     const before = await metrics.render();
     const created = await tenants.createClient('metrics');
-    await database.prisma.conversation.create({ data: { clientId: created.id } });
+    await database.prisma.conversation.create({ data: { clientId: created.id, contactRef: 'c' } });
     await database.prisma.conversation.findMany({ where: { clientId: created.id } });
     await database.prisma.client.count();
 

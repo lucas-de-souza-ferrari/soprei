@@ -37,15 +37,18 @@ describe('cobertura do registro de models (lê o schema gerado)', () => {
     assert.deepEqual(models.map((model) => model.name).sort(), Object.keys(MODEL_SCOPES).sort());
   });
 
-  it('Conversation é de tenant (tem clientId) e Client é global (raiz do tenant)', () => {
+  it('Conversation e Message são de tenant (têm clientId) e Client é global (raiz do tenant)', () => {
     assert.equal(MODEL_SCOPES.Conversation, 'tenant');
+    assert.equal(MODEL_SCOPES.Message, 'tenant');
+    const message = models.find((model) => model.name === 'Message');
+    assert.ok(message?.fields.some((field) => field.name === 'clientId'));
     assert.equal(MODEL_SCOPES.Client, 'global');
     const conversation = models.find((model) => model.name === 'Conversation');
     assert.ok(conversation?.fields.some((field) => field.name === 'clientId'));
   });
 
-  const message: ModelInfo = {
-    name: 'Message',
+  const ticket: ModelInfo = {
+    name: 'Ticket',
     fields: [
       { name: 'id', kind: 'scalar', type: 'String' },
       { name: 'clientId', kind: 'scalar', type: 'String' },
@@ -57,15 +60,15 @@ describe('cobertura do registro de models (lê o schema gerado)', () => {
   };
 
   it('falha se um model com clientId não está no registro de tenant', () => {
-    const problems = findScopeProblems([...models, message], MODEL_SCOPES);
+    const problems = findScopeProblems([...models, ticket], MODEL_SCOPES);
     assert.equal(problems.length, 1);
-    assert.match(problems[0] ?? '', /Message/);
-    assert.throws(() => createTenantScopeGuard([...models, message]), /Message/);
+    assert.match(problems[0] ?? '', /Ticket/);
+    assert.throws(() => createTenantScopeGuard([...models, ticket]), /Ticket/);
   });
 
   it('falha se um model com clientId foi registrado como global', () => {
-    const scopes: Record<string, ModelScope> = { ...MODEL_SCOPES, Message: 'global' };
-    assert.match(findScopeProblems([...models, message], scopes).join(), /Message.*tenant/);
+    const scopes: Record<string, ModelScope> = { ...MODEL_SCOPES, Ticket: 'global' };
+    assert.match(findScopeProblems([...models, ticket], scopes).join(), /Ticket.*tenant/);
   });
 
   it('falha se um model sem clientId não está na lista de globais', () => {
@@ -195,6 +198,46 @@ describe('segunda barreira: regras da verificação', () => {
     });
   });
 
+  describe('model de tenant (Message)', () => {
+    const OPERATIONS_WITH_WHERE = ['findMany', 'findFirst', 'count', 'updateMany', 'deleteMany'];
+
+    it('consulta sem clientId no where lança TenantScopeError', () => {
+      for (const operation of OPERATIONS_WITH_WHERE) {
+        rejects('Message', operation, {});
+        rejects('Message', operation, { where: {} });
+        rejects('Message', operation, { where: { conversationId: randomUUID() } });
+        rejects('Message', operation, { where: { clientId: undefined, externalId: 'x' } });
+      }
+    });
+
+    it('aceita as operações permitidas com clientId no where', () => {
+      for (const operation of OPERATIONS_WITH_WHERE) {
+        run('Message', operation, { where: { clientId: clientA, externalId: 'x' } });
+      }
+      run('Message', 'findMany', {
+        where: { clientId: clientA, conversationId: randomUUID() },
+        orderBy: [{ createdAt: 'desc' }],
+        take: 5,
+      });
+    });
+
+    it('operações por chave única são proibidas, mesmo com clientId', () => {
+      for (const operation of ['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert']) {
+        rejects('Message', operation, { where: { id: randomUUID() } });
+        rejects('Message', operation, { where: { id: randomUUID(), clientId: clientA } });
+      }
+    });
+
+    it('criação exige clientId nos dados (e não aceita relação client)', () => {
+      rejects('Message', 'create', { data: { content: 'x' } });
+      rejects('Message', 'create', {
+        data: { content: 'x', client: { connect: { id: clientA } } },
+      });
+      rejects('Message', 'createMany', { data: [{ clientId: clientA }, { content: 'x' }] });
+      run('Message', 'create', { data: { clientId: clientA, content: 'x' } });
+    });
+  });
+
   describe('model global (Client)', () => {
     it('não exige clientId e aceita operações por chave única', () => {
       for (const operation of [
@@ -219,6 +262,8 @@ describe('segunda barreira: regras da verificação', () => {
         select: { _count: { select: { conversations: true } } },
       });
       rejects('Client', 'create', { data: { name: 'x' }, include: { conversations: true } });
+      rejects('Client', 'findMany', { include: { messages: true } });
+      rejects('Client', 'findMany', { select: { _count: { select: { messages: true } } } });
     });
 
     it('aceita select e include que não tocam dados de tenant', () => {

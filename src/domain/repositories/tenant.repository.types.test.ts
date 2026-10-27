@@ -15,7 +15,7 @@ export function typeContracts(repo: ConversationRepository, clientId: ClientId, 
   void repo.findById(clientId, id);
   void repo.list(clientId);
   void repo.list(clientId, { limit: 10, cursor: 'x' });
-  void repo.create(clientId, {});
+  void repo.create(clientId, { contactRef: 'c' });
   void repo.update(clientId, id, {});
   void repo.delete(clientId, id);
   void repo.count(clientId);
@@ -28,7 +28,7 @@ export function typeContracts(repo: ConversationRepository, clientId: ClientId, 
   // @ts-expect-error count exige o ClientId
   void repo.count();
   // @ts-expect-error create exige o ClientId antes dos dados
-  void repo.create({});
+  void repo.create({ contactRef: 'c' });
   // @ts-expect-error update exige o ClientId antes do id
   void repo.update(id, {});
   // @ts-expect-error delete exige o ClientId antes do id
@@ -44,7 +44,7 @@ export function typeContracts(repo: ConversationRepository, clientId: ClientId, 
 
   // clientId nos dados de criação ou de atualização.
   // @ts-expect-error TCreate não aceita clientId
-  void repo.create(clientId, { clientId });
+  void repo.create(clientId, { contactRef: 'c', clientId });
   // @ts-expect-error TUpdate não aceita clientId
   void repo.update(clientId, id, { clientId });
 }

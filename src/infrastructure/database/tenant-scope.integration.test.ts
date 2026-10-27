@@ -25,9 +25,14 @@ before(async () => {
   tenants = new TestTenants(database.prisma);
   clientA = await tenants.createClient('scope-a');
   clientB = await tenants.createClient('scope-b');
-  await database.prisma.conversation.create({ data: { clientId: clientA.id } });
-  conversationB = (await database.prisma.conversation.create({ data: { clientId: clientB.id } }))
-    .id;
+  await database.prisma.conversation.create({
+    data: { clientId: clientA.id, contactRef: randomUUID() },
+  });
+  conversationB = (
+    await database.prisma.conversation.create({
+      data: { clientId: clientB.id, contactRef: randomUUID() },
+    })
+  ).id;
 });
 
 after(async () => {
@@ -56,14 +61,17 @@ function unscopedCalls(db: TenantScopedDb): readonly (readonly [string, () => Pr
       () =>
         db.conversation.upsert({
           where: { id },
-          create: { clientId: clientA.id },
+          create: { clientId: clientA.id, contactRef: randomUUID() },
           update: {},
         }),
     ],
     ['clientId undefined', () => db.conversation.findMany({ where: { clientId: undefined } })],
     [
       'create sem clientId (via relação)',
-      () => db.conversation.create({ data: { client: { connect: { id: clientA.id } } } }),
+      () =>
+        db.conversation.create({
+          data: { contactRef: randomUUID(), client: { connect: { id: clientA.id } } },
+        }),
     ],
   ];
 }
@@ -82,7 +90,7 @@ describe('segunda barreira contra o banco real', () => {
   it('o mesmo vale dentro de runInTransaction (e o erro desfaz a transação)', async () => {
     await assert.rejects(
       runInTransaction(database.prisma, async (tx) => {
-        await tx.conversation.create({ data: { clientId: clientA.id } });
+        await tx.conversation.create({ data: { clientId: clientA.id, contactRef: randomUUID() } });
         for (const [label, call] of unscopedCalls(tx)) {
           await assert.rejects(call(), isTenantScopeError, `tx: ${label}`);
         }

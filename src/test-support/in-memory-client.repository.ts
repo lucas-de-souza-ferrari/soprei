@@ -55,6 +55,7 @@ export class InMemoryClientRepository implements ClientRepository {
       name: data.name,
       slug: data.slug,
       status: data.status ?? 'ACTIVE',
+      persona: null,
       createdAt: now,
       updatedAt: now,
     };

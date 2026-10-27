@@ -15,6 +15,9 @@ import { PrismaConversationRepository } from './conversation.repository.js';
 import { runInTransaction } from './transaction.js';
 
 const config = loadIntegrationConfig();
+let refCounter = 0;
+/** `contactRef` distinto a cada chamada (a unicidade é por cliente e contato). */
+const nextRef = (): string => `contato-${String((refCounter += 1))}`;
 
 let database: Database;
 let tenants: TestTenants;
@@ -31,12 +34,16 @@ before(async () => {
   clientA = await tenants.createClient('iso-a');
   clientB = await tenants.createClient('iso-b');
   // Criações em paralelo para que várias linhas caiam no mesmo milissegundo (empate de createdAt).
-  idsA = (await Promise.all(Array.from({ length: 7 }, () => repo.create(clientA.id, {})))).map(
-    (conversation) => conversation.id,
-  );
-  idsB = (await Promise.all(Array.from({ length: 4 }, () => repo.create(clientB.id, {})))).map(
-    (conversation) => conversation.id,
-  );
+  idsA = (
+    await Promise.all(
+      Array.from({ length: 7 }, () => repo.create(clientA.id, { contactRef: nextRef() })),
+    )
+  ).map((conversation) => conversation.id);
+  idsB = (
+    await Promise.all(
+      Array.from({ length: 4 }, () => repo.create(clientB.id, { contactRef: nextRef() })),
+    )
+  ).map((conversation) => conversation.id);
 });
 
 after(async () => {
@@ -101,7 +108,7 @@ describe('isolamento no repositório de Conversation (clientes A e B)', () => {
   });
 
   it('delete: o dono apaga o próprio registro e depois ele é NotFoundError', async () => {
-    const created = await repo.create(clientA.id, {});
+    const created = await repo.create(clientA.id, { contactRef: nextRef() });
     await repo.delete(clientA.id, created.id);
     await assert.rejects(repo.findById(clientA.id, created.id), NotFoundError);
     await assert.rejects(repo.delete(clientA.id, created.id), NotFoundError);
@@ -181,7 +188,7 @@ describe('listagem paginada por cursor', () => {
 
 describe('create', () => {
   it('grava no cliente do parâmetro mesmo com outro clientId injetado em runtime', async () => {
-    const hostile = { clientId: clientB.id } as unknown as NewConversation;
+    const hostile = { contactRef: nextRef(), clientId: clientB.id } as unknown as NewConversation;
     const created = await repo.create(clientA.id, hostile);
     assert.equal(created.clientId, clientA.id);
     assert.equal((await repo.findById(clientA.id, created.id)).id, created.id);
@@ -191,7 +198,7 @@ describe('create', () => {
 
   it('cliente inexistente: a FK impede (DatabaseError), nada é gravado', async () => {
     const ghost = ClientId.parse('01890a5d-ac96-774b-bcce-b302099a8057');
-    await assert.rejects(repo.create(ghost, {}), (error: unknown) => {
+    await assert.rejects(repo.create(ghost, { contactRef: nextRef() }), (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.equal(error.name, 'DatabaseError');
       return true;
@@ -207,7 +214,7 @@ describe('forTransaction', () => {
     await assert.rejects(
       runInTransaction(database.prisma, async (tx) => {
         const inTx = repo.forTransaction(tx);
-        await inTx.create(clientA.id, {});
+        await inTx.create(clientA.id, { contactRef: nextRef() });
         assert.equal(await inTx.count(clientA.id), before + 1);
         throw boom;
       }),
@@ -219,7 +226,7 @@ describe('forTransaction', () => {
   it('confirma (commit) e mantém o isolamento dentro da transação', async () => {
     const id = await runInTransaction(database.prisma, async (tx) => {
       const inTx = repo.forTransaction(tx);
-      const created = await inTx.create(clientA.id, {});
+      const created = await inTx.create(clientA.id, { contactRef: nextRef() });
       await assert.rejects(inTx.findById(clientB.id, created.id), NotFoundError);
       await assert.rejects(inTx.delete(clientA.id, idsB[0] ?? ''), NotFoundError);
       return created.id;

@@ -22,8 +22,10 @@ export {
 } from './database-errors.js';
 export { retryOnRecoverable, runInTransaction } from './transaction.js';
 export type { RetryOptions, TransactionOptions } from './transaction.js';
+export { PrismaAttendanceUnitOfWork } from './attendance-unit-of-work.js';
 export { PrismaClientRepository } from './client.repository.js';
 export { PrismaConversationRepository } from './conversation.repository.js';
+export { PrismaMessageRepository } from './message.repository.js';
 export { withRepositoryErrors } from './repository-errors.js';
 export { PrismaTenantRepository } from './tenant.repository.base.js';
 export type { TenantModelOps, TenantWhere } from './tenant.repository.base.js';

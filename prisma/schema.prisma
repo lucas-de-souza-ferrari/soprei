@@ -30,21 +30,67 @@ model Client {
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
   deletedAt DateTime?    @map("deleted_at")
+  /// Persona do assistente (até 4000 caracteres; nulo = persona padrão). Nunca vai para log.
+  persona   String?
 
   conversations Conversation[]
+  messages      Message[]
 
   @@map("clients")
 }
 
-/// Mínimo para provar o isolamento; os campos reais vêm em specs futuras. (TENANT)
+enum MessageRole {
+  USER
+  ASSISTANT
+
+  @@map("message_role")
+}
+
+/// Conversa de um contato com o assistente de um cliente. `contactRef` é o identificador do
+/// contato definido pelo canal (texto livre). (TENANT)
 model Conversation {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  clientId  String   @map("client_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id         String   @id @default(uuid(7)) @db.Uuid
+  clientId   String   @map("client_id") @db.Uuid
+  contactRef String   @map("contact_ref")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  client   Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  messages Message[]
 
+  // `[id, clientId]` existe só para as chaves estrangeiras compostas de Message.
+  @@unique([id, clientId])
+  @@unique([clientId, contactRef])
   @@index([clientId, createdAt, id])
   @@map("conversations")
+}
+
+/// Mensagem de uma conversa (do contato ou do assistente). (TENANT)
+/// Integridade entre clientes no banco: as chaves estrangeiras são COMPOSTAS com `clientId`,
+/// então uma mensagem nunca aponta para conversa nem para outra mensagem de outro cliente.
+/// `content` nunca vai para log nem para label de métrica.
+model Message {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  clientId       String      @map("client_id") @db.Uuid
+  conversationId String      @map("conversation_id") @db.Uuid
+  role           MessageRole
+  content        String
+  isFallback     Boolean     @default(false) @map("is_fallback")
+  /// Id da mensagem no canal, para idempotência (único por cliente quando presente).
+  externalId     String?     @map("external_id")
+  /// Na resposta do assistente, a mensagem do contato a que ela responde.
+  replyToId      String?     @map("reply_to_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  conversation Conversation @relation(fields: [conversationId, clientId], references: [id, clientId], onDelete: NoAction)
+  replyTo      Message?     @relation("MessageReply", fields: [replyToId, clientId], references: [id, clientId], onDelete: NoAction)
+  replies      Message[]    @relation("MessageReply")
+
+  @@unique([id, clientId])
+  @@unique([clientId, externalId])
+  // No máximo uma resposta por mensagem do contato (a retentativa concorrente não duplica).
+  @@unique([clientId, replyToId])
+  @@index([clientId, conversationId, createdAt, id])
+  @@map("messages")
 }

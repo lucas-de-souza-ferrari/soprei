@@ -20,6 +20,7 @@ export class TestTenants {
       name: row.name,
       slug: row.slug,
       status: row.status,
+      persona: row.persona,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -32,6 +33,8 @@ export class TestTenants {
 
   async cleanup(): Promise<void> {
     for (const id of this.created) {
+      // Mensagens antes das conversas: a chave estrangeira composta aponta para elas.
+      await this.db.message.deleteMany({ where: { clientId: id } });
       await this.db.conversation.deleteMany({ where: { clientId: id } });
     }
     await this.db.client.deleteMany({ where: { id: { in: [...this.created] } } });

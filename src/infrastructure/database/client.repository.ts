@@ -74,6 +74,7 @@ export class PrismaClientRepository implements ClientRepository {
         data: {
           ...(data.name === undefined ? {} : { name: data.name }),
           ...(data.status === undefined ? {} : { status: data.status }),
+          ...(data.persona === undefined ? {} : { persona: data.persona }),
         },
       });
       if (count === 0) throw notFound();
