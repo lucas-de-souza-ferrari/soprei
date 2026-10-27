@@ -272,4 +272,113 @@ describe('parseConfig', () => {
       assert.doesNotMatch(result.error.message, /ADMIN_API_KEY/);
     });
   });
+
+  describe('rate limiting (spec 005)', () => {
+    const PRODUCTION = {
+      ...VALID_ENV,
+      NODE_ENV: 'production',
+      ADMIN_API_KEY: 'a'.repeat(32),
+    };
+
+    it('aplica os defaults: ligado, 100/15 min público, 600/min admin e webhook, 250 ms, sem proxy', () => {
+      const result = parseConfig(VALID_ENV);
+      assert.ok(result.ok);
+      const config = result.value;
+      assert.equal(config.RATE_LIMIT_ENABLED, true);
+      assert.equal(config.RATE_LIMIT_PUBLIC_MAX, 100);
+      assert.equal(config.RATE_LIMIT_PUBLIC_WINDOW_SECONDS, 900);
+      assert.equal(config.RATE_LIMIT_ADMIN_MAX, 600);
+      assert.equal(config.RATE_LIMIT_ADMIN_WINDOW_SECONDS, 60);
+      assert.equal(config.RATE_LIMIT_WEBHOOK_MAX, 600);
+      assert.equal(config.RATE_LIMIT_WEBHOOK_WINDOW_SECONDS, 60);
+      assert.equal(config.RATE_LIMIT_REDIS_TIMEOUT_MS, 250);
+      assert.equal(config.TRUST_PROXY, false);
+    });
+
+    it('converte os valores informados para número', () => {
+      const result = parseConfig({
+        ...VALID_ENV,
+        RATE_LIMIT_ADMIN_MAX: '5',
+        RATE_LIMIT_ADMIN_WINDOW_SECONDS: '86400',
+        RATE_LIMIT_REDIS_TIMEOUT_MS: '50',
+      });
+      assert.ok(result.ok);
+      assert.equal(result.value.RATE_LIMIT_ADMIN_MAX, 5);
+      assert.equal(result.value.RATE_LIMIT_ADMIN_WINDOW_SECONDS, 86_400);
+      assert.equal(result.value.RATE_LIMIT_REDIS_TIMEOUT_MS, 50);
+    });
+
+    const profiles = ['PUBLIC', 'ADMIN', 'WEBHOOK'];
+    for (const profile of profiles) {
+      for (const invalid of ['0', '-1', 'abc', '1.5']) {
+        it(`rejeita RATE_LIMIT_${profile}_MAX=${invalid}`, () => {
+          const name = `RATE_LIMIT_${profile}_MAX`;
+          const result = parseConfig({ ...VALID_ENV, [name]: invalid });
+          assert.equal(result.ok, false);
+          assert.match(result.error.message, new RegExp(name));
+        });
+      }
+      for (const invalid of ['0', '-1', 'abc', '86401']) {
+        it(`rejeita RATE_LIMIT_${profile}_WINDOW_SECONDS=${invalid}`, () => {
+          const name = `RATE_LIMIT_${profile}_WINDOW_SECONDS`;
+          const result = parseConfig({ ...VALID_ENV, [name]: invalid });
+          assert.equal(result.ok, false);
+          assert.match(result.error.message, new RegExp(name));
+        });
+      }
+    }
+
+    it('rejeita RATE_LIMIT_REDIS_TIMEOUT_MS inválido', () => {
+      for (const invalid of ['0', '-5', 'x', '10001']) {
+        const result = parseConfig({ ...VALID_ENV, RATE_LIMIT_REDIS_TIMEOUT_MS: invalid });
+        assert.equal(result.ok, false, invalid);
+        assert.match(result.error.message, /RATE_LIMIT_REDIS_TIMEOUT_MS/);
+      }
+    });
+
+    it('RATE_LIMIT_ENABLED: "false" literal desliga (não vira verdadeiro) fora de produção', () => {
+      const off = parseConfig({ ...VALID_ENV, RATE_LIMIT_ENABLED: 'false' });
+      assert.ok(off.ok);
+      assert.equal(off.value.RATE_LIMIT_ENABLED, false);
+      const on = parseConfig({ ...VALID_ENV, RATE_LIMIT_ENABLED: 'true' });
+      assert.ok(on.ok);
+      assert.equal(on.value.RATE_LIMIT_ENABLED, true);
+      const empty = parseConfig({ ...VALID_ENV, RATE_LIMIT_ENABLED: '' });
+      assert.ok(empty.ok);
+      assert.equal(empty.value.RATE_LIMIT_ENABLED, true);
+    });
+
+    it('RATE_LIMIT_ENABLED rejeita qualquer outro texto', () => {
+      for (const invalid of ['0', '1', 'no', 'FALSE', 'off']) {
+        const result = parseConfig({ ...VALID_ENV, RATE_LIMIT_ENABLED: invalid });
+        assert.equal(result.ok, false, invalid);
+        assert.match(result.error.message, /RATE_LIMIT_ENABLED/);
+      }
+    });
+
+    it('RATE_LIMIT_ENABLED=false é rejeitado em produção; ligado ou ausente passa', () => {
+      const off = parseConfig({ ...PRODUCTION, RATE_LIMIT_ENABLED: 'false' });
+      assert.equal(off.ok, false);
+      assert.match(off.error.message, /RATE_LIMIT_ENABLED: não pode ser "false" em produção/);
+      assert.ok(parseConfig({ ...PRODUCTION, RATE_LIMIT_ENABLED: 'true' }).ok);
+      assert.ok(parseConfig(PRODUCTION).ok);
+    });
+
+    it('TRUST_PROXY aceita false, true, inteiro e lista de IPs/CIDRs e rejeita lixo', () => {
+      const trust = (value: string): unknown => {
+        const result = parseConfig({ ...VALID_ENV, TRUST_PROXY: value });
+        assert.ok(result.ok, value);
+        return result.value.TRUST_PROXY;
+      };
+      assert.equal(trust('false'), false);
+      assert.equal(trust('true'), true);
+      assert.equal(trust('1'), 1);
+      assert.deepEqual(trust('10.0.0.0/8,172.16.0.1'), ['10.0.0.0/8', '172.16.0.1']);
+
+      const bad = parseConfig({ ...VALID_ENV, TRUST_PROXY: 'talvez' });
+      assert.equal(bad.ok, false);
+      assert.match(bad.error.message, /TRUST_PROXY/);
+      assert.equal(parseConfig({ ...VALID_ENV, TRUST_PROXY: '0' }).ok, false);
+    });
+  });
 });

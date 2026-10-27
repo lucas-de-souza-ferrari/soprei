@@ -1,10 +1,25 @@
 import { z } from 'zod';
+import { parseTrustProxy, type TrustProxySetting } from './trust-proxy.js';
 
 export const ADMIN_API_KEY_MIN_LENGTH = 32;
 export const METRICS_TOKEN_MIN_LENGTH = 32;
 
 /** Provedores de LLM disponíveis. O real entra em spec própria; por ora só o `mock`. */
 export const LLM_PROVIDERS = ['mock'] as const;
+
+/** `true`/`false` literais; vazio vale como ausente. `z.coerce.boolean` trataria "false" como verdadeiro. */
+const booleanLiteral = (defaultValue: boolean): z.ZodType<boolean> =>
+  z
+    .enum(['true', 'false'], { error: 'deve ser "true" ou "false"' })
+    .optional()
+    .transform((value) => (value === undefined ? defaultValue : value === 'true'));
+
+const emptyAsUndefined = (value: unknown): unknown => (value === '' ? undefined : value);
+
+const rateLimitMax = (defaultValue: number): z.ZodType<number> =>
+  z.coerce.number().int().min(1).max(1_000_000).default(defaultValue);
+const rateLimitWindowSeconds = (defaultValue: number): z.ZodType<number> =>
+  z.coerce.number().int().min(1).max(86_400).default(defaultValue);
 
 export const envSchema = z
   .object({
@@ -41,8 +56,36 @@ export const envSchema = z
     // Mensagem do contato sem resposta há mais que isto deixa de ser "em andamento": a
     // retentativa com o mesmo externalId completa o fluxo em vez de receber 409.
     ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: z.coerce.number().int().min(1).max(3_600_000).default(60_000),
+    // Rate limiting (spec 005). Limites por perfil e por IP, guardados no Redis.
+    // `false` literal desliga fora de produção; em produção é rejeitado (ver superRefine).
+    RATE_LIMIT_ENABLED: z.preprocess(emptyAsUndefined, booleanLiteral(true)),
+    RATE_LIMIT_PUBLIC_MAX: rateLimitMax(100),
+    RATE_LIMIT_PUBLIC_WINDOW_SECONDS: rateLimitWindowSeconds(900),
+    RATE_LIMIT_ADMIN_MAX: rateLimitMax(600),
+    RATE_LIMIT_ADMIN_WINDOW_SECONDS: rateLimitWindowSeconds(60),
+    RATE_LIMIT_WEBHOOK_MAX: rateLimitMax(600),
+    RATE_LIMIT_WEBHOOK_WINDOW_SECONDS: rateLimitWindowSeconds(60),
+    // Prazo de cada comando da conexão Redis dedicada ao limiter; estourou: fail-open.
+    RATE_LIMIT_REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(10_000).default(250),
+    // IP atrás de proxy: false | true | número de proxies | lista de IPs/CIDRs (ver trust-proxy.ts).
+    TRUST_PROXY: z
+      .string()
+      .optional()
+      .transform((value, ctx): TrustProxySetting => {
+        const parsed = parseTrustProxy(value);
+        if (parsed.ok) return parsed.value;
+        ctx.addIssue({ code: 'custom', message: parsed.message });
+        return z.NEVER;
+      }),
   })
   .superRefine((env, ctx) => {
+    if (env.NODE_ENV === 'production' && !env.RATE_LIMIT_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['RATE_LIMIT_ENABLED'],
+        message: 'não pode ser "false" em produção (a proteção contra abuso ficaria desligada)',
+      });
+    }
     if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < METRICS_TOKEN_MIN_LENGTH) {
       ctx.addIssue({
         code: 'custom',
