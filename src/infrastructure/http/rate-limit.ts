@@ -142,15 +142,16 @@ export function registerRateLimit(
     },
   });
 
-  // `after`: roda quando o plugin acima já carregou (`app.rateLimit` existe) e antes dos plugins
-  // registrados depois (controllers), que herdam este hook.
-  app.after((error) => {
-    if (error !== null) return;
-    const limit = app.rateLimit();
-    app.addHook('onRequest', async function rateLimitHook(request, reply) {
-      // 404 não tem perfil (e o plugin também não o cobriria); `rateLimit: false` é o opt-out.
-      if (request.is404 || request.routeOptions.config.rateLimit === false) return;
-      await limit.call(app, request, reply);
-    });
+  // Hook na raiz, registrado já (antes dos controllers, que o herdam). `app.rateLimit` só existe
+  // depois que o plugin acima carrega, então o handler é obtido na primeira requisição. Nada de
+  // `app.after(...)`: com `(error) => ...` o avvio dá a falha do plugin por tratada e o servidor
+  // subiria SEM limite; sem o parâmetro, o callback ainda roda e estoura fora do `ready`. Assim, se o
+  // registro do plugin falhar, `app.ready()` rejeita com o erro original e o boot cai.
+  let limit: ReturnType<FastifyInstance['rateLimit']> | undefined;
+  app.addHook('onRequest', async function rateLimitHook(request, reply) {
+    // 404 não tem perfil (e o plugin também não o cobriria); `rateLimit: false` é o opt-out.
+    if (request.is404 || request.routeOptions.config.rateLimit === false) return;
+    limit ??= app.rateLimit();
+    await limit.call(app, request, reply);
   });
 }

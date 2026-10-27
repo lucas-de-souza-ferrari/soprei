@@ -151,6 +151,28 @@ describe('registerRateLimit', () => {
   });
 });
 
+describe('falha ao registrar o plugin', () => {
+  it('app.ready() rejeita: o servidor nunca sobe sem o limiter', async () => {
+    const app = buildServer({
+      logger,
+      readiness: ALL_UP,
+      rateLimit: {
+        // O plugin chama `defineCommand` ao montar o store: aqui ele lança.
+        redis: {
+          defineCommand(): void {
+            throw new Error('falha de teste no registro');
+          },
+        } as unknown as Redis,
+        profiles: PROFILES,
+      },
+    });
+    await assert.rejects(async () => {
+      await app.ready();
+    }, /falha de teste no registro/);
+    await app.close().catch(() => undefined);
+  });
+});
+
 describe('log do fail-open não vaza o IP', () => {
   const IP = '203.0.113.9';
   const PREFIX = 'soprei:ratelimit:';
