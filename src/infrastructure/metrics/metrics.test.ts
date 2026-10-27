@@ -95,6 +95,24 @@ describe('createMetrics', () => {
     assert.match(await metrics.render(), /custom_events_total 1/);
   });
 
+  it('registra as métricas do LLM e do fallback (spec 010)', async () => {
+    const metrics = createMetrics();
+    metrics.observeLlmRequest({ provider: 'mock', result: 'ok', durationSeconds: 0.2 });
+    metrics.observeLlmRequest({ provider: 'mock', result: 'ok', durationSeconds: 0.3 });
+    metrics.observeLlmRequest({ provider: 'mock', result: 'error', durationSeconds: 0.01 });
+    metrics.observeLlmRequest({ provider: 'mock', result: 'timeout', durationSeconds: 15 });
+    metrics.countAttendanceFallback();
+    metrics.countAttendanceFallback();
+
+    const body = await metrics.render();
+    assert.match(body, /llm_requests_total{provider="mock",result="ok"} 2/);
+    assert.match(body, /llm_requests_total{provider="mock",result="error"} 1/);
+    assert.match(body, /llm_requests_total{provider="mock",result="timeout"} 1/);
+    assert.match(body, /llm_request_duration_seconds_count{provider="mock"} 4/);
+    assert.match(body, /attendance_fallbacks_total 2/);
+    assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
+  });
+
   it('não cria labels de alta cardinalidade (clientId, userId)', async () => {
     const metrics = createMetrics();
     metrics.observeHttpRequest({

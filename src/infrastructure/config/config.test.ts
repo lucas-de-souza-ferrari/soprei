@@ -103,6 +103,45 @@ describe('parseConfig', () => {
     }
   });
 
+  describe('atendimento (LLM_PROVIDER, LLM_TIMEOUT_MS, ATTENDANCE_IN_FLIGHT_TIMEOUT_MS)', () => {
+    it('aplica os defaults: provedor mock, 15 s de timeout do LLM e 60 s de "em andamento"', () => {
+      const result = parseConfig(VALID_ENV);
+      assert.ok(result.ok);
+      assert.equal(result.value.LLM_PROVIDER, 'mock');
+      assert.equal(result.value.LLM_TIMEOUT_MS, 15_000);
+      assert.equal(result.value.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS, 60_000);
+    });
+
+    it('converte strings para número', () => {
+      const result = parseConfig({
+        ...VALID_ENV,
+        LLM_PROVIDER: 'mock',
+        LLM_TIMEOUT_MS: '2500',
+        ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '9000',
+      });
+      assert.ok(result.ok);
+      assert.equal(result.value.LLM_TIMEOUT_MS, 2500);
+      assert.equal(result.value.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS, 9000);
+    });
+
+    const invalid: readonly (readonly [string, string])[] = [
+      ['LLM_PROVIDER', 'openai'],
+      ['LLM_PROVIDER', ''],
+      ['LLM_TIMEOUT_MS', '0'],
+      ['LLM_TIMEOUT_MS', '120001'],
+      ['LLM_TIMEOUT_MS', 'rapido'],
+      ['ATTENDANCE_IN_FLIGHT_TIMEOUT_MS', '0'],
+      ['ATTENDANCE_IN_FLIGHT_TIMEOUT_MS', '3600001'],
+    ];
+    for (const [name, value] of invalid) {
+      it(`rejeita ${name}=${value === '' ? '(vazio)' : value}`, () => {
+        const result = parseConfig({ ...VALID_ENV, [name]: value });
+        assert.equal(result.ok, false);
+        assert.match(result.error.message, new RegExp(name));
+      });
+    }
+  });
+
   describe('ADMIN_API_KEY', () => {
     const KEY = 'a'.repeat(32);
 

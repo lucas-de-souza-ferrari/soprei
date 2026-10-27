@@ -3,6 +3,9 @@ import { z } from 'zod';
 export const ADMIN_API_KEY_MIN_LENGTH = 32;
 export const METRICS_TOKEN_MIN_LENGTH = 32;
 
+/** Provedores de LLM disponíveis. O real entra em spec própria; por ora só o `mock`. */
+export const LLM_PROVIDERS = ['mock'] as const;
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -32,6 +35,12 @@ export const envSchema = z
       .string()
       .optional()
       .transform((value) => (value === '' ? undefined : value)),
+    // Atendimento (spec 010). Provedor de LLM e prazo máximo de uma chamada ao modelo.
+    LLM_PROVIDER: z.enum(LLM_PROVIDERS).default('mock'),
+    LLM_TIMEOUT_MS: z.coerce.number().int().min(1).max(120_000).default(15_000),
+    // Mensagem do contato sem resposta há mais que isto deixa de ser "em andamento": a
+    // retentativa com o mesmo externalId completa o fluxo em vez de receber 409.
+    ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: z.coerce.number().int().min(1).max(3_600_000).default(60_000),
   })
   .superRefine((env, ctx) => {
     if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < METRICS_TOKEN_MIN_LENGTH) {
