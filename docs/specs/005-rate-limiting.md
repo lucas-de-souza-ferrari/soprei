@@ -1,6 +1,6 @@
 # 005 — Rate limiting
 
-- **Status:** aprovada pelo dono em 2026-10-27, com todas as recomendações da seção "Decisões" (reescrita no mesmo dia contra o código real e contra o que a spec 011 exige)
+- **Status:** concluída (aprovada pelo dono em 2026-10-27 com todas as recomendações da seção "Decisões"; revisada pelo agente `reviewer` com um bloqueante e dois importantes corrigidos; CI verde e merge confirmados pelo dono)
 - **Branch:** `spec/005-rate-limiting`
 - **Depende de:** 002 e 004 (concluídas); é pré-requisito da 011 (canal WhatsApp, primeiro endpoint público)
 
