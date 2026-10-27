@@ -344,9 +344,26 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
       const response = await send(clientId, { contactRef: 'c1', text: 'oi' });
       const requestId = response.headers['x-request-id'];
       const mine = logs.lines().filter((line) => line.requestId === requestId);
-      assert.ok(mine.length >= 2, 'log do atendimento e log da requisição');
-      for (const line of mine) assert.equal(line.clientId, clientId);
-      assert.ok(mine.some((line) => line.msg === 'requisição concluída'));
+      // Se falhar (já aconteceu só no Node 22 do CI), a mensagem lista todas as linhas do pedido
+      // com os campos de contexto; nunca imprime conteúdo de mensagem nem persona.
+      const diagnosis = JSON.stringify(
+        mine.map((line) => ({
+          msg: line.msg,
+          level: line.level,
+          statusCode: line.statusCode,
+          operation: line.operation,
+          clientId: line.clientId,
+          keys: Object.keys(line).sort(),
+        })),
+      );
+      assert.ok(mine.length >= 2, `log do atendimento e log da requisição: ${diagnosis}`);
+      for (const line of mine) {
+        assert.equal(line.clientId, clientId, `linha sem o clientId do path: ${diagnosis}`);
+      }
+      assert.ok(
+        mine.some((line) => line.msg === 'requisição concluída'),
+        `falta o log de fim da requisição: ${diagnosis}`,
+      );
     });
   });
 });
