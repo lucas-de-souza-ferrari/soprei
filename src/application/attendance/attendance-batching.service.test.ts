@@ -26,11 +26,15 @@ const LIMITS: BatchLimits = { maxMessages: 10, maxChars: 8_000 };
 class FakeMetrics implements AttendanceMetrics {
   readonly batches: { size: number; result: BatchResult }[] = [];
   fallbacks = 0;
+  unsentReplies = 0;
   observeLlmRequest(): void {
     // não interessa aqui
   }
   countAttendanceFallback(): void {
     this.fallbacks += 1;
+  }
+  countUnsentReply(): void {
+    this.unsentReplies += 1;
   }
   observeAttendanceBatch(sample: { size: number; result: BatchResult }): void {
     this.batches.push(sample);
@@ -296,8 +300,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
       'nenhuma mensagem perdida',
     );
     assert.deepEqual(
-      // Os turnos não são enviados neste teste: cada um avisa que o anterior ficou sem `sentAt`.
-      h.metrics.batches.map((batch) => batch.result).filter((r) => r !== 'unsent_previous'),
+      h.metrics.batches.map((batch) => batch.result),
       ['capped', 'capped', 'answered'],
     );
     // O histórico de cada turno inclui o turno anterior (mensagens e a resposta, na ordem).
@@ -536,8 +539,9 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     assert.ok(!h.logs.raw().includes('um'.repeat(10)), 'sem texto no aviso');
     assert.deepEqual(
       h.metrics.batches.map((batch) => batch.result),
-      ['answered', 'unsent_previous', 'answered'],
+      ['answered', 'answered'],
     );
+    assert.equal(h.metrics.unsentReplies, 1);
   });
 
   it('não avisa quando a resposta anterior já foi enviada', async () => {
@@ -552,7 +556,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     await accept(h, client, 'dois');
     await h.service.respondToPending(client.id, 'contato-1', LIMITS);
     assert.ok(!h.logs.raw().includes('não será reenviada'));
-    assert.ok(h.metrics.batches.every((batch) => batch.result !== 'unsent_previous'));
+    assert.equal(h.metrics.unsentReplies, 0);
   });
 
   it('resumeUnsent não reenvia resposta que já tem sentAt', async () => {

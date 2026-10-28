@@ -691,7 +691,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
           url: '/metrics',
           headers: { authorization: `Bearer ${METRICS_TOKEN}` },
         });
-        assert.match(metrics.body, /attendance_batches_total\{result="unsent_previous"\} 1/);
+        assert.match(metrics.body, /attendance_unsent_replies_total 1/);
         const raw = h.logs.raw();
         for (const secret of ['primeira', 'segunda', contact, PERSONA]) {
           assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);

@@ -45,13 +45,14 @@ export interface AttendanceMetrics {
    * `result` é `answered`, `empty` (nada pendente) ou `capped` (sobrou excedente).
    */
   observeAttendanceBatch?(sample: { readonly size: number; readonly result: BatchResult }): void;
+  /**
+   * A resposta do turno anterior ficou gravada sem `sentAt` e este turno saiu mesmo assim (spec 013).
+   * Contador sem labels.
+   */
+  countUnsentReply?(): void;
 }
 
-/**
- * `unsent_previous` não é um lote: conta o evento "a resposta do turno anterior ficou gravada sem
- * `sentAt` e este turno saiu mesmo assim" (tamanho 0, fora do histograma).
- */
-export type BatchResult = 'answered' | 'empty' | 'capped' | 'unsent_previous';
+export type BatchResult = 'answered' | 'empty' | 'capped';
 
 /**
  * O que o serviço precisa do logger. O do Pino serve; o contexto da requisição (`requestId`,
@@ -556,9 +557,9 @@ export class AttendanceService {
 
   private recordUnsentPrevious(): void {
     try {
-      this.deps.metrics?.observeAttendanceBatch?.({ size: 0, result: 'unsent_previous' });
+      this.deps.metrics?.countUnsentReply?.();
     } catch (err) {
-      this.deps.logger.warn({ err }, 'falha ao registrar métrica do lote');
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de resposta não enviada');
     }
   }
 

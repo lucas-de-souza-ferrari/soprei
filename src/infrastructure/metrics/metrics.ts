@@ -26,7 +26,7 @@ export interface LlmRequestSample {
 }
 
 /** Resultado de uma resposta de lote (spec 013): `answered`, `empty` (nada pendente) ou `capped` (sobrou excedente). */
-export type BatchResult = 'answered' | 'empty' | 'capped' | 'unsent_previous';
+export type BatchResult = 'answered' | 'empty' | 'capped';
 
 export interface BatchSample {
   /** Quantas mensagens do contato a resposta juntou (0 em `empty`). */
@@ -94,6 +94,8 @@ export interface Metrics {
   countAttendanceFallback(): void;
   /** Uma resposta de lote terminou (spec 013). Sem `clientId`, telefone nem texto em label. */
   observeAttendanceBatch(sample: BatchSample): void;
+  /** Um turno saiu com a resposta do turno anterior ainda sem `sentAt` (spec 013). Sem labels. */
+  countUnsentReply(): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
   /** O destino de uma mensagem de entrada do canal. */
@@ -186,8 +188,14 @@ export function createMetrics(): Metrics {
   });
   const batches = new Counter({
     name: 'attendance_batches_total',
-    help: 'Respostas de lote do canal por resultado (answered, empty, capped, unsent_previous)',
+    help: 'Respostas de lote do canal por resultado (answered, empty, capped)',
     labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
+  const unsentReplies = new Counter({
+    name: 'attendance_unsent_replies_total',
+    help: 'Turnos que responderam as pendentes com a resposta anterior gravada e ainda sem sentAt',
     registers: [registry],
   });
 
@@ -279,6 +287,9 @@ export function createMetrics(): Metrics {
       batches.inc({ result });
       // `empty` não é uma resposta: não entra no histograma de tamanho.
       if (size > 0) batchSize.observe(size);
+    },
+    countUnsentReply() {
+      unsentReplies.inc();
     },
     countWebhookRequest(channel, result) {
       webhookRequests.inc({ channel, result });
