@@ -1311,7 +1311,12 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
       ]);
       await deliver(h, payload);
       await waitFor(() => graph.requests.length === 2, 'duas respostas');
-      await waitFor(async () => (await h.queue.jobCounts()).completed === 2, 'jobs concluídos');
+      // O envio e o log da marca vêm depois da requisição ao Graph: espera os dois lotes terminarem.
+      await waitFor(
+        () =>
+          h.logs.lines().filter((line) => line.msg === 'resposta enviada ao contato').length === 2,
+        'os dois envios registrados em log',
+      );
       const sent = h.logs.lines().filter((line) => line.msg === 'resposta enviada ao contato');
       assert.deepEqual(
         sent.map((line) => line.clientId),
