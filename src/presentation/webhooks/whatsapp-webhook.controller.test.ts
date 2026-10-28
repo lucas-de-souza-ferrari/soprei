@@ -319,7 +319,7 @@ describe('POST /webhooks/whatsapp (assinatura e corpo cru)', () => {
     });
   });
 
-  it('corpo acima de 1 MiB é recusado, mesmo assinado, e nada é processado', async () => {
+  it('corpo acima de 3 MiB é recusado, mesmo assinado, e nada é processado', async () => {
     await withServer(async (h) => {
       const huge = JSON.stringify({ padding: 'x'.repeat(WEBHOOK_BODY_LIMIT_BYTES + 10) });
       const response = await post(h, huge);
@@ -328,14 +328,16 @@ describe('POST /webhooks/whatsapp (assinatura e corpo cru)', () => {
     });
   });
 
-  it('corpo logo abaixo de 1 MiB, assinado, é aceito', async () => {
+  it('corpo logo abaixo de 3 MiB, assinado, é aceito', async () => {
     await withServer(async (h) => {
       const near = JSON.stringify({
         object: 'whatsapp_business_account',
         entry: [],
         padding: 'x'.repeat(WEBHOOK_BODY_LIMIT_BYTES - 200),
       });
+      assert.ok(WEBHOOK_BODY_LIMIT_BYTES >= 3_000_000, 'cobre os 3 MB da Meta');
       assert.ok(Buffer.byteLength(near) < WEBHOOK_BODY_LIMIT_BYTES);
+      assert.ok(Buffer.byteLength(near) > 2_000_000, 'bem acima do antigo limite de 1 MiB');
       assert.equal((await post(h, near)).statusCode, 200);
     });
   });

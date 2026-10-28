@@ -13,8 +13,12 @@ import { parseWebhookBody } from './whatsapp-webhook.schemas.js';
 /** Nome do canal nos labels de métrica. */
 const CHANNEL = 'whatsapp';
 
-/** Limite do corpo do webhook: 1 MiB. */
-export const WEBHOOK_BODY_LIMIT_BYTES = 1_048_576;
+/**
+ * Limite do corpo do webhook: 3 MiB. A documentação da Meta diz que "Webhook payloads can be up to
+ * 3 MB" (developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/overview); 3 MiB
+ * (3 145 728 bytes) cobre os 3 MB (3 000 000) com folga. Acima disso o corpo é recusado antes de ler.
+ */
+export const WEBHOOK_BODY_LIMIT_BYTES = 3 * 1024 * 1024;
 
 export const WHATSAPP_WEBHOOK_ROUTE = '/webhooks/whatsapp';
 
@@ -62,7 +66,7 @@ const verificationQuerySchema = z.object({
  *
  * - `GET`: handshake de verificação (`hub.verify_token` em tempo constante; a query string **nunca**
  *   vai a log, porque carrega o token).
- * - `POST`: corpo lido cru (parser de JSON encapsulado só aqui, Buffer, 1 MiB), assinatura
+ * - `POST`: corpo lido cru (parser de JSON encapsulado só aqui, Buffer, 3 MiB), assinatura
  *   HMAC-SHA256 em tempo constante **antes** de interpretar o corpo, schema tolerante, e resposta
  *   200 logo depois de enfileirar: nada de LLM nem de chamada ao canal no fluxo síncrono. O
  *   `clientId` nunca vem de cabeçalho, query ou corpo: nasce da resolução do número do negócio no
