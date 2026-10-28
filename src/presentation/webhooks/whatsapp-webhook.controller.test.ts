@@ -146,24 +146,32 @@ describe('GET /webhooks/whatsapp (verificação)', () => {
   it('token errado, ausente, modo diferente ou challenge ausente/inválido: 403, sem eco do challenge', async () => {
     await withServer(async (h) => {
       const cases: Record<string, string>[] = [
-        { 'hub.mode': 'subscribe', 'hub.verify_token': 'errado', 'hub.challenge': '777' },
-        { 'hub.mode': 'subscribe', 'hub.challenge': '777' },
-        { 'hub.mode': 'unsubscribe', 'hub.verify_token': VERIFY_TOKEN, 'hub.challenge': '777' },
-        { 'hub.verify_token': VERIFY_TOKEN, 'hub.challenge': '777' },
+        { 'hub.mode': 'subscribe', 'hub.verify_token': 'errado', 'hub.challenge': 'zzchallenge1' },
+        { 'hub.mode': 'subscribe', 'hub.challenge': 'zzchallenge1' },
+        {
+          'hub.mode': 'unsubscribe',
+          'hub.verify_token': VERIFY_TOKEN,
+          'hub.challenge': 'zzchallenge1',
+        },
+        { 'hub.verify_token': VERIFY_TOKEN, 'hub.challenge': 'zzchallenge1' },
         { 'hub.mode': 'subscribe', 'hub.verify_token': VERIFY_TOKEN },
         { 'hub.mode': 'subscribe', 'hub.verify_token': VERIFY_TOKEN, 'hub.challenge': '<script>' },
         {
           'hub.mode': 'subscribe',
           'hub.verify_token': VERIFY_TOKEN.slice(0, -1),
-          'hub.challenge': '777',
+          'hub.challenge': 'zzchallenge1',
         },
-        { 'hub.mode': 'subscribe', 'hub.verify_token': `${VERIFY_TOKEN}x`, 'hub.challenge': '777' },
+        {
+          'hub.mode': 'subscribe',
+          'hub.verify_token': `${VERIFY_TOKEN}x`,
+          'hub.challenge': 'zzchallenge1',
+        },
         {},
       ];
       for (const query of cases) {
         const response = await h.app.inject({ method: 'GET', url: verifyUrl(query) });
         assert.equal(response.statusCode, 403, JSON.stringify(query));
-        assert.ok(!response.body.includes('777'), 'não ecoa o challenge');
+        assert.ok(!response.body.includes('zzchallenge1'), 'não ecoa o challenge');
         assert.match(String(response.headers['content-type']), /^application\/json/);
       }
       // Parâmetro repetido também é recusado.
@@ -190,7 +198,7 @@ describe('GET /webhooks/whatsapp (verificação)', () => {
         url: verifyUrl({
           'hub.mode': 'subscribe',
           'hub.verify_token': VERIFY_TOKEN,
-          'hub.challenge': '4242',
+          'hub.challenge': 'zzchallenge2',
         }),
       });
       await h.app.inject({
@@ -198,7 +206,7 @@ describe('GET /webhooks/whatsapp (verificação)', () => {
         url: verifyUrl({
           'hub.mode': 'subscribe',
           'hub.verify_token': 'errado-9981',
-          'hub.challenge': '4243',
+          'hub.challenge': 'zzchallenge3',
         }),
       });
       const raw = h.logs.raw();
@@ -209,8 +217,8 @@ describe('GET /webhooks/whatsapp (verificação)', () => {
         'errado-9981',
         'hub.verify_token',
         'hub.challenge',
-        '4242',
-        '4243',
+        'zzchallenge2',
+        'zzchallenge3',
       ]) {
         assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
       }
