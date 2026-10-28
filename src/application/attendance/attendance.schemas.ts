@@ -25,14 +25,17 @@ export const messageTextSchema = z
   // O Postgres recusa NUL em texto (22021): vira 400 aqui, não 500 no banco.
   .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL');
 
+/** Identificador do contato definido pelo canal: texto livre, sem caracteres de controle. */
+export const contactRefSchema = z
+  .string()
+  .regex(NO_CONTROL_CHARS, NO_CONTROL_MESSAGE)
+  .trim()
+  .min(1)
+  .max(CONTACT_REF_MAX_LENGTH);
+
 export const inboundMessageSchema = z
   .object({
-    contactRef: z
-      .string()
-      .regex(NO_CONTROL_CHARS, NO_CONTROL_MESSAGE)
-      .trim()
-      .min(1)
-      .max(CONTACT_REF_MAX_LENGTH),
+    contactRef: contactRefSchema,
     text: messageTextSchema,
     externalId: z
       .string()
@@ -45,3 +48,15 @@ export const inboundMessageSchema = z
   .strict();
 
 export type InboundMessage = z.infer<typeof inboundMessageSchema>;
+
+/** Limites de uma resposta que junta várias mensagens do contato (spec 013). */
+export const batchLimitsSchema = z
+  .object({
+    /** Máximo de mensagens somadas numa resposta. */
+    maxMessages: z.number().int().min(1),
+    /** Máximo de caracteres somados; uma única mensagem maior que isto segue sozinha. */
+    maxChars: z.number().int().min(1),
+  })
+  .strict();
+
+export type BatchLimits = z.infer<typeof batchLimitsSchema>;
