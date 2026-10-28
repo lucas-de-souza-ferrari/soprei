@@ -129,6 +129,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 **Próximas, nesta ordem**
 
 8. **Canal WhatsApp, parte A ([spec 011](specs/011-canal-whatsapp.md), aprovada em 2026-10-27, implementada em 2026-10-28 na branch `spec/011-canal-whatsapp`; aguardando revisão do `reviewer`, CI, teste manual com o número de teste da Meta e merge):** webhook com verificação e assinatura, fila BullMQ, envio da resposta pela Cloud API, mapeamento `phone_number_id` → cliente, número de teste da Meta, LLM ainda `mock`. Depende da 005, concluída.
+9. **Agrupamento de mensagens rápidas ([spec 013](specs/013-agrupamento-de-mensagens.md), aprovada em 2026-10-28):** janela de espera deslizante por contato; cada mensagem é gravada no banco ao chegar (decisão do dono, depois de avaliar um buffer no Redis e descartá-lo) e o sistema responde uma vez a todas as pendentes. Pedido do dono depois do teste manual da 011 (2026-10-28), que funcionou de ponta a ponta com o número de teste da Meta.
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
 
