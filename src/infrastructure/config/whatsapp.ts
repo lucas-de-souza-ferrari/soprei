@@ -18,6 +18,18 @@ export interface QueueSettings {
   readonly keepFailedSeconds: number;
 }
 
+/** Agrupamento de mensagens rápidas do canal (spec 013). */
+export interface BatchSettings {
+  /** Espera sem mensagem nova antes de responder; 0 desliga a espera. */
+  readonly windowMs: number;
+  /** Teto de espera, contado desde a mais antiga mensagem pendente. */
+  readonly maxWaitMs: number;
+  /** Máximo de mensagens somadas numa resposta. */
+  readonly maxMessages: number;
+  /** Máximo de caracteres somados numa resposta (uma única mensagem maior segue sozinha). */
+  readonly maxChars: number;
+}
+
 /**
  * Configuração do canal, ou `undefined` com `WHATSAPP_ENABLED=false`. A validação do schema
  * já garantiu os três segredos quando habilitado; se faltar algum aqui é erro de programação.
@@ -57,4 +69,13 @@ export function queueSettings(config: Config): QueueSettings {
 export function trustProxyMode(setting: TrustProxySetting): 'off' | 'all' | 'list' {
   if (setting === false) return 'off';
   return setting === true ? 'all' : 'list';
+}
+
+export function batchSettings(config: Config): BatchSettings {
+  return {
+    windowMs: config.CHANNEL_BATCH_WINDOW_MS,
+    maxWaitMs: config.CHANNEL_BATCH_MAX_WAIT_MS,
+    maxMessages: config.CHANNEL_BATCH_MAX_MESSAGES,
+    maxChars: config.CHANNEL_BATCH_MAX_CHARS,
+  };
 }

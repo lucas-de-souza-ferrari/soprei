@@ -552,4 +552,91 @@ describe('parseConfig', () => {
       assert.ok(parseConfig({ ...VALID_ENV, QUEUE_BACKOFF_MS: '1000' }).ok);
     });
   });
+
+  describe('agrupamento de mensagens do canal (spec 013)', () => {
+    const ENABLED = {
+      ...VALID_ENV,
+      WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
+      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
+      WHATSAPP_ACCESS_TOKEN: 'token-de-envio-1234',
+      WHATSAPP_ENABLED: 'true',
+      TRUST_PROXY: 'false',
+    };
+
+    it('aplica os defaults: janela de 5 s, teto de 20 s, 10 mensagens e 8 000 caracteres', () => {
+      const result = parseConfig(VALID_ENV);
+      assert.ok(result.ok);
+      assert.equal(result.value.CHANNEL_BATCH_WINDOW_MS, 5_000);
+      assert.equal(result.value.CHANNEL_BATCH_MAX_WAIT_MS, 20_000);
+      assert.equal(result.value.CHANNEL_BATCH_MAX_MESSAGES, 10);
+      assert.equal(result.value.CHANNEL_BATCH_MAX_CHARS, 8_000);
+      assert.ok(parseConfig(ENABLED).ok);
+    });
+
+    it('converte strings para número e aceita os extremos', () => {
+      const result = parseConfig({
+        ...ENABLED,
+        CHANNEL_BATCH_WINDOW_MS: '0',
+        CHANNEL_BATCH_MAX_WAIT_MS: '0',
+        CHANNEL_BATCH_MAX_MESSAGES: '50',
+        CHANNEL_BATCH_MAX_CHARS: '24000',
+      });
+      assert.ok(result.ok);
+      assert.equal(result.value.CHANNEL_BATCH_WINDOW_MS, 0);
+      assert.equal(result.value.CHANNEL_BATCH_MAX_MESSAGES, 50);
+      assert.equal(result.value.CHANNEL_BATCH_MAX_CHARS, 24_000);
+      const high = parseConfig({
+        ...ENABLED,
+        CHANNEL_BATCH_WINDOW_MS: '60000',
+        CHANNEL_BATCH_MAX_WAIT_MS: '300000',
+        CHANNEL_BATCH_MAX_MESSAGES: '1',
+        CHANNEL_BATCH_MAX_CHARS: '1',
+      });
+      assert.ok(high.ok);
+    });
+
+    it('rejeita valor fora da faixa, não inteiro ou não numérico, citando a variável', () => {
+      for (const [name, value] of [
+        ['CHANNEL_BATCH_WINDOW_MS', '-1'],
+        ['CHANNEL_BATCH_WINDOW_MS', '60001'],
+        ['CHANNEL_BATCH_WINDOW_MS', '1.5'],
+        ['CHANNEL_BATCH_WINDOW_MS', 'abc'],
+        ['CHANNEL_BATCH_MAX_WAIT_MS', '-1'],
+        ['CHANNEL_BATCH_MAX_WAIT_MS', '300001'],
+        ['CHANNEL_BATCH_MAX_MESSAGES', '0'],
+        ['CHANNEL_BATCH_MAX_MESSAGES', '51'],
+        ['CHANNEL_BATCH_MAX_CHARS', '0'],
+        ['CHANNEL_BATCH_MAX_CHARS', '24001'],
+      ] as const) {
+        const result = parseConfig({ ...ENABLED, [name]: value });
+        assert.equal(result.ok, false, `${name}=${value}`);
+        assert.match(result.error.message, new RegExp(name));
+      }
+    });
+
+    it('CHANNEL_BATCH_MAX_WAIT_MS menor que a janela é rejeitado; igual passa', () => {
+      const bad = parseConfig({
+        ...ENABLED,
+        CHANNEL_BATCH_WINDOW_MS: '8000',
+        CHANNEL_BATCH_MAX_WAIT_MS: '7999',
+      });
+      assert.equal(bad.ok, false);
+      assert.match(bad.error.message, /CHANNEL_BATCH_MAX_WAIT_MS/);
+      assert.ok(
+        parseConfig({
+          ...ENABLED,
+          CHANNEL_BATCH_WINDOW_MS: '8000',
+          CHANNEL_BATCH_MAX_WAIT_MS: '8000',
+        }).ok,
+      );
+      // Com o canal desligado a regra cruzada não se aplica (como a do backoff da fila).
+      assert.ok(
+        parseConfig({
+          ...VALID_ENV,
+          CHANNEL_BATCH_WINDOW_MS: '8000',
+          CHANNEL_BATCH_MAX_WAIT_MS: '1000',
+        }).ok,
+      );
+    });
+  });
 });

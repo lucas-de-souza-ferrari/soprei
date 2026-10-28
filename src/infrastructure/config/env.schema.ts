@@ -104,6 +104,12 @@ export const envSchema = z
     QUEUE_BACKOFF_MS: z.coerce.number().int().min(1).max(3_600_000).default(10_000),
     QUEUE_KEEP_COMPLETED_SECONDS: z.coerce.number().int().min(1).max(2_592_000).default(3_600),
     QUEUE_KEEP_FAILED_SECONDS: z.coerce.number().int().min(1).max(2_592_000).default(86_400),
+    // Agrupamento de mensagens rápidas do canal (spec 013). Janela deslizante com teto de espera;
+    // `CHANNEL_BATCH_WINDOW_MS=0` desliga a espera. Só valem com o canal habilitado.
+    CHANNEL_BATCH_WINDOW_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
+    CHANNEL_BATCH_MAX_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
+    CHANNEL_BATCH_MAX_MESSAGES: z.coerce.number().int().min(1).max(50).default(10),
+    CHANNEL_BATCH_MAX_CHARS: z.coerce.number().int().min(1).max(24_000).default(8_000),
     // IP atrás de proxy: false | true | lista de IPs/CIDRs dos proxies (ver trust-proxy.ts).
     TRUST_PROXY: z
       .string()
@@ -173,6 +179,8 @@ function refineWhatsapp(
     readonly QUEUE_ATTEMPTS: number;
     readonly QUEUE_BACKOFF_MS: number;
     readonly ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: number;
+    readonly CHANNEL_BATCH_WINDOW_MS: number;
+    readonly CHANNEL_BATCH_MAX_WAIT_MS: number;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -233,6 +241,15 @@ function refineWhatsapp(
       code: 'custom',
       path: ['QUEUE_BACKOFF_MS'],
       message: `QUEUE_BACKOFF_MS x (2^(QUEUE_ATTEMPTS - 1) - 1) = ${String(totalBackoffMs)} ms precisa ser maior que ATTENDANCE_IN_FLIGHT_TIMEOUT_MS (${String(env.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS)} ms), senão uma retentativa depois de queda do processo bateria em 409 até acabarem as tentativas`,
+    });
+  }
+  // O teto de espera conta desde a primeira mensagem pendente; menor que a janela, ele cortaria a
+  // espera de qualquer mensagem isolada e a janela deslizante deixaria de existir.
+  if (env.CHANNEL_BATCH_MAX_WAIT_MS < env.CHANNEL_BATCH_WINDOW_MS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['CHANNEL_BATCH_MAX_WAIT_MS'],
+      message: `precisa ser maior ou igual a CHANNEL_BATCH_WINDOW_MS (${String(env.CHANNEL_BATCH_WINDOW_MS)} ms)`,
     });
   }
 }
