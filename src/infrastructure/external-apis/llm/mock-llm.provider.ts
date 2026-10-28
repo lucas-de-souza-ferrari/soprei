@@ -5,6 +5,7 @@ import {
   type LlmProvider,
   type LlmReply,
 } from '../../../application/ports/llm-provider.js';
+import { ATTENDANCE_STYLE_INSTRUCTION } from '../../../application/attendance/attendance.service.js';
 import { ExternalServiceError } from '../../../shared/errors/index.js';
 import { Result } from '../../../shared/types/index.js';
 
@@ -78,7 +79,12 @@ export class MockLlmProvider implements LlmProvider {
     if (text.includes(MOCK_EMPTY_MARKER)) return Result.ok({ text: '' });
     if (text.includes(MOCK_HUGE_MARKER)) return Result.ok({ text: 'x'.repeat(5000) });
 
-    const persona = input.systemPrompt.slice(0, PERSONA_PREVIEW_CHARS);
+    // Cita só o começo da persona: a instrução fixa de estilo (spec 014) vem depois dela e não entra.
+    const suffix = `\n\n${ATTENDANCE_STYLE_INSTRUCTION}`;
+    const personaText = input.systemPrompt.endsWith(suffix)
+      ? input.systemPrompt.slice(0, -suffix.length)
+      : input.systemPrompt;
+    const persona = personaText.slice(0, PERSONA_PREVIEW_CHARS);
     const echo = text.slice(0, ECHO_MAX_CHARS);
     return Result.ok({
       text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})`,

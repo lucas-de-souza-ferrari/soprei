@@ -4,6 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import {
   ATTENDANCE_FALLBACK_TEXT,
   AttendanceService,
+  ATTENDANCE_STYLE_INSTRUCTION,
 } from '../../application/attendance/attendance.service.js';
 import type { Client } from '../../domain/index.js';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors/index.js';
@@ -65,6 +66,11 @@ async function clientWithPersona(label: string, persona?: string): Promise<Clien
 const callsFor = (prefix: string) =>
   llm.calls.filter((call) => call.userMessage.startsWith(prefix));
 
+/** O systemPrompt que o serviço envia: persona e, depois, a instrução fixa de estilo (spec 014). */
+function withStyle(persona: string): string {
+  return `${persona}\n\n${ATTENDANCE_STYLE_INSTRUCTION}`;
+}
+
 describe('atendimento contra o PostgreSQL de testes', () => {
   it('pipeline completo: conversa por contactRef, mensagem do contato e resposta gravadas', async () => {
     const client = await clientWithPersona('att-e2e', 'Persona-E2E');
@@ -103,7 +109,7 @@ describe('atendimento contra o PostgreSQL de testes', () => {
     assert.ok(stored.every((m) => !m.isFallback));
 
     const [call] = callsFor('e2e-dois');
-    assert.equal(call?.systemPrompt, 'Persona-E2E');
+    assert.equal(call?.systemPrompt, withStyle('Persona-E2E'));
     assert.deepEqual(
       call.history.map((turn) => turn.role),
       ['user', 'assistant'],
@@ -350,8 +356,12 @@ describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e me
   it('a persona de um nunca é usada no outro', () => {
     assert.equal(callsFor('isoA-').length, 4);
     assert.equal(callsFor('isoB-').length, 4);
-    assert.ok(callsFor('isoA-').every((call) => call.systemPrompt === 'Persona-Alfa-ISO'));
-    assert.ok(callsFor('isoB-').every((call) => call.systemPrompt === 'Persona-Beta-ISO'));
+    assert.ok(
+      callsFor('isoA-').every((call) => call.systemPrompt === withStyle('Persona-Alfa-ISO')),
+    );
+    assert.ok(
+      callsFor('isoB-').every((call) => call.systemPrompt === withStyle('Persona-Beta-ISO')),
+    );
   });
 
   it('o mesmo externalId em clientes diferentes não colide nem devolve a resposta do outro', async () => {
@@ -403,11 +413,11 @@ describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e me
       'há histórico (não é vácuo)',
     );
     for (const call of callsFor('concA-')) {
-      assert.equal(call.systemPrompt, 'Persona-Alfa-ISO');
+      assert.equal(call.systemPrompt, withStyle('Persona-Alfa-ISO'));
       assert.ok(call.history.every((turn) => !turn.content.includes('concB')));
     }
     for (const call of callsFor('concB-')) {
-      assert.equal(call.systemPrompt, 'Persona-Beta-ISO');
+      assert.equal(call.systemPrompt, withStyle('Persona-Beta-ISO'));
       assert.ok(call.history.every((turn) => !turn.content.includes('concA')));
     }
   });

@@ -3,7 +3,10 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { AttendanceService } from '../../application/attendance/attendance.service.js';
+import {
+  AttendanceService,
+  ATTENDANCE_STYLE_INSTRUCTION,
+} from '../../application/attendance/attendance.service.js';
 import { ClientService } from '../../application/clients/client.service.js';
 import type { LlmGenerateInput, LlmProvider } from '../../application/ports/llm-provider.js';
 import { Result } from '../../shared/types/index.js';
@@ -154,6 +157,11 @@ const metricsBody = async (): Promise<string> =>
       headers: { authorization: `Bearer ${METRICS_TOKEN}` },
     })
   ).body;
+
+/** O systemPrompt que o serviço envia: persona e, depois, a instrução fixa de estilo (spec 014). */
+function withStyle(persona: string): string {
+  return `${persona}\n\n${ATTENDANCE_STYLE_INSTRUCTION}`;
+}
 
 describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes', () => {
   it('fluxo completo: persona definida por PATCH, duas mensagens, duplicata, histórico e listagens', async () => {
@@ -350,11 +358,11 @@ describe('isolamento via HTTP (clientes A e B)', () => {
     assert.equal(callsA[1]?.history.length, 2, 'a 2ª mensagem de A tem histórico (não é vácuo)');
     assert.equal(callsB[1]?.history.length, 2, 'a 2ª mensagem de B tem histórico (não é vácuo)');
     for (const call of callsA) {
-      assert.equal(call.systemPrompt, 'Persona-A-HTTP');
+      assert.equal(call.systemPrompt, withStyle('Persona-A-HTTP'));
       assert.ok(call.history.every((turn) => !turn.content.includes('httpB-')));
     }
     for (const call of callsB) {
-      assert.equal(call.systemPrompt, 'Persona-B-HTTP');
+      assert.equal(call.systemPrompt, withStyle('Persona-B-HTTP'));
       assert.ok(call.history.every((turn) => !turn.content.includes('httpA-')));
     }
 

@@ -105,6 +105,32 @@ describe('AttendanceService: cancelamento, tokens e estilo (spec 014)', () => {
     assert.equal(aborted, true, 'o provedor foi cancelado');
   });
 
+  it('o [[mock:hang]] do mock termina quando o serviço aborta no prazo (não fica pendurado)', async (t) => {
+    t.after(keepEventLoopAlive());
+    const mock = new MockLlmProvider();
+    const settled: Promise<unknown>[] = [];
+    const spy: LlmProvider = {
+      name: 'mock',
+      generate: (input, options) => {
+        const pending = mock.generate(input, options);
+        settled.push(pending);
+        return pending;
+      },
+    };
+    const { result, metrics } = await run(spy, 30, 'oi [[mock:hang]]');
+    assert.equal(result.reply.isFallback, true);
+    assert.deepEqual(metrics.llm, ['timeout']);
+    const outcome = await Promise.race([
+      Promise.all(settled).then(() => 'terminou'),
+      new Promise((resolve) =>
+        setTimeout(() => {
+          resolve('pendurado');
+        }, 2_000),
+      ),
+    ]);
+    assert.equal(outcome, 'terminou');
+  });
+
   it('erro do provedor com errorType refusal ou max_tokens vira resultado refusal ou truncated', async () => {
     for (const [errorType, expected] of [
       ['refusal', 'refusal'],
