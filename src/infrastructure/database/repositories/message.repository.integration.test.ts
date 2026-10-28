@@ -642,3 +642,209 @@ describe('listBefore (spec 011): histórico anterior a uma mensagem', () => {
     assert.deepEqual(await repo.listBefore(clientA.id, conversationA.id, randomUUID(), 5), []);
   });
 });
+
+describe('listPending e markAnswered (spec 013): mensagens do contato à espera de resposta', () => {
+  /** Conversa nova com `count` mensagens do contato, em instantes distintos e crescentes. */
+  async function freshPending(client: Client, contact: string, count: number) {
+    const conversation = await conversations.findOrCreateByContact(client.id, contact);
+    const base = Date.UTC(2026, 2, 1);
+    const users: Message[] = [];
+    for (let i = 0; i < count; i += 1) {
+      users.push(
+        await repo.create(client.id, {
+          conversationId: conversation.id,
+          role: 'USER',
+          content: `pendente ${String(i)}`,
+          createdAt: new Date(base + i * 1000),
+        }),
+      );
+    }
+    return { conversation, users };
+  }
+
+  async function replyTo(client: Client, conversation: Conversation, last: Message) {
+    return repo.create(client.id, {
+      conversationId: conversation.id,
+      role: 'ASSISTANT',
+      content: 'resposta do lote',
+      replyToId: last.id,
+      createdAt: new Date(last.createdAt.getTime() + 1),
+    });
+  }
+
+  it('lista as pendentes da mais antiga para a mais nova, respeitando o limite', async () => {
+    const { conversation, users } = await freshPending(clientA, 'pend-order', 4);
+    const all = await repo.listPending(clientA.id, conversation.id, 10);
+    assert.deepEqual(
+      all.map((message) => message.id),
+      users.map((message) => message.id),
+    );
+    const two = await repo.listPending(clientA.id, conversation.id, 2);
+    assert.deepEqual(
+      two.map((message) => message.id),
+      users.slice(0, 2).map((message) => message.id),
+    );
+  });
+
+  it('mensagem do assistente nunca é pendente', async () => {
+    const { conversation, users } = await freshPending(clientA, 'pend-role', 1);
+    const first = users[0];
+    assert.ok(first !== undefined);
+    await replyTo(clientA, conversation, first);
+    assert.deepEqual(await repo.listPending(clientA.id, conversation.id, 10), []);
+  });
+
+  it('respondida por replyToId (caminho do simulador e linhas antigas) não é pendente, sem answeredById', async () => {
+    const { conversation, users } = await freshPending(clientA, 'pend-reply-to', 3);
+    const middle = users[1];
+    assert.ok(middle !== undefined);
+    await replyTo(clientA, conversation, middle);
+    const pending = await repo.listPending(clientA.id, conversation.id, 10);
+    assert.deepEqual(
+      pending.map((message) => message.id),
+      [users[0]?.id, users[2]?.id],
+    );
+    assert.equal((await repo.findById(clientA.id, middle.id)).answeredById, null);
+  });
+
+  it('markAnswered marca o lote inteiro, a resposta tem replyToId = a última, e a segunda chamada não acha pendentes', async () => {
+    const { conversation, users } = await freshPending(clientA, 'pend-batch', 3);
+    const last = users[2];
+    assert.ok(last !== undefined);
+    const reply = await replyTo(clientA, conversation, last);
+
+    const ids = users.map((message) => message.id);
+    assert.equal(await repo.markAnswered(clientA.id, ids, reply.id), 3);
+    for (const user of users) {
+      assert.equal((await repo.findById(clientA.id, user.id)).answeredById, reply.id);
+    }
+    assert.equal(reply.replyToId, last.id);
+    assert.deepEqual(await repo.listPending(clientA.id, conversation.id, 10), []);
+    // Idempotente: repetir não muda nada.
+    assert.equal(await repo.markAnswered(clientA.id, ids, reply.id), 0);
+  });
+
+  it('markAnswered não toca em mensagem já atendida por outra resposta nem em mensagem do assistente', async () => {
+    const { conversation, users } = await freshPending(clientA, 'pend-once', 2);
+    const [first, second] = users;
+    assert.ok(first !== undefined && second !== undefined);
+    const firstReply = await replyTo(clientA, conversation, first);
+    await repo.markAnswered(clientA.id, [first.id], firstReply.id);
+    const secondReply = await replyTo(clientA, conversation, second);
+    // A primeira já tem dono; só a segunda muda. O id da própria resposta (ASSISTANT) é ignorado.
+    assert.equal(
+      await repo.markAnswered(clientA.id, [first.id, second.id, secondReply.id], secondReply.id),
+      1,
+    );
+    assert.equal((await repo.findById(clientA.id, first.id)).answeredById, firstReply.id);
+    assert.equal((await repo.findById(clientA.id, second.id)).answeredById, secondReply.id);
+    assert.equal((await repo.findById(clientA.id, secondReply.id)).answeredById, null);
+  });
+
+  it('entradas inválidas não vão ao banco (limite, ids malformados, lista vazia)', async () => {
+    const { conversation } = await freshPending(clientA, 'pend-invalid', 1);
+    assert.deepEqual(await repo.listPending(clientA.id, conversation.id, 0), []);
+    assert.deepEqual(await repo.listPending(clientA.id, 'x', 5), []);
+    assert.equal(await repo.markAnswered(clientA.id, [], randomUUID()), 0);
+    assert.equal(await repo.markAnswered(clientA.id, ['x'], randomUUID()), 0);
+    assert.equal(await repo.markAnswered(clientA.id, [randomUUID()], 'x'), 0);
+  });
+
+  it('isolamento: listPending só enxerga o cliente informado, mesmo com a conversa de outro cliente', async () => {
+    const a = await freshPending(clientA, 'pend-iso', 2);
+    const b = await freshPending(clientB, 'pend-iso', 3);
+    assert.equal((await repo.listPending(clientA.id, a.conversation.id, 10)).length, 2);
+    assert.equal((await repo.listPending(clientB.id, b.conversation.id, 10)).length, 3);
+    // O ClientId de A com a conversa de B (e o inverso) não devolve nada.
+    assert.deepEqual(await repo.listPending(clientA.id, b.conversation.id, 10), []);
+    assert.deepEqual(await repo.listPending(clientB.id, a.conversation.id, 10), []);
+  });
+
+  it('isolamento: markAnswered com ids de outro cliente não altera nada', async () => {
+    const a = await freshPending(clientA, 'pend-mark-iso', 2);
+    const b = await freshPending(clientB, 'pend-mark-iso', 2);
+    const lastB = b.users[1];
+    assert.ok(lastB !== undefined);
+    const replyOfB = await replyTo(clientB, b.conversation, lastB);
+    const lastA = a.users[1];
+    assert.ok(lastA !== undefined);
+    const replyOfA = await replyTo(clientA, a.conversation, lastA);
+
+    // O ClientId de A com ids de mensagens de B: nada muda em B.
+    const idsOfB = b.users.map((message) => message.id);
+    assert.equal(await repo.markAnswered(clientA.id, idsOfB, replyOfA.id), 0);
+    for (const user of b.users) {
+      assert.equal((await repo.findById(clientB.id, user.id)).answeredById, null);
+    }
+    // Só a última de B foi respondida por replyToId (a resposta do lote de B): a primeira segue pendente.
+    assert.equal((await repo.listPending(clientB.id, b.conversation.id, 10)).length, 1);
+
+    // O ClientId de A com ids de A mas a resposta de B: o banco recusa (chave estrangeira composta)
+    // e nada fica marcado.
+    const idsOfA = a.users.map((message) => message.id);
+    await assert.rejects(
+      repo.markAnswered(clientA.id, idsOfA, replyOfB.id),
+      (error: unknown) => error instanceof DatabaseError,
+    );
+    assert.equal((await repo.listPending(clientA.id, a.conversation.id, 10)).length, 1);
+    for (const user of a.users) {
+      assert.equal((await repo.findById(clientA.id, user.id)).answeredById, null);
+    }
+  });
+
+  it('a tenant-scope exige clientId no where do updateMany de answeredById (TenantScopeError)', async () => {
+    await assert.rejects(
+      database.prisma.message.updateMany({
+        where: { id: userA.id },
+        data: { answeredById: replyA.id },
+      }),
+      (error: unknown) => error instanceof TenantScopeError,
+    );
+  });
+
+  it('SQL cru: answered_by_id apontando para mensagem de outro cliente viola a chave estrangeira composta (23503)', async () => {
+    const { users } = await freshPending(clientA, 'pend-fk', 1);
+    const user = users[0];
+    assert.ok(user !== undefined);
+    await assert.rejects(
+      database.prisma.$executeRaw`
+        UPDATE messages SET answered_by_id = ${replyB.id}::uuid WHERE id = ${user.id}::uuid`,
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /23503|foreign key|messages_answered_by_id_client_id_fkey/i);
+        return true;
+      },
+    );
+    assert.equal((await repo.findById(clientA.id, user.id)).answeredById, null);
+  });
+
+  it('SQL cru: answered_by_id em mensagem do assistente viola o CHECK', async () => {
+    const { conversation, users } = await freshPending(clientA, 'pend-check', 1);
+    const user = users[0];
+    assert.ok(user !== undefined);
+    const reply = await replyTo(clientA, conversation, user);
+    await assert.rejects(
+      database.prisma.$executeRaw`
+        UPDATE messages SET answered_by_id = ${reply.id}::uuid WHERE id = ${reply.id}::uuid`,
+      /messages_answered_by_only_user_check|check/i,
+    );
+    // E o caminho válido (mensagem do contato, resposta do mesmo cliente) passa.
+    await database.prisma.$executeRaw`
+      UPDATE messages SET answered_by_id = ${reply.id}::uuid WHERE id = ${user.id}::uuid`;
+    assert.equal((await repo.findById(clientA.id, user.id)).answeredById, reply.id);
+  });
+
+  it('conversations.findByContact: devolve só a conversa do cliente e nunca cria', async () => {
+    const before = await conversations.count(clientA.id);
+    const missing = await conversations.findByContact(clientA.id, `inexistente-${randomUUID()}`);
+    assert.equal(missing, null);
+    assert.equal(await conversations.count(clientA.id), before, 'não cria conversa');
+    const found = await conversations.findByContact(clientA.id, 'mesmo-contato');
+    assert.equal(found?.id, conversationA.id);
+    const foundB = await conversations.findByContact(clientB.id, 'mesmo-contato');
+    assert.equal(foundB?.id, conversationB.id);
+    // Contato que só existe em A não aparece para B.
+    await conversations.findOrCreateByContact(clientA.id, 'so-do-a');
+    assert.equal(await conversations.findByContact(clientB.id, 'so-do-a'), null);
+  });
+});

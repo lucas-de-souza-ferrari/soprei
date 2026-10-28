@@ -30,6 +30,13 @@ export interface Message {
   readonly channelMessageId: string | null;
   /** Quando a resposta foi entregue ao canal; nulo = ainda não enviada. */
   readonly sentAt: Date | null;
+  /**
+   * Na mensagem do **contato**, o id da resposta do assistente que a atendeu (agrupamento de
+   * mensagens, spec 013): várias mensagens do mesmo lote apontam para a mesma resposta. Nulo em
+   * mensagem do assistente e em mensagem do contato ainda sem resposta (ou respondida só pelo
+   * caminho de uma resposta por mensagem, via `replyToId`).
+   */
+  readonly answeredById: string | null;
 }
 
 /** Marca de envio de uma resposta do assistente (`MessageRepository.markSent`). */

@@ -40,6 +40,8 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
   private readonly transactionLog = new AsyncLocalStorage<{
     conversations: Conversation[];
     messages: Message[];
+    /** Ids de mensagens marcadas como atendidas (`markAnswered`) dentro da transação. */
+    answered: string[];
   }>();
 
   constructor(private readonly now: () => Date = () => new Date()) {
@@ -61,6 +63,13 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         }),
       count: (clientId) =>
         this.step(() => this.conversationRows.filter((row) => row.clientId === clientId).length),
+      findByContact: (clientId, contactRef) =>
+        this.step(
+          () =>
+            this.conversationRows.find(
+              (row) => row.clientId === clientId && row.contactRef === contactRef,
+            ) ?? null,
+        ),
       findOrCreateByContact: (clientId, contactRef) =>
         this.step(
           () =>
@@ -99,6 +108,10 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         }),
       markSent: (clientId, messageId, mark) =>
         this.step(() => this.applyMark(clientId, messageId, mark)),
+      listPending: (clientId, conversationId, limit) =>
+        this.step(() => this.pendingIn(clientId, conversationId).slice(0, limit)),
+      markAnswered: (clientId, messageIds, replyId) =>
+        this.step(() => this.applyAnswered(clientId, messageIds, replyId)),
       listByConversation: (clientId, conversationId, options) =>
         this.step(() => page(this.inConversation(clientId, conversationId), options)),
     } satisfies MessageRepository;
@@ -114,7 +127,11 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
   }
 
   async run<T>(fn: (tx: AttendanceTransaction) => Promise<T>): Promise<T> {
-    const log = { conversations: [] as Conversation[], messages: [] as Message[] };
+    const log = {
+      conversations: [] as Conversation[],
+      messages: [] as Message[],
+      answered: [] as string[],
+    };
     this.openTransactions += 1;
     try {
       return await this.transactionLog.run(log, () =>
@@ -122,6 +139,11 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       );
     } catch (error) {
       // Rollback: desfaz só o que ESTA transação gravou (outras podem estar em curso).
+      for (const id of log.answered) {
+        const index = this.messageRows.findIndex((row) => row.id === id);
+        const row = this.messageRows[index];
+        if (row !== undefined) this.messageRows[index] = { ...row, answeredById: null };
+      }
       for (const row of log.messages) this.messageRows.splice(this.messageRows.indexOf(row), 1);
       for (const row of log.conversations) {
         this.conversationRows.splice(this.conversationRows.indexOf(row), 1);
@@ -206,6 +228,7 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       createdAt: data.createdAt ?? this.now(),
       channelMessageId: null,
       sentAt: null,
+      answeredById: null,
     };
     this.messageRows.push(row);
     this.transactionLog.getStore()?.messages.push(row);
@@ -229,6 +252,45 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       sentAt: mark.sentAt,
     };
     return true;
+  }
+
+  /** Como o `listPending` do banco: USER, sem `answeredById` e sem resposta por `replyToId`. */
+  private pendingIn(clientId: ClientId, conversationId: string): Message[] {
+    return this.inConversation(clientId, conversationId).filter(
+      (row) =>
+        row.role === 'USER' &&
+        row.answeredById === null &&
+        !this.messageRows.some(
+          (other) => other.clientId === clientId && other.replyToId === row.id,
+        ),
+    );
+  }
+
+  /** Como o `markAnswered` do banco: só USER deste cliente, ainda sem marca; a resposta é do mesmo cliente. */
+  private applyAnswered(
+    clientId: ClientId,
+    messageIds: readonly string[],
+    replyId: string,
+  ): number {
+    if (!this.messageRows.some((row) => row.clientId === clientId && row.id === replyId)) {
+      throw new NotFoundError('Mensagem de resposta não encontrada');
+    }
+    let marked = 0;
+    for (const id of messageIds) {
+      const index = this.messageRows.findIndex(
+        (row) =>
+          row.clientId === clientId &&
+          row.id === id &&
+          row.role === 'USER' &&
+          row.answeredById === null,
+      );
+      const row = this.messageRows[index];
+      if (row === undefined) continue;
+      this.messageRows[index] = { ...row, answeredById: replyId };
+      this.transactionLog.getStore()?.answered.push(id);
+      marked += 1;
+    }
+    return marked;
   }
 
   private inConversation(clientId: ClientId, conversationId: string): Message[] {

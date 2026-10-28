@@ -135,6 +135,48 @@ export class PrismaMessageRepository
     });
   }
 
+  listPending(
+    clientId: ClientId,
+    conversationId: string,
+    limit: number,
+  ): Promise<readonly Message[]> {
+    return this.run('listPending', async () => {
+      if (!Number.isInteger(limit) || limit < 1 || !isUuid(conversationId)) return [];
+      const rows = await this.db.message.findMany({
+        where: {
+          clientId,
+          conversationId,
+          role: 'USER',
+          answeredById: null,
+          // Sem resposta pelo caminho de uma resposta por mensagem (simulador e dados antigos).
+          replies: { none: {} },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: limit,
+      });
+      return rows.map(toMessage);
+    });
+  }
+
+  markAnswered(
+    clientId: ClientId,
+    messageIds: readonly string[],
+    replyId: string,
+  ): Promise<number> {
+    return this.run('markAnswered', async () => {
+      const ids = messageIds.filter(isUuid);
+      if (ids.length === 0 || !isUuid(replyId)) return 0;
+      // O `where` carrega o cliente, o papel e a ausência de marca: só mensagem do contato deste
+      // cliente que ainda não foi atendida muda (idempotente; id de outro cliente é intocável). A
+      // chave estrangeira composta garante, no banco, que a resposta é do mesmo cliente.
+      const { count } = await this.db.message.updateMany({
+        where: { clientId, id: { in: ids }, role: 'USER', answeredById: null },
+        data: { answeredById: replyId },
+      });
+      return count;
+    });
+  }
+
   listByConversation(
     clientId: ClientId,
     conversationId: string,

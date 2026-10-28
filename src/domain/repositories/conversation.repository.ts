@@ -17,4 +17,6 @@ export interface ConversationRepository extends TenantRepository<
    * conversa (a unicidade `(clientId, contactRef)` é do banco).
    */
   findOrCreateByContact(clientId: ClientId, contactRef: string): Promise<Conversation>;
+  /** A conversa deste contato neste cliente, ou `null` se ainda não existe (nunca cria). */
+  findByContact(clientId: ClientId, contactRef: string): Promise<Conversation | null>;
 }

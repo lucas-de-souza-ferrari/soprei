@@ -39,6 +39,22 @@ export interface MessageRepository {
    * havia o que marcar (inexistente, de outro cliente, do contato ou já marcada).
    */
   markSent(clientId: ClientId, messageId: string, mark: MessageSentMark): Promise<boolean>;
+  /**
+   * As até `limit` mensagens do **contato** da conversa que ainda esperam resposta, as mais antigas
+   * primeiro (spec 013). Pendente = papel `USER`, sem `answeredById` e sem resposta por `replyToId`
+   * (esta segunda condição cobre o simulador e as linhas anteriores ao agrupamento).
+   */
+  listPending(
+    clientId: ClientId,
+    conversationId: string,
+    limit: number,
+  ): Promise<readonly Message[]>;
+  /**
+   * Marca as mensagens do contato `messageIds` como atendidas pela resposta `replyId`. Só altera
+   * mensagem deste cliente, do papel `USER` e ainda sem `answeredById` (idempotente: repetir não
+   * muda nada; id de outro cliente é ignorado). Devolve quantas mensagens marcou.
+   */
+  markAnswered(clientId: ClientId, messageIds: readonly string[], replyId: string): Promise<number>;
   /** Histórico paginado da conversa, em ordem cronológica. */
   listByConversation(
     clientId: ClientId,

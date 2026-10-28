@@ -88,11 +88,16 @@ model Message {
   channelMessageId String?     @map("channel_message_id")
   /// Quando a resposta foi entregue ao canal; nulo = ainda não enviada (ou o envio falhou).
   sentAt           DateTime?   @map("sent_at")
+  /// Na mensagem do CONTATO, a resposta do assistente que a atendeu (agrupamento de mensagens, spec 013).
+  /// Várias mensagens do mesmo lote apontam para a mesma resposta. Só mensagem USER tem o campo (CHECK).
+  answeredById     String?     @map("answered_by_id") @db.Uuid
 
   client       Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
   conversation Conversation @relation(fields: [conversationId, clientId], references: [id, clientId], onDelete: NoAction)
   replyTo      Message?     @relation("MessageReply", fields: [replyToId, clientId], references: [id, clientId], onDelete: NoAction)
   replies      Message[]    @relation("MessageReply")
+  answeredBy   Message?     @relation("MessageAnswer", fields: [answeredById, clientId], references: [id, clientId], onDelete: NoAction)
+  answers      Message[]    @relation("MessageAnswer")
 
   @@unique([id, clientId])
   @@unique([clientId, externalId])

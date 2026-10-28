@@ -38,6 +38,13 @@ export class PrismaConversationRepository
     return new PrismaConversationRepository(tx);
   }
 
+  findByContact(clientId: ClientId, contactRef: string): Promise<Conversation | null> {
+    return this.run('findByContact', async () => {
+      const row = await this.db.conversation.findFirst({ where: { clientId, contactRef } });
+      return row === null ? null : toConversation(row);
+    });
+  }
+
   findOrCreateByContact(clientId: ClientId, contactRef: string): Promise<Conversation> {
     return this.run('findOrCreateByContact', async () => {
       const where = { clientId, contactRef };
