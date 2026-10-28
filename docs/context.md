@@ -33,7 +33,7 @@ Resolver cada uma por spec antes de implementar o que depende dela.
 
 | Tema | Opções conhecidas | Observação |
 | --- | --- | --- |
-| Fila de jobs | BullMQ sobre Redis | Redis já é decisão (ver abaixo); resta decidir BullMQ para processar mensagens fora do webhook. |
+| Fila de jobs | **BullMQ sobre Redis (decidido na spec 011)** | Fila `channel-inbound`, worker no mesmo processo com concorrência 1; fila por cliente e vários workers só quando a latência medida pedir. |
 | Provedor de LLM | Gemini, Claude, OpenAI | Seja qual for, fica atrás da interface `LLMProvider`. |
 | Canal | **WhatsApp Cloud API oficial (decidido)** | Estado da conta Meta (informado pelo dono em 2026-10-27): empresa com verificação de negócio concluída, app Business publicado (live), já é Tech Provider, número de teste da Meta para desenvolver, e quer o fluxo de onboarding de vários clientes (Embedded Signup). A confirmar: moeda e forma de pagamento da conta de cobrança (BRL), onde roda o webhook. Desde 01/10/2026 só as 1 000 primeiras mensagens de serviço por número ao mês são grátis. |
 | Hospedagem | VPS (protótipo: Hetzner) | — |
@@ -72,8 +72,9 @@ src/
 ├── domain/          # entities, value-objects (ClientId...), interfaces de repositório
 ├── application/     # services/use-cases e portas
 │   ├── attendance/  # AttendanceService e schemas
+│   ├── channel/     # canal de mensagens: entrada do webhook e processador dos jobs (spec 011)
 │   ├── clients/     # ClientService
-│   └── ports/       # interfaces para o exterior (LlmProvider; a 011 acrescenta canal e fila)
+│   └── ports/       # interfaces para o exterior: LlmProvider, MessageSender, InboundJobQueue
 ├── infrastructure/
 │   ├── config/      # env validada com Zod (fail-fast)
 │   ├── database/    # raiz: Prisma singleton, transação com retry, erros, barrel (index.ts)
@@ -85,10 +86,12 @@ src/
 │   ├── logger/      # Pino com mixin de contexto e redact
 │   ├── metrics/     # prom-client: Registry dedicado (spec 004)
 │   ├── cache/       # client Redis singleton (cache em si: spec 006)
-│   └── external-apis/  # LLM (mock + real), canal de mensagens
+│   ├── queue/       # fila de entrada do canal (BullMQ), conexões Redis próprias (spec 011)
+│   └── external-apis/  # llm/ (mock; real em spec própria) e whatsapp/ (cliente da Cloud API)
 ├── presentation/    # controllers/rotas, hooks, validators Zod
 │   ├── admin/       # rotas /admin/*
 │   ├── system/      # /health, /health/ready, /metrics
+│   ├── webhooks/    # webhook do WhatsApp (spec 011)
 │   └── common/      # bearer auth hook, route pattern, perfil de rate limit
 ├── shared/          # errors (BaseError...), types (Brand, Result), request-context, utils
 └── index.ts         # bootstrap
@@ -125,7 +128,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 **Próximas, nesta ordem**
 
-8. **Canal WhatsApp, parte A ([spec 011](specs/011-canal-whatsapp.md), aprovada em 2026-10-27):** webhook com verificação e assinatura, fila BullMQ, envio da resposta pela Cloud API, mapeamento `phone_number_id` → cliente, número de teste da Meta, LLM ainda `mock`. Depende da 005, concluída.
+8. **Canal WhatsApp, parte A ([spec 011](specs/011-canal-whatsapp.md), aprovada em 2026-10-27, implementada em 2026-10-28 na branch `spec/011-canal-whatsapp`; aguardando revisão do `reviewer`, CI, teste manual com o número de teste da Meta e merge):** webhook com verificação e assinatura, fila BullMQ, envio da resposta pela Cloud API, mapeamento `phone_number_id` → cliente, número de teste da Meta, LLM ainda `mock`. Depende da 005, concluída.
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
 
@@ -155,6 +158,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 - **Spec 004 (observabilidade): concluída e mergeada**, CI verde. Já existem: contexto por requisição com `AsyncLocalStorage` (`src/shared/request-context/`), `x-request-id` reaproveitado ou UUID, logger com `mixin` de contexto e `redact` de segredos, log de requisição próprio com o padrão da rota, métricas `prom-client` num `Registry` dedicado (HTTP, queries do Prisma por model/operação via extensão aplicada depois da `tenant-scope`, pool de conexões, processo), `GET /metrics` só com `METRICS_TOKEN` (404 sem ele) e `bearerAuthHook` compartilhado com o admin. `clientId`/`userId` do contexto ficam vazios até a autenticação (spec 007). Dependência nova: `prom-client`.
 - **Spec 005 (rate limiting): concluída e mergeada**, revisada pelo `reviewer` (um bloqueante e dois importantes corrigidos) e com CI verde. Já existem: `@fastify/rate-limit` como hook `onRequest` da instância raiz (roda antes da autenticação e de ler o corpo), perfis `public` (padrão de rota sem perfil), `admin` e `webhook`, sempre por perfil e por IP normalizado, com store Redis em conexão dedicada (fila offline desligada, prazo curto por comando) e fail-open com log e `rate_limit_store_errors_total`; `RateLimitError` com corpo `{ error: { code: 'RATE_LIMITED', retryAfter } }` e os headers `Retry-After` e `X-RateLimit-*`; `TRUST_PROXY` (só `false`, `true` fora de produção ou lista de IPs/CIDRs dos proxies; o inteiro não existe porque o Fastify 5.12.7 o trata como fail-closed); `RATE_LIMIT_ENABLED` (não pode ser `false` em produção). Rota nova declara o perfil (`rateLimitProfile('webhook')`...); o teste de inventário de rotas falha se esquecer. Dependência nova: `@fastify/rate-limit`.
 - **Spec 012 (reorganização de pastas): concluída e mergeada**, CI verde. 39 arquivos movidos com `git mv`, sem mudança de lógica: 466 unitários e 148 de integração com os mesmos nomes. Estrutura e convenções (pasta por área, teste ao lado, sem barrels novos, sem aliases) estão em "Estrutura de pastas" e no `CLAUDE.md`.
+- **Spec 011 (canal WhatsApp, parte A): implementada, não mergeada** (aguarda `reviewer`, CI e o teste manual do dono com o número de teste da Meta). Já existem: `GET`/`POST /webhooks/whatsapp` (opt-in por `WHATSAPP_ENABLED`; assinatura HMAC-SHA256 sobre o corpo cru, rate limit `webhook`, resposta 200 depois de enfileirar), fila BullMQ 6 `channel-inbound` com worker no mesmo processo (concorrência 1, encerramento gracioso antes de Redis e banco), `ChannelIntakeService` e `ChannelInboundProcessor` (`application/channel/`), `WhatsappCloudApiClient` (Graph API `v26.0`, `fetch` nativo) atrás da porta `MessageSender`, migration aditiva (`Client.whatsappPhoneNumberId` único, `Message.channelMessageId` e `sentAt`), `findByWhatsappPhoneNumberId` (o único ponto que resolve identificador externo em cliente), `markSent` e `listBefore`, métricas do webhook, do canal e da fila. Dependência nova: `bullmq` (usa o `ioredis` do projeto). Retenção do texto e do `contactRef` nos jobs do Redis (`QUEUE_KEEP_*`) entra na decisão de LGPD antes de dados reais.
 - **Spec 010 (fatia vertical): concluída e mergeada**, revisada pelo `reviewer` e com CI verde (unitários e integração, Node 22 e LTS). Já existem: migration aditiva (`Client.persona`, `Conversation.contactRef` e o model `Message`, de tenant, com chaves estrangeiras compostas por `clientId`); `LlmProvider` + `MockLlmProvider` (modo de falha, marcadores `[[mock:fail]]`, `[[mock:hang]]`, `[[mock:empty]]`, `[[mock:huge]]`, registro de entradas só para testes); `AttendanceService` (idempotência por `externalId`, histórico de 20 mensagens e 12 000 caracteres, fallback constante gravado com `isFallback`, LLM fora da transação, timeout por `withTimeout`/`TimeoutError`); rotas `POST /admin/clients/:clientId/messages`, `GET .../conversations`, `GET .../conversations/:conversationId/messages` e `persona` no `PATCH /admin/clients/:id`; métricas `llm_requests_total`, `llm_request_duration_seconds`, `attendance_fallbacks_total`; regra de nunca logar conteúdo de mensagem nem persona, com teste de captura de log. Retenção de dados pessoais (mensagens e `contactRef`) segue sem política: decidir antes de dados reais, junto com a RLS. Specs 005 a 009 como esboço (ver "Roadmap"). Próximo passo: escolher o provedor real de LLM (e, junto, decidir o canal) e escrever a spec seguinte. Lição do CI: testes que conferem ordem por tempo precisam de relógio injetável (`src/test-support/clock.ts`), nunca do relógio real.
 
 ## 7. Histórico de decisões

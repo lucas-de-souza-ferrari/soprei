@@ -85,45 +85,45 @@ Regra cruzada na config: `QUEUE_BACKOFF_MS × (2^(QUEUE_ATTEMPTS − 1) − 1)` 
 ## Critérios de aceite
 
 **Verificação e assinatura**
-- [ ] `GET` com `hub.mode=subscribe` e token correto devolve 200 com o `hub.challenge` em `text/plain`; token errado, ausente ou `hub.mode` diferente → 403 sem eco do challenge.
-- [ ] `POST` com assinatura válida é aceito; assinatura ausente, malformada, de tamanho errado ou calculada com outro segredo → 401 e **nada** é enfileirado nem gravado.
-- [ ] A assinatura é conferida sobre os bytes crus: o mesmo JSON com espaços diferentes e a assinatura do original é rejeitado.
-- [ ] Corpo acima de 1 MiB é recusado; com `WHATSAPP_ENABLED` ausente ou `false` as duas rotas respondem 404.
-- [ ] Nenhum segredo (`WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`) nem a query string do `GET` aparece em log (captura de log, incluindo caso de erro).
+- [x] `GET` com `hub.mode=subscribe` e token correto devolve 200 com o `hub.challenge` em `text/plain`; token errado, ausente ou `hub.mode` diferente → 403 sem eco do challenge.
+- [x] `POST` com assinatura válida é aceito; assinatura ausente, malformada, de tamanho errado ou calculada com outro segredo → 401 e **nada** é enfileirado nem gravado.
+- [x] A assinatura é conferida sobre os bytes crus: o mesmo JSON com espaços diferentes e a assinatura do original é rejeitado.
+- [x] Corpo acima de 1 MiB é recusado; com `WHATSAPP_ENABLED` ausente ou `false` as duas rotas respondem 404.
+- [x] Nenhum segredo (`WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_ACCESS_TOKEN`) nem a query string do `GET` aparece em log (captura de log, incluindo caso de erro).
 
 **Entrada e roteamento**
-- [ ] Mensagem de texto de número mapeado gera job `text` com `contactRef` = `from`, `externalId` = `wamid` e o `clientId` do cliente dono do número; a resposta HTTP é 200 sem esperar o LLM (teste com provider bloqueado em `hold()`).
-- [ ] Lote com várias mensagens e vários números: cada uma vai para o cliente certo.
-- [ ] Número desconhecido, cliente removido e cliente `SUSPENDED`: 200, nada enfileirado, métrica e log `warn`.
-- [ ] Reentrega do mesmo evento (mesmo `wamid`) não gera segundo job nem segunda resposta.
-- [ ] Mensagem não textual e texto inválido (vazio, > 4000, NUL) geram job `notice` e o contato recebe o texto constante; nada é gravado como mensagem nem chama o LLM.
-- [ ] `statuses[]` não geram job; `failed` loga `warn` com id e código, sem telefone.
-- [ ] Assinatura válida com JSON inválido ou formato inesperado → 200 + `invalid_payload`; Redis fora → 500, e a reentrega depois enfileira só o que faltou.
+- [x] Mensagem de texto de número mapeado gera job `text` com `contactRef` = `from`, `externalId` = `wamid` e o `clientId` do cliente dono do número; a resposta HTTP é 200 sem esperar o LLM (teste com provider bloqueado em `hold()`).
+- [x] Lote com várias mensagens e vários números: cada uma vai para o cliente certo.
+- [x] Número desconhecido, cliente removido e cliente `SUSPENDED`: 200, nada enfileirado, métrica e log `warn`.
+- [x] Reentrega do mesmo evento (mesmo `wamid`) não gera segundo job nem segunda resposta.
+- [x] Mensagem não textual e texto inválido (vazio, > 4000, NUL) geram job `notice` e o contato recebe o texto constante; nada é gravado como mensagem nem chama o LLM.
+- [x] `statuses[]` não geram job; `failed` loga `warn` com id e código, sem telefone.
+- [x] Assinatura válida com JSON inválido ou formato inesperado → 200 + `invalid_payload`; Redis fora → 500, e a reentrega depois enfileira só o que faltou.
 
 **Processamento e envio**
-- [ ] De ponta a ponta (webhook assinado → fila real → worker → `MockLlmProvider` → servidor Graph falso local): o servidor falso recebe `POST /<versão>/<phone_number_id>/messages` com `Authorization: Bearer`, `to` = contato e o texto do mock; a conversa tem a mensagem do contato e a resposta, e a resposta fica com `sentAt` e `channelMessageId`.
-- [ ] Retentativa depois de envio concluído (job reexecutado) não envia de novo (`sentAt` preenchido).
-- [ ] Falha transitória do Graph (500, 429, timeout) é retentada com backoff e termina em sucesso, com uma só resposta gravada e um só envio bem-sucedido; falha permanente (código de token inválido, janela fechada) não é retentada, a resposta fica gravada sem `sentAt` e a métrica registra `error`.
-- [ ] Erro do service antes de existir resposta (ex.: banco indisponível simulado) esgota as tentativas e o contato recebe o `ATTENDANCE_FALLBACK_TEXT`; se esse envio também falha, apenas logam.
-- [ ] LLM com falha ou timeout continua resultando em fallback gravado e **enviado** (reaproveita os marcadores `[[mock:fail]]` e `[[mock:hang]]`).
-- [ ] `ConflictError` por mensagem "em andamento" é retentado e, passado o prazo, completa o fluxo sem segunda chamada ao LLM para a mesma mensagem ainda viva.
-- [ ] O número usado no envio é o do cliente no banco, não o do payload do job (teste com job adulterado).
-- [ ] Encerramento do processo espera o job ativo e fecha o worker antes de Redis e banco.
-- [ ] `loadHistory` devolve o histórico correto ao retomar uma mensagem antiga com 21 ou mais mensagens mais novas na conversa (`listBefore`).
+- [x] De ponta a ponta (webhook assinado → fila real → worker → `MockLlmProvider` → servidor Graph falso local): o servidor falso recebe `POST /<versão>/<phone_number_id>/messages` com `Authorization: Bearer`, `to` = contato e o texto do mock; a conversa tem a mensagem do contato e a resposta, e a resposta fica com `sentAt` e `channelMessageId`.
+- [x] Retentativa depois de envio concluído (job reexecutado) não envia de novo (`sentAt` preenchido).
+- [x] Falha transitória do Graph (500, 429, timeout) é retentada com backoff e termina em sucesso, com uma só resposta gravada e um só envio bem-sucedido; falha permanente (código de token inválido, janela fechada) não é retentada, a resposta fica gravada sem `sentAt` e a métrica registra `error`.
+- [x] Erro do service antes de existir resposta (ex.: banco indisponível simulado) esgota as tentativas e o contato recebe o `ATTENDANCE_FALLBACK_TEXT`; se esse envio também falha, apenas logam.
+- [x] LLM com falha ou timeout continua resultando em fallback gravado e **enviado** (reaproveita os marcadores `[[mock:fail]]` e `[[mock:hang]]`).
+- [x] `ConflictError` por mensagem "em andamento" é retentado e, passado o prazo, completa o fluxo sem segunda chamada ao LLM para a mesma mensagem ainda viva.
+- [x] O número usado no envio é o do cliente no banco, não o do payload do job (teste com job adulterado).
+- [x] Encerramento do processo espera o job ativo e fecha o worker antes de Redis e banco.
+- [x] `loadHistory` devolve o histórico correto ao retomar uma mensagem antiga com 21 ou mais mensagens mais novas na conversa (`listBefore`).
 
 **Isolamento entre clientes (o centro da spec)**
-- [ ] Dois clientes com números diferentes e **o mesmo contato** escrevendo para os dois: conversas distintas, histórico enviado ao LLM sem mistura (inspeção do mock), persona de cada um só na sua conversa.
-- [ ] Mensagens e respostas intercaladas dos dois clientes saem cada uma pelo `phone_number_id` do seu cliente (servidor Graph falso registra o par número/destinatário).
-- [ ] O mesmo `wamid` não colide entre clientes (jobId e `externalId` são por cliente).
-- [ ] `findByWhatsappPhoneNumberId` não devolve cliente removido; dois clientes não podem ter o mesmo `whatsappPhoneNumberId` (409 no PATCH e `@unique` no banco).
-- [ ] `markSent` só altera mensagem do cliente informado (teste de isolamento no modelo de `src/infrastructure/database/repositories/message.repository.integration.test.ts`) e `listBefore` não enxerga outro cliente.
-- [ ] Jobs de dois clientes processados em sequência mantêm cada um o seu `clientId` nos logs.
+- [x] Dois clientes com números diferentes e **o mesmo contato** escrevendo para os dois: conversas distintas, histórico enviado ao LLM sem mistura (inspeção do mock), persona de cada um só na sua conversa.
+- [x] Mensagens e respostas intercaladas dos dois clientes saem cada uma pelo `phone_number_id` do seu cliente (servidor Graph falso registra o par número/destinatário).
+- [x] O mesmo `wamid` não colide entre clientes (jobId e `externalId` são por cliente).
+- [x] `findByWhatsappPhoneNumberId` não devolve cliente removido; dois clientes não podem ter o mesmo `whatsappPhoneNumberId` (409 no PATCH e `@unique` no banco).
+- [x] `markSent` só altera mensagem do cliente informado (teste de isolamento no modelo de `src/infrastructure/database/repositories/message.repository.integration.test.ts`) e `listBefore` não enxerga outro cliente.
+- [x] Jobs de dois clientes processados em sequência mantêm cada um o seu `clientId` nos logs.
 
 **Privacidade, observabilidade e geral**
-- [ ] Texto de mensagem, `from`/`contactRef`, destinatário, nome de perfil, persona e tokens **não aparecem em nenhuma linha de log** nem em label de métrica (captura de log em webhook, worker, sucesso e falhas).
-- [ ] As métricas acima aparecem em `/metrics` e as chaves do BullMQ nos testes usam prefixo único no Redis `/15`, sem `FLUSHALL`/`FLUSHDB` (cada teste remove só o que criou).
-- [ ] Config: habilitado sem os três segredos, ou sem `TRUST_PROXY` definido explicitamente, falha no boot; `WHATSAPP_ENABLED=false` literal não habilita; a regra cruzada de backoff × `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS` é validada.
-- [ ] Migration aplicada em `soprei` e `soprei_test`; `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24; CI verde e revisão do `reviewer`.
+- [x] Texto de mensagem, `from`/`contactRef`, destinatário, nome de perfil, persona e tokens **não aparecem em nenhuma linha de log** nem em label de métrica (captura de log em webhook, worker, sucesso e falhas).
+- [x] As métricas acima aparecem em `/metrics` e as chaves do BullMQ nos testes usam prefixo único no Redis `/15`, sem `FLUSHALL`/`FLUSHDB` (cada teste remove só o que criou).
+- [x] Config: habilitado sem os três segredos, ou sem `TRUST_PROXY` definido explicitamente, falha no boot; `WHATSAPP_ENABLED=false` literal não habilita; a regra cruzada de backoff × `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS` é validada.
+- [ ] Migration aplicada em `soprei` e `soprei_test` (feito); `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24 (feito localmente, ver o registro); CI verde e revisão do `reviewer` (pendentes: dependem do PR).
 
 ## Teste manual com o número de teste da Meta (feito pelo dono, não é teste automatizado)
 
@@ -178,3 +178,74 @@ A 005 (aprovada e implementada em 2026-10-27) já cobre o que segue; a lista fic
 - **Dependência nova: `bullmq`** (e o `ioredis` que ele usa, na versão compatível com a que o projeto já tem; o implementer verifica e documenta). Conexão própria para a fila e o worker (`maxRetriesPerRequest: null`), separada do client `ioredis` singleton do restante. HTTP de saída com `fetch` nativo: sem outra dependência.
 - Migration aditiva (`Client.whatsappPhoneNumberId`, `Message.channelMessageId`, `Message.sentAt`) aplicada em `soprei` e `soprei_test`, com o mesmo limite da 003: sem `migrate reset`, sem `DROP`, sem apagar dado que o implementer não criou.
 - Por ser o primeiro endpoint público, tocar em isolamento (resolução de cliente por identificador externo) e guardar segredos, esta spec passa pelo agente `reviewer` antes do merge, com atenção a: assinatura sobre o corpo cru e tempo constante, nenhum `clientId` vindo de fora, envio pelo número do banco, vazamento de dado pessoal em log ou métrica, e o comportamento com Redis ou Graph API fora do ar.
+
+### Registro da implementação (2026-10-28)
+
+Implementada na branch `spec/011-canal-whatsapp`, com commits por parte (dependência, config, banco, métricas, envio, entrada e processador, fila, webhook, ligação no boot, testes, docs). **Status mantido em `aprovada`**: a conclusão fica para depois do `reviewer`, do CI e do teste manual do dono. Nada foi enviado à Meta real: os testes usam só o servidor Graph falso local.
+
+**Pastas e arquivos (convenções da 012):**
+
+| Pasta | O que há |
+| --- | --- |
+| `src/application/ports/` | `message-sender.ts` (`MessageSender`, `MessageSendError`), `inbound-job-queue.ts` (`InboundJobQueue`, schema do job, `inboundJobId`, `NonRetryableJobError`) |
+| `src/application/channel/` (nova) | `channel-intake.service.ts`, `channel-inbound.processor.ts`, `channel-texts.ts`, `describe-error.ts` (+ testes) |
+| `src/presentation/webhooks/` (nova) | `whatsapp-webhook.controller.ts`, `whatsapp-webhook.schemas.ts`, `whatsapp-signature.ts` (+ testes) |
+| `src/infrastructure/queue/` (nova) | `inbound-queue.ts` (BullMQ), teste de integração |
+| `src/infrastructure/external-apis/whatsapp/` (nova) | `whatsapp-cloud-api.client.ts` (+ teste) |
+| `src/infrastructure/config/` | `whatsapp.ts` (`whatsappChannelConfig`, `queueSettings`, `trustProxyMode`), schema e `parse-config.ts` ampliados |
+| `src/infrastructure/http/` | `server.ts` (`whatsapp?`), `whatsapp-channel.integration.test.ts` (ponta a ponta) |
+| `src/test-support/` | `fake-graph-api.ts`, `whatsapp-payloads.ts` |
+| `prisma/` | migration `20261027180000_whatsapp_channel` |
+
+Sem barrels novos e sem aliases. `application` e `presentation` não importam `infrastructure/database` nem o BullMQ (o lint segue verde).
+
+**Dependência (`bullmq`):** a última versão publicada é a 6.5.0 (de 2026-10-26, com um dia de idade). O pnpm tentou liberar essa versão com `minimumReleaseAgeExclude`, o que contorna a política de idade mínima do projeto; **desfiz** e fixei a mais nova que passa na política, `bullmq ^6.4.2` (resolvida em 6.4.2). O `ioredis` é dependência de par **opcional** do BullMQ (`>=5`): o `ioredis` 6.0.0 do projeto é o único em uso, sem cópia própria; compatível com o Redis 8.0.1 local (as suítes rodam nele). O script de build do acelerador nativo opcional `msgpackr-extract` ficou desligado em `pnpm-workspace.yaml` (`false`; cai no JavaScript puro). Restrições de `jobId` conferidas no código instalado: não pode conter `:` nem ser um inteiro puro; o id é `<clientId>_<encodeURIComponent(externalId)>`, o que também evita colisão entre `a:b` e `a%3Ab`.
+
+**Fontes da documentação da Meta consultadas (2026-10-28):**
+
+- Exemplos de payload do webhook (mensagem de texto): `developers.facebook.com/docs/whatsapp/cloud-api/webhooks/payload-examples`.
+- Referência de `statuses[]` (`failed`, `errors[]`): `developers.facebook.com/docs/whatsapp/cloud-api/webhooks/reference/messages/status`.
+- Envio de mensagens (`POST /{versão}/{phone-number-id}/messages`, corpo e resposta com `messages[].id`): `developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages`.
+- Códigos de erro e formato do erro (`error.code`, `type`): `developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes`.
+- Webhooks (verificação `hub.mode`/`hub.challenge`/`hub.verify_token` e `X-Hub-Signature-256`): `developers.facebook.com/docs/graph-api/webhooks/getting-started`.
+- Identificadores por negócio (BSUID, `from_user_id`, `contacts[].user_id`): `developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids`.
+- Versões do Graph API: `developers.facebook.com/docs/graph-api/changelog/versions` (última: **v26.0**, de 2026-07-29, sem data de expiração; a v25.0 expira em 2028-07-29). **`WHATSAPP_GRAPH_API_VERSION` padrão: `v26.0`**, a versão dos exemplos da própria documentação de envio.
+
+O que a documentação confirmou: o webhook leva `entry[].changes[].value.metadata.phone_number_id`, `messages[]` (`id`, `from`, `type`, `text.body`) e `statuses[]` (`id`, `status` entre `sent`, `delivered`, `read`, `played` e `failed`, `errors[]` com `code`); a resposta do envio leva `messages[].id`; o erro do Graph vem em `error.code` e `error.type`; a assinatura é `sha256=` mais o HMAC com o segredo do app (a página não detalha o HMAC nem os bytes crus: HMAC-SHA256 sobre os bytes do corpo é o que a spec e a prática da Meta usam, e os testes calculam a assinatura assim).
+
+**`from` ausente (identificadores por negócio):** a documentação atual diz que `messages[].from` (e `contacts[].wa_id`) só vêm quando o telefone pode ser informado; sempre vêm `from_user_id` e `contacts[].user_id` (o BSUID, ex.: `US.13491208655302741918`), e responder a esse contato exigiria o campo `recipient` no lugar de `to` no envio (a página cita limitações até julho de 2026). **Decisão desta spec, conforme o texto dela:** mensagem sem `from` utilizável (ausente, fora de 1 a 32 dígitos) é **descartada** com log `warn` e a métrica `channel_inbound_messages_total{result="missing_sender"}`, sem erro. **Risco:** contato que adotou nome de usuário e não compartilha o telefone não recebe resposta. Suporte a BSUID (`contactRef` e envio por `recipient`) fica para spec própria.
+
+**Decisões e desvios (o dono pode contestar qualquer um):**
+
+- **`wamid` nunca vai cru a log.** O `wamid` carrega o telefone do contato em base64; logar "o id da mensagem" (spec) vazaria o `from`. Os logs levam `messageRef` (16 primeiros caracteres hexadecimais do SHA-256 do id; `src/shared/utils/message-ref.ts`), mais `clientId`, ids internos (`replyId`), `jobKind`, status HTTP e códigos. Vale para o log `warn` de `statuses[].failed` (referência e código). O `jobId` no Redis ainda contém o `wamid` (exigido pela spec).
+- **`phone_number_id` do negócio vai ao log `warn` de "número sem cliente"**, para diagnosticar um cliente sem número gravado; não é dado do contato.
+- **Cliente removido libera o número:** `delete` (soft delete) grava `whatsappPhoneNumberId = null`, senão o `@unique` prenderia o número a um cliente que não recebe mais nada; `findByWhatsappPhoneNumberId` também filtra `deletedAt` (testado com o soft delete "à mão" que não libera o número).
+- **Config:** a regra cruzada de backoff só vale com o canal habilitado (as variáveis da fila são irrelevantes sem ele); "`TRUST_PROXY` definido explicitamente" é conferido em `parseConfig` (o schema já perdeu a diferença entre ausente e `false`); `WHATSAPP_API_BASE_URL` precisa ser `https` em produção e não aceita usuário, senha, query nem fragmento; `WHATSAPP_VERIFY_TOKEN` com mínimo de 16 caracteres; os segredos ganharam entradas no `redact` do logger (`appSecret`, `verifyToken`, `WHATSAPP_*`).
+- **Webhook:** o `hub.challenge` só é ecoado se casar com `^[A-Za-z0-9._~-]{1,256}$` (a Meta manda um inteiro; nada que vire marcação); `content-type` que não é JSON cai no parser padrão do Fastify (texto), o corpo não é `Buffer` e a resposta é **401** sem processar nada (não 415); o webhook ignora outro `object` da Meta e outros `field` além de `messages`; um `value` ou mensagem malformado é ignorado e o resto do lote é aproveitado (a requisição conta `invalid_payload`); falha do **banco** ao resolver o cliente também vira 500 (a Meta reentrega), contada como `enqueue_failed`.
+- **Fila:** o schema do job descarta campos desconhecidos (não é `strict`): um job adulterado com `phoneNumberId` no payload é processado com o número do banco (teste). O dedupe por `jobId` dura enquanto o job é retido (`QUEUE_KEEP_*`); depois, a idempotência do banco (`externalId`) e o `sentAt` seguram duplicatas. O `enqueue` tem prazo de 5 s; o `close()` espera o job ativo até 30 s (e, sem conexão pronta, no máximo 2 s e com fechamento forçado, porque o BullMQ memoriza o `close()` e um segundo `close(true)` não adianta; achado quando o Redis fora travava o encerramento).
+- **Falha permanente do atendimento** (`ForbiddenError` de cliente suspenso, `NotFoundError`, `ValidationError`/`ZodError`): além de não retentar, segue a spec ao pé da letra e tenta o texto padrão (se o cliente foi removido não há número e só loga).
+- **Métricas acrescentadas à lista da spec:** `channel_status_events_total{channel,status}` ("só métrica" para `statuses[]`) e, em `channel_inbound_messages_total`, os resultados `missing_sender` e `invalid_message`. `unsupported_type` e `invalid_text` contam quando o aviso é enfileirado (no lugar de `enqueued`).
+- **`AttendanceReply` tem `sentAt`**, então a resposta de `POST /admin/clients/:clientId/messages` ganhou `reply.sentAt` (nulo no simulador).
+- **Ligação no boot:** o worker liga em `src/index.ts` depois da verificação de infraestrutura e antes de `listen`; `closeInfrastructure` fecha a fila **antes** do banco e dos Redis (teste unitário da ordem e teste de integração com um job ativo).
+- **Migration:** aplicada com `prisma migrate deploy` em `soprei_test` e em `soprei`; `prisma migrate diff --from-config-datasource --to-schema` não acusa diferença nos dois; nenhum `reset`, `DROP` nem dado alheio tocado. O `prisma format` realinhou colunas de `Client` e `Message` no `schema.prisma` (ruído só de formatação).
+- **`to` do envio:** vai o `from` como veio (o `wa_id`, só dígitos). A documentação de envio cita o `+` na frente; o `wa_id` é o identificador que a própria resposta do Graph devolve. **A confirmar no teste manual com o número de teste**; se a Meta exigir o `+`, é um ajuste de uma linha no cliente.
+
+**Critérios:** todos marcados `[x]` têm teste passando (unitário, integração ou ambos, ver abaixo), exceto o último (CI verde e revisão do `reviewer`), que depende do PR; a parte local dele (typecheck, lint, format, testes em Node 22 e 24) está verde.
+
+**Validação local (2026-10-28):**
+
+| Comando | Node 22.23.2 | Node 24.18.0 |
+| --- | --- | --- |
+| `pnpm db:generate` | ok | (mesmo client gerado) |
+| `pnpm typecheck` | verde | verde |
+| `pnpm lint` | verde | verde |
+| `pnpm format:check` | verde | verde |
+| `pnpm test` | 565 testes, 565 ok | 565 testes, 565 ok |
+| `pnpm test:integration` | 200 testes, 200 ok | 200 testes, 200 ok |
+| `rm -rf dist && pnpm build` | ok (`dist/` com `application/channel`, `presentation/webhooks`, `infrastructure/queue`) | |
+
+Antes da 011 eram 466 unitários e 148 de integração (spec 012). Repetição das suítes novas (unitárias: canal, webhook, cliente do Graph, lifecycle, config, atendimento; integração: fila, ponta a ponta do canal, repositórios de mensagem e cliente, `/admin/clients`): 4 rodadas no Node 22 e 2 no Node 24, todas verdes no fim. A repetição achou **um flake**, corrigido em `53d2bfd`: o teste do `GET` procurava o `hub.challenge` (`777`) no corpo do erro, que carrega um `requestId` UUID aleatório e podia conter a sequência (falhou 3 vezes em cerca de 10 rodadas antes da correção; depois dela, 12 de 12 rodadas do arquivo e todas as seguintes verdes). O teste de encerramento do processo e o de Redis fora também revelaram, na primeira rodada, um defeito real do `close()` da fila (ver "Fila" acima), já corrigido.
+
+**Smoke do processo compilado** (`node dist/index.js`, diretório vazio sem `.env`, `NODE_ENV=production`, segredos e token **falsos**, banco e Redis de **testes**, sem chamar a Meta): com `WHATSAPP_ENABLED=true` e `TRUST_PROXY=false` o processo sobe e responde `GET /health` 200; `GET /webhooks/whatsapp` com o token certo devolve 200 `text/plain` com o challenge e com token errado 403 sem eco; `POST` sem assinatura e com assinatura errada, 401; `POST` assinado com corpo sem eventos, 200; nenhum segredo nem query string na saída do processo; o boot loga o canal e o modo do `TRUST_PROXY` (`off`), sem IP. Com `WHATSAPP_ENABLED=false` as duas rotas dão 404. Habilitado sem `TRUST_PROXY`, sai com código 1 citando `TRUST_PROXY`. Habilitado com o Redis inalcançável, sai com código 1 sem travar. O envio de `SIGTERM` pelo Node no Windows encerra o processo na hora (não há sinal POSIX), então o encerramento gracioso **não** foi exercitado por esse caminho; ele é coberto pelos testes (`lifecycle.test.ts` e o teste de integração que encerra com um job ativo). As chaves que o smoke criou no Redis `/15` (`soprei:queue:channel-inbound:*`) foram removidas.
+
+**Pendente ou incerto:** CI e `reviewer` (esta spec exige, ver "Decisões e dependências novas"); teste manual com o número de teste da Meta (o `to` com ou sem `+`; o túnel acrescentar ao `X-Forwarded-For`); suporte a contatos só com BSUID; retenção do texto e do `contactRef` nos jobs do Redis (LGPD, antes de dados reais); ordem entre mensagens rápidas do mesmo contato segue a de chegada dos webhooks (limitação já declarada).
