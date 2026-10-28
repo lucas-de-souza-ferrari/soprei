@@ -7,12 +7,13 @@
 ## Onde estamos
 
 - **Concluídas e mergeadas:** specs 001 a 005, 010, 011, 012 e 013 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta e com token permanente de usuário do sistema; o atendimento ainda responde com o `LlmProvider` `mock`.
-- **Branch em andamento:** `docs/agent-handoff` (esta mudança: `AGENTS.md` como fonte única de regras, `CLAUDE.md` importando-o, roteiros em `docs/agents/`, este arquivo). Só docs; precisa de push e PR do humano.
-- **Verde na última verificação (main com a 013):** `pnpm typecheck`, `lint`, `format:check`, 645 testes unitários e 241 de integração, em Node 22.23.2 e 24.18.0, e CI verde.
+- **Branch em andamento:** `spec/014-provedor-llm-real` (spec 014 implementada, aguardando `reviewer`, push, PR e CI; o agente não dá push). Os docs da `docs/agent-handoff` entraram no primeiro commit dela.
+- **Verde na última verificação (branch da 014):** `pnpm typecheck`, `lint`, `format:check`, 718 testes unitários e 241 de integração, em Node 22.23.2 e 24.18.0; `rm -rf dist && pnpm build` e smoke do processo compilado com `LLM_PROVIDER=mock` e com `anthropic` apontando para um servidor falso. CI ainda não rodou.
+- **Estabilidade da 014:** suítes novas e alteradas repetidas de 4 a 5 vezes em cada Node, sem falha (`anthropic-llm.provider.test.ts`, `anthropic-attendance.test.ts`, `attendance-llm.service.test.ts`, config, métricas, `attendance.integration.test.ts`).
 
 ## Próximo passo sugerido
 
-1. **Spec 014 (provedor real de LLM, Claude Haiku 5.5)** está em rascunho em `docs/specs/014-provedor-llm-real.md`, aguardando as decisões do dono (provedor, esforço, limite de saída, instrução de estilo, base legal LGPD). Depois de aprovada: implementer, reviewer e teste manual com a chave real (definir limite de gasto na conta da Anthropic).
+1. **Spec 014 (provedor real de LLM, Claude Haiku 5.5):** implementada (ver o "Registro da implementação" na spec). Falta: o `reviewer` (de preferência outro agente; foco em vazamento de dado pessoal em erro, chave, cancelamento e o caminho do atendimento), push e PR pelo humano, CI verde, o **teste manual com a chave real** (criar a chave e **definir limite de gasto mensal** na conta da Anthropic; roteiro em `AGENTS.md`, "Provedor de LLM real") e a conferência da base legal e dos termos de dados (LGPD, decisão 7 da spec) antes de clientes reais. O dono marca a spec como `concluída` depois do merge.
 2. Antes de **dados reais de clientes**: política de retenção e LGPD (inclui limpeza do Redis, jobs do BullMQ e o último job retido), RLS do Postgres, varredura de mensagens pendentes antigas.
 
 ## Decisões do dono que não são óbvias no código
@@ -31,6 +32,8 @@
 - Teste sensível ao relógio já falhou no CI: use relógio injetável e esperas com prazo, e repita as suítes novas várias vezes.
 - Erro do ioredis e do BullMQ não pode ir inteiro ao log (carrega `command.args` com chave e IP).
 - Sem `ADMIN_API_KEY` no `.env`, as rotas `/admin` respondem 401.
+- Provedor Anthropic: nunca logue nem copie `error.message`, corpo ou o objeto de erro do SDK (podem ecoar persona, histórico e texto do contato); só `{ provider, status, errorType, retryable }`. O SDK 1.3.0 manda a chave em `Authorization: Bearer`. O tokenizador do Haiku 5.5 conta cerca de 30% mais tokens que o do 4.5.
+- Testes que comparam o `systemPrompt` precisam esperar persona mais a instrução de estilo (`ATTENDANCE_STYLE_INSTRUCTION`).
 
 ## O que não vem pelo git (recriar em cada máquina)
 

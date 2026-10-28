@@ -62,21 +62,21 @@ Trocar o `mock` por um modelo de verdade: uma implementação de `LlmProvider` p
 (Todos com **servidor falso local**, sem chamar a API real nem usar chave real.)
 
 **Provedor e pedido**
-- [ ] Teste: o pedido ao servidor falso tem `model`, `max_tokens`, `system` = o `systemPrompt`, `messages` na ordem (histórico e depois a mensagem nova como `user`), `output_config.effort`, e **não** traz `temperature`, `top_p`, `top_k`, prefill nem `tool_choice`; a chave vai no cabeçalho do SDK e em nenhum outro lugar.
-- [ ] Teste: histórico que começa por turno do assistente é adaptado (turnos iniciais do assistente descartados); histórico vazio envia só a mensagem nova; turnos vizinhos do mesmo papel são aceitos.
-- [ ] Teste: resposta com blocos `text` (e blocos de pensamento ignorados) vira `LlmReply.text` e `usage`; resposta vazia, `refusal`, `max_tokens` e `pause_turn` viram `Result.err` (e o atendimento grava o texto padrão).
-- [ ] Teste: 401, 400, 429, 500, 529 e falha de conexão viram `ExternalServiceError` com só `{ provider, status, errorType, retryable }`; 429/5xx/rede são repetidos até `LLM_MAX_RETRIES` e dentro do prazo.
-- [ ] Teste: **cancelamento** — com o servidor falso demorando mais que `LLM_TIMEOUT_MS`, o atendimento cai no texto padrão com resultado `timeout` **e a conexão com o servidor falso é encerrada** (o provedor não segue rodando); o mesmo vale para o `[[mock:hang]]` do mock.
+- [x] Teste: o pedido ao servidor falso tem `model`, `max_tokens`, `system` = o `systemPrompt`, `messages` na ordem (histórico e depois a mensagem nova como `user`), `output_config.effort`, e **não** traz `temperature`, `top_p`, `top_k`, prefill nem `tool_choice`; a chave vai no cabeçalho do SDK e em nenhum outro lugar.
+- [x] Teste: histórico que começa por turno do assistente é adaptado (turnos iniciais do assistente descartados); histórico vazio envia só a mensagem nova; turnos vizinhos do mesmo papel são aceitos.
+- [x] Teste: resposta com blocos `text` (e blocos de pensamento ignorados) vira `LlmReply.text` e `usage`; resposta vazia, `refusal`, `max_tokens` e `pause_turn` viram `Result.err` (e o atendimento grava o texto padrão).
+- [x] Teste: 401, 400, 429, 500, 529 e falha de conexão viram `ExternalServiceError` com só `{ provider, status, errorType, retryable }`; 429/5xx/rede são repetidos até `LLM_MAX_RETRIES` e dentro do prazo.
+- [x] Teste: **cancelamento** — com o servidor falso demorando mais que `LLM_TIMEOUT_MS`, o atendimento cai no texto padrão com resultado `timeout` **e a conexão com o servidor falso é encerrada** (o provedor não segue rodando); o mesmo vale para o `[[mock:hang]]` do mock.
 
 **Privacidade (o contrato da 010 vira teste)**
-- [ ] Teste de captura de log e de inspeção do erro: um texto de contato, histórico e persona **secretos** enviados por um servidor falso que **ecoa o pedido no corpo do erro** não aparecem em nenhuma linha de log, em `message`/`context` de erro, em label de métrica nem na resposta HTTP do simulador administrativo; a chave também não.
-- [ ] Teste: o serviço só loga ids, tamanhos, contagem de tokens e resultado.
+- [x] Teste de captura de log e de inspeção do erro: um texto de contato, histórico e persona **secretos** enviados por um servidor falso que **ecoa o pedido no corpo do erro** não aparecem em nenhuma linha de log, em `message`/`context` de erro, em label de métrica nem na resposta HTTP do simulador administrativo; a chave também não.
+- [x] Teste: o serviço só loga ids, tamanhos, contagem de tokens e resultado.
 
 **Atendimento e config**
-- [ ] Teste: `AttendanceService` passa `AbortSignal`, o aborta no prazo e registra `usage` (log com números e `llm_tokens_total`); as suítes da 010 e da 011 continuam verdes sem enfraquecer asserções.
-- [ ] Teste: `buildSystemPrompt` mantém a persona primeiro e acrescenta a instrução de estilo depois; o texto do contato nunca entra no `systemPrompt`.
-- [ ] Config: `LLM_PROVIDER=anthropic` sem `ANTHROPIC_API_KEY` falha no boot; valores inválidos de `LLM_EFFORT`, `LLM_MAX_OUTPUT_TOKENS` e `LLM_MAX_RETRIES` falham; `ANTHROPIC_BASE_URL` com `http://` é recusada em produção; `mock` não exige chave.
-- [ ] `/metrics` expõe `llm_tokens_total` e os novos resultados; nenhum `clientId`, texto ou chave em label.
+- [x] Teste: `AttendanceService` passa `AbortSignal`, o aborta no prazo e registra `usage` (log com números e `llm_tokens_total`); as suítes da 010 e da 011 continuam verdes sem enfraquecer asserções.
+- [x] Teste: `buildSystemPrompt` mantém a persona primeiro e acrescenta a instrução de estilo depois; o texto do contato nunca entra no `systemPrompt`.
+- [x] Config: `LLM_PROVIDER=anthropic` sem `ANTHROPIC_API_KEY` falha no boot; valores inválidos de `LLM_EFFORT`, `LLM_MAX_OUTPUT_TOKENS` e `LLM_MAX_RETRIES` falham; `ANTHROPIC_BASE_URL` com `http://` é recusada em produção; `mock` não exige chave.
+- [x] `/metrics` expõe `llm_tokens_total` e os novos resultados; nenhum `clientId`, texto ou chave em label.
 - [ ] `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24; CI verde; revisão do `reviewer`. O CI **nunca** chama a API real.
 
 ## Teste manual com a API real (feito pelo dono, não automatizado)
@@ -120,3 +120,38 @@ O provedor só recebe o que o `AttendanceService` monta para **um** cliente (per
 - **Dependência nova: `@anthropic-ai/sdk`** (SDK oficial; o implementer confere a versão estável publicada e a compatibilidade com Node 22 e 24). Justificativa: tipos, repetição, cancelamento e erros tipados prontos, em vez de HTTP escrito à mão.
 - Sem migration. Sem mudança de schema.
 - Por tocar em segredos, em uma chamada externa que recebe dado pessoal e no caminho do atendimento, passa pelo agente `reviewer` antes do merge.
+
+## Registro da implementação
+
+Branch `spec/014-provedor-llm-real`. Nada foi chamado na API real e nenhuma chave real foi usada.
+
+**Estado dos critérios:** todos marcados, exceto o último (verdes em Node 22 e 24, CI e revisão do `reviewer`): `typecheck`, `lint`, `format:check`, `test` (718) e `test:integration` (241) estão verdes em Node 22.23.2 e 24.18.0 localmente, mas o CI e o `reviewer` ainda não rodaram. A spec **não** foi marcada como `concluída`.
+
+**Decisões**
+
+- **Categoria do erro para o serviço:** o provedor marca `error.context.errorType` e o `AttendanceService` traduz em resultado de métrica (`resultForProviderError`): `timeout`, `refusal` e `max_tokens` (vira `truncated`); o resto é `error`. Os valores ficam em `LLM_ERROR_TYPE` (`src/application/ports/llm-provider.ts`). Assim recusa e corte entram na métrica sem a porta ganhar um segundo tipo de retorno.
+- **Prazo no SDK e prazo do atendimento:** `LLM_TIMEOUT_MS` vai ao SDK como prazo de cada tentativa e é também o prazo total do serviço (o `AbortSignal` corta a soma das repetições). O prazo do serviço vence sempre; um timeout de tentativa do SDK sozinho também vira `errorType: timeout`.
+- **Categoria pelo status HTTP, não pelo corpo:** 400/404/413/422 pedido inválido; 401 autenticação; 403 permissão; 408 prazo; 429 limite de taxa; 529 sobrecarga; 409 e 5xx indisponível. O `error.type` do corpo (texto do servidor) nunca é copiado. `status` é `null` em falha de rede ou cancelamento.
+- **Log de falha do serviço (`err: cause`):** continua igual; o `cause` é o `ExternalServiceError` seguro do provedor (sem `cause` do SDK). Há teste com servidor que ecoa o pedido provando que log, resposta do simulador e `/metrics` não vazam (`infrastructure/http/anthropic-attendance.test.ts`).
+- **SDK silenciado:** `logLevel: 'off'` e `openTelemetry: false` na criação do cliente (o SDK escreveria no `console`, fora do Pino e do `redact`, e emitiria spans de tracing).
+- **`usage`:** `inputTokens` é o `input_tokens` da resposta (não inclui o que veio do cache); `cacheReadTokens` só aparece se a API o informa. A métrica ignora valor não finito ou zero.
+- **Mock:** o `[[mock:hang]]` termina com erro `timeout` ao abortar (e ao receber um sinal já abortado); o eco de persona do mock ignora a instrução de estilo (cita só o começo da persona), para os testes antigos manterem o texto esperado.
+- **Testes antigos ajustados sem enfraquecer:** asserções que comparavam o `systemPrompt` exatamente com a persona agora comparam com persona mais a instrução fixa (`withStyle`, igualdade exata); a do controlador usa `startsWith` com a persona e a linha em branco.
+- **Não coberto por teste automatizado:** o teste de ponta a ponta com o canal (011/013, BullMQ) usa o mock nas suítes existentes (inalteradas e verdes); o provedor Anthropic foi exercitado de ponta a ponta no simulador administrativo (teste `anthropic-attendance.test.ts`) e no processo compilado com servidor falso (smoke manual). O caminho `respondToPending` usa o mesmo `callProvider`.
+
+**Desvios e fontes**
+
+- **Autenticação:** o SDK 1.3.0 instalado envia a chave como `Authorization: Bearer <chave>` (`node_modules/@anthropic-ai/sdk/client.js`, `authHeaders`), não `x-api-key`. A spec só exige "cabeçalho do SDK e em nenhum outro lugar", o que vale; o teste aceita os dois nomes.
+- **`LLM_EFFORT`:** o SDK aceita `low`, `medium`, `high`, `xhigh` e `max`; a config aceita só os três primeiros, como a spec manda.
+- **Fatos conferidos em 2026-10-28:** id `claude-haiku-5-5` (também no tipo `Model` do SDK), preços (US$ 0,10 entrada e 0,50 saída até 100 mil tokens; cache read US$ 0,01), pensamento adaptivo e `effort` padrão `medium`, contexto de 1 M e saída máxima de 128 K (https://platform.claude.com/docs/en/about-claude/models/overview e https://platform.claude.com/docs/en/models/haiku-5-5/overview). A página do modelo diz para omitir `temperature`, `top_p` e `top_k`; o 400 para valor diferente do padrão e para prefill vem da spec e não foi reconfirmado por chamada real (o provedor simplesmente não os envia). **Novidade:** o Haiku 5.5 usa um tokenizador que conta cerca de 30% mais tokens que o Haiku 4.5 para o mesmo texto; vale ao estimar custo e ao ajustar `LLM_MAX_OUTPUT_TOKENS`.
+- **SDK:** `@anthropic-ai/sdk` 1.3.0 (publicado em 2026-10-23, mais de dois dias, Apache-2.0, `latest` do npm). Classes de erro, `stop_reason` (`end_turn`, `max_tokens`, `stop_sequence`, `tool_use`, `pause_turn`, `refusal`, `model_context_window_exceeded`), `output_config.effort`, `signal`, `timeout`, `maxRetries` e `baseURL` conferidos nos `.d.ts` instalados. Testes verdes em Node 22 e 24; `pnpm-workspace.yaml` não precisou mudar e `minimumReleaseAgeExclude` não foi usado.
+- **Variáveis de ambiente do SDK:** com `apiKey` explícita o SDK não lê `ANTHROPIC_API_KEY`; sem `baseURL` ele ainda leria `ANTHROPIC_BASE_URL` do ambiente, que é a mesma variável já validada na config.
+
+**Pastas e arquivos finais**
+
+- `src/application/ports/llm-provider.ts` (porta: `options.signal`, `LlmUsage`, `LLM_ERROR_TYPE`); `src/application/attendance/attendance.service.ts` (`AbortController`, usage, resultados novos, `buildSystemPrompt`).
+- `src/infrastructure/external-apis/llm/`: `anthropic-llm.provider.ts` (novo), `create-llm-provider.ts`, `mock-llm.provider.ts`.
+- `src/infrastructure/config/env.schema.ts`; `src/infrastructure/metrics/metrics.ts` e `index.ts`.
+- Testes novos: `src/application/attendance/attendance-llm.service.test.ts`, `src/infrastructure/external-apis/llm/anthropic-llm.provider.test.ts`, `src/infrastructure/http/anthropic-attendance.test.ts`; servidor falso `src/test-support/fake-anthropic-api.ts`. Testes alterados: config, métricas, mock, atendimento (unitário e de integração) e controlador.
+- `.env.example`, `.env.test.example`, `AGENTS.md`, `docs/handoff.md`.
+
