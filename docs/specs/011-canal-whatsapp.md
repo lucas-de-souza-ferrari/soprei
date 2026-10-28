@@ -1,6 +1,6 @@
 # 011 — Canal WhatsApp: webhook de entrada e envio da resposta
 
-- **Status:** aprovada pelo dono em 2026-10-27, com todas as recomendações da seção "Decisões" (fila BullMQ, concorrência 1, mapeamento por coluna em `Client`, credenciais por variável de ambiente, resposta constante para mensagem não textual, fallback na falha final, marca de envio na mensagem, canal opt-in, 005 antes). **Só implementar depois da 005 concluída.**
+- **Status:** concluída (CI verde e merge confirmados pelo dono; ver também o teste manual com a Meta no Registro). Aprovada pelo dono em 2026-10-27, com todas as recomendações da seção "Decisões" (fila BullMQ, concorrência 1, mapeamento por coluna em `Client`, credenciais por variável de ambiente, resposta constante para mensagem não textual, fallback na falha final, marca de envio na mensagem, canal opt-in, 005 antes). **Só implementar depois da 005 concluída.**
 - **Branch:** `spec/011-canal-whatsapp`
 - **Depende de:** 010 (concluída) e **005 (rate limiting) concluída antes de implementar**, porque esta spec expõe o primeiro endpoint público. A 005 é um esboço e precisa ser relida contra o código e aprovada primeiro (ver "Requisitos sobre a spec 005").
 

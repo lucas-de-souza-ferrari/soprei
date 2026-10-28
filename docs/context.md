@@ -125,11 +125,14 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 5. 005 — Rate limiting: limite por perfil e por IP em Redis, `TRUST_PROXY`, 429 padronizado
 6. **Fatia vertical ([spec 010](specs/010-fatia-vertical-atendimento.md), concluída):** mensagem de entrada → conversa/mensagem do cliente → `LLMProvider` com `mock` → resposta, com isolamento por cliente e fallback de erro. Decisões do dono (todas conforme a recomendação): simulador por API administrativa, processamento síncrono, persona em `Client`, `contactRef` livre, histórico de 20 mensagens e 12 000 caracteres, fallback constante, nunca logar conteúdo de mensagens, política de retenção de dados pessoais só antes de dados reais. Passa pelo `reviewer` antes do merge.
 7. 012 — Reorganização de pastas: subpastas por área em `database`, `http`, `application` e `presentation`, sem mudança de comportamento
+8. 011 — Canal WhatsApp (webhook assinado, fila BullMQ, envio pela Cloud API, número de teste da Meta, LLM `mock`); teste manual do dono com a Meta funcionou de ponta a ponta
+9. 013 — Agrupamento de mensagens rápidas (janela de espera deslizante, lote respondido uma vez; mensagens gravadas no banco, `Message.answeredById`)
 
-**Próximas, nesta ordem**
+**Próximas**
 
-8. **Canal WhatsApp, parte A ([spec 011](specs/011-canal-whatsapp.md), aprovada em 2026-10-27, implementada em 2026-10-28 na branch `spec/011-canal-whatsapp`; aguardando revisão do `reviewer`, CI, teste manual com o número de teste da Meta e merge):** webhook com verificação e assinatura, fila BullMQ, envio da resposta pela Cloud API, mapeamento `phone_number_id` → cliente, número de teste da Meta, LLM ainda `mock`. Depende da 005, concluída.
-9. **Agrupamento de mensagens rápidas ([spec 013](specs/013-agrupamento-de-mensagens.md), aprovada em 2026-10-28, implementada na branch `spec/013-agrupamento-de-mensagens`; aguardando revisão do `reviewer`, CI e merge):** janela de espera deslizante por contato; cada mensagem é gravada no banco ao chegar (decisão do dono, depois de avaliar um buffer no Redis e descartá-lo) e o sistema responde uma vez a todas as pendentes. Pedido do dono depois do teste manual da 011 (2026-10-28), que funcionou de ponta a ponta com o número de teste da Meta.
+- Provedor real de LLM (avaliar Claude Haiku 5.5 e Gemini 3.1 Flash-Lite com conversas em português), antes de clientes reais.
+- Pendências antes de dados reais: política de retenção e LGPD (inclui limpeza do Redis e dos jobs), RLS do Postgres, varredura de mensagens pendentes antigas, suporte a BSUID (contato sem telefone), confirmar que o túnel/proxy acrescenta ao `X-Forwarded-For`.
+
 
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
 

@@ -1,6 +1,6 @@
 # 013 — Agrupamento de mensagens rápidas (janela de espera)
 
-- **Status:** aprovada pelo dono em 2026-10-28, com todas as recomendações (espera no banco, janela deslizante de 5 s com teto de 20 s, lote de 10 mensagens e 8 000 caracteres, um turno `user` único, avisos imediatos, simulador síncrono, configuração global, revisão pelo `reviewer`)
+- **Status:** concluída (CI verde e merge confirmados pelo dono; ver também o teste manual com a Meta no Registro). Aprovada pelo dono em 2026-10-28, com todas as recomendações (espera no banco, janela deslizante de 5 s com teto de 20 s, lote de 10 mensagens e 8 000 caracteres, um turno `user` único, avisos imediatos, simulador síncrono, configuração global, revisão pelo `reviewer`)
 - **Branch:** `spec/013-agrupamento-de-mensagens`
 - **Depende de:** 011 (canal WhatsApp, mergeada) e 010 (atendimento)
 
