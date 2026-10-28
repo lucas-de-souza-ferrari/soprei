@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { ConflictError } from '../../shared/errors/index.js';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { BatchLimits } from '../../application/attendance/attendance.schemas.js';
 import { MockLlmProvider } from '../external-apis/llm/mock-llm.provider.js';
@@ -146,5 +147,48 @@ describe('agrupamento no banco (spec 013)', () => {
     assert.equal(again.status, 'answered');
     assert.equal(llm.calls.length, before);
     assert.equal(await database.prisma.message.count({ where: { clientId: client.id } }), 2);
+  });
+
+  it('lotes diferentes do mesmo contato em paralelo: só uma resposta confirma, a outra é desfeita (ConflictError) e a retentativa nunca deixa duas respostas para a mesma mensagem', async () => {
+    const client = await tenants.createClient('lotes-paralelos-db');
+    const contact = 'contato-paralelo';
+    for (const [i, text] of ['um', 'dois', 'tres'].entries()) {
+      await accept(client.id, text, contact, `par-${String(i)}`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    llm.calls.length = 0;
+    const release = llm.hold();
+
+    // As duas execuções leem as três pendentes e escolhem lotes diferentes (2 e 3 mensagens).
+    const small = service.respondToPending(client.id, contact, { maxMessages: 2, maxChars: 8_000 });
+    const large = service.respondToPending(client.id, contact, LIMITS);
+    const settled = Promise.allSettled([small, large]);
+    while (llm.calls.length < 2) await new Promise((resolve) => setTimeout(resolve, 10));
+    release();
+    const results = await settled;
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    assert.equal(fulfilled.length, 1, 'só uma execução confirma');
+    assert.equal(rejected.length, 1);
+    assert.ok(rejected[0]?.reason instanceof ConflictError);
+
+    // Retentativa da que perdeu: responde o que sobrou (ou nada), sem duplicar mensagem alguma.
+    await service.respondToPending(client.id, contact, LIMITS);
+    const conversation = await conversations.findByContact(client.id, contact);
+    assert.ok(conversation !== null);
+    const rows = await database.prisma.message.findMany({
+      where: { clientId: client.id, conversationId: conversation.id },
+    });
+    const users = rows.filter((row) => row.role === 'USER');
+    const replies = rows.filter((row) => row.role === 'ASSISTANT');
+    assert.ok(
+      users.every((user) => user.answeredById !== null),
+      'nenhuma mensagem sem resposta',
+    );
+    const owners = new Set(users.map((user) => user.answeredById));
+    assert.equal(replies.length, owners.size, 'toda resposta atende pelo menos uma mensagem');
+    assert.ok(replies.every((reply) => owners.has(reply.id)));
+    assert.ok(replies.length <= 2);
   });
 });

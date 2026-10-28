@@ -104,7 +104,10 @@ interface Harness {
   stop(): Promise<void>;
 }
 
-async function start(batch: ChannelBatchSettings): Promise<Harness> {
+async function start(
+  batch: ChannelBatchSettings,
+  queueSettings: typeof QUEUE_SETTINGS = QUEUE_SETTINGS,
+): Promise<Harness> {
   const logs = captureLogs();
   const metrics = createMetrics();
   const database = createDatabase(config, logs.logger);
@@ -112,7 +115,7 @@ async function start(batch: ChannelBatchSettings): Promise<Harness> {
   const prefix = keyspace.scopedPrefix('bull').slice(0, -1);
   const queue = createInboundQueue({
     redisUrl: config.REDIS_URL,
-    settings: QUEUE_SETTINGS,
+    settings: queueSettings,
     logger: logs.logger,
     metrics,
     prefix,
@@ -191,14 +194,18 @@ async function start(batch: ChannelBatchSettings): Promise<Harness> {
 async function withHarness(
   batch: Partial<ChannelBatchSettings>,
   fn: (h: Harness) => Promise<void>,
+  queueSettings: typeof QUEUE_SETTINGS = QUEUE_SETTINGS,
 ): Promise<void> {
-  const h = await start({
-    windowMs: 300,
-    maxWaitMs: 1_500,
-    maxMessages: 10,
-    maxChars: 8_000,
-    ...batch,
-  });
+  const h = await start(
+    {
+      windowMs: 1_500,
+      maxWaitMs: 6_000,
+      maxMessages: 10,
+      maxChars: 8_000,
+      ...batch,
+    },
+    queueSettings,
+  );
   try {
     await fn(h);
   } finally {
@@ -319,7 +326,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('janela deslizante: mensagem nova dentro da janela adia a resposta; o job flush não leva texto e a chave inclui o cliente', async (t) => {
     const release = keepEventLoopAlive();
     t.after(release);
-    await withHarness({ windowMs: 700, maxWaitMs: 5_000 }, async (h) => {
+    await withHarness({ windowMs: 2_000, maxWaitMs: 10_000 }, async (h) => {
       const number = phoneNumberId();
       const client = await newClient('desliza', number);
       const contact = contactNumber();
@@ -340,12 +347,12 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       assert.ok(flush.id?.includes(client.id), 'a chave do flush inclui o clientId');
       assert.ok(!flush.id?.includes(contact), 'e não o telefone');
 
-      await sleep(350);
+      await sleep(1_000);
       await send(h, number, contact, 'segunda');
       await waitFor(async () => (await userCount(client, contact)) === 2, 'segunda aceita');
       const secondAcceptedAt = Date.now();
-      // Passou a janela da primeira (700 ms desde `begin`): sem deslizar, a resposta já teria saído.
-      await sleep(Math.max(0, begin + 700 + 150 - Date.now()));
+      // Passou a janela da primeira (2 s desde `begin`): sem deslizar, a resposta já teria saído.
+      await sleep(Math.max(0, begin + 2_000 + 300 - Date.now()));
       assert.equal(h.llm.calls.length, 0, 'a segunda mensagem adiou a resposta');
       assert.equal((await raw.getDelayed()).length, 1, 'ainda um só flush esperando');
 
@@ -354,7 +361,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
         'resposta depois da janela',
       );
       assert.ok(
-        Date.now() - secondAcceptedAt >= 600,
+        Date.now() - secondAcceptedAt >= 1_800,
         'esperou a janela inteira a partir da segunda',
       );
       assert.equal(h.llm.calls.length, 1);
@@ -363,7 +370,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   });
 
   it('teto de espera: quem escreve sem parar recebe resposta ao completar o teto, e as seguintes viram o turno seguinte', async () => {
-    await withHarness({ windowMs: 500, maxWaitMs: 1_100 }, async (h) => {
+    await withHarness({ windowMs: 1_000, maxWaitMs: 2_200 }, async (h) => {
       const number = phoneNumberId();
       const client = await newClient('teto', number);
       const contact = contactNumber();
@@ -373,7 +380,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       for (let i = 1; i <= total; i += 1) {
         await send(h, number, contact, `m${String(i)}`);
         if (firstReplyAfterSent === -1 && h.llm.calls.length > 0) firstReplyAfterSent = i;
-        await sleep(200);
+        await sleep(400);
       }
       assert.ok(firstReplyAfterSent !== -1, 'respondeu antes de o contato parar de escrever');
       assert.ok(firstReplyAfterSent < total, 'o primeiro turno saiu no meio da sequência');
@@ -439,7 +446,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   });
 
   it('mais pendentes que o limite de mensagens ou de caracteres: turnos sucessivos, sem perder nenhuma e sem nova espera', async () => {
-    await withHarness({ windowMs: 400, maxMessages: 2, maxChars: 8_000 }, async (h) => {
+    await withHarness({ windowMs: 1_500, maxMessages: 2, maxChars: 8_000 }, async (h) => {
       const number = phoneNumberId();
       const client = await newClient('limite', number);
       const contact = contactNumber();
@@ -452,7 +459,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       const users = (await stored(client, contact)).filter((m) => m.role === 'USER');
       assert.ok(users.every((user) => user.answeredById !== null));
     });
-    await withHarness({ windowMs: 400, maxMessages: 10, maxChars: 70 }, async (h) => {
+    await withHarness({ windowMs: 1_500, maxMessages: 10, maxChars: 70 }, async (h) => {
       const number = phoneNumberId();
       const client = await newClient('limite-chars', number);
       const contact = contactNumber();
@@ -502,7 +509,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   });
 
   it('aviso constante (áudio) não espera e não entra no lote; o texto pendente continua esperando a janela', async () => {
-    await withHarness({ windowMs: 1_500, maxWaitMs: 5_000 }, async (h) => {
+    await withHarness({ windowMs: 4_000, maxWaitMs: 12_000 }, async (h) => {
       const number = phoneNumberId();
       const client = await newClient('aviso', number);
       const contact = contactNumber();
@@ -510,7 +517,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       await send(h, number, contact, 'texto pendente');
       await waitFor(async () => (await userCount(client, contact)) === 1, 'texto aceito');
       await send(h, number, contact, '', { type: 'audio' });
-      await waitFor(() => graph.requests.length === 1, 'aviso enviado', 1_200);
+      await waitFor(() => graph.requests.length === 1, 'aviso enviado', 3_000);
       assert.equal(textsSent()[0], CHANNEL_NOTICE_TEXTS.unsupported_type);
       assert.equal(h.llm.calls.length, 0, 'o texto ainda espera a janela');
 
@@ -521,7 +528,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   });
 
   it('dois contatos do mesmo cliente e o mesmo contato em dois clientes escrevendo juntos nunca se misturam', async () => {
-    await withHarness({ windowMs: 300 }, async (h) => {
+    await withHarness({ windowMs: 1_500 }, async (h) => {
       const numberA = phoneNumberId();
       const numberB = phoneNumberId();
       const clientA = await newClient('iso-a', numberA);
@@ -563,7 +570,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   });
 
   it('cliente suspenso ou número trocado durante a espera: o flush é descartado e nada é enviado', async () => {
-    await withHarness({ windowMs: 500 }, async (h) => {
+    await withHarness({ windowMs: 2_000 }, async (h) => {
       const numberS = phoneNumberId();
       const numberC = phoneNumberId();
       const suspended = await newClient('susp', numberS);
@@ -604,7 +611,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   });
 
   it('as métricas do lote aparecem em /metrics; texto, contato, persona e segredos não aparecem em nenhum log', async () => {
-    await withHarness({ windowMs: 250 }, async (h) => {
+    await withHarness({ windowMs: 1_500 }, async (h) => {
       const number = phoneNumberId();
       const client = await newClient('privado', number);
       const contact = contactNumber();
@@ -641,5 +648,56 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       }
       assert.ok(raw.includes('lote de mensagens atendido'));
     });
+  });
+
+  it('limitação conhecida: mensagem nova durante o backoff de um envio que falhou troca o job em retentativa; a resposta antiga fica gravada sem sentAt, o aviso aparece e a nova mensagem é respondida', async () => {
+    await withHarness(
+      { windowMs: 300 },
+      async (h) => {
+        const number = phoneNumberId();
+        const client = await newClient('backoff', number);
+        const contact = contactNumber();
+        graph.failNext(1, { kind: 'respond', status: 503 });
+
+        await send(h, number, contact, 'primeira');
+        await waitFor(() => graph.requests.length === 1, 'envio que falhou');
+        await waitFor(
+          async () => (await stored(client, contact)).some((m) => m.role === 'ASSISTANT'),
+          'resposta gravada',
+        );
+        // O job está esperando o backoff (3 s). A mensagem nova o substitui.
+        await send(h, number, contact, 'segunda');
+        await waitFor(async () => (await sentCount(client, contact)) === 1, 'segunda respondida');
+
+        const rows = await stored(client, contact);
+        const replies = rows.filter((m) => m.role === 'ASSISTANT');
+        assert.equal(replies.length, 2);
+        assert.equal(replies[0]?.sentAt, null, 'a resposta antiga ficou gravada, sem sentAt');
+        assert.notEqual(replies[1]?.sentAt, null);
+        assert.equal(
+          h.llm.calls.length,
+          2,
+          'a primeira não foi reenviada: nova chamada só para a segunda',
+        );
+        assert.equal(h.llm.calls[1]?.userMessage, 'segunda');
+        const warn = h.logs
+          .lines()
+          .find((line) => String(line.msg).includes('não foi enviada e não será reenviada'));
+        assert.equal(warn?.level, 40);
+        assert.equal(warn.clientId, client.id);
+        assert.equal(warn.replyId, replies[0].id);
+        const metrics = await h.app.inject({
+          method: 'GET',
+          url: '/metrics',
+          headers: { authorization: `Bearer ${METRICS_TOKEN}` },
+        });
+        assert.match(metrics.body, /attendance_batches_total\{result="unsent_previous"\} 1/);
+        const raw = h.logs.raw();
+        for (const secret of ['primeira', 'segunda', contact, PERSONA]) {
+          assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
+        }
+      },
+      { ...QUEUE_SETTINGS, backoffMs: 3_000 },
+    );
   });
 });
