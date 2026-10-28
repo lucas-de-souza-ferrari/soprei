@@ -86,6 +86,19 @@ describe('MockLlmProvider', () => {
     assert.equal(outcome, 'travado');
   });
 
+  it('marcador de travamento termina com erro de prazo quando a chamada é abortada (e se já veio abortada)', async () => {
+    const mock = new MockLlmProvider();
+    const controller = new AbortController();
+    const pending = mock.generate(input(MOCK_HANG_MARKER), { signal: controller.signal });
+    controller.abort();
+    const result = await pending;
+    assert.equal(result.ok, false);
+    assert.equal(result.error.context['errorType'], 'timeout');
+
+    const already = await mock.generate(input(MOCK_HANG_MARKER), { signal: AbortSignal.abort() });
+    assert.equal(already.ok, false);
+  });
+
   it('hold() segura as chamadas até a liberação', async () => {
     const mock = new MockLlmProvider({ recordCalls: true });
     const release = mock.hold();

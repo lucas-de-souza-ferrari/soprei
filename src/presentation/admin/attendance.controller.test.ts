@@ -132,7 +132,7 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
       assert.equal(patched.statusCode, 200);
       const before = llm.calls.length;
       await send(clientId, { contactRef: 'c1', text: 'oi' });
-      assert.equal(llm.calls[before]?.systemPrompt, 'Persona-Rota-123');
+      assert.ok(llm.calls[before]?.systemPrompt.startsWith('Persona-Rota-123\n\n'));
     });
 
     it('externalId repetido: 200 com a mesma resposta e duplicate=true', async () => {

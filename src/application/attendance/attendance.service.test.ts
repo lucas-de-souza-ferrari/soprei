@@ -27,6 +27,7 @@ import {
   type AttendanceMetrics,
   AttendanceService,
   type AttendanceOptions,
+  ATTENDANCE_STYLE_INSTRUCTION,
   buildSystemPrompt,
   type LlmRequestResult,
 } from './attendance.service.js';
@@ -94,6 +95,11 @@ async function newClient(h: Harness, slug: string, persona?: string): Promise<Cl
   return persona === undefined ? client : h.clients.update(client.id, { persona });
 }
 
+/** O que o serviço envia como systemPrompt: persona e, depois, a instrução fixa de estilo (spec 014). */
+function withStyle(persona: string): string {
+  return `${persona}\n\n${ATTENDANCE_STYLE_INSTRUCTION}`;
+}
+
 describe('AttendanceService: pipeline', () => {
   it('mensagem nova cria a conversa, grava a mensagem e a resposta e devolve a resposta do mock', async () => {
     const h = setup();
@@ -146,10 +152,10 @@ describe('AttendanceService: pipeline', () => {
     await h.service.handleInboundMessage(client.id, { contactRef: 'c1', text: 'segunda' });
 
     const [first, second] = h.llm.calls;
-    assert.equal(first?.systemPrompt, 'Persona-Alfa: seja formal.');
+    assert.equal(first?.systemPrompt, withStyle('Persona-Alfa: seja formal.'));
     assert.deepEqual(first.history, []);
     assert.equal(first.userMessage, 'primeira');
-    assert.equal(second?.systemPrompt, 'Persona-Alfa: seja formal.');
+    assert.equal(second?.systemPrompt, withStyle('Persona-Alfa: seja formal.'));
     assert.equal(second.userMessage, 'segunda');
     assert.deepEqual(
       second.history.map((turn) => turn.role),
@@ -211,7 +217,7 @@ describe('AttendanceService: pipeline', () => {
     await h.service.handleInboundMessage(client.id, { contactRef: 'c1', text: attack });
     const call = h.llm.calls[0];
     assert.equal(call?.userMessage, attack);
-    assert.equal(call.systemPrompt, 'Persona-Alfa');
+    assert.equal(call.systemPrompt, withStyle('Persona-Alfa'));
     assert.ok(!call.systemPrompt.includes('Ignore'));
     assert.ok(call.history.every((turn) => !turn.content.includes('Ignore')));
   });
@@ -616,8 +622,8 @@ describe('AttendanceService: isolamento entre clientes', () => {
       await h.service.handleInboundMessage(b.id, { contactRef: 'mesmo', text: `B-${String(i)}` });
     }
 
-    const callsA = h.llm.calls.filter((call) => call.systemPrompt === 'Persona-Alfa');
-    const callsB = h.llm.calls.filter((call) => call.systemPrompt === 'Persona-Beta');
+    const callsA = h.llm.calls.filter((call) => call.systemPrompt === withStyle('Persona-Alfa'));
+    const callsB = h.llm.calls.filter((call) => call.systemPrompt === withStyle('Persona-Beta'));
     assert.equal(callsA.length, 4);
     assert.equal(callsB.length, 4);
     for (const call of callsA) {
@@ -650,7 +656,7 @@ describe('AttendanceService: isolamento entre clientes', () => {
       'há histórico (não é vácuo)',
     );
     for (const call of h.llm.calls) {
-      const prefix = call.systemPrompt === 'Persona-Alfa' ? 'A-' : 'B-';
+      const prefix = call.systemPrompt === withStyle('Persona-Alfa') ? 'A-' : 'B-';
       const other = prefix === 'A-' ? 'B-' : 'A-';
       assert.ok(call.userMessage.startsWith(prefix));
       assert.ok(call.history.every((turn) => !turn.content.includes(other)));

@@ -1,7 +1,9 @@
-import type {
-  LlmGenerateInput,
-  LlmProvider,
-  LlmReply,
+import {
+  LLM_ERROR_TYPE,
+  type LlmGenerateInput,
+  type LlmGenerateOptions,
+  type LlmProvider,
+  type LlmReply,
 } from '../../../application/ports/llm-provider.js';
 import { ExternalServiceError } from '../../../shared/errors/index.js';
 import { Result } from '../../../shared/types/index.js';
@@ -60,12 +62,15 @@ export class MockLlmProvider implements LlmProvider {
     };
   }
 
-  async generate(input: LlmGenerateInput): Promise<Result<LlmReply, ExternalServiceError>> {
+  async generate(
+    input: LlmGenerateInput,
+    options: LlmGenerateOptions = {},
+  ): Promise<Result<LlmReply, ExternalServiceError>> {
     if (this.recordCalls) this.calls.push(input);
     if (this.gate !== undefined) await this.gate;
 
     const text = input.userMessage;
-    if (text.includes(MOCK_HANG_MARKER)) return new Promise(() => undefined);
+    if (text.includes(MOCK_HANG_MARKER)) return waitForAbort(options.signal);
     if (text.includes(MOCK_FAIL_MARKER)) {
       // Nunca ecoa o texto do contato no erro (contrato do LlmProvider).
       return Result.err(new ExternalServiceError('Falha simulada do provedor mock'));
@@ -79,4 +84,24 @@ export class MockLlmProvider implements LlmProvider {
       text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})`,
     });
   }
+}
+
+/** Nunca responde, mas termina (como um provedor de verdade) quando a chamada é cancelada. */
+function waitForAbort(
+  signal: AbortSignal | undefined,
+): Promise<Result<LlmReply, ExternalServiceError>> {
+  return new Promise((resolve) => {
+    if (signal === undefined) return;
+    const cancelled = (): void => {
+      resolve(
+        Result.err(
+          new ExternalServiceError('Chamada ao provedor mock cancelada', {
+            context: { provider: 'mock', errorType: LLM_ERROR_TYPE.timeout, retryable: false },
+          }),
+        ),
+      );
+    };
+    if (signal.aborted) cancelled();
+    else signal.addEventListener('abort', cancelled, { once: true });
+  });
 }

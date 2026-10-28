@@ -113,6 +113,25 @@ describe('createMetrics', () => {
     assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
   });
 
+  it('registra tokens e os resultados refusal e truncated do LLM (spec 014), sem label de cliente', async () => {
+    const metrics = createMetrics();
+    metrics.observeLlmRequest({ provider: 'anthropic', result: 'refusal', durationSeconds: 0.2 });
+    metrics.observeLlmRequest({ provider: 'anthropic', result: 'truncated', durationSeconds: 0.3 });
+    metrics.observeLlmTokens({ provider: 'anthropic', type: 'input', tokens: 100 });
+    metrics.observeLlmTokens({ provider: 'anthropic', type: 'input', tokens: 20 });
+    metrics.observeLlmTokens({ provider: 'anthropic', type: 'output', tokens: 30 });
+    metrics.observeLlmTokens({ provider: 'anthropic', type: 'cache_read', tokens: 0 });
+    metrics.observeLlmTokens({ provider: 'anthropic', type: 'cache_read', tokens: Number.NaN });
+
+    const body = await metrics.render();
+    assert.match(body, /llm_requests_total{provider="anthropic",result="refusal"} 1/);
+    assert.match(body, /llm_requests_total{provider="anthropic",result="truncated"} 1/);
+    assert.match(body, /llm_tokens_total{provider="anthropic",type="input"} 120/);
+    assert.match(body, /llm_tokens_total{provider="anthropic",type="output"} 30/);
+    assert.doesNotMatch(body, /llm_tokens_total{provider="anthropic",type="cache_read"} [1-9]/);
+    assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
+  });
+
   it('registra o tamanho e o resultado das respostas de lote (spec 013), sem label de cliente', async () => {
     const metrics = createMetrics();
     metrics.observeAttendanceBatch({ size: 1, result: 'answered' });

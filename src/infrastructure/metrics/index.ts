@@ -13,6 +13,8 @@ export type {
   HttpRequestSample,
   LlmRequestResult,
   LlmRequestSample,
+  LlmTokensSample,
+  LlmTokenType,
   Metrics,
   PoolSnapshot,
   QueueJobResult,

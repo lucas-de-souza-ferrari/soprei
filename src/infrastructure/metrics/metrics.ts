@@ -15,8 +15,20 @@ export interface HttpRequestSample {
   readonly durationSeconds: number;
 }
 
-/** Resultado de uma chamada ao LLM: `ok`, `error` (falha ou resposta inutilizável) ou `timeout`. */
-export type LlmRequestResult = 'ok' | 'error' | 'timeout';
+/**
+ * Resultado de uma chamada ao LLM: `ok`, `error` (falha ou resposta inutilizável), `timeout`,
+ * `refusal` (o modelo recusou) ou `truncated` (resposta cortada por limite de tokens).
+ */
+export type LlmRequestResult = 'ok' | 'error' | 'timeout' | 'refusal' | 'truncated';
+
+/** Tipo de token contado em `llm_tokens_total` (conjunto fixo). */
+export type LlmTokenType = 'input' | 'output' | 'cache_read';
+
+export interface LlmTokensSample {
+  readonly provider: string;
+  readonly type: LlmTokenType;
+  readonly tokens: number;
+}
 
 export interface LlmRequestSample {
   /** Nome do provedor (`mock`...): conjunto pequeno e fixo, nunca dado do usuário. */
@@ -90,6 +102,8 @@ export interface Metrics {
   observeDbQuery(sample: DbQuerySample): void;
   /** Uma chamada ao LLM terminou (spec 010). Sem `clientId` em label. */
   observeLlmRequest(sample: LlmRequestSample): void;
+  /** Tokens de uma chamada ao LLM que respondeu (spec 014). Sem `clientId` nem texto em label. */
+  observeLlmTokens(sample: LlmTokensSample): void;
   /** O contato recebeu o texto padrão de falha em vez de uma resposta do modelo. */
   countAttendanceFallback(): void;
   /** Uma resposta de lote terminou (spec 013). Sem `clientId`, telefone nem texto em label. */
@@ -163,7 +177,7 @@ export function createMetrics(): Metrics {
 
   const llmRequests = new Counter({
     name: 'llm_requests_total',
-    help: 'Total de chamadas ao LLM, por provedor e resultado (ok, error, timeout)',
+    help: 'Total de chamadas ao LLM, por provedor e resultado (ok, error, timeout, refusal, truncated)',
     labelNames: ['provider', 'result'] as const,
     registers: [registry],
   });
@@ -172,6 +186,12 @@ export function createMetrics(): Metrics {
     help: 'Duração das chamadas ao LLM em segundos, por provedor',
     labelNames: ['provider'] as const,
     buckets: [...LLM_DURATION_BUCKETS],
+    registers: [registry],
+  });
+  const llmTokens = new Counter({
+    name: 'llm_tokens_total',
+    help: 'Total de tokens das chamadas ao LLM, por provedor e tipo (input, output, cache_read)',
+    labelNames: ['provider', 'type'] as const,
     registers: [registry],
   });
   const attendanceFallbacks = new Counter({
@@ -279,6 +299,9 @@ export function createMetrics(): Metrics {
     observeLlmRequest({ provider, result, durationSeconds }) {
       llmRequests.inc({ provider, result });
       llmDuration.observe({ provider }, durationSeconds);
+    },
+    observeLlmTokens({ provider, type, tokens }) {
+      if (Number.isFinite(tokens) && tokens > 0) llmTokens.inc({ provider, type }, tokens);
     },
     countAttendanceFallback() {
       attendanceFallbacks.inc();
