@@ -26,7 +26,7 @@ export interface LlmRequestSample {
 }
 
 /** Resultado de uma resposta de lote (spec 013): `answered`, `empty` (nada pendente) ou `capped` (sobrou excedente). */
-export type BatchResult = 'answered' | 'empty' | 'capped';
+export type BatchResult = 'answered' | 'empty' | 'capped' | 'unsent_previous';
 
 export interface BatchSample {
   /** Quantas mensagens do contato a resposta juntou (0 em `empty`). */
@@ -186,7 +186,7 @@ export function createMetrics(): Metrics {
   });
   const batches = new Counter({
     name: 'attendance_batches_total',
-    help: 'Respostas de lote do canal por resultado (answered, empty, capped)',
+    help: 'Respostas de lote do canal por resultado (answered, empty, capped, unsent_previous)',
     labelNames: ['result'] as const,
     registers: [registry],
   });

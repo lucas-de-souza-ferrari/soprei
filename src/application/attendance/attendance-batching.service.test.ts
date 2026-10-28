@@ -6,7 +6,7 @@ import {
   MOCK_FAIL_MARKER,
   MockLlmProvider,
 } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
-import { ForbiddenError, NotFoundError } from '../../shared/errors/index.js';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors/index.js';
 import { steppingClock } from '../../test-support/clock.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
 import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
@@ -296,7 +296,8 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
       'nenhuma mensagem perdida',
     );
     assert.deepEqual(
-      h.metrics.batches.map((batch) => batch.result),
+      // Os turnos não são enviados neste teste: cada um avisa que o anterior ficou sem `sentAt`.
+      h.metrics.batches.map((batch) => batch.result).filter((r) => r !== 'unsent_previous'),
       ['capped', 'capped', 'answered'],
     );
     // O histórico de cada turno inclui o turno anterior (mensagens e a resposta, na ordem).
@@ -436,6 +437,50 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
     assert.equal(h.store.allMessages().filter((message) => message.role === 'ASSISTANT').length, 1);
     assert.equal(left.reply?.id, right.reply?.id, 'as duas enxergam a mesma resposta');
+    // O lote é contado uma vez (quem respondeu primeiro), não uma vez por execução.
+    assert.deepEqual(h.metrics.batches, [{ size: 2, result: 'answered' }]);
+  });
+
+  it('lotes diferentes do mesmo contato em paralelo: se outra execução já respondeu parte do lote, esta resposta é desfeita (ConflictError) e a retentativa resolve', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    const m1 = await accept(h, client, 'um');
+    await accept(h, client, 'dois');
+    // Simula a outra execução: ela já respondeu `m1` (resposta própria, já confirmada) entre a
+    // leitura das pendentes e a transação desta execução (durante a chamada ao LLM).
+    const generate = h.llm.generate.bind(h.llm);
+    let interfered = false;
+    h.llm.generate = async (input) => {
+      if (!interfered) {
+        interfered = true;
+        const other = await h.store.messages.create(client.id, {
+          conversationId: m1.conversationId,
+          role: 'ASSISTANT',
+          content: 'resposta da outra execução',
+          replyToId: m1.messageId,
+          createdAt: new Date(m1.messageCreatedAt.getTime() + 1),
+        });
+        await h.store.messages.markAnswered(client.id, [m1.messageId], other.id);
+      }
+      return generate(input);
+    };
+
+    await assert.rejects(h.service.respondToPending(client.id, 'contato-1', LIMITS), ConflictError);
+
+    const replies = h.store.allMessages().filter((message) => message.role === 'ASSISTANT');
+    assert.equal(replies.length, 1, 'só a da outra execução: esta foi desfeita');
+    assert.equal(replies[0]?.content, 'resposta da outra execução');
+    // A retentativa responde o que sobrou, sem duplicar o que já tinha dono.
+    const retry = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    assert.equal(retry.batchSize, 1);
+    assert.equal(h.llm.calls.at(-1)?.userMessage, 'dois');
+    assert.equal(h.store.allMessages().filter((m) => m.role === 'ASSISTANT').length, 2);
+    assert.ok(
+      h.store
+        .allMessages()
+        .filter((m) => m.role === 'USER')
+        .every((m) => m.answeredById !== null),
+    );
   });
 
   it('resposta gravada e ainda não enviada: resend, sem nova chamada ao LLM; depois do sentAt, empty', async () => {
@@ -477,10 +522,37 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     assert.equal(resumed.hasMorePending, true);
     assert.equal(h.llm.calls.length, llmCalls, 'sem nova chamada ao LLM');
 
-    // Sem a opção (primeira tentativa), a resposta anterior não é reenviada: responde as pendentes.
+    // Sem a opção (primeira tentativa), a resposta anterior não é reenviada: responde as pendentes,
+    // avisa em log (só ids) e conta o evento.
     const normal = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
     assert.equal(normal.outcome, 'answered');
     assert.equal(normal.batchSize, 1);
+    const warn = h.logs
+      .lines()
+      .find((line) => String(line.msg).includes('não foi enviada e não será reenviada'));
+    assert.equal(warn?.level, 40);
+    assert.equal(warn.clientId, client.id);
+    assert.equal(warn.replyId, first.reply?.id);
+    assert.ok(!h.logs.raw().includes('um'.repeat(10)), 'sem texto no aviso');
+    assert.deepEqual(
+      h.metrics.batches.map((batch) => batch.result),
+      ['answered', 'unsent_previous', 'answered'],
+    );
+  });
+
+  it('não avisa quando a resposta anterior já foi enviada', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    await accept(h, client, 'um');
+    const first = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    await h.store.messages.markSent(client.id, first.reply?.id ?? '', {
+      channelMessageId: 'wamid.out',
+      sentAt: new Date(),
+    });
+    await accept(h, client, 'dois');
+    await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    assert.ok(!h.logs.raw().includes('não será reenviada'));
+    assert.ok(h.metrics.batches.every((batch) => batch.result !== 'unsent_previous'));
   });
 
   it('resumeUnsent não reenvia resposta que já tem sentAt', async () => {

@@ -47,7 +47,11 @@ export interface AttendanceMetrics {
   observeAttendanceBatch?(sample: { readonly size: number; readonly result: BatchResult }): void;
 }
 
-export type BatchResult = 'answered' | 'empty' | 'capped';
+/**
+ * `unsent_previous` não é um lote: conta o evento "a resposta do turno anterior ficou gravada sem
+ * `sentAt` e este turno saiu mesmo assim" (tamanho 0, fora do histograma).
+ */
+export type BatchResult = 'answered' | 'empty' | 'capped' | 'unsent_previous';
 
 /**
  * O que o serviço precisa do logger. O do Pino serve; o contexto da requisição (`requestId`,
@@ -279,16 +283,23 @@ export class AttendanceService {
         ? this.emptyResponse(conversation.id)
         : this.resendResponse(conversation.id, unsent, false);
     }
-    if (options.resumeUnsent === true) {
-      const [previous] = await this.deps.messages.listBefore(
-        clientId,
-        conversation.id,
-        first.id,
-        1,
-      );
-      if (previous?.role === 'ASSISTANT' && previous.sentAt === null) {
+    const [previous] = await this.deps.messages.listBefore(clientId, conversation.id, first.id, 1);
+    if (previous?.role === 'ASSISTANT' && previous.sentAt === null) {
+      if (options.resumeUnsent === true) {
         return this.resendResponse(conversation.id, previous, true);
       }
+      // Não é retentativa: a resposta anterior não saiu (envio recusado de vez, ou o job em
+      // retentativa foi trocado por este) e não será reenviada. Fica só gravada: avisa, sem conteúdo.
+      this.deps.logger.warn(
+        {
+          clientId,
+          conversationId: conversation.id,
+          replyId: previous.id,
+          firstPendingId: first.id,
+        },
+        'a resposta do turno anterior não foi enviada e não será reenviada; respondendo as pendentes',
+      );
+      this.recordUnsentPrevious();
     }
 
     const batch = selectBatch(fetched, limits);
@@ -328,11 +339,18 @@ export class AttendanceService {
           // dela, e o histórico do turno seguinte a inclui.
           createdAt: new Date(last.createdAt.getTime() + 1),
         });
-        await tx.messages.markAnswered(
+        const marked = await tx.messages.markAnswered(
           clientId,
           batch.map((message) => message.id),
           created.id,
         );
+        if (marked !== batch.length) {
+          // Outra execução já respondeu parte deste lote (lotes diferentes do mesmo contato em
+          // paralelo): desfaz esta resposta (mesma transação) e deixa a retentativa resolver.
+          throw new ConflictError('O lote já foi atendido, em parte, por outra execução', {
+            context: { clientId },
+          });
+        }
         return created;
       });
     } catch (error) {
@@ -340,7 +358,7 @@ export class AttendanceService {
       // Outra execução respondeu este lote primeiro (a mensagem só aceita uma resposta).
       const existing = await this.deps.messages.findReplyTo(clientId, last.id);
       if (existing === null) throw error;
-      this.recordBatch(batch.length, hasMorePending);
+      // Não conta o lote de novo: quem respondeu primeiro já o contou.
       return {
         outcome: 'answered',
         conversationId: conversation.id,
@@ -534,6 +552,14 @@ export class AttendanceService {
       batchSize: 0,
       hasMorePending,
     };
+  }
+
+  private recordUnsentPrevious(): void {
+    try {
+      this.deps.metrics?.observeAttendanceBatch?.({ size: 0, result: 'unsent_previous' });
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica do lote');
+    }
   }
 
   private recordBatch(size: number, capped: boolean): void {

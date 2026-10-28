@@ -119,11 +119,13 @@ describe('createMetrics', () => {
     metrics.observeAttendanceBatch({ size: 3, result: 'answered' });
     metrics.observeAttendanceBatch({ size: 10, result: 'capped' });
     metrics.observeAttendanceBatch({ size: 0, result: 'empty' });
+    metrics.observeAttendanceBatch({ size: 0, result: 'unsent_previous' });
 
     const body = await metrics.render();
     assert.match(body, /attendance_batches_total{result="answered"} 2/);
     assert.match(body, /attendance_batches_total{result="capped"} 1/);
     assert.match(body, /attendance_batches_total{result="empty"} 1/);
+    assert.match(body, /attendance_batches_total{result="unsent_previous"} 1/);
     // `empty` não entra no histograma: 3 respostas, 14 mensagens no total.
     assert.match(body, /attendance_batch_size_count 3/);
     assert.match(body, /attendance_batch_size_sum 14/);
