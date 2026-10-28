@@ -130,7 +130,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 **Próximas**
 
-- Provedor real de LLM (avaliar Claude Haiku 5.5 e Gemini 3.1 Flash-Lite com conversas em português), antes de clientes reais.
+- **Provedor real de LLM ([spec 014](specs/014-provedor-llm-real.md), aprovada em 2026-10-28):** `AnthropicLlmProvider` (Claude Haiku 5.5) atrás do `LlmProvider`, com `AbortSignal` (cancelar a chamada no prazo), erro sem texto do contato e métricas de tokens. Gemini só em spec futura, e só com conta de faturamento (o plano gratuito treina com os dados).
 - Pendências antes de dados reais: política de retenção e LGPD (inclui limpeza do Redis e dos jobs), RLS do Postgres, varredura de mensagens pendentes antigas, suporte a BSUID (contato sem telefone), confirmar que o túnel/proxy acrescenta ao `X-Forwarded-For`.
 
 

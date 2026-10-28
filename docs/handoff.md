@@ -12,7 +12,7 @@
 
 ## Próximo passo sugerido
 
-1. Spec do **provedor real de LLM** atrás do `LlmProvider` (escrever com `docs/agents/spec-writer.md`): comparar Claude Haiku 5.5 e Gemini 3.1 Flash-Lite com conversas reais em português (custo, qualidade, latência), exigir `AbortSignal` (o provedor hoje continua rodando depois do timeout), teste de que o erro do provedor nunca carrega texto do contato, e conferir a política de retenção de dados do provedor (LGPD). O dono decide o provedor.
+1. **Spec 014 (provedor real de LLM, Claude Haiku 5.5)** está em rascunho em `docs/specs/014-provedor-llm-real.md`, aguardando as decisões do dono (provedor, esforço, limite de saída, instrução de estilo, base legal LGPD). Depois de aprovada: implementer, reviewer e teste manual com a chave real (definir limite de gasto na conta da Anthropic).
 2. Antes de **dados reais de clientes**: política de retenção e LGPD (inclui limpeza do Redis, jobs do BullMQ e o último job retido), RLS do Postgres, varredura de mensagens pendentes antigas.
 
 ## Decisões do dono que não são óbvias no código
