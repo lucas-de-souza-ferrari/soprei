@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
+import { ClientId } from '../../domain/index.js';
 import { ClientService } from '../../application/clients/client.service.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { buildServer } from '../../infrastructure/http/server.js';
@@ -36,6 +37,7 @@ interface MessageBody {
   isFallback: boolean;
   externalId: string | null;
   replyToId: string | null;
+  sentAt: string | null;
 }
 interface ErrorBody {
   error: { code: string; message: string };
@@ -43,6 +45,7 @@ interface ErrorBody {
 
 describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
   let app: FastifyInstance;
+  let store: InMemoryAttendanceStore;
   const logs = captureLogs();
   const llm = new MockLlmProvider({ recordCalls: true });
 
@@ -51,7 +54,7 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
     // Relógio determinístico: com o real, dois pedidos no mesmo milissegundo invertem a ordem
     // da resposta e da pergunta seguinte (falhou no CI, ora no Node 22, ora na LTS).
     const clock = steppingClock();
-    const store = new InMemoryAttendanceStore(clock);
+    store = new InMemoryAttendanceStore(clock);
     app = buildServer({
       logger: logs.logger,
       readiness: {
@@ -242,6 +245,38 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
   });
 
   describe('GET conversations e messages', () => {
+    it('expõe sentAt: nulo na resposta não enviada (simulador) e ISO depois da marca de envio', async () => {
+      const clientId = await createClient('get-sent');
+      const first = await send(clientId, { contactRef: 'c1', text: 'um' });
+      const { conversationId } = first.json<ReplyBody>();
+      const list = async () =>
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/admin/clients/${clientId}/conversations/${conversationId}/messages`,
+            headers: auth,
+          })
+        ).json<PageBody<MessageBody>>().items;
+
+      const before = await list();
+      assert.deepEqual(
+        before.map((m) => m.sentAt),
+        [null, null],
+      );
+
+      const reply = before[1];
+      assert.ok(reply !== undefined);
+      const sentAt = new Date('2026-10-28T12:00:00.000Z');
+      const marked = await store.messages.markSent(ClientId.parse(clientId), reply.id, {
+        channelMessageId: 'wamid.out',
+        sentAt,
+      });
+      assert.equal(marked, true);
+      const after = await list();
+      assert.equal(after[0]?.sentAt, null);
+      assert.equal(after[1]?.sentAt, sentAt.toISOString());
+    });
+
     it('lista conversas e o histórico em ordem cronológica, com paginação', async () => {
       const clientId = await createClient('get-ok');
       const first = await send(clientId, { contactRef: 'c1', text: 'um', externalId: 'e1' });
@@ -289,6 +324,7 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
         'isFallback',
         'replyToId',
         'role',
+        'sentAt',
       ]);
 
       const paged = await app.inject({

@@ -39,6 +39,8 @@ function toMessageResponse(message: Message): {
   externalId: string | null;
   replyToId: string | null;
   createdAt: string;
+  /** Quando a resposta foi entregue ao canal (ISO); nulo = ainda não enviada (ou o envio falhou). */
+  sentAt: string | null;
 } {
   return {
     id: message.id,
@@ -48,6 +50,7 @@ function toMessageResponse(message: Message): {
     externalId: message.externalId,
     replyToId: message.replyToId,
     createdAt: message.createdAt.toISOString(),
+    sentAt: message.sentAt === null ? null : message.sentAt.toISOString(),
   };
 }
 
