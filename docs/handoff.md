@@ -33,6 +33,7 @@
 - Erro do ioredis e do BullMQ não pode ir inteiro ao log (carrega `command.args` com chave e IP).
 - Sem `ADMIN_API_KEY` no `.env`, as rotas `/admin` respondem 401.
 - Provedor Anthropic: nunca logue nem copie `error.message`, corpo ou o objeto de erro do SDK (podem ecoar persona, histórico e texto do contato); só `{ provider, status, errorType, retryable }`. O SDK 1.3.0 manda a chave em `Authorization: Bearer`. O tokenizador do Haiku 5.5 conta cerca de 30% mais tokens que o do 4.5.
+- Provedor Anthropic: `redirect: 'error'` no fetch do SDK (nunca reenviar o corpo a outro host) e `ANTHROPIC_CUSTOM_HEADERS` escondido do SDK; `LLM_MAX_OUTPUT_TOKENS` conta o pensamento adaptivo (suba o teto com esforço `medium` ou `high`). SDK fixo em 1.3.0.
 - Testes que comparam o `systemPrompt` precisam esperar persona mais a instrução de estilo (`ATTENDANCE_STYLE_INSTRUCTION`).
 
 ## O que não vem pelo git (recriar em cada máquina)
