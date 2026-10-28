@@ -962,6 +962,96 @@ describe('canal WhatsApp: falhas e retentativas', () => {
   });
 });
 
+describe('canal WhatsApp: cliente suspenso não recebe nada (decisão do dono, 2026-10-28)', () => {
+  it('cliente suspenso entre o enfileiramento e o processamento: nem a resposta, nem o aviso, nem o texto padrão; zero requisições ao Graph e nada de texto ou contato em log', async () => {
+    await withHarness(async (h) => {
+      const number = phoneNumberId();
+      const client = await newClient('susp-e2e', number);
+      const contact = contactNumber();
+      const secretText = 'texto-secreto-do-suspenso-6a4';
+      await fixturesDb.prisma.client.updateMany({
+        where: { id: client.id },
+        data: { status: 'SUSPENDED' },
+      });
+
+      // Jobs que entraram quando o cliente ainda estava ativo e só agora são processados.
+      const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
+      const raw = new Queue(INBOUND_QUEUE_NAME, { connection, prefix: h.prefix });
+      const base = {
+        clientId: client.id,
+        phoneNumberId: number,
+        contactRef: contact,
+        requestId: 'req-suspenso-1234',
+      };
+      try {
+        await raw.add('text', {
+          kind: 'text',
+          ...base,
+          text: secretText,
+          externalId: fakeWamid(contact, '-susp-texto'),
+        });
+        await raw.add('notice', {
+          kind: 'notice',
+          ...base,
+          reason: 'unsupported_type',
+          externalId: fakeWamid(contact, '-susp-aviso'),
+        });
+        await waitFor(async () => (await h.queue.jobCounts()).completed === 2, 'jobs descartados');
+      } finally {
+        await raw.close();
+        connection.disconnect();
+      }
+      await sleep(300);
+
+      assert.equal(graph.requests.length, 0, 'zero requisições ao Graph');
+      assert.equal(h.llm.calls.length, 0);
+      assert.equal((await stored(client, contact)).length, 0);
+      const counts = await h.queue.jobCounts();
+      assert.equal(counts.failed, 0, 'descartado, não falho');
+      assert.match(
+        await metricsBody(h),
+        /queue_jobs_total\{queue="channel-inbound",result="discarded"\} 2/,
+      );
+      const warns = h.logs.lines().filter((line) => String(line.msg).includes('cliente suspenso'));
+      assert.ok(warns.length >= 2);
+      assert.ok(warns.every((line) => line.level === 40 && line.clientId === client.id));
+      const rawLog = h.logs.raw();
+      for (const secret of [secretText, contact, number, fakeWamid(contact, '-susp-texto')]) {
+        assert.ok(!rawLog.includes(secret), `vazou em log: ${secret}`);
+      }
+    });
+  });
+
+  it('webhook de cliente já suspenso: 200, nada enfileirado nem enviado (intake descarta); reativado, volta a atender', async () => {
+    await withHarness(async (h) => {
+      const number = phoneNumberId();
+      const client = await newClient('susp-intake', number);
+      const contact = contactNumber();
+      await fixturesDb.prisma.client.updateMany({
+        where: { id: client.id },
+        data: { status: 'SUSPENDED' },
+      });
+      assert.equal(
+        (await deliver(h, textEvent(number, contact, 'suspenso').payload)).statusCode,
+        200,
+      );
+      await sleep(250);
+      assert.equal(graph.requests.length, 0);
+
+      await fixturesDb.prisma.client.updateMany({
+        where: { id: client.id },
+        data: { status: 'ACTIVE' },
+      });
+      assert.equal(
+        (await deliver(h, textEvent(number, contact, 'reativado').payload)).statusCode,
+        200,
+      );
+      await waitFor(() => graph.requests.length === 1, 'resposta do cliente reativado');
+      assert.equal(graph.requests[0]?.phoneNumberId, number);
+    });
+  });
+});
+
 describe('canal WhatsApp: Redis fora e encerramento', () => {
   it('Redis fora ao enfileirar: 500 para a Meta retentar; a reentrega, com a fila de volta, enfileira só o que faltou', async (t) => {
     const release = keepEventLoopAlive();

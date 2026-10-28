@@ -122,6 +122,12 @@ export class ChannelInboundProcessor {
         externalId: job.externalId,
       });
     } catch (error) {
+      if (error instanceof ForbiddenError) {
+        // Cliente suspenso entre o enfileiramento e o processamento: decisão do dono (2026-10-28),
+        // nada é enviado ao contato, nem o texto padrão. O job é descartado (métrica `discarded`).
+        this.logSuspended(clientId, job);
+        return 'discarded';
+      }
       throw await this.onAttendanceFailure(clientId, job, context, error);
     }
 
@@ -193,8 +199,9 @@ export class ChannelInboundProcessor {
     job: InboundJob,
     text: string,
   ): Promise<{ kind: 'sent'; channelMessageId: string } | { kind: 'discarded' }> {
-    const phoneNumberId = await this.resolvePhoneNumber(clientId, job);
-    if (phoneNumberId === null) {
+    const target = await this.resolvePhoneNumber(clientId, job);
+    if (target.kind === 'suspended') return { kind: 'discarded' };
+    if (target.kind === 'none') {
       this.deps.logger.error(
         { clientId, messageRef: messageRef(job.externalId) },
         'cliente sem número do canal; mensagem não enviada',
@@ -202,7 +209,7 @@ export class ChannelInboundProcessor {
       return { kind: 'discarded' };
     }
     const sent = await this.deps.sender.sendText({
-      phoneNumberId,
+      phoneNumberId: target.phoneNumberId,
       to: job.contactRef,
       text,
     });
@@ -210,9 +217,33 @@ export class ChannelInboundProcessor {
     throw this.classifySendFailure(clientId, job, sent.error);
   }
 
-  private async resolvePhoneNumber(clientId: ClientId, job: InboundJob): Promise<string | null> {
+  /** Cliente suspenso não recebe nada do canal: nem resposta, nem aviso, nem texto padrão. */
+  private logSuspended(clientId: ClientId, job: InboundJob): void {
+    this.deps.logger.warn(
+      { clientId, messageRef: messageRef(job.externalId), jobKind: job.kind },
+      'cliente suspenso; nada é enviado ao contato e o job é descartado',
+    );
+  }
+
+  /**
+   * O que o envio precisa saber do cliente, lido do banco pelo `clientId` do job: o número do canal,
+   * ou que não há número, ou que o cliente está suspenso (nada se envia). Cliente removido e número
+   * trocado desde o enfileiramento lançam `NonRetryableJobError`.
+   */
+  private async resolvePhoneNumber(
+    clientId: ClientId,
+    job: InboundJob,
+  ): Promise<
+    | { readonly kind: 'number'; readonly phoneNumberId: string }
+    | { readonly kind: 'none' }
+    | { readonly kind: 'suspended' }
+  > {
     try {
       const client = await this.deps.clients.findById(clientId);
+      if (client.status === 'SUSPENDED') {
+        this.logSuspended(clientId, job);
+        return { kind: 'suspended' };
+      }
       const current = client.whatsappPhoneNumberId;
       if (current !== null && current !== job.phoneNumberId) {
         // O número do cliente mudou desde que a mensagem entrou (ou o job foi adulterado): quem
@@ -225,7 +256,7 @@ export class ChannelInboundProcessor {
           context: { clientId, messageRef: messageRef(job.externalId) },
         });
       }
-      return current;
+      return current === null ? { kind: 'none' } : { kind: 'number', phoneNumberId: current };
     } catch (error) {
       if (error instanceof NotFoundError) {
         // Cliente removido depois de enfileirar: não há por onde responder.
@@ -303,8 +334,10 @@ export class ChannelInboundProcessor {
   private async sendFallback(clientId: ClientId, job: InboundJob): Promise<void> {
     const ref = messageRef(job.externalId);
     try {
-      const phoneNumberId = await this.resolvePhoneNumber(clientId, job);
-      if (phoneNumberId === null) {
+      const target = await this.resolvePhoneNumber(clientId, job);
+      // Suspenso: já logado em `resolvePhoneNumber`; nem o texto padrão sai.
+      if (target.kind === 'suspended') return;
+      if (target.kind === 'none') {
         this.deps.logger.warn(
           { clientId, messageRef: ref },
           'sem número do canal para o texto padrão',
@@ -312,7 +345,7 @@ export class ChannelInboundProcessor {
         return;
       }
       const sent = await this.deps.sender.sendText({
-        phoneNumberId,
+        phoneNumberId: target.phoneNumberId,
         to: job.contactRef,
         text: ATTENDANCE_FALLBACK_TEXT,
       });
@@ -338,13 +371,10 @@ export class ChannelInboundProcessor {
   }
 }
 
-/** Erro que repetir não resolve: cliente suspenso ou removido, entrada inválida (bug do enfileirador). */
+/** Erro que repetir não resolve: cliente removido, entrada inválida (bug do enfileirador). O cliente suspenso (`ForbiddenError`) nem chega aqui: o job é descartado sem envio. */
 function isPermanentAttendanceError(error: unknown): boolean {
   return (
-    error instanceof ForbiddenError ||
-    error instanceof NotFoundError ||
-    error instanceof ValidationError ||
-    error instanceof ZodError
+    error instanceof NotFoundError || error instanceof ValidationError || error instanceof ZodError
   );
 }
 

@@ -5,6 +5,7 @@ import {
   DatabaseError,
   ExternalServiceError,
   ForbiddenError,
+  ValidationError,
 } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
@@ -418,17 +419,15 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
     assert.ok(warn !== undefined);
   });
 
-  it('erro permanente (cliente suspenso, removido, entrada inválida): sem retentativa, com o texto padrão', async () => {
-    for (const error of [new ForbiddenError('suspenso')]) {
-      const h = setup({ attendance: failing(error) });
-      const client = await newClient(h, 'alfa');
-      await assert.rejects(
-        h.processor.process(textJob(client.id), MORE),
-        (e: unknown) => e instanceof NonRetryableJobError,
-      );
-      assert.equal(h.sender.calls.length, 1);
-      assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
-    }
+  it('erro permanente que não é suspensão (entrada inválida): sem retentativa, com o texto padrão (inalterado)', async () => {
+    const h = setup({ attendance: failing(new ValidationError('entrada inválida')) });
+    const client = await newClient(h, 'alfa');
+    await assert.rejects(
+      h.processor.process(textJob(client.id), MORE),
+      (e: unknown) => e instanceof NonRetryableJobError,
+    );
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
   });
 
   it('cliente removido depois de enfileirar: permanente, e sem número não há por onde responder', async () => {
@@ -585,6 +584,92 @@ describe('ChannelInboundProcessor: job que falhou sem passar pelo handler (parad
     for (const secret of [SECRET_TEXT, CONTACT, WAMID, '555001', '555777']) {
       assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
     }
+  });
+});
+
+describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão do dono, 2026-10-28)', () => {
+  async function suspended(h: Harness, slug: string) {
+    const client = await newClient(h, slug, '555001');
+    await h.clients.update(client.id, { status: 'SUSPENDED' });
+    return client;
+  }
+
+  it('texto: o atendimento recusa o cliente suspenso e o job é descartado sem enviar NADA (nem o texto padrão), sem gravar mensagem', async () => {
+    const h = setup();
+    const client = await suspended(h, 'alfa');
+
+    const outcome = await h.processor.process(textJob(client.id), LAST);
+
+    assert.equal(outcome, 'discarded');
+    assert.equal(h.sender.calls.length, 0);
+    assert.equal(h.llm.calls.length, 0);
+    assert.equal(h.store.allMessages().length, 0);
+    const line = h.logs.lines().find((entry) => String(entry.msg).includes('cliente suspenso'));
+    assert.equal(line?.level, 40);
+    assert.equal(line.clientId, client.id);
+    assert.equal(typeof line.messageRef, 'string');
+    const raw = h.logs.raw();
+    for (const secret of [SECRET_TEXT, CONTACT, WAMID, '555001']) {
+      assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
+    }
+  });
+
+  it('texto: ForbiddenError do atendimento (suspensão) também descarta, mesmo na última tentativa', async () => {
+    const h = setup({
+      attendance: { handleInboundMessage: () => Promise.reject(new ForbiddenError('suspenso')) },
+    });
+    const client = await newClient(h, 'alfa');
+    assert.equal(await h.processor.process(textJob(client.id), LAST), 'discarded');
+    assert.equal(await h.processor.process(textJob(client.id), MORE), 'discarded');
+    assert.equal(h.sender.calls.length, 0);
+  });
+
+  it('aviso (notice) de cliente suspenso não é enviado: descartado', async () => {
+    const h = setup();
+    const client = await suspended(h, 'alfa');
+    for (const reason of ['unsupported_type', 'invalid_text'] as const) {
+      assert.equal(await h.processor.process(noticeJob(client.id, reason), MORE), 'discarded');
+    }
+    assert.equal(h.sender.calls.length, 0);
+  });
+
+  it('cliente suspenso depois que a resposta foi gravada: a retentativa descarta; a resposta fica gravada sem envio', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    h.sender.script(Result.err(retryable()));
+    await h.processor.process(textJob(client.id), MORE).catch(() => undefined);
+    await h.clients.update(client.id, { status: 'SUSPENDED' });
+
+    assert.equal(await h.processor.process(textJob(client.id), MORE), 'discarded');
+    assert.equal(h.sender.calls.length, 1, 'só a tentativa de antes da suspensão');
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.equal(reply?.sentAt, null);
+  });
+
+  it('falha final sem handler (handleUnprocessedFailure): nem o texto padrão sai para cliente suspenso', async () => {
+    const h = setup();
+    const client = await suspended(h, 'alfa');
+    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    await h.processor.handleUnprocessedFailure(noticeJob(client.id));
+    assert.equal(h.sender.calls.length, 0);
+    assert.ok(h.logs.lines().some((entry) => String(entry.msg).includes('cliente suspenso')));
+  });
+
+  it('cliente removido continua sem envio (permanente) e cliente ativo segue como antes', async () => {
+    const h = setup();
+    const removed = await newClient(h, 'removido');
+    await h.clients.delete(removed.id);
+    await assert.rejects(
+      h.processor.process(noticeJob(removed.id), MORE),
+      (e: unknown) => e instanceof NonRetryableJobError,
+    );
+    assert.equal(h.sender.calls.length, 0);
+
+    const active = await newClient(h, 'ativo', '555002');
+    assert.equal(await h.processor.process(noticeJob(active.id), MORE), 'done');
+    assert.equal(await h.processor.process(textJob(active.id), MORE), 'done');
+    assert.equal(h.sender.calls.length, 2);
+    assert.ok(h.sender.calls.every((call) => call.phoneNumberId === '555002'));
   });
 });
 
