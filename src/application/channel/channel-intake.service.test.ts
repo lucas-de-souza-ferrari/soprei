@@ -9,6 +9,7 @@ import { type InboundJob, type InboundJobQueue, inboundJobId } from '../ports/in
 import {
   type ChannelInboundResult,
   ChannelIntakeService,
+  contentFromType,
   type InboundChannelMessage,
 } from './channel-intake.service.js';
 
@@ -414,6 +415,49 @@ describe('ChannelIntakeService: privacidade nos logs', () => {
       Buffer.from(`\u001c\u0018\u000b${CONTACT}`).toString('base64'),
     ]) {
       assert.ok(!everything.includes(secret), `vazou em log: ${secret}`);
+    }
+  });
+});
+
+describe('ChannelIntakeService: tipos que não são mensagem do contato', () => {
+  it('reação, system, unsupported e tipo desconhecido: sem job, sem aviso, métrica ignored_type e log sem conteúdo', async () => {
+    const h = setup();
+    await newClient(h, 'alfa', '1001');
+    const ignored = (id: string): InboundChannelMessage => ({
+      phoneNumberId: '1001',
+      messageId: id,
+      sender: CONTACT,
+      content: { kind: 'ignored' },
+    });
+    const summary = await h.intake.accept(
+      [ignored('wamid.reacao'), ignored('wamid.sistema'), ignored('wamid.novo')],
+      'req-12345678',
+    );
+    assert.deepEqual(summary, { enqueued: 0, discarded: 3, failed: 0 });
+    assert.equal(h.queue.attempts, 0);
+    assert.deepEqual(h.results, ['ignored_type', 'ignored_type', 'ignored_type']);
+    assert.equal(h.lookups, 0, 'nem resolve o cliente');
+    assert.ok(h.logs.lines().every((line) => Number(line.level) <= 30));
+  });
+
+  it('contentFromType: só áudio, imagem, vídeo, documento, figurinha, localização e contatos recebem aviso; text segue o fluxo; o resto é ignorado', () => {
+    for (const type of ['audio', 'image', 'video', 'document', 'sticker', 'location', 'contacts']) {
+      assert.deepEqual(contentFromType(type, undefined), { kind: 'unsupported' }, type);
+    }
+    assert.deepEqual(contentFromType('text', 'oi'), { kind: 'text', text: 'oi' });
+    assert.deepEqual(contentFromType('text', undefined), { kind: 'text', text: undefined });
+    for (const type of [
+      'reaction',
+      'system',
+      'unsupported',
+      'button',
+      'interactive',
+      'order',
+      'inventado',
+      '',
+      undefined,
+    ]) {
+      assert.deepEqual(contentFromType(type, 'x'), { kind: 'ignored' }, String(type));
     }
   });
 });

@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import type { InboundChannelMessage } from '../../application/channel/channel-intake.service.js';
+import {
+  contentFromType,
+  type InboundChannelMessage,
+} from '../../application/channel/channel-intake.service.js';
 
 /**
  * Formato do webhook da Cloud API (campo `messages`), lido de forma **tolerante**: campos
@@ -119,10 +122,7 @@ export function parseWebhookBody(body: unknown): ParsedWebhook {
           phoneNumberId,
           messageId: message.id,
           sender: from,
-          content:
-            message.type === 'text'
-              ? { kind: 'text', text: typeof body === 'string' ? body : undefined }
-              : { kind: 'unsupported' },
+          content: contentFromType(message.type, typeof body === 'string' ? body : undefined),
         });
       }
 

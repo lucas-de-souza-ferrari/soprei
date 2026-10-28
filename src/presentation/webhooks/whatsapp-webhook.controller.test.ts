@@ -652,3 +652,42 @@ describe('POST /webhooks/whatsapp (privacidade nos logs)', () => {
     });
   });
 });
+
+describe('POST /webhooks/whatsapp (tipos de mensagem)', () => {
+  it('áudio e imagem viram conteúdo não suportado (aviso); reação, system e tipo desconhecido, ignorado', async () => {
+    await withServer(async (h) => {
+      const body = JSON.stringify(
+        webhookPayload([
+          {
+            phoneNumberId: '1001',
+            messages: [
+              { id: 'wamid.a', from: CONTACT, type: 'audio' },
+              { id: 'wamid.i', from: CONTACT, type: 'image' },
+              {
+                id: 'wamid.r',
+                from: CONTACT,
+                type: 'reaction',
+                extra: { reaction: { emoji: 'x' } },
+              },
+              { id: 'wamid.s', type: 'system', extra: { system: { body: 'mudou' } } },
+              { id: 'wamid.n', from: CONTACT, type: 'tipo_novo' },
+              { id: 'wamid.t', from: CONTACT, text: 'oi' },
+            ],
+          },
+        ]),
+      );
+      assert.equal((await post(h, body)).statusCode, 200);
+      assert.deepEqual(
+        h.intake.calls[0]?.messages.map((message) => [message.messageId, message.content.kind]),
+        [
+          ['wamid.a', 'unsupported'],
+          ['wamid.i', 'unsupported'],
+          ['wamid.r', 'ignored'],
+          ['wamid.s', 'ignored'],
+          ['wamid.n', 'ignored'],
+          ['wamid.t', 'text'],
+        ],
+      );
+    });
+  });
+});

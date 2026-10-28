@@ -623,6 +623,60 @@ describe('canal WhatsApp: entrada e roteamento', () => {
     });
   });
 
+  it('reação e evento system não geram job nem envio; áudio e imagem seguem gerando o aviso', async () => {
+    await withHarness(async (h) => {
+      const number = phoneNumberId();
+      const client = await newClient('ignored', number);
+      const contact = contactNumber();
+      const ignoredPayload = webhookPayload([
+        {
+          phoneNumberId: number,
+          messages: [
+            {
+              id: fakeWamid(contact, '-reacao'),
+              from: contact,
+              type: 'reaction',
+              extra: { reaction: { emoji: 'x' } },
+            },
+            {
+              id: fakeWamid(contact, '-sistema'),
+              type: 'system',
+              extra: { system: { body: 'mudou' } },
+            },
+          ],
+        },
+      ]);
+      assert.equal((await deliver(h, ignoredPayload)).statusCode, 200);
+      await sleep(250);
+      const counts = await h.queue.jobCounts();
+      assert.equal((counts.waiting ?? 0) + (counts.completed ?? 0) + (counts.failed ?? 0), 0);
+      assert.equal(graph.requests.length, 0);
+      assert.equal(h.llm.calls.length, 0);
+      assert.equal((await stored(client, contact)).length, 0);
+      assert.match(
+        await metricsBody(h),
+        /channel_inbound_messages_total\{channel="whatsapp",result="ignored_type"\} 2/,
+      );
+
+      const noticePayload = webhookPayload([
+        {
+          phoneNumberId: number,
+          messages: [
+            { id: fakeWamid(contact, '-audio'), from: contact, type: 'audio' },
+            { id: fakeWamid(contact, '-imagem'), from: contact, type: 'image' },
+          ],
+        },
+      ]);
+      assert.equal((await deliver(h, noticePayload)).statusCode, 200);
+      await waitFor(() => graph.requests.length === 2, 'dois avisos');
+      assert.ok(
+        graph.requests.every(
+          (request) => bodyText(request) === CHANNEL_NOTICE_TEXTS.unsupported_type,
+        ),
+      );
+    });
+  });
+
   it('statuses não geram job nem resposta; failed loga warn e só conta', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();

@@ -42,7 +42,8 @@ export type ChannelInboundResult =
   | 'unsupported_type'
   | 'invalid_text'
   | 'missing_sender'
-  | 'invalid_message';
+  | 'invalid_message'
+  | 'ignored_type';
 
 export type ChannelSendResult = 'ok' | 'error';
 

@@ -20,7 +20,8 @@ export type ChannelInboundResult =
   | 'unsupported_type'
   | 'invalid_text'
   | 'missing_sender'
-  | 'invalid_message';
+  | 'invalid_message'
+  | 'ignored_type';
 
 export interface ChannelIntakeMetrics {
   countChannelInbound(channel: string, result: ChannelInboundResult): void;
@@ -34,6 +35,31 @@ export interface ChannelLogger {
 }
 
 /** Uma mensagem de entrada, já extraída do formato do canal (o webhook valida o formato). */
+/**
+ * Tipos de mensagem do **contato** que o atendimento não lê: recebem o aviso "só consigo ler
+ * texto". Qualquer outro tipo que não seja `text` (reação, `system`, `unsupported`, tipo novo ou
+ * desconhecido) não é uma mensagem para atender: é descartado sem aviso.
+ */
+export const UNSUPPORTED_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  'audio',
+  'image',
+  'video',
+  'document',
+  'sticker',
+  'location',
+  'contacts',
+]);
+
+/** Conteúdo de uma mensagem de entrada a partir do `type` informado pelo canal. */
+export function contentFromType(
+  type: string | undefined,
+  text: string | undefined,
+): InboundChannelMessage['content'] {
+  if (type === 'text') return { kind: 'text', text };
+  if (type !== undefined && UNSUPPORTED_CONTENT_TYPES.has(type)) return { kind: 'unsupported' };
+  return { kind: 'ignored' };
+}
+
 export interface InboundChannelMessage {
   /** Número do **negócio** que recebeu a mensagem (`phone_number_id`): o que resolve o cliente. */
   readonly phoneNumberId: string;
@@ -42,7 +68,11 @@ export interface InboundChannelMessage {
   /** Identificador do contato (`from`); ausente quando o canal não o informa. */
   readonly sender: string | undefined;
   readonly content:
-    { readonly kind: 'text'; readonly text: string | undefined } | { readonly kind: 'unsupported' };
+    | { readonly kind: 'text'; readonly text: string | undefined }
+    /** Conteúdo do contato que não sabemos ler (áudio, imagem...): recebe o aviso constante. */
+    | { readonly kind: 'unsupported' }
+    /** Evento que não é mensagem do contato (reação, sistema...): descartado sem aviso. */
+    | { readonly kind: 'ignored' };
 }
 
 export interface IntakeSummary {
@@ -113,6 +143,14 @@ export class ChannelIntakeService {
   ): Promise<'enqueued' | 'discarded' | 'failed'> {
     const { logger } = this.deps;
     const ref = messageRef(message.messageId);
+
+    // Reação, evento de sistema e tipo desconhecido não são mensagem do contato: nem aviso nem job.
+    // Só id interno no log (nada do conteúdo).
+    if (message.content.kind === 'ignored') {
+      this.count('ignored_type');
+      logger.info({ messageRef: ref }, 'evento que não é mensagem do contato ignorado');
+      return 'discarded';
+    }
 
     const contactRef = message.sender;
     if (contactRef === undefined || !SENDER_PATTERN.test(contactRef)) {
@@ -188,7 +226,7 @@ export class ChannelIntakeService {
       externalId: message.messageId,
       requestId,
     };
-    if (message.content.kind === 'unsupported') {
+    if (message.content.kind !== 'text') {
       return {
         job: { kind: 'notice', ...base, reason: 'unsupported_type' },
         result: 'unsupported_type',
