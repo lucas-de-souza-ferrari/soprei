@@ -171,7 +171,19 @@ export class ChannelInboundProcessor {
   private async resolvePhoneNumber(clientId: ClientId, job: InboundJob): Promise<string | null> {
     try {
       const client = await this.deps.clients.findById(clientId);
-      return client.whatsappPhoneNumberId;
+      const current = client.whatsappPhoneNumberId;
+      if (current !== null && current !== job.phoneNumberId) {
+        // O número do cliente mudou desde que a mensagem entrou (ou o job foi adulterado): quem
+        // recebeu a mensagem não é mais o número deste cliente. Nada é enviado. Sem números em log.
+        this.deps.logger.error(
+          { clientId, messageRef: messageRef(job.externalId), jobKind: job.kind },
+          'o número do cliente mudou desde o enfileiramento; mensagem descartada sem envio',
+        );
+        throw new NonRetryableJobError('Número do cliente diferente do número do job', {
+          context: { clientId, messageRef: messageRef(job.externalId) },
+        });
+      }
+      return current;
     } catch (error) {
       if (error instanceof NotFoundError) {
         // Cliente removido depois de enfileirar: não há por onde responder.

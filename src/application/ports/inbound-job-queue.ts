@@ -3,6 +3,7 @@ import {
   CONTACT_REF_MAX_LENGTH,
   EXTERNAL_ID_MAX_LENGTH,
   MESSAGE_CONTENT_MAX_LENGTH,
+  WHATSAPP_PHONE_NUMBER_ID_PATTERN,
 } from '../../domain/index.js';
 import { BaseError, type ExternalServiceError } from '../../shared/errors/index.js';
 import type { Result } from '../../shared/types/index.js';
@@ -27,6 +28,12 @@ export const jobExternalIdSchema = z
 
 const baseFields = {
   clientId: z.uuid(),
+  /**
+   * Número do negócio que recebeu a mensagem, gravado ao enfileirar. Defesa em profundidade: o envio
+   * usa SEMPRE o número lido do banco pelo `clientId`; este só serve para descartar o job se o número
+   * do cliente mudou (ou o job foi adulterado) entre enfileirar e processar.
+   */
+  phoneNumberId: z.string().regex(WHATSAPP_PHONE_NUMBER_ID_PATTERN),
   contactRef: jobContactRefSchema,
   externalId: jobExternalIdSchema,
   requestId: z.string().min(1).max(128),

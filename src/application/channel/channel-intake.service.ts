@@ -222,6 +222,7 @@ export class ChannelIntakeService {
   ): { job: InboundJob; result: ChannelInboundResult } {
     const base = {
       clientId: client.id,
+      phoneNumberId: message.phoneNumberId,
       contactRef,
       externalId: message.messageId,
       requestId,

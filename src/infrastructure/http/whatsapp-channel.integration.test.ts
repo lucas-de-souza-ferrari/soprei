@@ -416,6 +416,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
           {
             kind: 'text',
             clientId: client.id,
+            phoneNumberId: number,
             contactRef: contact,
             text: 'reexecuta',
             externalId: id,
@@ -926,14 +927,29 @@ describe('canal WhatsApp: falhas e retentativas', () => {
         await raw.add('text', {
           kind: 'text',
           clientId: client.id,
+          phoneNumberId: number,
           contactRef: contact,
           text: 'job adulterado',
           externalId: fakeWamid(contact, '-forjado'),
           requestId: 'req-forjado-123',
-          phoneNumberId: otherNumber,
+          // Campos extras que um adulterador poderia tentar usar para escolher o número de envio.
           phone_number_id: otherNumber,
+          sendFrom: otherNumber,
         });
         await waitFor(() => graph.requests.length === 1, 'envio');
+        // Job cujo phoneNumberId não é o do cliente no banco: descartado, nada sai por número algum.
+        const before = graph.requests.length;
+        await raw.add('text', {
+          kind: 'text',
+          clientId: client.id,
+          phoneNumberId: otherNumber,
+          contactRef: contact,
+          text: 'job com outro número',
+          externalId: fakeWamid(contact, '-forjado-2'),
+          requestId: 'req-forjado-456',
+        });
+        await waitFor(async () => (await h.queue.jobCounts()).failed === 1, 'job descartado');
+        assert.equal(graph.requests.length, before, 'nada enviado pelo job com outro número');
       } finally {
         await raw.close();
         connection.disconnect();

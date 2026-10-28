@@ -117,8 +117,12 @@ function setup(
   };
 }
 
+/** Número do negócio com que cada cliente foi criado: o `phoneNumberId` que o job leva ao ser enfileirado. */
+const jobPhone = new Map<string, string>();
+
 async function newClient(h: Harness, slug: string, phoneNumberId: string | null = '1000') {
   const created = await h.clients.create({ name: `Empresa ${slug}`, slug });
+  jobPhone.set(created.id, phoneNumberId ?? '1000');
   return h.clients.update(created.id, {
     persona: `${PERSONA} ${slug}`,
     whatsappPhoneNumberId: phoneNumberId,
@@ -131,6 +135,7 @@ const textJob = (
 ): Extract<InboundJob, { kind: 'text' }> => ({
   kind: 'text',
   clientId,
+  phoneNumberId: jobPhone.get(clientId) ?? '1000',
   contactRef: CONTACT,
   text: SECRET_TEXT,
   externalId: WAMID,
@@ -144,6 +149,7 @@ const noticeJob = (
 ): InboundJob => ({
   kind: 'notice',
   clientId,
+  phoneNumberId: jobPhone.get(clientId) ?? '1000',
   contactRef: CONTACT,
   externalId: WAMID,
   requestId: 'req-12345678',
@@ -188,12 +194,13 @@ describe('ChannelInboundProcessor: job de texto', () => {
     assert.equal(h.store.allMessages().length, 2, 'uma só resposta gravada');
   });
 
-  it('o número do envio é o do banco, não o de um campo extra do job adulterado', async () => {
+  it('o número do envio é o do banco: campos extras de um job adulterado (número, destinatário) são ignorados', async () => {
     const h = setup();
     const client = await newClient(h, 'alfa', '555001');
     const forged = {
       ...textJob(client.id),
-      phoneNumberId: '999999',
+      phone_number_id: '999999',
+      sendFrom: '999999',
       to: '5500000000000',
     } as unknown as InboundJob;
 
@@ -201,6 +208,56 @@ describe('ChannelInboundProcessor: job de texto', () => {
 
     assert.equal(h.sender.calls[0]?.phoneNumberId, '555001');
     assert.equal(h.sender.calls[0].to, CONTACT);
+  });
+
+  it('job cujo phoneNumberId não é o do cliente no banco (adulterado): erro permanente, nada é enviado, log sem conteúdo', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    const other = await newClient(h, 'beta', '555002');
+
+    for (const job of [textJob(client.id, { phoneNumberId: '555002' }), noticeJob(client.id)]) {
+      const forged = { ...job, phoneNumberId: other.whatsappPhoneNumberId ?? '' };
+      await assert.rejects(
+        h.processor.process(forged, MORE),
+        (error: unknown) => error instanceof NonRetryableJobError,
+      );
+    }
+    assert.equal(
+      h.sender.calls.length,
+      0,
+      'nada sai, nem pelo número do job nem pelo do outro cliente',
+    );
+    const line = h.logs
+      .lines()
+      .find((entry) => String(entry.msg).includes('o número do cliente mudou'));
+    assert.equal(line?.level, 50);
+    assert.equal(line.clientId, client.id);
+    const raw = h.logs.raw();
+    for (const secret of ['555001', '555002', CONTACT, SECRET_TEXT, WAMID]) {
+      assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
+    }
+  });
+
+  it('número trocado entre enfileirar e processar: texto e aviso não enviam (nem o texto padrão)', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    const text = textJob(client.id);
+    const notice = noticeJob(client.id);
+    // O dono troca o número do cliente depois de a mensagem entrar na fila.
+    await h.clients.update(client.id, { whatsappPhoneNumberId: '555777' });
+
+    await assert.rejects(
+      h.processor.process(text, MORE),
+      (error: unknown) => error instanceof NonRetryableJobError,
+    );
+    await assert.rejects(
+      h.processor.process(notice, MORE),
+      (error: unknown) => error instanceof NonRetryableJobError,
+    );
+    assert.equal(h.sender.calls.length, 0);
+    // A resposta ficou gravada sem envio (visível na API administrativa).
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.equal(reply?.sentAt, null);
   });
 
   it('cliente sem número no banco: descarta com log, sem enviar; a resposta fica gravada sem envio', async () => {

@@ -118,6 +118,7 @@ describe('ChannelIntakeService: roteamento', () => {
       {
         kind: 'text',
         clientId: client.id,
+        phoneNumberId: '1001',
         contactRef: CONTACT,
         text: SECRET_TEXT,
         externalId: WAMID,

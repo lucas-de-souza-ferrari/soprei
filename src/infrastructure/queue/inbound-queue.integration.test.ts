@@ -86,6 +86,7 @@ function setup(overrides: Partial<InboundQueueOptions> = {}): Harness {
 const textJob = (overrides: Partial<Extract<InboundJob, { kind: 'text' }>> = {}): InboundJob => ({
   kind: 'text',
   clientId: randomUUID(),
+  phoneNumberId: '106540352242922',
   contactRef: CONTACT,
   text: SECRET_TEXT,
   externalId: `wamid.${randomUUID()}`,
