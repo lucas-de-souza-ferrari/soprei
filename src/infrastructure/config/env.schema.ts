@@ -4,8 +4,17 @@ import { parseTrustProxy, type TrustProxySetting } from './trust-proxy.js';
 export const ADMIN_API_KEY_MIN_LENGTH = 32;
 export const METRICS_TOKEN_MIN_LENGTH = 32;
 
-/** Provedores de LLM disponíveis. O real entra em spec própria; por ora só o `mock`. */
-export const LLM_PROVIDERS = ['mock'] as const;
+/** Provedores de LLM disponíveis: `mock` (testes e dev offline) e `anthropic` (spec 014). */
+export const LLM_PROVIDERS = ['mock', 'anthropic'] as const;
+
+/** Modelo padrão do provedor Anthropic (spec 014): Claude Haiku 5.5. */
+export const DEFAULT_LLM_MODEL = 'claude-haiku-5-5';
+/** Esforço de raciocínio do modelo (`output_config.effort`): `low` basta para atendimento por chat. */
+export const LLM_EFFORTS = ['low', 'medium', 'high'] as const;
+/** Mínimo da chave da Anthropic (as reais têm dezenas de caracteres). */
+export const ANTHROPIC_API_KEY_MIN_LENGTH = 20;
+/** Formato do id do modelo; fechado para o valor não virar caminho nem cabeçalho estranho. */
+const LLM_MODEL_PATTERN = /^[a-z0-9.-]{1,64}$/;
 
 /** `true`/`false` literais; vazio vale como ausente. `z.coerce.boolean` trataria "false" como verdadeiro. */
 const booleanLiteral = (defaultValue: boolean): z.ZodType<boolean> =>
@@ -68,6 +77,20 @@ export const envSchema = z
     // Atendimento (spec 010). Provedor de LLM e prazo máximo de uma chamada ao modelo.
     LLM_PROVIDER: z.enum(LLM_PROVIDERS).default('mock'),
     LLM_TIMEOUT_MS: z.coerce.number().int().min(1).max(120_000).default(15_000),
+    // Provedor Anthropic (spec 014). A chave só é exigida com `LLM_PROVIDER=anthropic` e nunca vai
+    // a log, métrica, erro nem resposta. `ANTHROPIC_BASE_URL` existe para os testes (servidor falso).
+    ANTHROPIC_API_KEY: optionalSecret,
+    ANTHROPIC_BASE_URL: z.preprocess(emptyAsUndefined, z.url().optional()),
+    LLM_MODEL: z.preprocess(
+      emptyAsUndefined,
+      z
+        .string()
+        .regex(LLM_MODEL_PATTERN, 'deve casar com ^[a-z0-9.-]{1,64}$')
+        .default(DEFAULT_LLM_MODEL),
+    ),
+    LLM_EFFORT: z.preprocess(emptyAsUndefined, z.enum(LLM_EFFORTS).default('low')),
+    LLM_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(64).max(8_192).default(1_024),
+    LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
     // Mensagem do contato sem resposta há mais que isto deixa de ser "em andamento": a
     // retentativa com o mesmo externalId completa o fluxo em vez de receber 409.
     ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: z.coerce.number().int().min(1).max(3_600_000).default(60_000),
@@ -139,6 +162,7 @@ export const envSchema = z
       });
     }
     refineWhatsapp(env, ctx);
+    refineAnthropic(env, ctx);
     if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < METRICS_TOKEN_MIN_LENGTH) {
       ctx.addIssue({
         code: 'custom',
@@ -166,6 +190,48 @@ export const envSchema = z
       });
     }
   });
+
+/** Regras do provedor Anthropic (spec 014). */
+function refineAnthropic(
+  env: {
+    readonly NODE_ENV: 'development' | 'test' | 'production';
+    readonly LLM_PROVIDER: (typeof LLM_PROVIDERS)[number];
+    readonly ANTHROPIC_API_KEY: string | undefined;
+    readonly ANTHROPIC_BASE_URL?: string | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (env.ANTHROPIC_BASE_URL !== undefined) {
+    const baseUrl = parseBaseUrl(env.ANTHROPIC_BASE_URL);
+    if (baseUrl === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ANTHROPIC_BASE_URL'],
+        message: 'deve ser uma URL http(s) sem usuário, senha, query nem fragmento',
+      });
+    } else if (env.NODE_ENV === 'production' && baseUrl.protocol !== 'https:') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ANTHROPIC_BASE_URL'],
+        message: 'precisa ser https:// em produção (a chave iria em texto claro)',
+      });
+    }
+  }
+  if (env.LLM_PROVIDER !== 'anthropic') return;
+  if (env.ANTHROPIC_API_KEY === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['ANTHROPIC_API_KEY'],
+      message: 'obrigatória com LLM_PROVIDER=anthropic',
+    });
+  } else if (env.ANTHROPIC_API_KEY.length < ANTHROPIC_API_KEY_MIN_LENGTH) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['ANTHROPIC_API_KEY'],
+      message: `precisa ter no mínimo ${String(ANTHROPIC_API_KEY_MIN_LENGTH)} caracteres`,
+    });
+  }
+}
 
 /** Regras do canal WhatsApp (spec 011): só valem com `WHATSAPP_ENABLED=true`, salvo a URL base. */
 function refineWhatsapp(

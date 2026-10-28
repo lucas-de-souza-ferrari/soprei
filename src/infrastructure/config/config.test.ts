@@ -103,6 +103,109 @@ describe('parseConfig', () => {
     }
   });
 
+  describe('provedor Anthropic (spec 014)', () => {
+    const KEY = 'chave-de-teste-com-mais-de-20-caracteres';
+    const ANTHROPIC = { ...VALID_ENV, LLM_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: KEY };
+
+    it('defaults: modelo claude-haiku-5-5, esforço low, 1024 tokens, 1 repetição, sem chave e sem base', () => {
+      const result = parseConfig(VALID_ENV);
+      assert.ok(result.ok);
+      assert.equal(result.value.LLM_MODEL, 'claude-haiku-5-5');
+      assert.equal(result.value.LLM_EFFORT, 'low');
+      assert.equal(result.value.LLM_MAX_OUTPUT_TOKENS, 1024);
+      assert.equal(result.value.LLM_MAX_RETRIES, 1);
+      assert.equal(result.value.ANTHROPIC_API_KEY, undefined);
+      assert.equal(result.value.ANTHROPIC_BASE_URL, undefined);
+    });
+
+    it('mock não exige chave; anthropic sem chave (ausente ou vazia) falha citando a variável, sem valor', () => {
+      assert.ok(parseConfig({ ...VALID_ENV, LLM_PROVIDER: 'mock' }).ok);
+      for (const key of [undefined, '']) {
+        const result = parseConfig({
+          ...VALID_ENV,
+          LLM_PROVIDER: 'anthropic',
+          ...(key === undefined ? {} : { ANTHROPIC_API_KEY: key }),
+        });
+        assert.equal(result.ok, false);
+        assert.match(result.error.message, /ANTHROPIC_API_KEY/);
+      }
+    });
+
+    it('chave curta é recusada e a mensagem nunca traz o valor', () => {
+      const short = 'curta-demais-123';
+      const result = parseConfig({ ...ANTHROPIC, ANTHROPIC_API_KEY: short });
+      assert.equal(result.ok, false);
+      assert.match(result.error.message, /ANTHROPIC_API_KEY/);
+      assert.ok(!result.error.message.includes(short));
+    });
+
+    it('aceita anthropic com chave válida e os valores customizados', () => {
+      const result = parseConfig({
+        ...ANTHROPIC,
+        LLM_MODEL: 'claude-haiku-5-5',
+        LLM_EFFORT: 'high',
+        LLM_MAX_OUTPUT_TOKENS: '2048',
+        LLM_MAX_RETRIES: '3',
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4010',
+      });
+      assert.ok(result.ok);
+      assert.equal(result.value.LLM_EFFORT, 'high');
+      assert.equal(result.value.LLM_MAX_OUTPUT_TOKENS, 2048);
+      assert.equal(result.value.LLM_MAX_RETRIES, 3);
+      assert.equal(result.value.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4010');
+    });
+
+    const invalid: readonly (readonly [string, string])[] = [
+      ['LLM_EFFORT', 'max'],
+      ['LLM_EFFORT', 'xhigh'],
+      ['LLM_MAX_OUTPUT_TOKENS', '63'],
+      ['LLM_MAX_OUTPUT_TOKENS', '8193'],
+      ['LLM_MAX_OUTPUT_TOKENS', 'muito'],
+      ['LLM_MAX_RETRIES', '-1'],
+      ['LLM_MAX_RETRIES', '4'],
+      ['LLM_MODEL', 'Claude Haiku'],
+      ['LLM_MODEL', 'a/b'],
+      ['LLM_MODEL', 'x'.repeat(65)],
+      ['ANTHROPIC_BASE_URL', 'nao-e-url'],
+      ['ANTHROPIC_BASE_URL', 'ftp://host'],
+      ['ANTHROPIC_BASE_URL', 'https://u:p@host'],
+    ];
+    for (const [name, value] of invalid) {
+      it(`rejeita ${name}=${value}`, () => {
+        const result = parseConfig({ ...ANTHROPIC, [name]: value });
+        assert.equal(result.ok, false);
+        assert.match(result.error.message, new RegExp(name));
+      });
+    }
+
+    it('ANTHROPIC_BASE_URL com http:// é recusada em produção e aceita fora dela', () => {
+      const prod = {
+        ...ANTHROPIC,
+        NODE_ENV: 'production',
+        ADMIN_API_KEY: 'a'.repeat(32),
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4010',
+      };
+      const refused = parseConfig(prod);
+      assert.equal(refused.ok, false);
+      assert.match(refused.error.message, /ANTHROPIC_BASE_URL/);
+      assert.ok(parseConfig({ ...prod, ANTHROPIC_BASE_URL: 'https://api.anthropic.com' }).ok);
+      assert.ok(parseConfig({ ...prod, NODE_ENV: 'development' }).ok);
+    });
+
+    it('os valores dos .env*.example são válidos', () => {
+      assert.ok(
+        parseConfig({
+          ...ANTHROPIC,
+          LLM_MODEL: 'claude-haiku-5-5',
+          LLM_EFFORT: 'low',
+          LLM_MAX_OUTPUT_TOKENS: '1024',
+          LLM_MAX_RETRIES: '1',
+          ANTHROPIC_BASE_URL: '',
+        }).ok,
+      );
+    });
+  });
+
   describe('atendimento (LLM_PROVIDER, LLM_TIMEOUT_MS, ATTENDANCE_IN_FLIGHT_TIMEOUT_MS)', () => {
     it('aplica os defaults: provedor mock, 15 s de timeout do LLM e 60 s de "em andamento"', () => {
       const result = parseConfig(VALID_ENV);
