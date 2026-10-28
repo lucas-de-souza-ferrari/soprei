@@ -399,7 +399,7 @@ describe('parseConfig', () => {
     const SECRETS = {
       WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
       WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
-      WHATSAPP_ACCESS_TOKEN: 'token-de-envio',
+      WHATSAPP_ACCESS_TOKEN: 'token-de-envio-1234',
     };
     const PRODUCTION = { ...VALID_ENV, NODE_ENV: 'production', ADMIN_API_KEY: 'a'.repeat(32) };
     const ENABLED = { ...VALID_ENV, ...SECRETS, WHATSAPP_ENABLED: 'true', TRUST_PROXY: 'false' };
@@ -455,6 +455,18 @@ describe('parseConfig', () => {
       assert.equal(short.ok, false);
       assert.match(short.error.message, /WHATSAPP_VERIFY_TOKEN: precisa ter no mínimo 16/);
       assert.ok(parseConfig({ ...ENABLED, WHATSAPP_VERIFY_TOKEN: 'x'.repeat(16) }).ok);
+    });
+
+    it('WHATSAPP_APP_SECRET e WHATSAPP_ACCESS_TOKEN exigem no mínimo 16 caracteres (e o valor não aparece na mensagem)', () => {
+      for (const name of ['WHATSAPP_APP_SECRET', 'WHATSAPP_ACCESS_TOKEN']) {
+        const short = parseConfig({ ...ENABLED, [name]: 'abcdefghijklmno' });
+        assert.equal(short.ok, false, name);
+        assert.match(short.error.message, new RegExp(`${name}: precisa ter no mínimo 16`));
+        assert.ok(!short.error.message.includes('abcdefghijklmno'));
+        assert.ok(parseConfig({ ...ENABLED, [name]: 'x'.repeat(16) }).ok, name);
+      }
+      // Desligado, os segredos não são exigidos nem medidos.
+      assert.ok(parseConfig({ ...VALID_ENV, WHATSAPP_APP_SECRET: 'x' }).ok);
     });
 
     it('habilitado sem TRUST_PROXY definido explicitamente falha; "false" explícito passa', () => {

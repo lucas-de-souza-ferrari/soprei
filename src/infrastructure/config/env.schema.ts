@@ -26,6 +26,8 @@ const optionalSecret = z
 const GRAPH_API_VERSION_PATTERN = /^v\d{1,3}\.\d{1,2}$/;
 
 export const WHATSAPP_VERIFY_TOKEN_MIN_LENGTH = 16;
+/** Mínimo conservador do segredo do app e do token de envio (os reais têm dezenas de caracteres). */
+export const WHATSAPP_SECRET_MIN_LENGTH = 16;
 /** Versão estável do Graph API vigente quando a spec 011 foi implementada (ver a spec). */
 export const DEFAULT_WHATSAPP_GRAPH_API_VERSION = 'v26.0';
 
@@ -200,6 +202,16 @@ function refineWhatsapp(
         code: 'custom',
         path: [name],
         message: 'obrigatória com WHATSAPP_ENABLED=true',
+      });
+    }
+  }
+  for (const name of ['WHATSAPP_APP_SECRET', 'WHATSAPP_ACCESS_TOKEN'] as const) {
+    const value = env[name];
+    if (value !== undefined && value.length < WHATSAPP_SECRET_MIN_LENGTH) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [name],
+        message: `precisa ter no mínimo ${String(WHATSAPP_SECRET_MIN_LENGTH)} caracteres`,
       });
     }
   }
