@@ -158,3 +158,44 @@ describe('/admin/clients contra o PostgreSQL de testes', () => {
     }
   });
 });
+
+describe('whatsappPhoneNumberId no PATCH /admin/clients/:id, contra o banco (spec 011)', () => {
+  const phoneNumber = (): string =>
+    `8${randomBytes(6).readUIntBE(0, 6).toString().padStart(15, '0')}`;
+
+  it('define, devolve, limpa; número já usado por outro cliente é 409 e o @unique do banco é a barreira', async () => {
+    const first = (await post({ name: 'WA um', slug: slug('wa1') })).json<ClientBody>();
+    const second = (await post({ name: 'WA dois', slug: slug('wa2') })).json<ClientBody>();
+    tenants.track(first.id);
+    tenants.track(second.id);
+    const number = phoneNumber();
+    const patch = (id: string, payload: object): Promise<LightMyRequestResponse> =>
+      app.inject({ method: 'PATCH', url: `/admin/clients/${id}`, headers: auth, payload });
+
+    const set = await patch(first.id, { whatsappPhoneNumberId: number });
+    assert.equal(set.statusCode, 200);
+    assert.equal(set.json<{ whatsappPhoneNumberId: string }>().whatsappPhoneNumberId, number);
+    const read = await app.inject({
+      method: 'GET',
+      url: `/admin/clients/${first.id}`,
+      headers: auth,
+    });
+    assert.equal(read.json<{ whatsappPhoneNumberId: string }>().whatsappPhoneNumberId, number);
+
+    assert.equal((await patch(second.id, { whatsappPhoneNumberId: number })).statusCode, 409);
+    assert.equal((await patch(second.id, { whatsappPhoneNumberId: 'abc' })).statusCode, 400);
+    // Pedidos simultâneos para o mesmo número: um 200 e o outro 409.
+    const other = phoneNumber();
+    const results = await Promise.all([
+      patch(first.id, { whatsappPhoneNumberId: other }),
+      patch(second.id, { whatsappPhoneNumberId: other }),
+    ]);
+    assert.deepEqual(results.map((r) => r.statusCode).sort(), [200, 409]);
+
+    const cleared = await patch(first.id, { whatsappPhoneNumberId: null });
+    assert.equal(cleared.json<{ whatsappPhoneNumberId: null }>().whatsappPhoneNumberId, null);
+    // Remover o cliente libera o número para outro.
+    await app.inject({ method: 'DELETE', url: `/admin/clients/${second.id}`, headers: auth });
+    assert.equal((await patch(first.id, { whatsappPhoneNumberId: other })).statusCode, 200);
+  });
+});

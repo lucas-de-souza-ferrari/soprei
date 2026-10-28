@@ -49,6 +49,11 @@ export class FakeGraphApi {
   private fallback: GraphBehavior | undefined;
   private baseUrlValue = '';
 
+  /** Quantos pedidos receberam a resposta de sucesso padrão (cada um com um `wamid.FAKE<n>` novo). */
+  get successCount(): number {
+    return this.sequence;
+  }
+
   /** `http://127.0.0.1:<porta>`, depois de `start()`. */
   get baseUrl(): string {
     return this.baseUrlValue;
@@ -128,6 +133,7 @@ export class FakeGraphApi {
     this.scripted = [];
     this.fallback = undefined;
     this.requests.length = 0;
+    this.sequence = 0;
   }
 
   /** Pedidos que o servidor respondeu com sucesso por padrão não são distinguíveis; use `requests`. */
