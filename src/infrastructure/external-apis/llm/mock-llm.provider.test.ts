@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ExternalServiceError } from '../../../shared/errors/index.js';
+import { parseConfig } from '../../config/parse-config.js';
+import { AnthropicLlmProvider } from './anthropic-llm.provider.js';
 import { createLlmProvider } from './create-llm-provider.js';
 import {
   MOCK_EMPTY_MARKER,
@@ -116,8 +118,26 @@ describe('MockLlmProvider', () => {
 });
 
 describe('createLlmProvider', () => {
+  const base = {
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
+    REDIS_URL: 'redis://localhost:6379/0',
+  };
+
   it('LLM_PROVIDER=mock cria o MockLlmProvider', () => {
-    const provider = createLlmProvider({ LLM_PROVIDER: 'mock' });
-    assert.ok(provider instanceof MockLlmProvider);
+    const parsed = parseConfig({ ...base, LLM_PROVIDER: 'mock' });
+    assert.ok(parsed.ok);
+    assert.ok(createLlmProvider(parsed.value) instanceof MockLlmProvider);
+  });
+
+  it('LLM_PROVIDER=anthropic cria o AnthropicLlmProvider (sem chamar a rede)', () => {
+    const parsed = parseConfig({
+      ...base,
+      LLM_PROVIDER: 'anthropic',
+      ANTHROPIC_API_KEY: 'chave-de-teste-com-mais-de-20-caracteres',
+    });
+    assert.ok(parsed.ok);
+    const provider = createLlmProvider(parsed.value);
+    assert.ok(provider instanceof AnthropicLlmProvider);
+    assert.equal(provider.name, 'anthropic');
   });
 });
