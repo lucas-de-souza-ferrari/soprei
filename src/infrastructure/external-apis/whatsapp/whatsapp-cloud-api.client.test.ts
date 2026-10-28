@@ -207,6 +207,56 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
   });
 });
 
+describe('WhatsappCloudApiClient: corpo da resposta com teto', () => {
+  async function floodedFailure(status: number): Promise<MessageSendError> {
+    graph.failNext(1, { kind: 'flood', status });
+    const begin = Date.now();
+    const error = await expectFailure(makeClient({ timeoutMs: 5_000 }));
+    assert.ok(Date.now() - begin < 3_000, 'não esperou o corpo sem fim');
+    return error;
+  }
+
+  async function serverSawCancel(): Promise<void> {
+    const deadline = Date.now() + 3_000;
+    while (!graph.floodClosedByClient && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(graph.floodClosedByClient, true, 'o cliente cancelou a conexão');
+    // Leu só até o teto (64 KiB) mais o que já estava em trânsito: nada perto de "o corpo inteiro".
+    assert.ok(
+      graph.floodBytesWritten < 16 * 1024 * 1024,
+      `escrito: ${String(graph.floodBytesWritten)}`,
+    );
+  }
+
+  it('2xx com corpo sem fim: lê só até o teto, cancela a conexão e falha como resposta inválida, sem retentar', async () => {
+    const error = await floodedFailure(200);
+    assert.equal(error.reason, 'invalid_response');
+    assert.equal(error.retryable, false);
+    assert.equal(error.httpStatus, 200);
+    await serverSawCancel();
+  });
+
+  it('erro HTTP com corpo sem fim: o status decide a classificação (5xx retentável, 4xx permanente)', async () => {
+    const serverError = await floodedFailure(503);
+    assert.equal(serverError.retryable, true);
+    assert.equal(serverError.reason, 'http_error');
+    await serverSawCancel();
+
+    graph.reset();
+    const clientError = await floodedFailure(401);
+    assert.equal(clientError.retryable, false);
+    assert.equal(clientError.httpStatus, 401);
+    await serverSawCancel();
+  });
+
+  it('resposta de sucesso normal (poucos bytes) continua sendo lida por inteiro', async () => {
+    const result = await makeClient().sendText(input);
+    assert.ok(result.ok);
+    assert.match(result.value.channelMessageId, /^wamid\.FAKE\d+$/);
+  });
+});
+
 describe('WhatsappCloudApiClient: privacidade do erro', () => {
   it('o erro leva só status, code, type e retentável: nunca token, texto, destinatário nem a mensagem da Meta', async () => {
     graph.failNext(1, graphError(400, 131047));

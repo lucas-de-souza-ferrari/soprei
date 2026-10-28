@@ -13,8 +13,12 @@ import type { ChannelSendSample } from '../../metrics/index.js';
 /** Nome do canal nos labels de métrica. */
 export const WHATSAPP_CHANNEL = 'whatsapp';
 
-/** Limite de leitura da resposta do Graph API (a resposta de verdade tem poucas centenas de bytes). */
-const MAX_RESPONSE_CHARS = 64 * 1024;
+/**
+ * Teto de bytes lidos da resposta do Graph API (a de verdade tem poucas centenas). Passou disso a
+ * leitura é abortada e a conexão cancelada: nada de bufferizar o corpo inteiro de uma resposta
+ * hostil ou defeituosa.
+ */
+const MAX_RESPONSE_BYTES = 64 * 1024;
 
 /**
  * Códigos de erro da Meta que são transitórios (limite de taxa e indisponibilidade), segundo a
@@ -125,7 +129,23 @@ export class WhatsappCloudApiClient implements MessageSender {
 
     let raw: unknown;
     try {
-      raw = parseJson((await response.text()).slice(0, MAX_RESPONSE_CHARS));
+      const read = await readCapped(response, MAX_RESPONSE_BYTES);
+      if (read.tooLarge) {
+        // Corpo absurdo: lido só até o teto e descartado. Em 2xx o envio pode ter acontecido (nada de
+        // reenviar); em erro, o status decide.
+        if (response.ok) {
+          return Result.err(
+            new MessageSendError({
+              reason: 'invalid_response',
+              retryable: false,
+              httpStatus: response.status,
+            }),
+          );
+        }
+        raw = undefined;
+      } else {
+        raw = parseJson(read.text);
+      }
     } catch (error) {
       if (response.ok) {
         // A Meta aceitou o envio mas não lemos o id: retentar poderia duplicar a mensagem.
@@ -176,6 +196,32 @@ export class WhatsappCloudApiClient implements MessageSender {
       // Métrica é acessório: nunca derruba nem muda o resultado do envio.
     }
   }
+}
+
+/**
+ * Lê o corpo em pedaços e para ao passar de `maxBytes` (cancelando a conexão), mantendo o prazo do
+ * `AbortSignal.timeout` da requisição. Erro de leitura (prazo, conexão) é relançado.
+ */
+async function readCapped(
+  response: Response,
+  maxBytes: number,
+): Promise<{ readonly text: string; readonly tooLarge: boolean }> {
+  if (response.body === null) return { text: '', tooLarge: false };
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const result = (await reader.read()) as ReadableStreamReadResult<Uint8Array>;
+    if (result.done) break;
+    const value = result.value;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return { text: '', tooLarge: true };
+    }
+    chunks.push(value);
+  }
+  return { text: Buffer.concat(chunks).toString('utf8'), tooLarge: false };
 }
 
 function parseJson(text: string): unknown {

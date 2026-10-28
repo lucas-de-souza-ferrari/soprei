@@ -22,7 +22,9 @@ export type GraphBehavior =
   /** Aceita a conexão e nunca responde (para testar timeout). */
   | { readonly kind: 'hang' }
   /** Derruba a conexão sem responder (erro de rede). */
-  | { readonly kind: 'drop' };
+  | { readonly kind: 'drop' }
+  /** Responde com `status` e despeja corpo sem fim (em pedaços de 16 KiB) até o cliente fechar. */
+  | { readonly kind: 'flood'; readonly status: number };
 
 export const graphError = (
   status: number,
@@ -48,6 +50,9 @@ export class FakeGraphApi {
   private scripted: GraphBehavior[] = [];
   private fallback: GraphBehavior | undefined;
   private baseUrlValue = '';
+  /** Bytes que o modo `flood` escreveu e se o cliente fechou a conexão antes do fim do teste. */
+  floodBytesWritten = 0;
+  floodClosedByClient = false;
 
   /** Quantos pedidos receberam a resposta de sucesso padrão (cada um com um `wamid.FAKE<n>` novo). */
   get successCount(): number {
@@ -83,6 +88,26 @@ export class FakeGraphApi {
         });
         const behavior = this.scripted.shift() ?? this.fallback ?? this.success();
         if (behavior.kind === 'hang') return;
+        if (behavior.kind === 'flood') {
+          response.writeHead(behavior.status, { 'content-type': 'application/json' });
+          const chunk = Buffer.alloc(16 * 1024, 0x20);
+          let open = true;
+          response.on('close', () => {
+            open = false;
+            this.floodClosedByClient = true;
+          });
+          const pump = (): void => {
+            while (open) {
+              this.floodBytesWritten += chunk.length;
+              if (!response.write(chunk)) {
+                response.once('drain', pump);
+                return;
+              }
+            }
+          };
+          pump();
+          return;
+        }
         if (behavior.kind === 'drop') {
           request.socket.destroy();
           return;
@@ -134,6 +159,8 @@ export class FakeGraphApi {
     this.fallback = undefined;
     this.requests.length = 0;
     this.sequence = 0;
+    this.floodBytesWritten = 0;
+    this.floodClosedByClient = false;
   }
 
   /** Pedidos que o servidor respondeu com sucesso por padrão não são distinguíveis; use `requests`. */
