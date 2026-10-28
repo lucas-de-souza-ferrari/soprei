@@ -2,12 +2,15 @@ import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { Database } from './database/index.js';
 import type { RateLimitRedisHandle } from './cache/rate-limit-redis.js';
 import type { RedisHandle } from './cache/redis.client.js';
+import type { InboundQueueHandle } from './queue/inbound-queue.js';
 
 export interface Infrastructure {
   readonly database: Database;
   readonly redis: RedisHandle;
   /** Conexão Redis dedicada ao rate limit (spec 005); ausente com `RATE_LIMIT_ENABLED=false`. */
   readonly rateLimitRedis?: RateLimitRedisHandle | undefined;
+  /** Fila de entrada do canal e seu worker (spec 011); ausente com `WHATSAPP_ENABLED=false`. */
+  readonly inboundQueue?: Pick<InboundQueueHandle, 'close'> | undefined;
 }
 
 /**
@@ -34,11 +37,24 @@ export async function verifyInfrastructure(
   return failed;
 }
 
-/** Fecha o pool e os Redis; um não impede o outro de fechar. */
+/**
+ * Fecha a fila (o worker espera o job ativo terminar) e **só depois** o pool e os Redis: o job
+ * ativo ainda usa o banco e o Redis. Um recurso que falha ao fechar não impede os outros.
+ */
 export async function closeInfrastructure(
-  { database, redis, rateLimitRedis }: Infrastructure,
+  { database, redis, rateLimitRedis, inboundQueue }: Infrastructure,
   logger: FastifyBaseLogger,
 ): Promise<void> {
+  if (inboundQueue !== undefined) {
+    try {
+      await inboundQueue.close();
+    } catch (err) {
+      logger.error(
+        { errName: err instanceof Error ? err.name : typeof err },
+        'falha ao encerrar a fila de entrada',
+      );
+    }
+  }
   const results = await Promise.allSettled([
     database.close(),
     redis.close(),
@@ -51,7 +67,10 @@ export async function closeInfrastructure(
   }
 }
 
-/** Ordem do shutdown: primeiro o Fastify (para de aceitar e termina requisições), depois o pool e o Redis. */
+/**
+ * Ordem do shutdown: o Fastify (para de aceitar e termina requisições), a fila e o worker (esperam o
+ * job ativo) e, por último, o pool e o Redis.
+ */
 export async function shutdown(
   app: FastifyInstance,
   infrastructure: Infrastructure,

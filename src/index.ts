@@ -1,8 +1,15 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { ChannelInboundProcessor } from './application/channel/channel-inbound.processor.js';
+import { ChannelIntakeService } from './application/channel/channel-intake.service.js';
 import { ClientService } from './application/clients/client.service.js';
 import { createRateLimitRedis } from './infrastructure/cache/rate-limit-redis.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
-import { loadConfig } from './infrastructure/config/index.js';
+import {
+  loadConfig,
+  queueSettings,
+  trustProxyMode,
+  whatsappChannelConfig,
+} from './infrastructure/config/index.js';
 import {
   getDatabase,
   PrismaAttendanceUnitOfWork,
@@ -11,8 +18,9 @@ import {
   PrismaMessageRepository,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
+import { WhatsappCloudApiClient } from './infrastructure/external-apis/whatsapp/whatsapp-cloud-api.client.js';
 import { rateLimitProfilesFromConfig } from './infrastructure/http/rate-limit/rate-limit.js';
-import { buildServer } from './infrastructure/http/server.js';
+import { buildServer, type WhatsappRoutesParams } from './infrastructure/http/server.js';
 import {
   closeInfrastructure,
   type Infrastructure,
@@ -21,6 +29,7 @@ import {
 } from './infrastructure/lifecycle.js';
 import { createLogger } from './infrastructure/logger/logger.js';
 import { createMetrics } from './infrastructure/metrics/index.js';
+import { createInboundQueue } from './infrastructure/queue/inbound-queue.js';
 
 /** Espera da conexão Redis do rate limit no boot; passou disso, segue em fail-open com `warn`. */
 const RATE_LIMIT_READY_TIMEOUT_MS = 2_000;
@@ -30,6 +39,17 @@ async function main(): Promise<void> {
   const logger = createLogger(config);
 
   const metrics = createMetrics();
+  const whatsapp = whatsappChannelConfig(config);
+  // Fila de entrada do canal (spec 011), com conexões Redis próprias; só com o canal habilitado.
+  const inboundQueue =
+    whatsapp === undefined
+      ? undefined
+      : createInboundQueue({
+          redisUrl: config.REDIS_URL,
+          settings: queueSettings(config),
+          logger,
+          metrics,
+        });
 
   const infrastructure: Infrastructure = {
     database: getDatabase({
@@ -42,6 +62,7 @@ async function main(): Promise<void> {
     redis: getRedis({ config, logger }),
     // Conexão própria do limiter (spec 005), com fila offline desligada e prazo curto por comando.
     rateLimitRedis: config.RATE_LIMIT_ENABLED ? createRateLimitRedis(config, logger) : undefined,
+    inboundQueue,
   };
 
   metrics.bindPool(() => infrastructure.database.poolMetrics());
@@ -85,6 +106,46 @@ async function main(): Promise<void> {
     },
   });
 
+  let whatsappRoutes: WhatsappRoutesParams | undefined;
+  if (whatsapp !== undefined && inboundQueue !== undefined) {
+    const channelLogger = logger;
+    const processor = new ChannelInboundProcessor({
+      attendance,
+      clients: clientRepository,
+      messages: new PrismaMessageRepository(prisma),
+      sender: new WhatsappCloudApiClient({
+        baseUrl: whatsapp.apiBaseUrl,
+        graphApiVersion: whatsapp.graphApiVersion,
+        accessToken: whatsapp.accessToken,
+        timeoutMs: whatsapp.sendTimeoutMs,
+        metrics,
+      }),
+      logger: channelLogger,
+    });
+    // Worker no mesmo processo, concorrência 1; o shutdown o espera antes de fechar Redis e banco.
+    inboundQueue.startWorker((job, context) => processor.process(job, context));
+    whatsappRoutes = {
+      appSecret: whatsapp.appSecret,
+      verifyToken: whatsapp.verifyToken,
+      intake: new ChannelIntakeService({
+        clients: clientRepository,
+        queue: inboundQueue.queue,
+        logger: channelLogger,
+        metrics,
+        channel: 'whatsapp',
+      }),
+    };
+    // Qual modo do TRUST_PROXY está ativo, sem IP algum (a Meta e um atacante dividiriam a cota
+    // do perfil webhook se o túnel/proxy não estivesse listado).
+    logger.info(
+      {
+        trustProxyMode: trustProxyMode(config.TRUST_PROXY),
+        graphApiVersion: whatsapp.graphApiVersion,
+      },
+      'canal WhatsApp habilitado',
+    );
+  }
+
   const app = buildServer({
     logger,
     metrics,
@@ -98,6 +159,7 @@ async function main(): Promise<void> {
             profiles: rateLimitProfilesFromConfig(config),
           },
         }),
+    ...(whatsappRoutes === undefined ? {} : { whatsapp: whatsappRoutes }),
     readiness: {
       database: () => infrastructure.database.check(),
       redis: () => infrastructure.redis.check(),
