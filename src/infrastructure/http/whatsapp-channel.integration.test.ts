@@ -9,7 +9,10 @@ import {
   ATTENDANCE_FALLBACK_TEXT,
   AttendanceService,
 } from '../../application/attendance/attendance.service.js';
-import { ChannelInboundProcessor } from '../../application/channel/channel-inbound.processor.js';
+import {
+  ChannelInboundProcessor,
+  type InboundAttendance,
+} from '../../application/channel/channel-inbound.processor.js';
 import { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import { CHANNEL_NOTICE_TEXTS } from '../../application/channel/channel-texts.js';
 import type { Client } from '../../domain/index.js';
@@ -108,9 +111,7 @@ const contactNumber = (): string =>
 
 interface Setup {
   /** Troca o atendimento (ex.: para simular o banco fora antes de existir resposta). */
-  readonly wrapAttendance?: (real: AttendanceService) => {
-    handleInboundMessage: AttendanceService['handleInboundMessage'];
-  };
+  readonly wrapAttendance?: (real: InboundAttendance) => Partial<InboundAttendance>;
   readonly queueRedisUrl?: string;
   readonly rateLimitWebhookMax?: number;
 }
@@ -155,8 +156,18 @@ async function start(setup: Setup = {}): Promise<Harness> {
     metrics,
     options: { llmTimeoutMs: LLM_TIMEOUT_MS, inFlightTimeoutMs: IN_FLIGHT_MS },
   });
+  const attendance_: InboundAttendance = {
+    acceptInboundMessage: (clientId, input) => attendance.acceptInboundMessage(clientId, input),
+    respondToPending: (clientId, contactRef, limits, options) =>
+      attendance.respondToPending(clientId, contactRef, limits, options),
+    hasPendingMessages: (clientId, contactRef) =>
+      attendance.hasPendingMessages(clientId, contactRef),
+  };
   const processor = new ChannelInboundProcessor({
-    attendance: setup.wrapAttendance?.(attendance) ?? attendance,
+    attendance: { ...attendance_, ...setup.wrapAttendance?.(attendance_) },
+    queue: queue.queue,
+    // Sem espera: o comportamento de uma resposta por mensagem da 011 (a janela tem os seus testes).
+    batch: { windowMs: 0, maxWaitMs: 0, maxMessages: 10, maxChars: 8_000 },
     clients,
     messages,
     sender: new WhatsappCloudApiClient({
@@ -845,10 +856,10 @@ describe('canal WhatsApp: falhas e retentativas', () => {
       },
       {
         wrapAttendance: (real) => ({
-          handleInboundMessage: (clientId, input) =>
+          acceptInboundMessage: (clientId, input) =>
             input.text.includes('FALHA-BANCO')
               ? Promise.reject(new DatabaseError('banco indisponível simulado'))
-              : real.handleInboundMessage(clientId, input),
+              : real.acceptInboundMessage(clientId, input),
         }),
       },
     );
@@ -876,13 +887,13 @@ describe('canal WhatsApp: falhas e retentativas', () => {
     });
   });
 
-  it('ConflictError (mensagem em andamento) é retentado e, passado o prazo, completa sem segunda chamada ao LLM', async () => {
+  it('queda entre gravar a mensagem e agendar o flush: a mensagem já gravada e pendente é agendada pela entrega seguinte e respondida uma só vez', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('conflict', number);
+      const client = await newClient('pendente', number);
       const contact = contactNumber();
-      const { id, payload } = textEvent(number, contact, 'já em andamento');
-      // Mensagem do contato gravada agora e ainda sem resposta: "em andamento" por IN_FLIGHT_MS.
+      const { id, payload } = textEvent(number, contact, 'gravada antes da queda');
+      // Como se o job text tivesse gravado a mensagem e caído antes de agendar o flush.
       const conversation = await fixturesDb.prisma.conversation.create({
         data: { clientId: client.id, contactRef: contact },
       });
@@ -891,28 +902,19 @@ describe('canal WhatsApp: falhas e retentativas', () => {
           clientId: client.id,
           conversationId: conversation.id,
           role: 'USER',
-          content: 'já em andamento',
+          content: 'gravada antes da queda',
           externalId: id,
         },
       });
 
       await deliver(h, payload);
       await waitFor(
-        async () =>
-          (await h.queue.jobCounts()).delayed === 1 ||
-          h.logs.lines().some((l) => l.msg === 'job falhou; será retentado com backoff'),
-        'primeira tentativa em 409',
-      );
-      assert.equal(h.llm.calls.length, 0, 'a mensagem ainda estava viva: nenhuma chamada ao LLM');
-
-      await waitFor(
         async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
-        'retentativa concluída',
-        20_000,
+        'mensagem respondida',
       );
       assert.equal(h.llm.calls.length, 1, 'uma só chamada ao LLM');
       assert.equal(graph.requests.length, 1);
-      assert.equal((await stored(client, contact)).length, 2);
+      assert.equal((await stored(client, contact)).length, 2, 'sem segunda gravação');
     });
   });
 
@@ -1273,16 +1275,18 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
           assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
         }
         // Todo log do worker leva o clientId do job (contexto aberto pelo worker).
-        const attendance = h.logs.lines().filter((line) => line.msg === 'mensagem atendida');
+        const attendance = h.logs
+          .lines()
+          .filter((line) => line.msg === 'lote de mensagens atendido');
         assert.ok(attendance.length >= 1);
         assert.ok(attendance.every((line) => line.clientId === client.id));
       },
       {
         wrapAttendance: (real) => ({
-          handleInboundMessage: (clientId, input) =>
+          acceptInboundMessage: (clientId, input) =>
             input.text.includes('FALHA-BANCO')
               ? Promise.reject(new DatabaseError('banco indisponível simulado'))
-              : real.handleInboundMessage(clientId, input),
+              : real.acceptInboundMessage(clientId, input),
         }),
       },
     );
@@ -1313,7 +1317,7 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
         sent.map((line) => line.clientId),
         [a.id, b.id],
       );
-      const attended = h.logs.lines().filter((line) => line.msg === 'mensagem atendida');
+      const attended = h.logs.lines().filter((line) => line.msg === 'lote de mensagens atendido');
       assert.deepEqual(
         attended.map((line) => line.clientId),
         [a.id, b.id],

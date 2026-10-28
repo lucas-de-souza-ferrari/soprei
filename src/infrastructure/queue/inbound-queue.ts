@@ -1,14 +1,18 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { type Job, Queue, UnrecoverableError, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { describeError } from '../../application/channel/describe-error.js';
 import {
+  channelJobSchema,
+  type FlushJob,
+  type FlushSchedule,
+  flushKey,
   type InboundJob,
   type InboundJobFailureHandler,
   type InboundJobHandler,
   type InboundJobQueue,
   inboundJobId,
-  inboundJobSchema,
   NonRetryableJobError,
 } from '../../application/ports/inbound-job-queue.js';
 import { MessageSendError } from '../../application/ports/message-sender.js';
@@ -150,6 +154,44 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
         );
       }
     },
+
+    /**
+     * Um `flush` por `(clientId, contactRef)`, pela deduplicação do BullMQ (id = `flushKey`, que
+     * inclui o `clientId`), com `keepLastIfActive`: se o `flush` do contato está rodando agora, o
+     * próximo é guardado em Redis e criado, de forma atômica, quando ele terminar. `slide` usa
+     * `replace`: o `flush` que ainda espera (job atrasado) é removido e um novo, com a espera
+     * inteira, o substitui (janela deslizante). O `jobId` é único por agendamento: com um `jobId`
+     * fixo o BullMQ trata o novo como duplicata antes de olhar a deduplicação e o `replace` nunca
+     * rodaria. O job conclui sem retenção (`removeOnComplete: true`): não deixa o `contactRef` no Redis.
+     */
+    async scheduleFlush(job: FlushJob, schedule: FlushSchedule) {
+      const key = flushKey(job);
+      try {
+        await withTimeout(
+          queue.add(job.kind, job, {
+            jobId: `${key}_${randomUUID()}`,
+            delay: schedule.delayMs,
+            deduplication:
+              schedule.mode === 'slide'
+                ? { id: key, replace: true, keepLastIfActive: true }
+                : { id: key, keepLastIfActive: true },
+            attempts: settings.attempts,
+            backoff: { type: 'exponential', delay: settings.backoffMs },
+            removeOnComplete: true,
+            removeOnFail: { age: settings.keepFailedSeconds },
+          }),
+          enqueueTimeoutMs,
+          'fila de entrada',
+        );
+        return Result.ok(undefined);
+      } catch (error) {
+        return Result.err(
+          new ExternalServiceError('Falha ao agendar a resposta ao contato', {
+            context: { queue: INBOUND_QUEUE_NAME, ...describeRedisError(error) },
+          }),
+        );
+      }
+    },
   };
 
   /** A falha deste job já foi contada e logada aqui; o evento `failed` do worker não repete. */
@@ -159,7 +201,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
 
   /** Roda um job dentro do contexto de requisição do webhook que o originou. */
   async function runJob(job: Job, handler: InboundJobHandler): Promise<'done' | 'discarded'> {
-    const parsed = inboundJobSchema.safeParse(job.data);
+    const parsed = channelJobSchema.safeParse(job.data);
     if (!parsed.success) {
       // Nunca loga o conteúdo do job nem os detalhes do Zod (podem citar valores).
       count('failed');
@@ -176,7 +218,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
       setClientId(data.clientId);
       setOperation(`job ${INBOUND_QUEUE_NAME}/${data.kind}`);
       try {
-        const outcome = await handler(data, { finalAttempt });
+        const outcome = await handler(data, { attempt, finalAttempt });
         count(outcome === 'discarded' ? 'discarded' : 'completed');
         return outcome;
       } catch (error) {
@@ -255,7 +297,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
           },
           'job falhou sem passar pelo handler',
         );
-        const parsed = inboundJobSchema.safeParse(job?.data);
+        const parsed = channelJobSchema.safeParse(job?.data);
         const onFailure = hooks.onUnhandledFailure;
         if (!parsed.success || onFailure === undefined) return;
         runWithContext(createRequestContext(parsed.data.requestId), () => {

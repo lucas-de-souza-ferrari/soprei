@@ -5,6 +5,7 @@ import { ClientService } from './application/clients/client.service.js';
 import { createRateLimitRedis } from './infrastructure/cache/rate-limit-redis.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
 import {
+  batchSettings,
   loadConfig,
   queueSettings,
   trustProxyMode,
@@ -120,6 +121,8 @@ async function main(): Promise<void> {
         timeoutMs: whatsapp.sendTimeoutMs,
         metrics,
       }),
+      queue: inboundQueue.queue,
+      batch: batchSettings(config),
       logger: channelLogger,
     });
     // Worker no mesmo processo, concorrência 1; o shutdown o espera antes de fechar Redis e banco.

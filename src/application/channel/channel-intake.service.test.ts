@@ -18,7 +18,7 @@ const CONTACT = '5511987654321';
 const WAMID = `wamid.${Buffer.from(`\u001c\u0018\u000b${CONTACT}`).toString('base64')}`;
 
 /** Fila de mentira com o dedupe por `jobId` do BullMQ (o mesmo id não entra duas vezes). */
-class FakeQueue implements InboundJobQueue {
+class FakeQueue implements Pick<InboundJobQueue, 'enqueue'> {
   readonly jobs = new Map<string, InboundJob>();
   failOn: ((job: InboundJob) => boolean) | undefined;
   attempts = 0;

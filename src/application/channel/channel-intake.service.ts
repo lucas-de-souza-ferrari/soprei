@@ -86,7 +86,8 @@ export interface IntakeSummary {
 
 export interface ChannelIntakeDeps {
   readonly clients: Pick<ClientRepository, 'findByWhatsappPhoneNumberId'>;
-  readonly queue: InboundJobQueue;
+  /** O webhook só enfileira mensagens e avisos; o `flush` é agendado pelo processador. */
+  readonly queue: Pick<InboundJobQueue, 'enqueue'>;
   readonly logger: ChannelLogger;
   readonly metrics?: ChannelIntakeMetrics;
   /** Nome do canal para métricas (`whatsapp`). */

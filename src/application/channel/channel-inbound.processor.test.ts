@@ -1,28 +1,38 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  ConflictError,
   DatabaseError,
   ExternalServiceError,
   ForbiddenError,
   ValidationError,
 } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
+import { steppingClock } from '../../test-support/clock.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
 import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
 import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { ATTENDANCE_FALLBACK_TEXT, AttendanceService } from '../attendance/attendance.service.js';
-import type { InboundJob } from '../ports/inbound-job-queue.js';
-import { NonRetryableJobError } from '../ports/inbound-job-queue.js';
+import type {
+  FlushJob,
+  FlushSchedule,
+  InboundJob,
+  InboundJobOutcome,
+  InboundJobQueue,
+} from '../ports/inbound-job-queue.js';
+import { flushKey, NonRetryableJobError } from '../ports/inbound-job-queue.js';
 import {
   MessageSendError,
   type MessageSender,
   type SendTextInput,
 } from '../ports/message-sender.js';
 import { CHANNEL_NOTICE_TEXTS } from './channel-texts.js';
-import { ChannelInboundProcessor } from './channel-inbound.processor.js';
+import {
+  type ChannelBatchSettings,
+  ChannelInboundProcessor,
+  type InboundAttendance,
+} from './channel-inbound.processor.js';
 
 const IN_FLIGHT_MS = 60_000;
 const SECRET_TEXT = 'texto-secreto-do-contato-9f3';
@@ -52,6 +62,30 @@ class FakeSender implements MessageSender {
   }
 }
 
+/** Fila de mentira: guarda os agendamentos de `flush` que o processador pede. */
+class FakeScheduler implements Pick<InboundJobQueue, 'scheduleFlush'> {
+  readonly calls: { job: FlushJob; schedule: FlushSchedule }[] = [];
+  /** Erro devolvido (como `Result.err`) nos próximos agendamentos, enquanto definido. */
+  failWith: ExternalServiceError | undefined;
+
+  scheduleFlush(
+    job: FlushJob,
+    schedule: FlushSchedule,
+  ): Promise<Result<void, ExternalServiceError>> {
+    this.calls.push({ job, schedule });
+    return Promise.resolve(
+      this.failWith === undefined ? Result.ok(undefined) : Result.err(this.failWith),
+    );
+  }
+}
+
+const BATCH: ChannelBatchSettings = {
+  windowMs: 5_000,
+  maxWaitMs: 20_000,
+  maxMessages: 10,
+  maxChars: 8_000,
+};
+
 const retryable = (): MessageSendError =>
   new MessageSendError({ reason: 'http_error', retryable: true, httpStatus: 503 });
 const permanent = (code = 190): MessageSendError =>
@@ -68,6 +102,7 @@ interface Harness {
   readonly store: InMemoryAttendanceStore;
   readonly llm: MockLlmProvider;
   readonly sender: FakeSender;
+  readonly scheduler: FakeScheduler;
   readonly logs: ReturnType<typeof captureLogs>;
   readonly processor: ChannelInboundProcessor;
   readonly service: AttendanceService;
@@ -76,12 +111,16 @@ interface Harness {
 
 function setup(
   overrides: {
-    attendance?: { handleInboundMessage: AttendanceService['handleInboundMessage'] };
+    attendance?: Partial<InboundAttendance>;
     messages?: Partial<InMemoryAttendanceStore['messages']>;
+    batch?: Partial<ChannelBatchSettings>;
   } = {},
 ): Harness {
-  let time = Date.UTC(2026, 0, 1);
-  const now = (): Date => new Date((time += 1));
+  let offset = 0;
+  // 10 ms a cada leitura: as mensagens nunca caem no mesmo instante (a resposta do lote fica 1 ms
+  // depois da última mensagem e antes de qualquer outra).
+  const step = steppingClock(10);
+  const now = (): Date => new Date(step().getTime() + offset);
   const clients = new InMemoryClientRepository();
   const store = new InMemoryAttendanceStore(now);
   const llm = new MockLlmProvider({ recordCalls: true });
@@ -96,11 +135,15 @@ function setup(
     options: { llmTimeoutMs: 300, inFlightTimeoutMs: IN_FLIGHT_MS, now },
   });
   const sender = new FakeSender();
+  const scheduler = new FakeScheduler();
   const processor = new ChannelInboundProcessor({
-    attendance: overrides.attendance ?? service,
+    attendance:
+      overrides.attendance === undefined ? service : { ...bind(service), ...overrides.attendance },
     clients,
     messages: { ...store.messages, ...overrides.messages },
     sender,
+    queue: scheduler,
+    batch: { ...BATCH, ...overrides.batch },
     logger: logs.logger,
     now,
   });
@@ -109,12 +152,23 @@ function setup(
     store,
     llm,
     sender,
+    scheduler,
     logs,
     processor,
     service,
     advance(ms) {
-      time += ms;
+      offset += ms;
     },
+  };
+}
+
+/** Os métodos do serviço de atendimento ligados à instância (para poder sobrescrever só alguns). */
+function bind(service: AttendanceService): InboundAttendance {
+  return {
+    acceptInboundMessage: (clientId, input) => service.acceptInboundMessage(clientId, input),
+    respondToPending: (clientId, contactRef, limits, options) =>
+      service.respondToPending(clientId, contactRef, limits, options),
+    hasPendingMessages: (clientId, contactRef) => service.hasPendingMessages(clientId, contactRef),
   };
 }
 
@@ -157,6 +211,35 @@ const noticeJob = (
   reason,
 });
 
+/** O `flush` do contato que enviou este job de texto. */
+const flushOf = (job: Extract<InboundJob, { kind: 'text' }>): FlushJob => ({
+  kind: 'flush',
+  clientId: job.clientId,
+  phoneNumberId: job.phoneNumberId,
+  contactRef: job.contactRef,
+  requestId: job.requestId,
+});
+
+/**
+ * O fluxo de um contato que escreveu: etapa "aceitar" (job `text`) e, se ela terminou normalmente,
+ * o `flush` agendado (aqui rodado na hora, sem esperar a janela). Devolve o resultado da última
+ * etapa que rodou; erros de qualquer etapa sobem.
+ */
+async function flow(
+  h: Harness,
+  job: Extract<InboundJob, { kind: 'text' }>,
+  context: { finalAttempt: boolean },
+): Promise<InboundJobOutcome> {
+  const accepted = await h.processor.process(job, context);
+  if (accepted !== 'done') return accepted;
+  return h.processor.process(flushOf(job), context);
+}
+
+/** Texto passa pelo fluxo completo (aceitar e responder); aviso roda direto. */
+function run(h: Harness, job: InboundJob, context: { finalAttempt: boolean }) {
+  return job.kind === 'text' ? flow(h, job, context) : h.processor.process(job, context);
+}
+
 const LAST: { finalAttempt: boolean } = { finalAttempt: true };
 const MORE: { finalAttempt: boolean } = { finalAttempt: false };
 
@@ -165,7 +248,7 @@ describe('ChannelInboundProcessor: job de texto', () => {
     const h = setup();
     const client = await newClient(h, 'alfa', '555001');
 
-    const outcome = await h.processor.process(textJob(client.id), MORE);
+    const outcome = await flow(h, textJob(client.id), MORE);
 
     assert.equal(outcome, 'done');
     assert.equal(h.sender.calls.length, 1);
@@ -184,11 +267,11 @@ describe('ChannelInboundProcessor: job de texto', () => {
     const h = setup();
     const client = await newClient(h, 'alfa');
 
-    await h.processor.process(textJob(client.id), MORE);
+    await flow(h, textJob(client.id), MORE);
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.llm.calls.length, 1);
 
-    const again = await h.processor.process(textJob(client.id), MORE);
+    const again = await flow(h, textJob(client.id), MORE);
     assert.equal(again, 'done');
     assert.equal(h.sender.calls.length, 1, 'não reenvia');
     assert.equal(h.llm.calls.length, 1, 'não chama o LLM de novo');
@@ -205,7 +288,7 @@ describe('ChannelInboundProcessor: job de texto', () => {
       to: '5500000000000',
     } as unknown as InboundJob;
 
-    await h.processor.process(forged, MORE);
+    await run(h, forged, MORE);
 
     assert.equal(h.sender.calls[0]?.phoneNumberId, '555001');
     assert.equal(h.sender.calls[0].to, CONTACT);
@@ -219,7 +302,7 @@ describe('ChannelInboundProcessor: job de texto', () => {
     for (const job of [textJob(client.id, { phoneNumberId: '555002' }), noticeJob(client.id)]) {
       const forged = { ...job, phoneNumberId: other.whatsappPhoneNumberId ?? '' };
       await assert.rejects(
-        h.processor.process(forged, MORE),
+        run(h, forged, MORE),
         (error: unknown) => error instanceof NonRetryableJobError,
       );
     }
@@ -248,11 +331,11 @@ describe('ChannelInboundProcessor: job de texto', () => {
     await h.clients.update(client.id, { whatsappPhoneNumberId: '555777' });
 
     await assert.rejects(
-      h.processor.process(text, MORE),
+      run(h, text, MORE),
       (error: unknown) => error instanceof NonRetryableJobError,
     );
     await assert.rejects(
-      h.processor.process(notice, MORE),
+      run(h, notice, MORE),
       (error: unknown) => error instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 0);
@@ -265,7 +348,7 @@ describe('ChannelInboundProcessor: job de texto', () => {
     const h = setup();
     const client = await newClient(h, 'alfa', null);
 
-    const outcome = await h.processor.process(textJob(client.id), MORE);
+    const outcome = await flow(h, textJob(client.id), MORE);
 
     assert.equal(outcome, 'discarded');
     assert.equal(h.sender.calls.length, 0);
@@ -278,7 +361,7 @@ describe('ChannelInboundProcessor: job de texto', () => {
   it('clientId malformado no job é erro permanente', async () => {
     const h = setup();
     await assert.rejects(
-      h.processor.process(textJob('nao-e-uuid'), MORE),
+      flow(h, textJob('nao-e-uuid'), MORE),
       (error: unknown) => error instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 0);
@@ -290,7 +373,7 @@ describe('ChannelInboundProcessor: job de texto', () => {
     for (const marker of ['[[mock:fail]]', '[[mock:hang]]']) {
       const h = setup();
       const client = await newClient(h, 'alfa');
-      await h.processor.process(textJob(client.id, { text: `oi ${marker}` }), MORE);
+      await flow(h, textJob(client.id, { text: `oi ${marker}` }), MORE);
       assert.equal(h.sender.calls.length, 1, marker);
       assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
       const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
@@ -307,7 +390,7 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
     const failure = retryable();
     h.sender.script(Result.err(failure));
 
-    await assert.rejects(h.processor.process(textJob(client.id), MORE), (error: unknown) => {
+    await assert.rejects(flow(h, textJob(client.id), MORE), (error: unknown) => {
       return error === failure;
     });
     assert.equal(h.sender.calls.length, 1, 'só a tentativa da resposta, sem fallback');
@@ -315,7 +398,7 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
     assert.equal(reply?.sentAt, null);
 
     // A retentativa envia a MESMA resposta (sem novo LLM) e confirma o envio.
-    const outcome = await h.processor.process(textJob(client.id), MORE);
+    const outcome = await flow(h, textJob(client.id), MORE);
     assert.equal(outcome, 'done');
     assert.equal(h.llm.calls.length, 1);
     assert.equal(h.sender.calls.length, 2);
@@ -330,7 +413,7 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
     h.sender.script(Result.err(permanent(131047)));
 
     await assert.rejects(
-      h.processor.process(textJob(client.id), MORE),
+      flow(h, textJob(client.id), MORE),
       (error: unknown) => error instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 1, 'sem fallback quando a resposta já existe');
@@ -340,14 +423,14 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
     assert.equal(line?.level, 50);
     assert.equal(line.clientId, client.id);
     assert.equal(line.providerCode, 131047);
-    assert.equal(typeof line.messageRef, 'string');
+    assert.equal(typeof line.flushRef, 'string');
   });
 
   it('falha transitória na última tentativa também não manda fallback (a resposta existe)', async () => {
     const h = setup();
     const client = await newClient(h, 'alfa');
     h.sender.script(Result.err(retryable()));
-    await assert.rejects(h.processor.process(textJob(client.id), LAST));
+    await assert.rejects(flow(h, textJob(client.id), LAST));
     assert.equal(h.sender.calls.length, 1);
   });
 
@@ -358,7 +441,7 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
       },
     });
     const client = await newClient(failingMark, 'alfa');
-    const outcome = await failingMark.processor.process(textJob(client.id), MORE);
+    const outcome = await flow(failingMark, textJob(client.id), MORE);
     assert.equal(outcome, 'done');
     assert.equal(failingMark.sender.calls.length, 1);
     const line = failingMark.logs
@@ -370,20 +453,15 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
 });
 
 describe('ChannelInboundProcessor: falha do atendimento antes de existir resposta', () => {
-  const failing = (
-    error: Error,
-  ): { handleInboundMessage: AttendanceService['handleInboundMessage'] } => ({
-    handleInboundMessage: () => Promise.reject(error),
+  const failing = (error: Error): Partial<InboundAttendance> => ({
+    acceptInboundMessage: () => Promise.reject(error),
   });
 
   it('transitória com tentativas restantes: relança sem enviar nada', async () => {
     const error = new DatabaseError('indisponível');
     const h = setup({ attendance: failing(error) });
     const client = await newClient(h, 'alfa');
-    await assert.rejects(
-      h.processor.process(textJob(client.id), MORE),
-      (e: unknown) => e === error,
-    );
+    await assert.rejects(flow(h, textJob(client.id), MORE), (e: unknown) => e === error);
     assert.equal(h.sender.calls.length, 0);
   });
 
@@ -391,10 +469,7 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
     const error = new DatabaseError('indisponível');
     const h = setup({ attendance: failing(error) });
     const client = await newClient(h, 'alfa', '555009');
-    await assert.rejects(
-      h.processor.process(textJob(client.id), LAST),
-      (e: unknown) => e === error,
-    );
+    await assert.rejects(flow(h, textJob(client.id), LAST), (e: unknown) => e === error);
     assert.equal(h.sender.calls.length, 1);
     assert.deepEqual(h.sender.calls[0], {
       phoneNumberId: '555009',
@@ -408,10 +483,7 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
     const h = setup({ attendance: failing(error) });
     const client = await newClient(h, 'alfa');
     h.sender.script(Result.err(permanent()));
-    await assert.rejects(
-      h.processor.process(textJob(client.id), LAST),
-      (e: unknown) => e === error,
-    );
+    await assert.rejects(flow(h, textJob(client.id), LAST), (e: unknown) => e === error);
     assert.equal(h.sender.calls.length, 1, 'uma única tentativa');
     const warn = h.logs
       .lines()
@@ -423,7 +495,7 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
     const h = setup({ attendance: failing(new ValidationError('entrada inválida')) });
     const client = await newClient(h, 'alfa');
     await assert.rejects(
-      h.processor.process(textJob(client.id), MORE),
+      flow(h, textJob(client.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 1);
@@ -435,35 +507,30 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
     const client = await newClient(h, 'alfa');
     await h.clients.delete(client.id);
     await assert.rejects(
-      h.processor.process(textJob(client.id), MORE),
+      flow(h, textJob(client.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 0);
   });
 
-  it('ConflictError (mensagem em andamento) é retentado; passado o prazo, completa sem segunda chamada ao LLM', async () => {
+  it('queda entre gravar a mensagem e agendar o flush: a retentativa do job text agenda de novo e a mensagem é respondida uma vez', async () => {
     const h = setup();
     const client = await newClient(h, 'alfa');
-    const conversation = await h.store.conversations.findOrCreateByContact(client.id, CONTACT);
-    await h.store.messages.create(client.id, {
-      conversationId: conversation.id,
-      role: 'USER',
-      content: SECRET_TEXT,
-      externalId: WAMID,
-    });
+    h.scheduler.failWith = new ExternalServiceError('Redis fora');
 
-    // Mensagem ainda viva (sem resposta e recente): 409 retentável, sem LLM nem envio.
-    await assert.rejects(
-      h.processor.process(textJob(client.id), MORE),
-      (error: unknown) => error instanceof ConflictError,
-    );
+    await assert.rejects(h.processor.process(textJob(client.id), MORE), ExternalServiceError);
+    // A mensagem ficou gravada e pendente, sem LLM nem envio.
+    assert.equal(h.store.allMessages().length, 1);
     assert.equal(h.llm.calls.length, 0);
-    assert.equal(h.sender.calls.length, 0);
 
-    h.advance(IN_FLIGHT_MS + 1);
-    const outcome = await h.processor.process(textJob(client.id), MORE);
-    assert.equal(outcome, 'done');
-    assert.equal(h.llm.calls.length, 1, 'uma só chamada ao LLM para a mensagem');
+    h.scheduler.failWith = undefined;
+    assert.equal(await h.processor.process(textJob(client.id), MORE), 'done');
+    const last = h.scheduler.calls.at(-1);
+    assert.equal(last?.schedule.mode, 'ensure', 'a retentativa só garante o flush');
+    assert.equal(h.store.allMessages().length, 1, 'sem segunda gravação');
+
+    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(h.llm.calls.length, 1);
     assert.equal(h.sender.calls.length, 1);
   });
 });
@@ -545,7 +612,7 @@ describe('ChannelInboundProcessor: job que falhou sem passar pelo handler (parad
     const h = setup();
     const client = await newClient(h, 'alfa');
     h.sender.script(Result.err(permanent()));
-    await h.processor.process(textJob(client.id), MORE).catch(() => undefined);
+    await flow(h, textJob(client.id), MORE).catch(() => undefined);
     assert.equal(h.sender.calls.length, 1);
 
     await h.processor.handleUnprocessedFailure(textJob(client.id));
@@ -598,7 +665,7 @@ describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão d
     const h = setup();
     const client = await suspended(h, 'alfa');
 
-    const outcome = await h.processor.process(textJob(client.id), LAST);
+    const outcome = await flow(h, textJob(client.id), LAST);
 
     assert.equal(outcome, 'discarded');
     assert.equal(h.sender.calls.length, 0);
@@ -616,11 +683,11 @@ describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão d
 
   it('texto: ForbiddenError do atendimento (suspensão) também descarta, mesmo na última tentativa', async () => {
     const h = setup({
-      attendance: { handleInboundMessage: () => Promise.reject(new ForbiddenError('suspenso')) },
+      attendance: { acceptInboundMessage: () => Promise.reject(new ForbiddenError('suspenso')) },
     });
     const client = await newClient(h, 'alfa');
-    assert.equal(await h.processor.process(textJob(client.id), LAST), 'discarded');
-    assert.equal(await h.processor.process(textJob(client.id), MORE), 'discarded');
+    assert.equal(await flow(h, textJob(client.id), LAST), 'discarded');
+    assert.equal(await flow(h, textJob(client.id), MORE), 'discarded');
     assert.equal(h.sender.calls.length, 0);
   });
 
@@ -637,10 +704,10 @@ describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão d
     const h = setup();
     const client = await newClient(h, 'alfa', '555001');
     h.sender.script(Result.err(retryable()));
-    await h.processor.process(textJob(client.id), MORE).catch(() => undefined);
+    await flow(h, textJob(client.id), MORE).catch(() => undefined);
     await h.clients.update(client.id, { status: 'SUSPENDED' });
 
-    assert.equal(await h.processor.process(textJob(client.id), MORE), 'discarded');
+    assert.equal(await flow(h, textJob(client.id), MORE), 'discarded');
     assert.equal(h.sender.calls.length, 1, 'só a tentativa de antes da suspensão');
     const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
     assert.equal(reply?.sentAt, null);
@@ -667,7 +734,7 @@ describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão d
 
     const active = await newClient(h, 'ativo', '555002');
     assert.equal(await h.processor.process(noticeJob(active.id), MORE), 'done');
-    assert.equal(await h.processor.process(textJob(active.id), MORE), 'done');
+    assert.equal(await flow(h, textJob(active.id), MORE), 'done');
     assert.equal(h.sender.calls.length, 2);
     assert.ok(h.sender.calls.every((call) => call.phoneNumberId === '555002'));
   });
@@ -680,22 +747,10 @@ describe('ChannelInboundProcessor: isolamento entre clientes', () => {
     const b = await newClient(h, 'beta', '222222');
 
     // Jobs intercalados dos dois clientes, com o MESMO contato e o MESMO wamid.
-    await h.processor.process(
-      textJob(a.id, { text: 'primeira de A', externalId: 'wamid.mesmo' }),
-      MORE,
-    );
-    await h.processor.process(
-      textJob(b.id, { text: 'primeira de B', externalId: 'wamid.mesmo' }),
-      MORE,
-    );
-    await h.processor.process(
-      textJob(a.id, { text: 'segunda de A', externalId: 'wamid.dois' }),
-      MORE,
-    );
-    await h.processor.process(
-      textJob(b.id, { text: 'segunda de B', externalId: 'wamid.dois' }),
-      MORE,
-    );
+    await flow(h, textJob(a.id, { text: 'primeira de A', externalId: 'wamid.mesmo' }), MORE);
+    await flow(h, textJob(b.id, { text: 'primeira de B', externalId: 'wamid.mesmo' }), MORE);
+    await flow(h, textJob(a.id, { text: 'segunda de A', externalId: 'wamid.dois' }), MORE);
+    await flow(h, textJob(b.id, { text: 'segunda de B', externalId: 'wamid.dois' }), MORE);
 
     assert.equal(h.store.allConversations().length, 2);
     // Cada envio saiu pelo número do seu cliente.
@@ -736,8 +791,8 @@ describe('ChannelInboundProcessor: isolamento entre clientes', () => {
     const h = setup();
     const a = await newClient(h, 'alfa', '1001');
     const b = await newClient(h, 'beta', '1002');
-    await h.processor.process(textJob(a.id, { externalId: 'wamid.a1' }), MORE);
-    await h.processor.process(textJob(b.id, { externalId: 'wamid.b1' }), MORE);
+    await flow(h, textJob(a.id, { externalId: 'wamid.a1' }), MORE);
+    await flow(h, textJob(b.id, { externalId: 'wamid.b1' }), MORE);
     const sent = h.logs.lines().filter((entry) => entry.msg === 'resposta enviada ao contato');
     assert.deepEqual(
       sent.map((entry) => entry.clientId),
@@ -754,21 +809,19 @@ describe('ChannelInboundProcessor: privacidade nos logs', () => {
     const client = await newClient(h, 'alfa', '777888');
 
     // Sucesso, retentativa (já enviada), falha transitória, permanente, fallback, aviso e timeout.
-    await h.processor.process(textJob(client.id), MORE);
-    await h.processor.process(textJob(client.id), MORE);
+    await flow(h, textJob(client.id), MORE);
+    await flow(h, textJob(client.id), MORE);
     h.sender.script(Result.err(retryable()));
-    await h.processor
-      .process(textJob(client.id, { externalId: 'wamid.x2' }), MORE)
-      .catch(() => undefined);
+    await flow(h, textJob(client.id, { externalId: 'wamid.x2' }), MORE).catch(() => undefined);
     h.sender.script(Result.err(permanent(131047)));
-    await h.processor
-      .process(textJob(client.id, { externalId: 'wamid.x3' }), MORE)
-      .catch(() => undefined);
-    await h.processor.process(
+    await flow(h, textJob(client.id, { externalId: 'wamid.x3' }), MORE).catch(() => undefined);
+    await flow(
+      h,
       textJob(client.id, { text: `${SECRET_TEXT} [[mock:fail]]`, externalId: 'wamid.x4' }),
       MORE,
     );
-    await h.processor.process(
+    await flow(
+      h,
       textJob(client.id, { text: `${SECRET_TEXT} [[mock:hang]]`, externalId: 'wamid.x5' }),
       MORE,
     );
@@ -778,11 +831,11 @@ describe('ChannelInboundProcessor: privacidade nos logs', () => {
 
     // Falha do atendimento com envio do texto padrão (e falha dele).
     const failing = setup({
-      attendance: { handleInboundMessage: () => Promise.reject(new DatabaseError('banco fora')) },
+      attendance: { acceptInboundMessage: () => Promise.reject(new DatabaseError('banco fora')) },
     });
     const other = await newClient(failing, 'beta', '777999');
     failing.sender.script(Result.err(permanent()));
-    await failing.processor.process(textJob(other.id), LAST).catch(() => undefined);
+    await flow(failing, textJob(other.id), LAST).catch(() => undefined);
 
     const everything = `${h.logs.raw()}${failing.logs.raw()}`;
     assert.ok(everything.length > 0);
@@ -805,9 +858,318 @@ describe('ChannelInboundProcessor: erro de serviço externo sem classificação'
     const client = await newClient(h, 'alfa');
     const failure = new ExternalServiceError('falha genérica do canal');
     h.sender.script(Result.err(failure));
-    await assert.rejects(
-      h.processor.process(textJob(client.id), MORE),
-      (e: unknown) => e === failure,
+    await assert.rejects(flow(h, textJob(client.id), MORE), (e: unknown) => e === failure);
+  });
+});
+
+describe('ChannelInboundProcessor: etapa aceitar e agendamento do flush (spec 013)', () => {
+  it('o job text só grava e agenda: nada de LLM nem envio; o flush não leva texto e agenda a janela deslizante', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+
+    assert.equal(await h.processor.process(textJob(client.id), MORE), 'done');
+
+    assert.equal(h.llm.calls.length, 0);
+    assert.equal(h.sender.calls.length, 0);
+    assert.equal(h.store.allMessages().length, 1);
+    assert.equal(h.scheduler.calls.length, 1);
+    const [call] = h.scheduler.calls;
+    assert.deepEqual(call?.schedule, { delayMs: 5_000, mode: 'slide' });
+    assert.deepEqual(Object.keys(call.job).sort(), [
+      'clientId',
+      'contactRef',
+      'kind',
+      'phoneNumberId',
+      'requestId',
+    ]);
+    assert.ok(!JSON.stringify(call.job).includes(SECRET_TEXT), 'o job flush não contém texto');
+    assert.equal(call.job.phoneNumberId, '555001');
+  });
+
+  it('o teto de espera encurta o atraso: nunca passa de maxWait desde a mais antiga pendente', async () => {
+    // Relógio com 10 ms por leitura; teto curto força o corte depois de poucas mensagens.
+    const h = setup({ batch: { windowMs: 5_000, maxWaitMs: 60 } });
+    const client = await newClient(h, 'alfa');
+    for (let i = 0; i < 12; i += 1) {
+      await h.processor.process(textJob(client.id, { externalId: `wamid.t${String(i)}` }), MORE);
+    }
+    const delays = h.scheduler.calls.map((call) => call.schedule.delayMs);
+    assert.equal(delays[0], 60, 'a primeira espera no máximo o teto');
+    assert.ok(delays.every((delay) => delay <= 60));
+    assert.equal(delays.at(-1), 0, 'passado o teto, a resposta sai sem esperar');
+  });
+
+  it('janela zero agenda com atraso zero', async () => {
+    const h = setup({ batch: { windowMs: 0 } });
+    const client = await newClient(h, 'alfa');
+    await h.processor.process(textJob(client.id), MORE);
+    assert.equal(h.scheduler.calls[0]?.schedule.delayMs, 0);
+  });
+
+  it('reentrega de mensagem pendente só garante o flush (ensure); de mensagem já respondida não grava nem agenda', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    await h.processor.process(textJob(client.id), MORE);
+    await h.processor.process(textJob(client.id), MORE);
+    assert.deepEqual(
+      h.scheduler.calls.map((call) => call.schedule.mode),
+      ['slide', 'ensure'],
     );
+    assert.equal(h.store.allMessages().length, 1);
+
+    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    h.scheduler.calls.length = 0;
+    assert.equal(await h.processor.process(textJob(client.id), MORE), 'done');
+    assert.equal(h.scheduler.calls.length, 0);
+    assert.equal(h.llm.calls.length, 1);
+    assert.equal(h.sender.calls.length, 1);
+  });
+
+  it('o aviso (notice) segue imediato: nada é agendado e nada entra no lote', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    await h.processor.process(textJob(client.id), MORE);
+    assert.equal(await h.processor.process(noticeJob(client.id), MORE), 'done');
+    assert.equal(h.scheduler.calls.length, 1, 'só o agendamento do texto');
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.text, CHANNEL_NOTICE_TEXTS.unsupported_type);
+    assert.equal(h.llm.calls.length, 0, 'o texto pendente continua esperando a janela');
+  });
+
+  it('falha ao agendar (Redis fora) é retentada e, na última tentativa, o contato recebe o texto padrão', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    h.scheduler.failWith = new ExternalServiceError('Redis fora');
+    await assert.rejects(h.processor.process(textJob(client.id), MORE), ExternalServiceError);
+    assert.equal(h.sender.calls.length, 0);
+    await assert.rejects(h.processor.process(textJob(client.id), LAST), ExternalServiceError);
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
+  });
+});
+
+describe('ChannelInboundProcessor: job flush (spec 013)', () => {
+  const textOf = (h: Harness, clientId: string, text: string, id: string) =>
+    h.processor.process(textJob(clientId, { text, externalId: id }), MORE);
+
+  it('três mensagens, um flush: uma chamada ao LLM, uma resposta enviada, o lote inteiro respondido', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    await textOf(h, client.id, 'um', 'wamid.1');
+    await textOf(h, client.id, 'dois', 'wamid.2');
+    await textOf(h, client.id, 'tres', 'wamid.3');
+
+    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+
+    assert.equal(h.llm.calls.length, 1);
+    assert.equal(h.llm.calls[0]?.userMessage, 'um\ndois\ntres');
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.phoneNumberId, '555001');
+    const users = h.store.allMessages().filter((message) => message.role === 'USER');
+    assert.ok(users.every((user) => user.answeredById !== null));
+    // Nada sobrou: nenhum agendamento além dos três do aceitar.
+    assert.equal(h.scheduler.calls.length, 3);
+  });
+
+  it('sobrou pendente (limite do lote): agenda o próximo flush sem nova espera e o próximo responde o resto', async () => {
+    const h = setup({ batch: { maxMessages: 2 } });
+    const client = await newClient(h, 'alfa');
+    for (let i = 1; i <= 3; i += 1) {
+      await textOf(h, client.id, `m${String(i)}`, `wamid.${String(i)}`);
+    }
+    h.scheduler.calls.length = 0;
+
+    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    assert.equal(h.llm.calls[0]?.userMessage, 'm1\nm2');
+    assert.deepEqual(
+      h.scheduler.calls.map((call) => call.schedule),
+      [{ delayMs: 0, mode: 'ensure' }],
+    );
+
+    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    assert.equal(h.llm.calls[1]?.userMessage, 'm3');
+    assert.equal(h.scheduler.calls.length, 1, 'o último turno não agenda mais nada');
+    assert.equal(h.sender.calls.length, 2);
+  });
+
+  it('flush repetido depois da resposta gravada e antes do sentAt só reenvia, sem novo LLM; depois do sentAt não envia', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    await textOf(h, client.id, 'oi', 'wamid.1');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(client.id)), MORE),
+      NonRetryableJobError,
+    );
+    assert.equal(h.llm.calls.length, 1);
+
+    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(h.llm.calls.length, 1, 'sem nova chamada ao LLM');
+    assert.equal(h.sender.calls.length, 2);
+    assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+
+    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(h.sender.calls.length, 2, 'depois do sentAt não envia de novo');
+  });
+
+  it('falha do LLM no lote: um fallback marca todas e é enviado uma vez', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    await textOf(h, client.id, 'um', 'wamid.1');
+    await textOf(h, client.id, 'dois [[mock:fail]]', 'wamid.2');
+
+    await h.processor.process(flushOf(textJob(client.id)), MORE);
+
+    assert.deepEqual(
+      h.sender.calls.map((call) => call.text),
+      [ATTENDANCE_FALLBACK_TEXT],
+    );
+    const stored = h.store.allMessages();
+    assert.equal(stored.filter((message) => message.isFallback).length, 1);
+    assert.ok(stored.filter((m) => m.role === 'USER').every((m) => m.answeredById !== null));
+  });
+
+  it('erro transitório no envio é retentado: a retentativa reenvia a MESMA resposta antes de responder o excedente, sem novo LLM', async () => {
+    const h = setup({ batch: { maxMessages: 1 } });
+    const client = await newClient(h, 'alfa');
+    await textOf(h, client.id, 'a', 'wamid.1');
+    await textOf(h, client.id, 'b', 'wamid.2');
+    const failure = retryable();
+    h.sender.script(Result.err(failure));
+
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(client.id)), { attempt: 1, finalAttempt: false }),
+      (error: unknown) => error === failure,
+    );
+    assert.equal(h.llm.calls.length, 1);
+
+    // Retentativa: reenvia a resposta de `a` (não responde `b` ainda) e agenda o próximo turno.
+    h.scheduler.calls.length = 0;
+    await h.processor.process(flushOf(textJob(client.id)), { attempt: 2, finalAttempt: false });
+    assert.equal(h.llm.calls.length, 1, 'sem nova chamada ao LLM');
+    assert.equal(h.sender.calls.length, 2);
+    assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+    assert.deepEqual(
+      h.scheduler.calls.map((call) => call.schedule.mode),
+      ['ensure'],
+    );
+  });
+
+  it('erro permanente no envio com excedente: o próximo turno é agendado mesmo assim', async () => {
+    const h = setup({ batch: { maxMessages: 1 } });
+    const client = await newClient(h, 'alfa');
+    await textOf(h, client.id, 'a', 'wamid.1');
+    await textOf(h, client.id, 'b', 'wamid.2');
+    h.scheduler.calls.length = 0;
+    h.sender.script(Result.err(permanent(131047)));
+
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(client.id)), MORE),
+      NonRetryableJobError,
+    );
+
+    assert.equal(h.scheduler.calls.length, 1);
+  });
+
+  it('nada pendente: não faz nada', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(h.sender.calls.length, 0);
+    assert.equal(h.llm.calls.length, 0);
+  });
+
+  it('cliente suspenso: o flush é descartado sem enviar nada; removido e número trocado descartam sem envio', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    await textOf(h, client.id, 'oi', 'wamid.1');
+    const flush = flushOf(textJob(client.id));
+
+    await h.clients.update(client.id, { status: 'SUSPENDED' });
+    assert.equal(await h.processor.process(flush, LAST), 'discarded');
+    assert.equal(h.sender.calls.length, 0);
+    assert.equal(h.llm.calls.length, 0);
+
+    await h.clients.update(client.id, { status: 'ACTIVE', whatsappPhoneNumberId: '555777' });
+    await assert.rejects(h.processor.process(flush, MORE), NonRetryableJobError);
+    assert.equal(h.sender.calls.length, 0);
+
+    const removed = await newClient(h, 'beta', '555002');
+    await textOf(h, removed.id, 'oi', 'wamid.9');
+    const removedFlush = flushOf(textJob(removed.id));
+    await h.clients.delete(removed.id);
+    await assert.rejects(h.processor.process(removedFlush, MORE), NonRetryableJobError);
+    assert.equal(h.sender.calls.length, 0);
+  });
+
+  it('falha do atendimento na última tentativa do flush: texto padrão ao contato; nas anteriores, nada', async () => {
+    const error = new DatabaseError('indisponível');
+    const h = setup({ attendance: { respondToPending: () => Promise.reject(error) } });
+    const client = await newClient(h, 'alfa', '555009');
+    const flush = flushOf(textJob(client.id));
+    await assert.rejects(h.processor.process(flush, MORE), (e: unknown) => e === error);
+    assert.equal(h.sender.calls.length, 0);
+    await assert.rejects(h.processor.process(flush, LAST), (e: unknown) => e === error);
+    assert.deepEqual(h.sender.calls, [
+      { phoneNumberId: '555009', to: CONTACT, text: ATTENDANCE_FALLBACK_TEXT },
+    ]);
+  });
+
+  it('flush que falhou sem handler: texto padrão só se há pendente', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    await h.processor.handleUnprocessedFailure(flushOf(textJob(client.id)));
+    assert.equal(h.sender.calls.length, 0, 'nada pendente');
+    await textOf(h, client.id, 'oi', 'wamid.1');
+    await h.processor.handleUnprocessedFailure(flushOf(textJob(client.id)));
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
+  });
+
+  it('isolamento: o mesmo contato em dois clientes tem lotes, números e chave do flush separados', async () => {
+    const h = setup();
+    const a = await newClient(h, 'alfa', '111111');
+    const b = await newClient(h, 'beta', '222222');
+    await textOf(h, a.id, 'a1', 'wamid.a1');
+    await textOf(h, b.id, 'b1', 'wamid.b1');
+    await textOf(h, a.id, 'a2', 'wamid.a2');
+
+    await h.processor.process(flushOf(textJob(a.id)), MORE);
+    await h.processor.process(flushOf(textJob(b.id)), MORE);
+
+    assert.deepEqual(
+      h.llm.calls.map((call) => call.userMessage),
+      ['a1\na2', 'b1'],
+    );
+    assert.deepEqual(
+      h.sender.calls.map((call) => call.phoneNumberId),
+      ['111111', '222222'],
+    );
+    const first = h.scheduler.calls[0];
+    const second = h.scheduler.calls[1];
+    assert.ok(first !== undefined && second !== undefined);
+    const keyA = flushKey(first.job);
+    const keyB = flushKey(second.job);
+    assert.ok(keyA.includes(a.id) && keyB.includes(b.id));
+    assert.notEqual(keyA, keyB, 'o mesmo contato em dois clientes não colide');
+    assert.ok(!keyA.includes(CONTACT), 'o telefone não aparece na chave');
+  });
+
+  it('privacidade: texto, contato e persona não aparecem em log em todo o fluxo; o log leva clientId', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '777888');
+    await textOf(h, client.id, SECRET_TEXT, 'wamid.1');
+    await textOf(h, client.id, `${SECRET_TEXT} [[mock:fail]]`, 'wamid.2');
+    h.sender.script(Result.err(permanent(131047)));
+    await h.processor.process(flushOf(textJob(client.id)), MORE).catch(() => undefined);
+    await h.processor.process(flushOf(textJob(client.id)), MORE);
+
+    const raw = h.logs.raw();
+    for (const secret of [SECRET_TEXT, CONTACT, WAMID, PERSONA, '777888']) {
+      assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
+    }
+    const lines = h.logs.lines().filter((entry) => entry.msg === 'resposta enviada ao contato');
+    assert.ok(lines.every((entry) => entry.clientId === client.id));
+    assert.ok(lines.length >= 1);
   });
 });

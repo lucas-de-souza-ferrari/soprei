@@ -5,6 +5,8 @@ import { after, afterEach, before, describe, it } from 'node:test';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import {
+  type ChannelJob,
+  type FlushJob,
   type InboundJob,
   type InboundJobContext,
   type InboundJobHandler,
@@ -118,12 +120,12 @@ async function metricValue(metrics: Harness['metrics'], result: string): Promise
 /** Handler que registra cada chamada e devolve o resultado de `behavior`. */
 function recordingHandler(
   behavior: (
-    job: InboundJob,
+    job: ChannelJob,
     context: InboundJobContext,
     call: number,
   ) => Promise<'done' | 'discarded'> | 'done' | 'discarded' = () => 'done',
-): { handler: InboundJobHandler; calls: { job: InboundJob; context: InboundJobContext }[] } {
-  const calls: { job: InboundJob; context: InboundJobContext }[] = [];
+): { handler: InboundJobHandler; calls: { job: ChannelJob; context: InboundJobContext }[] } {
+  const calls: { job: ChannelJob; context: InboundJobContext }[] = [];
   return {
     calls,
     handler: async (job, context) => {
@@ -290,7 +292,7 @@ describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
       await sleep(40);
-      order.push(job.externalId);
+      if (job.kind !== 'flush') order.push(job.externalId);
       active -= 1;
       return 'done';
     });
@@ -356,7 +358,7 @@ describe('fila de entrada: falhas que não passam (ou passam) pelo handler', () 
     const { handler, calls } = recordingHandler(() => {
       throw new ExternalServiceError('sempre falha');
     });
-    const unhandled: InboundJob[] = [];
+    const unhandled: ChannelJob[] = [];
     handle.startWorker(handler, {
       onUnhandledFailure: (job) => {
         unhandled.push(job);
@@ -407,8 +409,8 @@ describe('fila de entrada: falhas que não passam (ou passam) pelo handler', () 
     await waitFor(() => taken, 'job ativo no worker que "caiu"');
 
     // O worker de verdade sobe depois e encontra o job parado.
-    const handled: InboundJob[] = [];
-    const unhandled: InboundJob[] = [];
+    const handled: ChannelJob[] = [];
+    const unhandled: ChannelJob[] = [];
     handle.startWorker(
       (received) => {
         handled.push(received);
@@ -504,5 +506,181 @@ describe('fila de entrada: privacidade', () => {
     const failure = logs.lines().find((line) => line.msg === 'job esgotou as tentativas');
     assert.equal(failure?.errName, 'Error');
     assert.equal(failure.attempts, SETTINGS.attempts);
+  });
+});
+
+const flushJob = (overrides: Partial<FlushJob> = {}): FlushJob => ({
+  kind: 'flush',
+  clientId: randomUUID(),
+  phoneNumberId: '106540352242922',
+  contactRef: CONTACT,
+  requestId: `req-${randomUUID()}`,
+  ...overrides,
+});
+
+describe('fila de entrada: agendamento do flush (spec 013)', () => {
+  /** Jobs do BullMQ (sem worker) vistos por uma fila crua sobre o mesmo prefixo. */
+  function rawQueue(prefix: string): Queue {
+    const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
+    rawConnections.push(connection);
+    const raw = new Queue(INBOUND_QUEUE_NAME, { connection, prefix });
+    rawQueues.push(raw);
+    return raw;
+  }
+
+  it('um flush por (cliente, contato): slide substitui o que ainda espera e reinicia a espera inteira', async () => {
+    const { handle, prefix } = setup();
+    const raw = rawQueue(prefix);
+    const job = flushJob();
+
+    assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 5_000, mode: 'slide' })).ok);
+    const [first] = await raw.getDelayed();
+    assert.ok(first !== undefined);
+    await sleep(120);
+    assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 5_000, mode: 'slide' })).ok);
+
+    const delayed = await raw.getDelayed();
+    assert.equal(delayed.length, 1, 'continua um só flush por contato');
+    const [second] = delayed;
+    assert.ok(second !== undefined);
+    assert.notEqual(second.id, first.id, 'o antigo foi substituído');
+    assert.ok(
+      second.timestamp + second.delay >= first.timestamp + first.delay + 100,
+      'a espera reiniciou',
+    );
+    // O id inclui o clientId e não leva o telefone; o job não leva texto.
+    assert.ok(second.id?.includes(job.clientId));
+    assert.ok(!(second.id ?? '').includes(CONTACT));
+    assert.ok(!(second.id ?? '').includes(':'));
+    assert.equal(second.name, 'flush');
+    assert.deepEqual(Object.keys(second.data as object).sort(), [
+      'clientId',
+      'contactRef',
+      'kind',
+      'phoneNumberId',
+      'requestId',
+    ]);
+    // Sem retenção de jobs concluídos: o contactRef não fica no Redis depois do flush.
+    assert.equal(second.opts.removeOnComplete, true);
+  });
+
+  it('ensure não adia o flush que já espera; sem flush, cria um', async () => {
+    const { handle, prefix } = setup();
+    const raw = rawQueue(prefix);
+    const job = flushJob();
+    assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 5_000, mode: 'ensure' })).ok);
+    const [first] = await raw.getDelayed();
+    assert.ok(first !== undefined);
+    await sleep(60);
+    assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 5_000, mode: 'ensure' })).ok);
+    const delayed = await raw.getDelayed();
+    assert.deepEqual(
+      delayed.map((entry) => entry.id),
+      [first.id],
+    );
+  });
+
+  it('o mesmo contactRef em dois clientes tem flush separado; dois contatos do mesmo cliente também', async () => {
+    const { handle, prefix } = setup();
+    const raw = rawQueue(prefix);
+    const clientA = randomUUID();
+    const clientB = randomUUID();
+    for (const job of [
+      flushJob({ clientId: clientA }),
+      flushJob({ clientId: clientB }),
+      flushJob({ clientId: clientA, contactRef: '5511000000001' }),
+    ]) {
+      assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 5_000, mode: 'slide' })).ok);
+    }
+    assert.equal((await raw.getDelayed()).length, 3);
+    // Reagendar o de A não mexe nos outros.
+    assert.ok(
+      (
+        await handle.queue.scheduleFlush(flushJob({ clientId: clientA }), {
+          delayMs: 5_000,
+          mode: 'slide',
+        })
+      ).ok,
+    );
+    assert.equal((await raw.getDelayed()).length, 3);
+  });
+
+  it('o flush roda depois do atraso com o requestId e o clientId no contexto; janela zero roda já', async () => {
+    const { handle } = setup();
+    const { handler, calls } = recordingHandler();
+    handle.startWorker(handler);
+    const delayed = flushJob();
+    const startedAt = Date.now();
+    assert.ok((await handle.queue.scheduleFlush(delayed, { delayMs: 300, mode: 'slide' })).ok);
+    await waitFor(() => calls.length === 1, 'flush atrasado');
+    assert.ok(Date.now() - startedAt >= 250, 'esperou o atraso');
+    assert.deepEqual(calls[0]?.job, delayed);
+
+    const immediate = flushJob();
+    assert.ok((await handle.queue.scheduleFlush(immediate, { delayMs: 0, mode: 'slide' })).ok);
+    await waitFor(() => calls.length === 2, 'flush imediato');
+  });
+
+  it('agendar enquanto o flush do contato está ativo guarda o próximo e o cria quando ele termina (nada fica sem resposta)', async () => {
+    const { handle, prefix } = setup();
+    const raw = rawQueue(prefix);
+    let releaseFirst: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const { handler, calls } = recordingHandler(async (_job, _context, call): Promise<'done'> => {
+      if (call === 1) await gate;
+      return 'done';
+    });
+    handle.startWorker(handler);
+    const job = flushJob();
+
+    assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 0, mode: 'slide' })).ok);
+    await waitFor(() => calls.length === 1, 'primeiro flush ativo');
+    // Chega mensagem durante o atendimento (slide) e sobra excedente (ensure): ambos só guardam.
+    assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 100, mode: 'slide' })).ok);
+    assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 0, mode: 'ensure' })).ok);
+    const counts = await handle.jobCounts();
+    assert.equal(counts.active, 1);
+    assert.equal((counts.waiting ?? 0) + (counts.delayed ?? 0), 0, 'ainda não criou o próximo');
+
+    releaseFirst();
+    await waitFor(() => calls.length === 2, 'o próximo flush foi criado e rodou');
+    await waitFor(
+      async () => (await raw.getJobCounts('completed', 'failed')).failed === 0,
+      'sem falha',
+    );
+    await sleep(100);
+    assert.equal(calls.length, 2, 'só um próximo (o último agendamento vence)');
+    assert.deepEqual(calls[1]?.job, job);
+  });
+
+  it('sem Redis, o agendamento volta como Result.err sem dado do contato; a falha vira erro retentável', async () => {
+    const closed = await getClosedPort();
+    const logs = captureLogs();
+    const handle = createInboundQueue({
+      redisUrl: withPort(config.REDIS_URL, closed),
+      settings: SETTINGS,
+      logger: logs.logger,
+      prefix: uniquePrefix(),
+      enqueueTimeoutMs: 300,
+    });
+    open.push(handle);
+    const result = await handle.queue.scheduleFlush(flushJob(), { delayMs: 0, mode: 'slide' });
+    assert.equal(result.ok, false);
+    assert.ok(!JSON.stringify(result).includes(CONTACT));
+  });
+
+  it('a retentativa do flush chega com attempt maior que 1', async () => {
+    const { handle } = setup();
+    const { handler, calls } = recordingHandler((_job, _context, call) => {
+      if (call === 1) throw new ExternalServiceError('transitório');
+      return 'done';
+    });
+    handle.startWorker(handler);
+    assert.ok((await handle.queue.scheduleFlush(flushJob(), { delayMs: 0, mode: 'slide' })).ok);
+    await waitFor(() => calls.length === 2, 'retentativa');
+    assert.equal(calls[0]?.context.attempt, 1);
+    assert.equal(calls[1]?.context.attempt, 2);
   });
 });
