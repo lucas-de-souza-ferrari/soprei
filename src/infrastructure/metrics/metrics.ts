@@ -25,6 +25,15 @@ export interface LlmRequestSample {
   readonly durationSeconds: number;
 }
 
+/** Resultado de uma resposta de lote (spec 013): `answered`, `empty` (nada pendente) ou `capped` (sobrou excedente). */
+export type BatchResult = 'answered' | 'empty' | 'capped';
+
+export interface BatchSample {
+  /** Quantas mensagens do contato a resposta juntou (0 em `empty`). */
+  readonly size: number;
+  readonly result: BatchResult;
+}
+
 /** Resultado de uma requisição ao webhook do canal (spec 011). Conjunto fixo. */
 export type WebhookRequestResult =
   | 'verification_ok'
@@ -83,6 +92,8 @@ export interface Metrics {
   observeLlmRequest(sample: LlmRequestSample): void;
   /** O contato recebeu o texto padrão de falha em vez de uma resposta do modelo. */
   countAttendanceFallback(): void;
+  /** Uma resposta de lote terminou (spec 013). Sem `clientId`, telefone nem texto em label. */
+  observeAttendanceBatch(sample: BatchSample): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
   /** O destino de uma mensagem de entrada do canal. */
@@ -110,6 +121,9 @@ export const HTTP_DURATION_BUCKETS: readonly number[] = [
 export const LLM_DURATION_BUCKETS: readonly number[] = [
   0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 45, 120,
 ];
+
+/** Mensagens por resposta de lote (spec 013): de 1 até o máximo configurável (50). */
+export const BATCH_SIZE_BUCKETS: readonly number[] = [1, 2, 3, 5, 10, 25, 50];
 
 /** De 1 ms a 5 s: queries costumam ser mais rápidas que requisições. */
 export const DB_DURATION_BUCKETS: readonly number[] = [
@@ -161,6 +175,19 @@ export function createMetrics(): Metrics {
   const attendanceFallbacks = new Counter({
     name: 'attendance_fallbacks_total',
     help: 'Total de respostas de fallback (texto padrão) enviadas por falha do LLM',
+    registers: [registry],
+  });
+
+  const batchSize = new Histogram({
+    name: 'attendance_batch_size',
+    help: 'Mensagens do contato juntadas em cada resposta de lote do canal',
+    buckets: [...BATCH_SIZE_BUCKETS],
+    registers: [registry],
+  });
+  const batches = new Counter({
+    name: 'attendance_batches_total',
+    help: 'Respostas de lote do canal por resultado (answered, empty, capped)',
+    labelNames: ['result'] as const,
     registers: [registry],
   });
 
@@ -247,6 +274,11 @@ export function createMetrics(): Metrics {
     },
     countAttendanceFallback() {
       attendanceFallbacks.inc();
+    },
+    observeAttendanceBatch({ size, result }) {
+      batches.inc({ result });
+      // `empty` não é uma resposta: não entra no histograma de tamanho.
+      if (size > 0) batchSize.observe(size);
     },
     countWebhookRequest(channel, result) {
       webhookRequests.inc({ channel, result });

@@ -113,6 +113,27 @@ describe('createMetrics', () => {
     assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
   });
 
+  it('registra o tamanho e o resultado das respostas de lote (spec 013), sem label de cliente', async () => {
+    const metrics = createMetrics();
+    metrics.observeAttendanceBatch({ size: 1, result: 'answered' });
+    metrics.observeAttendanceBatch({ size: 3, result: 'answered' });
+    metrics.observeAttendanceBatch({ size: 10, result: 'capped' });
+    metrics.observeAttendanceBatch({ size: 0, result: 'empty' });
+
+    const body = await metrics.render();
+    assert.match(body, /attendance_batches_total{result="answered"} 2/);
+    assert.match(body, /attendance_batches_total{result="capped"} 1/);
+    assert.match(body, /attendance_batches_total{result="empty"} 1/);
+    // `empty` não entra no histograma: 3 respostas, 14 mensagens no total.
+    assert.match(body, /attendance_batch_size_count 3/);
+    assert.match(body, /attendance_batch_size_sum 14/);
+    for (const bucket of ['1', '2', '3', '5', '10', '25', '50']) {
+      assert.match(body, new RegExp(`attendance_batch_size_bucket{le="${bucket}"} `));
+    }
+    assert.match(body, /attendance_batch_size_bucket{le="3"} 2/);
+    assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
+  });
+
   it('não cria labels de alta cardinalidade (clientId, userId)', async () => {
     const metrics = createMetrics();
     metrics.observeHttpRequest({
