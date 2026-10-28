@@ -61,7 +61,7 @@ Desvios deliberados em relação ao guia:
 - **Fastify** no lugar de Express: o que o guia faz com middleware, aqui vira hook/plugin do Fastify.
 - **Sem `any`** no repositório genérico; o guia usa `any` no modelo Prisma e isso enfraquece a tipagem.
 - **Isolamento entre clientes** não está no guia: aqui o `ClientId` (branded type) é obrigatório em todo repositório.
-- **Estratégia de testes** não está no guia: definida no `CLAUDE.md`.
+- **Estratégia de testes** não está no guia: definida no `AGENTS.md`.
 - **Itens do guia que o guia trata como opcionais** (JWT/refresh, RBAC, rate limiting, cache, métricas, WebSocket/SSE) entram desde já na base, cada um em sua spec (004 a 009). Cache sem decorators; rate limiting sobre `@fastify/rate-limit` em vez de limiter próprio.
 - Exemplos do guia são incompletos em alguns pontos (refresh token em memória, service layer esqueleto); não copiar literalmente, usar como direção.
 
@@ -99,7 +99,7 @@ prisma/
 └── schema.prisma
 ```
 
-Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md); versão operacional no `CLAUDE.md`):
+Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md); versão operacional no `AGENTS.md`):
 
 1. Pasta por área quando passar de uns 10 arquivos ou juntar duas responsabilidades; não criar pasta para o futuro (as pastas da 011 nascem na 011).
 2. Teste ao lado do arquivo que testa, na mesma subpasta; teste que atravessa várias partes fica na pasta pai.

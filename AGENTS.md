@@ -1,0 +1,223 @@
+# Soprei
+
+Sistema de atendimento via IA. Contexto completo, decisões e roadmap em [docs/context.md](docs/context.md) — leia antes de propor arquitetura.
+
+## Stack (decidida — não trocar sem perguntar)
+
+- Node.js 22 ou superior (`engines.node >= 22`; versões maiores são aceitas), TypeScript strict
+- Fastify (HTTP) + Zod (validação de entrada)
+- Prisma (ORM, migrations) sobre PostgreSQL
+- Redis (rate limit, cache, revogação de tokens, tempo real); `@fastify/rate-limit` para os limites (spec 005)
+- BullMQ sobre o Redis (fila de entrada do canal, spec 011); WhatsApp Cloud API oficial da Meta como canal (spec 011)
+- Pino (logs estruturados) + `prom-client` (métricas)
+- JWT + refresh token, RBAC, SSE e Socket.IO (specs 007 a 009)
+
+Ainda não decididos: provedor de LLM real (só existe o `mock`), onboarding de vários clientes no canal (spec B), hospedagem. Ver "Decisões em aberto" em `docs/context.md`. Não assuma nenhum deles; proponha em uma spec.
+
+A ordem de execução das specs é a do **roadmap em `docs/context.md` (seção 5)**, não a numeração dos arquivos. Só a próxima spec é detalhada; specs com status `esboço` (hoje 005 a 009) **não são implementadas** até serem relidas contra o código real, reescritas se preciso, e aprovadas. Specs de segurança (autenticação, autorização, isolamento, RLS) passam pelo agente `reviewer` antes do merge.
+
+## Como trabalhamos (Agent-Driven Development)
+
+1. Nada de código sem spec aprovada em `docs/specs/NNN-nome.md` (use `docs/specs/_template.md`).
+2. Uma spec = uma branch (`spec/NNN-nome`) = um PR pequeno.
+3. Implemente só o que a spec pede. O que ficou de fora vai para "Fora de escopo" da spec ou vira nova spec.
+4. Uma spec só está pronta quando todos os critérios de aceite têm teste passando e `typecheck`, `lint` e `test` estão verdes.
+5. O humano aprova specs e faz o merge dos PRs. Nunca dê merge nem push direto na `main`.
+
+Funções de agente (spec-writer, implementer, reviewer): cada uma tem um roteiro em `docs/agents/` (`spec-writer.md`, `implementer.md`, `reviewer.md`) que **qualquer** agente segue, seja qual for a ferramenta. No Claude Code existem também como subagentes em `.claude/agents/`, que apenas apontam para esses roteiros.
+
+## Trabalho em turnos entre agentes (Claude Code, Codex ou outro)
+
+O projeto é tocado por mais de um agente, em sessões separadas e em máquinas diferentes. Nada que importa pode ficar só na conversa de um agente ou fora do git:
+
+1. **O estado vive no repositório:** specs (`docs/specs/`), `docs/context.md` (decisões, roadmap, estado) e `docs/handoff.md` (passagem de turno). Memória pessoal de uma ferramenta não conta.
+2. **Ao começar uma sessão:** leia este arquivo, `docs/context.md` e `docs/handoff.md`; confira `git status`, a branch atual e o `git log` recente; rode `pnpm install` e `pnpm db:generate` se a máquina for nova.
+3. **Uma branch (uma spec) por vez tem um único dono.** Quem implementa faz tudo na branch; o outro agente só revisa (o reviewer é, de preferência, **outro** agente/modelo, porque a revisão fica mais independente).
+4. **Ao terminar uma sessão:** deixe a árvore limpa, com commits pequenos e descritivos; atualize `docs/handoff.md` (branch, o que está verde, o que falta, decisões ainda sem spec, armadilhas, próximo passo); e avise o humano para dar push. O agente não dá push na `main`, não faz merge, não usa `git push --force`.
+5. **Decisões e mudança de rumo:** registre em `docs/context.md` (seção "Histórico de decisões") ou na spec, nunca só no chat. O que o humano decidiu é decisão; o que um agente sugeriu e o humano não confirmou não é.
+6. **Segredos e ambiente:** `.env` e `.env.test` não vão para o git e não são impressos nem colados em chat; cada máquina cria os seus (ver "Ambiente local"). O que um agente não pode fazer sozinho (criar roles ou bancos, mexer em Redis alheio, push) vale para todos.
+7. **Validação é a mesma para todos:** `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm test:integration`, em Node 22 e na LTS mais recente (o CI roda as duas). Nunca desative regra nem pule teste para passar.
+8. **Sem ferramenta de subagente:** siga o roteiro de `docs/agents/` na mão, em sessões separadas (uma para implementar, outra para revisar), e cole o resultado da revisão no PR ou em `docs/handoff.md`.
+
+## Comandos
+
+Gerenciador de pacotes: **pnpm**. Primeiro uso: `pnpm install`, `pnpm db:generate` (o Prisma Client não vai para o git e o `typecheck` precisa dele), `cp .env.example .env`, `cp .env.test.example .env.test` (preencha a senha nos dois) e a preparação do banco em "Ambiente local" abaixo.
+
+| Script | O que faz |
+| --- | --- |
+| `pnpm dev` | Sobe o servidor com `tsx watch` (log colorido via `pino-pretty`) |
+| `pnpm build` | Compila para `dist/` (`tsc -p tsconfig.build.json`, sem testes) |
+| `pnpm start` | Roda `node dist/index.js` (rode `pnpm build` antes) |
+| `pnpm test` | Testes **unitários** com `node --test` + `tsx` (`src/**/*.test.ts`, exceto `*.integration.test.ts`); não precisam de Postgres nem de Redis |
+| `pnpm test:integration` | Testes de integração (`src/**/*.integration.test.ts`); exigem Postgres e Redis no ar, leem `.env.test` e só rodam contra `soprei_test` e Redis `/15` |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm lint` | ESLint (flat config, `typescript-eslint` strict type-checked) |
+| `pnpm format` / `pnpm format:check` | Prettier (escreve / só verifica) |
+| `pnpm db:generate` | `prisma generate` (Prisma Client em `src/generated/prisma`, ignorado pelo git) |
+| `pnpm db:migrate` | `prisma migrate dev` (cria e aplica migration no banco de desenvolvimento; exige PostgreSQL acessível em `DATABASE_URL` e usa shadow database) |
+| `pnpm db:migrate:deploy` | `prisma migrate deploy` (aplica migrations pendentes; é o que o CI roda) |
+
+Antes de dar uma spec como pronta: `pnpm typecheck && pnpm lint && pnpm test && pnpm test:integration`. O CI roda esses quatro (mais `db:generate` e `db:migrate:deploy`) em Node 22 e na LTS mais recente, com Postgres e Redis como services do job.
+
+### Ambiente local (sem Docker)
+
+PostgreSQL e Redis rodam **nativos** na máquina, em `localhost:5432` e `localhost:6379`. O projeto não usa Docker nem `docker-compose` no desenvolvimento. Preparação única, feita por quem administra a máquina (um agente não cria nem altera roles, bancos ou senhas), em um `psql` ou pgAdmin como administrador:
+
+```sql
+CREATE ROLE soprei LOGIN PASSWORD '<escolha-uma-senha>' CREATEDB;
+CREATE DATABASE soprei OWNER soprei;
+CREATE DATABASE soprei_test OWNER soprei;
+```
+
+`CREATEDB` é necessário porque `prisma migrate dev` cria um shadow database. Dois bancos separam desenvolvimento (`soprei`) e testes (`soprei_test`). No Redis, índice `0` para desenvolvimento e `15` para testes.
+
+Depois: `cp .env.example .env` e `cp .env.test.example .env.test`, trocando `<senha>` pela senha escolhida (ambos ficam fora do git). `.env` aponta para `soprei` e Redis `/0`; `.env.test` para `soprei_test` e Redis `/15`.
+
+Confirmar que os serviços estão no ar (o servidor também verifica os dois no boot e encerra com código 1 se algum faltar):
+
+- Postgres: `psql "postgresql://soprei@localhost:5432/soprei_test" -c "SELECT 1"` (ou `pg_isready -h localhost -p 5432`).
+- Redis: `redis-cli -h localhost -p 6379 ping` (resposta `PONG`).
+- Com o servidor rodando: `curl localhost:3000/health` (processo vivo) e `curl localhost:3000/health/ready` (banco e Redis; 200 ou 503).
+
+Migrations contra o banco de testes (sem tocar no de desenvolvimento): `node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy`. Um model novo exige migration, classificação em `MODEL_SCOPES` (ver "Acesso a dados e isolamento") e `pnpm db:generate` antes de testar.
+
+**Segurança dos testes:** os testes de integração se recusam a rodar se `DATABASE_URL` não apontar para `soprei_test` ou `REDIS_URL` para o índice 15 (ambos em localhost), nunca usam `FLUSHALL`/`FLUSHDB` e cada teste remove só as chaves que criou, com prefixo único (`src/test-support/`). Testes que precisam de infra devem se chamar `*.integration.test.ts` e começar com `loadIntegrationConfig()`.
+
+## Regras invariantes
+
+- **Isolamento entre clientes (tenants):** toda entidade pertence a um cliente e toda query filtra por ele, sem exceção. Acesso a dados passa por uma camada que exige o identificador do cliente; query solta deve ser impossível por design. Todo código novo de acesso a dados precisa de teste provando que um cliente não enxerga dado de outro. As três barreiras e as regras de acesso a dados estão em "Acesso a dados e isolamento" abaixo.
+- **Erro nunca vira silêncio:** falha de IA ou de integração responde com fallback educado ao usuário final e loga com contexto.
+- **Webhooks respondem rápido** e processam em background; nada de chamada de IA no fluxo síncrono do webhook.
+- **LLM é peça trocável:** chamadas ao modelo ficam atrás de uma interface única (`LlmProvider`, em `src/application/ports/llm-provider.ts`; nos textos antigos aparece como `LLMProvider`), com implementação `mock` (`src/infrastructure/external-apis/llm/`) para testes e dev offline. Trocar de modelo é mudar configuração (`LLM_PROVIDER`), não código de negócio. `generate` devolve `Result<LlmReply, ExternalServiceError>`; o texto do contato vai sempre como mensagem `user`, nunca concatenado ao `systemPrompt`.
+- **Nunca logar conteúdo de mensagem nem persona** (são dados pessoais), nem pôr em label de métrica: loga-se só id, tamanho e resultado. Vale também para a mensagem e o `context` de erro (o contrato do `LlmProvider` proíbe o provedor de incluí-los). Todo teste de fluxo com mensagens captura o log (`src/test-support/log-capture.ts`) e prova que um texto secreto não aparece.
+- Validar toda entrada externa com Zod antes de usar.
+- Sem `any` solto e sem `// @ts-ignore` sem comentário explicando o motivo.
+- Logar com Pino, estruturado, incluindo o identificador do cliente quando houver.
+- Nunca commitar `.env`, chaves ou tokens. Toda variável de ambiente é validada em um único módulo de config e documentada em `.env.example`.
+- Não adicionar dependência sem justificar na spec ou no PR.
+
+## Arquitetura e padrões
+
+Seguimos o guia [Engenharia Backend Node.js + TypeScript](https://www.vivodecodigo.com.br/backend/engenharia-backend-nodejs-typescript-guia-definitivo) (Vivo de Código), adaptado a Fastify. Resumo do que vale aqui; detalhes e desvios em `docs/context.md`.
+
+**Camadas** (dependências apontam para o domínio; `domain` não importa de nenhuma outra camada):
+
+```
+src/
+├── domain/          # entities, value-objects, interfaces de repositório
+├── application/     # services/use-cases e portas
+│   ├── attendance/  # AttendanceService e schemas
+│   ├── clients/     # ClientService
+│   ├── channel/     # canal de mensagens (spec 011): entrada do webhook e processador dos jobs
+│   └── ports/       # interfaces para o exterior: LlmProvider, MessageSender, InboundJobQueue
+├── infrastructure/
+│   ├── config/ logger/ metrics/ cache/ lifecycle.ts
+│   ├── external-apis/ # llm/ (mock) e whatsapp/ (cliente da Cloud API)
+│   ├── queue/       # fila de entrada do canal (BullMQ), conexões Redis próprias
+│   ├── database/    # raiz: singleton, transação, erros e barrel (index.ts)
+│   │   ├── extensions/    # Prisma Client Extensions: tenant-scope, query-timing, schema-info
+│   │   └── repositories/  # PrismaTenantRepository (base), repositórios, unit of work, cursor, mappers
+│   └── http/        # raiz: server, test-server, error handler e testes de rota de ponta a ponta
+│       ├── observability/ # request id, contexto, log de requisição, métricas HTTP
+│       └── rate-limit/    # registerRateLimit e IP do cliente
+├── presentation/    # controllers/rotas, hooks/middlewares, validators Zod
+│   ├── admin/       # rotas /admin/*
+│   ├── system/      # /health, /health/ready, /metrics
+│   ├── webhooks/    # webhook do WhatsApp (spec 011)
+│   └── common/      # bearer auth hook, route pattern, perfil de rate limit
+└── shared/          # errors, types (Brand, Result), utils
+```
+
+**Convenções de pastas (spec 012):**
+
+1. Pasta por área quando passar de uns 10 arquivos ou juntar duas responsabilidades. Não criar pasta para o futuro: cada spec cria as pastas de que precisa.
+2. Teste ao lado do arquivo que testa, na mesma subpasta; teste que atravessa várias partes (fluxo de atendimento, rotas de ponta a ponta) fica na pasta pai.
+3. Barrels só onde já existem (`infrastructure/database/index.ts`, `domain/index.ts`), sem barrel novo. Imports de fora de uma camada usam o barrel dela quando ele exporta o símbolo; subpastas internas de uma pasta de infraestrutura (`extensions/`, `repositories/`) não aparecem para fora dela.
+4. Sem aliases de caminho (`@/...`): imports relativos.
+5. Nomes de arquivo seguem os sufixos `.service.ts`, `.repository.ts`, `.controller.ts`; mover para outra pasta não renomeia.
+
+- **Dependências entre camadas (o ESLint impõe):** `domain` só importa de `shared` (nem Prisma, nem Fastify); `application` e `presentation` não importam `infrastructure/database`. Elas dependem de **interfaces do domínio** (`ClientRepository`, `TenantRepository`...) e recebem a implementação por injeção (testes de integração que precisam do banco ficam em `infrastructure/`); quem liga tudo é `src/index.ts` e `infrastructure/http/server.ts`. `ClientId` e as entidades vivem em `src/domain/`.
+- **Config:** variáveis de ambiente validadas com Zod no boot (`z.coerce.number()` para números); se falhar, loga e encerra com `process.exit(1)`. Acesso por um único módulo de config, nunca `process.env` espalhado.
+- **Erros:** hierarquia a partir de `BaseError` (`code`, `statusCode`, `isOperational`, `context`) com `ValidationError` 400, `UnauthorizedError` 401, `ForbiddenError` 403, `NotFoundError` 404, `ConflictError` 409, `RateLimitError` 429 (`RATE_LIMITED`, com `retryAfterSeconds`), `DatabaseError` 500, `TenantScopeError` 500 (não operacional: consulta de tenant sem escopo é bug de programação), `ExternalServiceError` 502. Um error handler central do Fastify converte em JSON; nunca vaza stack nem detalhe interno ao cliente. Nunca `throw new Error('...')` genérico em regra de negócio.
+- **Result:** erros esperados em operações críticas (ex.: chamada de LLM, canal externo) voltam como `Result<T, E>`; exceção fica para o excepcional.
+- **Tipos:** branded types para identificadores (`ClientId`, `ConversationId`...) criados por factory que valida; o `ClientId` é parâmetro obrigatório de todo repositório, o que faz o isolamento entre clientes ser garantido pelo compilador. Uniões discriminadas para estados. Sem `any` em repositório genérico (o guia usa; nós não).
+- **Prisma:** um único client (singleton), nunca por requisição; pool configurado (`max`, timeouts, `statement_timeout`), TLS preservado, health check com `SELECT 1`. Transação com retry só para erros recuperáveis. `select` restrito aos campos necessários; evitar N+1 buscando em lote com `in`.
+- **Logs e contexto (spec 004):** Pino, JSON em produção e `pino-pretty` em dev; contexto por requisição via `AsyncLocalStorage` (ver "Observabilidade" abaixo).
+- **Rotas:** finas. Validam com Zod, chamam o service, devolvem só campos seguros e deixam o erro subir ao handler central. Pergunta-guia ao escrever: "como essa rota pode falhar?".
+- **Atendimento (spec 010):** `AttendanceService` (`src/application/attendance/attendance.service.ts`) é o pipeline mensagem do contato -> conversa -> `LlmProvider` -> resposta, com idempotência por `externalId`, fallback gravado com `isFallback = true` (texto constante em português) e a chamada ao LLM **fora** de qualquer transação (a transação, via `AttendanceUnitOfWork`, só grava conversa e mensagem do contato). Entra pelo simulador `POST /admin/clients/:clientId/messages` e, com o canal ligado, pelo webhook (spec 011, acima); `AttendanceReply` tem `sentAt` e o histórico vem de `MessageRepository.listBefore` (anterior à mensagem, correto também ao retomar uma mensagem antiga), mais `GET .../conversations` e `GET .../conversations/:conversationId/messages`; `persona` do cliente via `PATCH /admin/clients/:id` (`null` limpa; aceita também `whatsappPhoneNumberId`, 409 se já usado por outro cliente). No simulador a resposta é síncrona; no canal real o processamento roda em segundo plano na fila. Config: `LLM_PROVIDER`, `LLM_TIMEOUT_MS`, `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS` (só do caminho `handleInboundMessage`/simulador). No canal, o atendimento é dividido em `acceptInboundMessage` e `respondToPending` (ver "Agrupamento de mensagens (spec 013)"). Métricas: `llm_requests_total{provider,result}`, `llm_request_duration_seconds{provider}`, `attendance_fallbacks_total`, `attendance_batch_size`, `attendance_batches_total{result}`.
+- **Itens da base, cada um em sua spec (006 a 009, sob demanda; a 004, observabilidade, e a 005, rate limiting, estão prontas):** cache L1/L2 (sem decorators), JWT com refresh token (access de 15 min, rotação com detecção de reuso, só o hash no Redis com TTL), RBAC e tempo real (SSE e Socket.IO). Implemente cada um somente na sua spec.
+- **Chaves de cache, de rate limit, salas e canais de tempo real sempre derivam do `ClientId`** (do token assinado, nunca de header ou corpo da requisição). Exceção até a spec 007: os limites por **perfil e IP** (seção abaixo) valem antes da autenticação, quando o `ClientId` ainda não existe; a regra volta a valer para os perfis autenticados da 007.
+
+### Canal WhatsApp (spec 011)
+
+Webhook de entrada, fila e envio da resposta pela Cloud API da Meta, com o LLM ainda `mock`. **Opt-in:** sem `WHATSAPP_ENABLED=true` as rotas `GET` e `POST /webhooks/whatsapp` não existem (404). O onboarding de vários clientes (Embedded Signup, token por cliente) é a spec B; aqui há um app, um token e um número por cliente.
+
+- **Fluxo:** `POST` (perfil de rate limit `webhook`, que roda antes do corpo) -> corpo **cru** (Buffer; o parser de `application/json` é encapsulado só no plugin do webhook; limite de 3 MiB, o máximo que a Meta documenta para o payload) -> assinatura `X-Hub-Signature-256` (HMAC-SHA256 dos bytes crus com `WHATSAPP_APP_SECRET`, tempo constante, tamanho conferido antes) **antes** de interpretar o JSON -> schema Zod tolerante -> `ChannelIntakeService` (`src/application/channel/`) resolve o cliente por `phone_number_id` e enfileira um job `text` ou `notice` (só `audio`, `image`, `video`, `document`, `sticker`, `location` e `contacts` ganham o aviso; `reaction`, `system`, `unsupported` e tipo desconhecido são **ignorados** sem aviso, métrica `ignored_type`) -> **200**. Sem assinatura válida: 401 e nada é processado. Assinatura válida com corpo inválido: 200 + `invalid_payload` (um 4xx faria a Meta retentar em vão). Falha ao enfileirar (Redis ou banco fora): 500, e o `jobId` determinístico impede duplicar o que já entrou. `GET`: handshake com `hub.verify_token` em tempo constante; **a query string nunca vai a log** (carrega o token).
+- **Isolamento:** o `ClientId` nasce **só** da resolução `phone_number_id` -> cliente (`ClientRepository.findByWhatsappPhoneNumberId`, o único ponto que sai de um identificador externo para o cliente; cliente removido não aparece e libera o número) e viaja no job. Nunca vem de header, query ou corpo. O worker envia pelo número que o **banco** associa ao `clientId` do job (`Client.whatsappPhoneNumberId`), nunca pelo do payload; o job também grava o `phoneNumberId` que recebeu a mensagem e é **descartado sem enviar** se o número atual do cliente for outro (número trocado ou job adulterado). `jobId` = `<clientId>_<externalId codificado>` (sem `:`; o BullMQ recusa), então o mesmo `wamid` em dois clientes não colide.
+- **Fila (`src/infrastructure/queue/`):** BullMQ 6 sobre o Redis existente (o `ioredis` do projeto é o dele, dependência opcional). Fila `channel-inbound`, prefixo `soprei:queue`. Conexões **próprias**: a do produtor falha rápido (sem fila offline, `maxRetriesPerRequest: 1`; o `enqueue` tem prazo de 5 s), a do worker usa `maxRetriesPerRequest: null`. Worker **no mesmo processo, concorrência 1**, ligado no boot (`src/index.ts`); o `closeInfrastructure` o encerra **antes** de fechar Redis e banco (espera o job ativo, até 30 s). A porta é `InboundJobQueue` (`src/application/ports/`); `application` e `presentation` nunca importam o BullMQ nem o `ioredis` (o ESLint impõe, `eslint.config.js`). O job roda dentro de `runWithContext` com o `requestId` do webhook e o `clientId` (todo log do worker leva os dois). Config: `QUEUE_ATTEMPTS`, `QUEUE_BACKOFF_MS` (exponencial), `QUEUE_KEEP_COMPLETED_SECONDS`, `QUEUE_KEEP_FAILED_SECONDS` (retenção **mínima**, não TTL: o BullMQ só limpa por idade quando outro job termina e as chaves não expiram; sem tráfego o último job, com texto e `contactRef`, fica no Redis indefinidamente; limpeza periódica ou TTL é pendência antes de dados reais); regra cruzada: `QUEUE_BACKOFF_MS x (2^(QUEUE_ATTEMPTS - 1) - 1)` > `ATTENDANCE_IN_FLIGHT_TIMEOUT_MS`.
+- **Processamento (`ChannelInboundProcessor`):** o job `text` é a etapa "aceitar" e o job `flush` é a de responder (ver "Agrupamento de mensagens (spec 013)" abaixo); o `flush` roda `AttendanceService.respondToPending` -> se a resposta já tem `sentAt`, não reenvia -> `MessageSender.sendText` pelo número do banco -> `MessageRepository.markSent` (`updateMany` com `clientId`; falha só loga, o contato já recebeu). Transitório (rede, timeout, 5xx, 429, códigos de limite de taxa da Meta, banco): relança e a fila retenta com backoff. Permanente (token inválido, janela de 24 h fechada, `ForbiddenError`, `NotFoundError`...): `NonRetryableJobError`, sem retentativa. **Cliente suspenso não recebe nada** (decisão do dono, 2026-10-28): se o cliente é suspenso entre o enfileiramento e o processamento, o job é descartado (`discarded`, log `warn`) sem enviar resposta, aviso nem texto padrão, e o envio checa o status antes de enviar (vale também para a falha sem handler). Falha final (esgotou ou permanente, exceto suspensão) **antes de existir resposta gravada** tenta uma vez o `ATTENDANCE_FALLBACK_TEXT` ao contato (melhor esforço); se a resposta já existe e é o envio que falha, nada vira fallback (fica sem `sentAt`, visível na API administrativa). Falha de job que **não passou pelo handler** (ex.: parado além do limite depois de uma queda) é tratada por `worker.on('failed')`: log só com campos seguros, `queue_jobs_total{result="failed"}` e, se ainda não há resposta gravada, o texto padrão ao contato; `worker.on('stalled')` loga e conta retentativa. Conteúdo não lido (áudio, imagem...) ou texto inválido vira `notice` (texto constante, sem gravar nem chamar o LLM). Entrega at-least-once: queda entre o envio e o `markSent` pode duplicar uma resposta, nunca perdê-la.
+- **Envio (`WhatsappCloudApiClient`, `src/infrastructure/external-apis/whatsapp/`):** `POST {WHATSAPP_API_BASE_URL}/{WHATSAPP_GRAPH_API_VERSION}/{phone_number_id}/messages` com `fetch` nativo e `AbortSignal.timeout(WHATSAPP_SEND_TIMEOUT_MS)`. O `MessageSendError` leva só status HTTP, `code`, `type` e se é retentável. A resposta do Graph é lida em pedaços com teto de 64 KiB (passou disso, cancela a conexão).
+- **Privacidade do canal (vale além da regra geral):** texto, `from`/`contactRef`, destinatário, nome de perfil, persona, tokens e a **mensagem/corpo de erro da Meta** nunca vão a log nem a label de métrica. O `wamid` também não: ele carrega o telefone do contato em base64; logue `messageRef(externalId)` (`src/shared/utils/message-ref.ts`, hash curto). O webhook nem lê o nome de perfil. Ao logar erro do ioredis/BullMQ, nunca o objeto inteiro (o ioredis anexa `command.args`, com o job): use `describeRedisError`/`describeError` (campos controlados). O job guarda texto e `contactRef` no Redis até concluir e por pelo menos `QUEUE_KEEP_*`, e sem tráfego o último job fica indefinidamente (ver acima): entra na decisão de retenção/LGPD antes de dados reais. Os três segredos têm mínimo de 16 caracteres quando o canal está ligado.
+- **Config (tudo em `.env.example`):** `WHATSAPP_ENABLED` (`true`/`false` literais), `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` (mínimo 16), `WHATSAPP_ACCESS_TOKEN` (os três obrigatórios só com o canal ligado), `WHATSAPP_API_BASE_URL` (`http://` só fora de produção), `WHATSAPP_GRAPH_API_VERSION` (`v26.0`), `WHATSAPP_SEND_TIMEOUT_MS`. Com o canal ligado, **`TRUST_PROXY` precisa estar definido explicitamente** (mesmo `false`; atrás de túnel: `127.0.0.1,::1`), senão a Meta e um atacante dividem a cota do perfil `webhook`; o boot loga o modo ativo, sem IP. Os três segredos saem por `redact` do logger.
+- **Métricas:** `webhook_requests_total{channel,result}`, `channel_inbound_messages_total{channel,result}`, `channel_status_events_total{channel,status}`, `channel_send_total{channel,result}`, `channel_send_duration_seconds{channel}`, `queue_jobs_total{queue,result}`.
+- **Testes:** servidor Graph falso local (`src/test-support/fake-graph-api.ts`, `node:http` na porta 0, falha sob comando), payloads e assinaturas calculadas no teste (`whatsapp-payloads.ts`), fila real com prefixo único no Redis `/15` (`TestKeyspace.scopedPrefix`; só se remove o que o teste criou, sem `FLUSHALL`/`FLUSHDB`), sondagem com prazo em vez de sleep fixo. O fluxo de ponta a ponta com dois clientes está em `infrastructure/http/whatsapp-channel.integration.test.ts`. Todo teste de fluxo captura log e prova que textos secretos não aparecem.
+- **Teste manual com o número de teste da Meta (feito pelo dono; nenhum agente chama a API real):** (1) túnel HTTPS (Cloudflare Tunnel ou ngrok) para a porta local e `.env` com `WHATSAPP_ENABLED=true`, os três segredos e `TRUST_PROXY=127.0.0.1,::1` (confirme que o túnel **acrescenta** ao `X-Forwarded-For`); (2) no app Meta, WhatsApp > Configuração: callback `https://<túnel>/webhooks/whatsapp`, o verify token do `.env`, e assinar o campo `messages`; (3) gravar o `phone_number_id` do número de teste no cliente: `PATCH /admin/clients/:id` com `{ "whatsappPhoneNumberId": "<id>" }`; (4) cadastrar seu telefone como destinatário permitido e mandar uma mensagem: a resposta `[mock] ...` chega no WhatsApp e a conversa aparece em `GET /admin/clients/:clientId/conversations`. O token temporário do número de teste expira em cerca de 24 h.
+
+### Agrupamento de mensagens (spec 013)
+
+No canal, o sistema espera o contato parar de escrever e responde **uma vez** a todas as mensagens pendentes. O simulador `POST /admin/clients/:clientId/messages` **não** espera (continua `handleInboundMessage`, uma resposta por mensagem). Avisos constantes (`notice`) seguem imediatos e nunca entram no lote.
+
+- **Fluxo:** o job `text` é só a etapa **aceitar**: `AttendanceService.acceptInboundMessage` grava a conversa e a mensagem (idempotente por `externalId`, **sem LLM**) e o processador agenda o job **`flush`** do contato. O `flush` roda `AttendanceService.respondToPending`: lê as pendentes (`MessageRepository.listPending`, da mais antiga para a mais nova, até `CHANNEL_BATCH_MAX_MESSAGES` e `CHANNEL_BATCH_MAX_CHARS`), monta **um único turno `user`** (textos separados por `\n`; o histórico é o que veio antes da primeira do lote, `listBefore`), chama o LLM **fora** de qualquer transação e grava **uma** resposta (`replyToId` = a última do lote, `createdAt` = última + 1 ms para ficar antes de qualquer mensagem que chegou depois) junto com `markAnswered` (`answeredById` em **todas** as do lote) na **mesma** transação do `AttendanceUnitOfWork`; se o `markAnswered` marcar menos mensagens que o lote (outra execução já respondeu parte), lança `ConflictError` dentro da transação, que desfaz a resposta, e a retentativa resolve. O envio e a marca `sentAt` seguem as regras da 011. Sobrou pendente (excedeu o lote): o `flush` agenda o próximo sem nova espera.
+- **Pendente** = mensagem `USER` sem `Message.answeredById` **e** sem resposta por `replyToId` (cobre o simulador e linhas anteriores à migration; sem backfill). A coluna `answered_by_id` tem chave estrangeira **composta** `(answered_by_id, client_id)` -> `messages(id, client_id)`, `CHECK` (só `USER`) e índice parcial de pendentes (só na migration; o Prisma não o representa).
+- **Janela deslizante com teto (`flushDelayMs`, `application/channel/batch-window.ts`):** cada mensagem nova reinicia a espera de `CHANNEL_BATCH_WINDOW_MS`; o teto `CHANNEL_BATCH_MAX_WAIT_MS` conta desde a **mais antiga** pendente, usando só o `createdAt` do banco (nunca o relógio local). `CHANNEL_BATCH_WINDOW_MS=0` desliga a espera. Reentrega ou retentativa de mensagem pendente só **garante** o `flush` (`ensure`, não adia); reentrega de mensagem já respondida não gera nada.
+- **Fila (`InboundJobQueue.scheduleFlush`, BullMQ 6.4):** um `flush` por `(clientId, contactRef)` pela **deduplicação** do BullMQ: id = `flush_<clientId>_<sha256(contactRef)[0..32]>` (`flushKey`; sem `:` e sem o telefone), `replace: true` (a espera que ainda não venceu é substituída por uma nova, inteira) e `keepLastIfActive: true` (se o `flush` do contato está ativo, o próximo é guardado no Redis e criado de forma atômica quando ele termina: mensagem que chega durante o atendimento nunca fica sem resposta). O `jobId` é **único** por agendamento (um fixo seria tratado como duplicata antes da deduplicação e o `replace` nunca rodaria). `removeOnComplete: true` no `flush` (não deixa `contactRef` no Redis). **O job `flush` não carrega texto**: só `clientId`, `phoneNumberId` (descarte se o número do cliente mudou), `contactRef` e `requestId`.
+- **Retentativa do `flush`:** na retentativa (`attempt > 1`), uma resposta já gravada e ainda sem `sentAt` é reenviada **antes** de responder o excedente (sem nova chamada ao LLM). Limitação conhecida: se o contato escreve durante o backoff de um envio que falhou, o `replace` troca o job em retentativa por um novo e a resposta não enviada fica só gravada, sem `sentAt`: a API administrativa de mensagens expõe `sentAt` (ISO ou `null`) para distinguir enviada de não enviada, e o `flush` registra `warn` (só ids) e incrementa `attendance_unsent_replies_total` (sem labels) quando responde as pendentes com a resposta anterior sem `sentAt` (primeira tentativa). A retomada completa (varredura de pendentes e respostas não enviadas) fica para spec própria.
+- **Regras da 011 que continuam no `flush`:** cliente suspenso e cliente removido descartam sem enviar nada; número trocado descarta; envio sempre pelo número lido do banco pelo `clientId`; erro transitório/permanente como antes; falha final antes de existir resposta tenta o texto padrão (as mensagens seguem pendentes e a próxima do contato as responde juntas). Logs usam `messageRef` (text/notice) ou `flushRef` (flush); nunca texto, contato, destinatário, persona nem token.
+- **Config (`.env.example`, só valem com o canal ligado):** `CHANNEL_BATCH_WINDOW_MS` (5000; 0 a 60000), `CHANNEL_BATCH_MAX_WAIT_MS` (20000; 0 a 300000; maior ou igual à janela), `CHANNEL_BATCH_MAX_MESSAGES` (10; 1 a 50), `CHANNEL_BATCH_MAX_CHARS` (8000; 1 a 24000). Toda resposta passa a demorar pelo menos a janela mais o tempo do LLM.
+- **Métricas:** `attendance_batch_size` (histograma, buckets 1, 2, 3, 5, 10, 25, 50) e `attendance_batches_total{result}` (`answered`, `empty`, `capped`) e `attendance_unsent_replies_total` (turno que saiu com a resposta anterior ainda sem `sentAt`); `queue_jobs_total` cobre o `flush`.
+- **Testes:** janelas curtas por config (200 a 700 ms), sondagem com prazo e margens folgadas (nada de sleep fixo como asserção de espera curta); `infrastructure/http/channel-batching.integration.test.ts` (BullMQ, Postgres e Graph falso reais), `infrastructure/database/attendance-batching.integration.test.ts`, `infrastructure/queue/inbound-queue.integration.test.ts` (semântica do agendamento) e os unitários do processador e do atendimento. Ao inserir mensagens em teste, espace-as no tempo: a ordem dentro do mesmo milissegundo é só por `id`.
+
+### Rate limiting (spec 005)
+
+- **Plugin:** `@fastify/rate-limit` 11.x com store Redis, registrado por `registerRateLimit` (`src/infrastructure/http/rate-limit/rate-limit.ts`, chamado por `buildServer` só se o parâmetro `rateLimit` existir; sem ele nada é limitado e os testes antigos não mudam). O limiter é um hook `onRequest` da **instância raiz** (depois do da observabilidade, antes de qualquer hook de plugin filho): roda antes da autenticação e de ler o corpo. O hook por rota do plugin rodaria depois do `adminAuthHook` e tentativa de adivinhar a chave receberia 401 em vez de 429. Rotas registradas direto na raiz também são cobertas.
+- **Toda rota é limitada. Rota nova declara o perfil:** `config: rateLimitProfile('admin')` (helper em `src/presentation/common/rate-limit.ts`; os nomes ficam em `src/shared/rate-limit/profiles.ts`). Sem declarar, cai em `public` (rede de segurança, 100 por 15 min). Só `/health`, `/health/ready` e `/metrics` ficam fora, com `config: NO_RATE_LIMIT` (`{ rateLimit: false }`); o 404 de rota inexistente também não conta. O teste `rate-limit.test.ts` percorre as rotas registradas e falha se alguma não declarar perfil. A presentation só **nomeia** o perfil; os números vêm da config.
+- **Perfis (por IP, contadores independentes por perfil e por IP; chave `<prefixo>:<perfil>:<ip normalizado>`, nunca `clientId`):** `public` (100 por 900 s), `admin` (`/admin/*`, 600 por 60 s) e `webhook` (usado pelas duas rotas do webhook da spec 011, 600 por 60 s, folgado de propósito: 429 para a Meta significa retentativa). O IP é normalizado (IPv4 mapeado vira IPv4; IPv6 agrupado em /64; porta, colchetes e zona removidos; `X-Forwarded-For` malformado cai no IP do socket). Toda chave tem TTL de no máximo a janela do perfil.
+- **429:** `RateLimitError` devolvido pelo `errorResponseBuilder` e convertido pelo `errorHandler` em `{ error: { code: 'RATE_LIMITED', message, requestId, retryAfter } }`, com `Retry-After` (igual a `retryAfter`), `X-RateLimit-Limit`, `X-RateLimit-Remaining` e `X-RateLimit-Reset`.
+- **Redis fora = fail-open** para todos os perfis (`skipOnError`), com log `error` e `rate_limit_store_errors_total`. O limiter usa uma **conexão Redis dedicada** (`createRateLimitRedis`, `src/infrastructure/cache/rate-limit-redis.ts`: sem fila offline, `RATE_LIMIT_REDIS_TIMEOUT_MS` por comando, fechada no `shutdown`); `observeStoreErrors` é a casca fina que torna a falha observável (o plugin a engoliria em silêncio). Erros do ioredis carregam `command.args` (a chave, com o IP): logue só `describeRedisError(err)`, nunca `{ err }`. Perfis críticos com fail-closed (login, refresh) entram na spec 007.
+- **`TRUST_PROXY`** (padrão `false`) vai ao `trustProxy` do Fastify: `false` ignora `X-Forwarded-For`; `true` confia em toda a cadeia (o cliente escolhe o IP: só ambiente fechado; a config **recusa** com `NODE_ENV=production` e o boot avisa nos outros ambientes); ou uma **lista de IPs/CIDRs** dos proxies confiáveis (o proxy-addr valida o peer imediato; o IP é o último endereço do cabeçalho que não está na lista, então valor forjado à esquerda não conta). Túnel local: `TRUST_PROXY=127.0.0.1,::1`. **Não existe valor inteiro**: o Fastify 5.12.7 o trata como fail-closed e a função equivalente reabriria o spoofing. Antes de depender de um túnel/proxy, confirme que ele **acrescenta** ao `X-Forwarded-For` em vez de repassar o cabeçalho do cliente. Atrás de proxy sem `TRUST_PROXY`, todos os clientes parecem um IP só.
+- **Config:** `RATE_LIMIT_ENABLED` (`true`/`false` literais; `false` é rejeitado com `NODE_ENV=production`), `RATE_LIMIT_<PERFIL>_MAX` e `RATE_LIMIT_<PERFIL>_WINDOW_SECONDS` (janela de 1 a 86 400), `RATE_LIMIT_REDIS_TIMEOUT_MS`, `TRUST_PROXY` (`true` é rejeitado com `NODE_ENV=production`).
+- **Métricas:** `rate_limit_rejected_total{profile}` e `rate_limit_store_errors_total`. O IP nunca vai em label nem em log desta spec (é dado pessoal; aparece só na chave do Redis, com TTL).
+- **Testes:** prefixo único por teste (`TestKeyspace.scopedPrefix`), Redis `/15`; `ToggleProxy` (`src/test-support/toggle-proxy.ts`) simula Redis lento ou fora e a volta; "porta fechada" usa `closed-port.ts`.
+
+### Observabilidade (spec 004)
+
+- **Contexto por requisição:** `src/shared/request-context/` (`runWithContext`, `getContext`, `setClientId`, `setUserId`, `setOperation`; ids são `string` porque `shared` não importa de `domain`; setters são no-op fora de requisição). O hook `onRequest` (`infrastructure/http/observability/observability.ts`) abre o contexto com `als.run(store, done)`. A autenticação (spec 007) preenche `clientId`/`userId` pelos setters. O contexto serve a logs e métricas e **não é fonte de verdade de segurança**: o `ClientId` das operações de dados continua explícito nos repositórios. Evento de socket (ex.: `onRequestAbort`) chega fora do `run`: quem precisa do contexto ali reentra com `runWithContext` no store guardado.
+- **Request id:** `x-request-id` válido (`^[A-Za-z0-9._-]{8,128}$`) é reaproveitado, senão UUID; vai no header da resposta, em `request.id`, no campo `requestId` dos logs e no `error.requestId` do erro. Opções do Fastify via `LogController` (as de topo estão deprecadas).
+- **Logs:** o `mixin` do `createLogger` lê o contexto e acrescenta `requestId`, `clientId`, `userId` e `operation` a qualquer log, inclusive do logger raiz fora do `request.log`. Há um log de requisição próprio por requisição (método, **padrão da rota**, status, `durationMs`; info, warn para 4xx, error para 5xx; `/health`, `/health/ready` e `/metrics` em debug quando bem-sucedidos). Segredos (`authorization`, `cookie`, `password`, `refreshToken`, `accessToken`, `token`, `apiKey`) saem como `[Redacted]` por `redact`: ao logar objetos novos, nunca ponha segredo em campo com outro nome. Nunca logue a URL crua de rota com id (use `routePattern(request)`).
+- **Métricas:** `src/infrastructure/metrics/` (`createMetrics()`, `Registry` dedicado e não o global; as próximas specs registram as suas métricas nele). Existem `http_requests_total` e `http_request_duration_seconds` (labels `method`, `route`, `status_class`), `db_query_duration_seconds` (`model`, `operation`), `db_pool_connections{state}` e as métricas padrão do processo. **Nenhum label com `clientId`, `userId`, id de recurso ou URL crua.** Falha ao registrar métrica nunca derruba a requisição (try/catch com `warn`).
+- **`GET /metrics`:** só existe com `METRICS_TOKEN` (mínimo de 32 caracteres; sem ele, 404). Bearer comparado em tempo constante pelo mesmo `bearerAuthHook` (`presentation/common/bearer-auth.hook.ts`) do `adminAuthHook`. Não conta a si mesmo.
+- **Ordem das extensões do Prisma:** `extendWithTenantScope(base).$extends(queryTimingExtension(observer))`. O Prisma roda as extensões na ordem em que foram adicionadas, então a `tenant-scope` continua a primeira barreira e a de tempo só mede o que ela deixou passar. Extensão nova entra **depois** da `tenant-scope`.
+
+### Acesso a dados e isolamento (spec 003)
+
+Três barreiras independentes, cada uma com teste:
+
+1. **Repositório de tenant.** Todo método recebe `ClientId` como **primeiro parâmetro**; o filtro por cliente é montado pela base (`PrismaTenantRepository`, em `infrastructure/database/repositories/`), nunca pelo chamador. Só usa `findFirst`, `findMany`, `create`, `updateMany`, `deleteMany` e `count`, sempre com `clientId` no `where`; id de outro cliente é `NotFoundError`. Os tipos de criação e atualização não têm `clientId`. Dentro de `runInTransaction`, use `repo.forTransaction(tx)`. Métodos próprios do repositório (`findOrCreateByContact`, `findByExternalId`, `findReplyTo`, `listRecent`...) seguem a mesma regra (`ClientId` primeiro, `clientId` no `where`, passam pela `tenant-scope`); `findOrCreateByContact` usa `createMany({ skipDuplicates })` (`INSERT ... ON CONFLICT DO NOTHING`, permitido pela barreira) para que a corrida entre dois pedidos não aborte a transação. `Client` é a raiz do tenant (model global, repositório próprio, sem `ClientId`).
+2. **Prisma Client Extension (`infrastructure/database/extensions/tenant-scope.ts`).** O client singleton (`getPrisma()`) é estendido: em model de tenant, qualquer operação sem `clientId` no `where` (ou nos `data`) lança `TenantScopeError`, e `findUnique`, `findUniqueOrThrow`, `update`, `delete` e `upsert` são proibidos. **Todo model novo precisa ser classificado em `MODEL_SCOPES`** (`tenant` se tem `clientId`, `global` se não tem); o compilador e o teste de cobertura exigem.
+3. **Lint.** Fora de `src/infrastructure/database/**` é proibido importar `src/generated/prisma`, `@prisma/*`, `pg`, `getPrisma`/`PrismaClient` e usar `$queryRaw`, `$queryRawUnsafe`, `$executeRaw`, `$executeRawUnsafe`. A única exceção é essa pasta (inclui o health check). Não desligue a regra: se precisa de SQL cru, ele entra num módulo revisado dentro de `infrastructure/database/`, filtrando por `clientId`.
+
+O `ClientId` é sempre passado explicitamente (contexto por requisição vem nas specs 004 e 007). Rotas `/admin/*` usam `ADMIN_API_KEY` (Bearer, tempo constante), credencial temporária **entre clientes** que as specs 007/008 substituem; ela nunca vai em log nem em resposta. Dados de teste: use `src/test-support/tenant-fixtures.ts` (clientes com slug único e limpeza só do que o teste criou, mensagens antes das conversas) e copie o modelo de `infrastructure/database/repositories/conversation.repository.integration.test.ts` (ou o de `message.repository.integration.test.ts`, que cobre também chaves estrangeiras compostas e SQL controlado) para provar o isolamento em cada repositório novo. O fluxo completo com dois clientes (histórico enviado ao LLM, persona, `externalId` repetido) está em `attendance.integration.test.ts`, em `infrastructure/database/` e em `infrastructure/http/`; testes de service sem banco usam `src/test-support/in-memory-attendance.ts`.
+
+**Integridade no banco (spec 010):** `Message` tem chaves estrangeiras **compostas** `(conversationId, clientId)` -> `Conversation(id, clientId)` e `(replyToId, clientId)` -> `Message(id, clientId)`; por isso `Conversation` e `Message` têm `@@unique([id, clientId])`. Todo model de tenant novo que aponte para outro model de tenant deve fazer o mesmo, para que ligar dado de um cliente a dado de outro seja impossível no próprio banco. Mensagens são imutáveis (o `update` do repositório só confirma a existência). A spec 013 acrescenta `answered_by_id`, com a mesma chave estrangeira composta `(answered_by_id, client_id)`; `markSent` e `markAnswered` são as únicas escritas em mensagem, ambas por `updateMany` com `clientId` no `where` (a `tenant-scope` recusa sem ele).
+
+**Código em geral:** `async/await`, funções pequenas, responsabilidade única, services sem dependência de Fastify (`req`/`res`). Sufixos de arquivo: `.service.ts`, `.repository.ts`, `.controller.ts`.
+
+**Testes** (o guia não cobre; regra nossa): ao lado do código (`*.test.ts`), runner nativo do Node, salvo decisão em spec. Os que precisam de Postgres ou Redis são `*.integration.test.ts` (ver "Ambiente local"). Rotas testadas com `fastify.inject`. Toda regra de acesso a dados tem teste de isolamento entre clientes.
+
+## Nunca faça sem perguntar
+
+- Trocar item da stack ou reverter decisão registrada em `docs/context.md`.
+- Relaxar o isolamento entre clientes.
+- Apagar ou reescrever migrations já aplicadas.
+- Criar ou alterar roles, bancos, senhas ou dados no PostgreSQL e no Redis locais do dono, ou rodar `FLUSHALL`/`FLUSHDB`/`DROP DATABASE`. Eles rodam nativos na máquina (sem Docker) e podem ter outros dados; testes só tocam `soprei_test` e Redis `/15`.
+- Rodar comandos destrutivos em banco, `git push --force`, ou mexer em segredos.
