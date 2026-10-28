@@ -76,7 +76,7 @@ interface Harness {
 function setup(
   overrides: {
     attendance?: { handleInboundMessage: AttendanceService['handleInboundMessage'] };
-    messages?: { markSent: InMemoryAttendanceStore['messages']['markSent'] };
+    messages?: Partial<InMemoryAttendanceStore['messages']>;
   } = {},
 ): Harness {
   let time = Date.UTC(2026, 0, 1);
@@ -98,7 +98,7 @@ function setup(
   const processor = new ChannelInboundProcessor({
     attendance: overrides.attendance ?? service,
     clients,
-    messages: overrides.messages ?? store.messages,
+    messages: { ...store.messages, ...overrides.messages },
     sender,
     logger: logs.logger,
     now,
@@ -509,6 +509,82 @@ describe('ChannelInboundProcessor: job de aviso', () => {
     const noNumber = await newClient(h, 'beta', null);
     assert.equal(await h.processor.process(noticeJob(noNumber.id), MORE), 'discarded');
     assert.equal(h.sender.calls.length, 2);
+  });
+});
+
+describe('ChannelInboundProcessor: job que falhou sem passar pelo handler (parado)', () => {
+  it('sem resposta gravada: envia o texto padrão pelo número do banco, uma vez', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+
+    await h.processor.handleUnprocessedFailure(textJob(client.id));
+
+    assert.deepEqual(h.sender.calls, [
+      { phoneNumberId: '555001', to: CONTACT, text: ATTENDANCE_FALLBACK_TEXT },
+    ]);
+    const line = h.logs.lines().find((entry) => String(entry.msg).includes('sem resposta gravada'));
+    assert.equal(line?.level, 50);
+    assert.equal(line.clientId, client.id);
+  });
+
+  it('mensagem gravada mas ainda sem resposta (caiu no meio do LLM): também envia o texto padrão', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    const conversation = await h.store.conversations.findOrCreateByContact(client.id, CONTACT);
+    await h.store.messages.create(client.id, {
+      conversationId: conversation.id,
+      role: 'USER',
+      content: SECRET_TEXT,
+      externalId: WAMID,
+    });
+    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
+  });
+
+  it('com resposta já gravada (enviada ou não): nada é enviado; fica visível na API administrativa', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    h.sender.script(Result.err(permanent()));
+    await h.processor.process(textJob(client.id), MORE).catch(() => undefined);
+    assert.equal(h.sender.calls.length, 1);
+
+    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    assert.equal(h.sender.calls.length, 1, 'sem texto padrão');
+    assert.ok(h.logs.lines().some((entry) => String(entry.msg).includes('já há resposta gravada')));
+  });
+
+  it('job de aviso não envia nada; falha do envio do texto padrão e erro do banco só geram log, sem lançar', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa');
+    await h.processor.handleUnprocessedFailure(noticeJob(client.id));
+    assert.equal(h.sender.calls.length, 0);
+
+    h.sender.script(Result.err(permanent()));
+    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    assert.equal(h.sender.calls.length, 1);
+
+    const broken = setup({
+      messages: { findByExternalId: () => Promise.reject(new DatabaseError('banco fora')) },
+    });
+    const other = await newClient(broken, 'beta');
+    await broken.processor.handleUnprocessedFailure(textJob(other.id));
+    assert.equal(broken.sender.calls.length, 0);
+    assert.ok(broken.logs.lines().some((entry) => Number(entry.level) >= 50));
+    await h.processor.handleUnprocessedFailure(textJob('nao-e-uuid'));
+  });
+
+  it('número trocado desde o enfileiramento: nem o texto padrão sai; e nada vaza em log', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    const job = textJob(client.id);
+    await h.clients.update(client.id, { whatsappPhoneNumberId: '555777' });
+    await h.processor.handleUnprocessedFailure(job);
+    assert.equal(h.sender.calls.length, 0);
+    const raw = h.logs.raw();
+    for (const secret of [SECRET_TEXT, CONTACT, WAMID, '555001', '555777']) {
+      assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
+    }
   });
 });
 

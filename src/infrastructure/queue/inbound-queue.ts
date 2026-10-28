@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import { describeError } from '../../application/channel/describe-error.js';
 import {
   type InboundJob,
+  type InboundJobFailureHandler,
   type InboundJobHandler,
   type InboundJobQueue,
   inboundJobId,
@@ -46,13 +47,23 @@ export interface InboundQueueOptions {
   readonly prefix?: string;
   readonly enqueueTimeoutMs?: number;
   readonly workerCloseTimeoutMs?: number;
+  /** Intervalo da checagem de jobs parados do BullMQ (padrão 30 s; os testes baixam). */
+  readonly stalledIntervalMs?: number;
+  /** Quantas vezes um job pode parar antes de falhar de vez (padrão do BullMQ: 1; os testes usam 0). */
+  readonly maxStalledCount?: number;
+}
+
+/** Ganchos opcionais do worker. */
+export interface WorkerHooks {
+  /** Job que falhou de vez sem passar pelo handler (ex.: parado além do limite). */
+  readonly onUnhandledFailure?: InboundJobFailureHandler;
 }
 
 export interface InboundQueueHandle {
   /** Lado produtor: a única coisa que a aplicação e a apresentação enxergam. */
   readonly queue: InboundJobQueue;
   /** Liga o worker (concorrência 1, no mesmo processo). Chamar duas vezes não faz nada. */
-  startWorker(handler: InboundJobHandler): void;
+  startWorker(handler: InboundJobHandler, hooks?: WorkerHooks): void;
   /** Contagem de jobs por estado (diagnóstico e testes). */
   jobCounts(): Promise<Record<string, number>>;
   /**
@@ -103,6 +114,8 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
   let workerRedis: Redis | undefined;
   let worker: Worker | undefined;
   let closing: Promise<void> | undefined;
+  /** Ids de jobs cuja falha já foi tratada (e contada) dentro do handler: o evento `failed` os ignora. */
+  const handledFailures = new Set<string>();
 
   const count = (result: QueueJobResult): void => {
     try {
@@ -139,12 +152,18 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
     },
   };
 
+  /** A falha deste job já foi contada e logada aqui; o evento `failed` do worker não repete. */
+  const markHandled = (job: Job): void => {
+    if (job.id !== undefined) handledFailures.add(job.id);
+  };
+
   /** Roda um job dentro do contexto de requisição do webhook que o originou. */
   async function runJob(job: Job, handler: InboundJobHandler): Promise<'done' | 'discarded'> {
     const parsed = inboundJobSchema.safeParse(job.data);
     if (!parsed.success) {
       // Nunca loga o conteúdo do job nem os detalhes do Zod (podem citar valores).
       count('failed');
+      markHandled(job);
       logger.error({ jobName: job.name }, 'job da fila com formato inválido; descartado');
       throw new UnrecoverableError('job inválido');
     }
@@ -176,6 +195,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
         };
         if (error instanceof NonRetryableJobError) {
           count('failed');
+          markHandled(job);
           logger.error(fields, 'job falhou sem retentativa');
           throw new UnrecoverableError('job não retentável');
         }
@@ -186,6 +206,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
           count('retried');
           logger.warn(fields, 'job falhou; será retentado com backoff');
         }
+        markHandled(job);
         // Relança o erro: o BullMQ só precisa do nome/mensagem para `failedReason`; o erro dos
         // serviços (ExternalServiceError, ConflictError...) nunca carrega dado do contato.
         throw error;
@@ -196,7 +217,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
   return {
     queue: producer,
 
-    startWorker(handler) {
+    startWorker(handler, hooks = {}) {
       if (worker !== undefined) return;
       const connection = new Redis(redisUrl, {
         connectTimeout: CONNECT_TIMEOUT_MS,
@@ -213,6 +234,42 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
         prefix,
         // Concorrência 1 preserva a ordem de chegada (decisão 2 da spec 011).
         concurrency: 1,
+        ...(options.stalledIntervalMs === undefined
+          ? {}
+          : { stalledInterval: options.stalledIntervalMs }),
+        ...(options.maxStalledCount === undefined
+          ? {}
+          : { maxStalledCount: options.maxStalledCount }),
+      });
+      // Falha que NÃO passou pelo handler (ex.: job parado além do limite depois de uma queda do
+      // processo): nunca em silêncio. Log só com campos seguros (nada de id do job, que carrega o
+      // wamid, nem o erro inteiro) e a métrica; depois tenta, sem duplicar, não deixar o contato mudo.
+      worker.on('failed', (job: Job | undefined, err: Error) => {
+        if (job?.id !== undefined && handledFailures.delete(job.id)) return;
+        count('failed');
+        logger.error(
+          {
+            jobKind: job?.name,
+            attemptsMade: job?.attemptsMade,
+            ...describeError(err),
+          },
+          'job falhou sem passar pelo handler',
+        );
+        const parsed = inboundJobSchema.safeParse(job?.data);
+        const onFailure = hooks.onUnhandledFailure;
+        if (!parsed.success || onFailure === undefined) return;
+        runWithContext(createRequestContext(parsed.data.requestId), () => {
+          setClientId(parsed.data.clientId);
+          onFailure(parsed.data).catch((hookError: unknown) => {
+            logger.error(describeError(hookError), 'falha ao tratar o job que falhou sem handler');
+          });
+        });
+      });
+      // Job parado (processo caiu ou travou com ele ativo): o BullMQ o devolve à fila e ele roda de
+      // novo; conta como retentativa. O id do job carrega o wamid: não vai a log.
+      worker.on('stalled', () => {
+        count('retried');
+        logger.warn({ queue: INBOUND_QUEUE_NAME }, 'job parado; será reprocessado');
       });
       worker.on('error', (err: Error) => {
         logger.error(describeRedisError(err), 'erro no worker da fila de entrada');

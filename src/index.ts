@@ -123,7 +123,9 @@ async function main(): Promise<void> {
       logger: channelLogger,
     });
     // Worker no mesmo processo, concorrência 1; o shutdown o espera antes de fechar Redis e banco.
-    inboundQueue.startWorker((job, context) => processor.process(job, context));
+    inboundQueue.startWorker((job, context) => processor.process(job, context), {
+      onUnhandledFailure: (job) => processor.handleUnprocessedFailure(job),
+    });
     whatsappRoutes = {
       appSecret: whatsapp.appSecret,
       verifyToken: whatsapp.verifyToken,

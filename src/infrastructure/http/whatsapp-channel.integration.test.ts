@@ -168,7 +168,9 @@ async function start(setup: Setup = {}): Promise<Harness> {
     }),
     logger: logs.logger,
   });
-  queue.startWorker((job, context) => processor.process(job, context));
+  queue.startWorker((job, context) => processor.process(job, context), {
+    onUnhandledFailure: (job) => processor.handleUnprocessedFailure(job),
+  });
   const rateLimitRedis =
     setup.rateLimitWebhookMax === undefined ? undefined : createRateLimitRedis(config, logs.logger);
   // Sem a conexão pronta o limiter passaria em fail-open nas primeiras requisições.

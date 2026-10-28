@@ -30,7 +30,7 @@ export interface ChannelInboundProcessorDeps {
   readonly attendance: InboundAttendance;
   /** O número do canal é lido daqui, pelo `clientId` do job: nunca do payload. */
   readonly clients: Pick<ClientRepository, 'findById'>;
-  readonly messages: Pick<MessageRepository, 'markSent'>;
+  readonly messages: Pick<MessageRepository, 'markSent' | 'findByExternalId' | 'findReplyTo'>;
   readonly sender: MessageSender;
   readonly logger: ChannelLogger;
   /** Relógio injetável, para os testes. */
@@ -65,6 +65,48 @@ export class ChannelInboundProcessor {
     return job.kind === 'notice'
       ? this.processNotice(clientId, job)
       : this.processText(clientId, job, context);
+  }
+
+  /**
+   * Job que falhou de vez **sem passar pelo handler** (ex.: parado além do limite depois de uma
+   * queda do processo): para o contato não ficar no silêncio, tenta uma vez o texto padrão, mas só
+   * se ainda não há resposta gravada (se há, ela fica visível na API administrativa e nada é
+   * enviado). Melhor esforço, nunca lança. Limitação: se a tentativa que parou chegou a enviar a
+   * resposta sem gravar a marca, o contato pode receber o texto padrão além dela.
+   */
+  async handleUnprocessedFailure(job: InboundJob): Promise<void> {
+    const ref = messageRef(job.externalId);
+    try {
+      const clientId = parseClientId(job);
+      if (job.kind === 'notice') {
+        this.deps.logger.warn(
+          { clientId, messageRef: ref },
+          'aviso constante não enviado: o job falhou',
+        );
+        return;
+      }
+      const message = await this.deps.messages.findByExternalId(clientId, job.externalId);
+      if (
+        message !== null &&
+        (await this.deps.messages.findReplyTo(clientId, message.id)) !== null
+      ) {
+        this.deps.logger.info(
+          { clientId, messageRef: ref },
+          'job falhou, mas já há resposta gravada; sem texto padrão',
+        );
+        return;
+      }
+      this.deps.logger.error(
+        { clientId, messageRef: ref },
+        'job falhou sem resposta gravada; enviando o texto padrão ao contato',
+      );
+      await this.sendFallback(clientId, job);
+    } catch (error) {
+      this.deps.logger.error(
+        { messageRef: ref, ...describeError(error) },
+        'falha ao tratar o job que falhou sem handler',
+      );
+    }
   }
 
   private async processText(

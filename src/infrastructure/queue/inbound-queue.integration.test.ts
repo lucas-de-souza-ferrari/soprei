@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, afterEach, before, describe, it } from 'node:test';
-import { Queue } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import {
   type InboundJob,
@@ -347,6 +347,96 @@ describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
     await handle.close();
     assert.ok(Date.now() - begin < 1_400, 'não esperou o job inteiro');
     assert.ok(logs.lines().some((line) => String(line.msg).includes('forçando')));
+  });
+});
+
+describe('fila de entrada: falhas que não passam (ou passam) pelo handler', () => {
+  it('job que estoura as tentativas é contado como failed UMA vez (o evento do worker não conta de novo) e não aciona o gancho de falha sem handler', async () => {
+    const { handle, metrics } = setup();
+    const { handler, calls } = recordingHandler(() => {
+      throw new ExternalServiceError('sempre falha');
+    });
+    const unhandled: InboundJob[] = [];
+    handle.startWorker(handler, {
+      onUnhandledFailure: (job) => {
+        unhandled.push(job);
+        return Promise.resolve();
+      },
+    });
+    assert.ok((await handle.queue.enqueue(textJob())).ok);
+
+    await waitFor(async () => (await metricValue(metrics, 'failed')) === 1, 'failed');
+    await sleep(300);
+    assert.equal(calls.length, SETTINGS.attempts);
+    assert.equal(await metricValue(metrics, 'failed'), 1, 'sem dupla contagem');
+    assert.equal(unhandled.length, 0);
+  });
+
+  it('job parado além do limite falha sem passar pelo handler: log só com campos seguros, métrica failed e o gancho recebe o job', async (t) => {
+    const release = keepEventLoopAlive();
+    t.after(release);
+    const { handle, metrics, logs, prefix } = setup({ stalledIntervalMs: 100, maxStalledCount: 0 });
+
+    // Um "worker" externo pega o job e nunca renova o lock: simula o processo que caiu com ele ativo.
+    const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
+    rawConnections.push(connection);
+    const job = textJob();
+    const raw = new Queue(INBOUND_QUEUE_NAME, { connection, prefix });
+    rawQueues.push(raw);
+    await raw.add(job.kind, job, { jobId: inboundJobId(job), attempts: 3 });
+    const crashConnection = connection.duplicate({ maxRetriesPerRequest: null });
+    rawConnections.push(crashConnection);
+    let taken = false;
+    const crashing = new Worker(
+      INBOUND_QUEUE_NAME,
+      async () => {
+        taken = true;
+        await sleep(5_000);
+      },
+      {
+        connection: crashConnection,
+        prefix,
+        lockDuration: 200,
+        skipLockRenewal: true,
+        // Sem a checagem de parados dele: o BullMQ só deixa UM worker checar por intervalo (chave
+        // stalled-check), e o do teste precisa ser o que o outro processo, que não caiu, executa.
+        skipStalledCheck: true,
+      },
+    );
+    crashing.on('error', () => undefined);
+    await waitFor(() => taken, 'job ativo no worker que "caiu"');
+
+    // O worker de verdade sobe depois e encontra o job parado.
+    const handled: InboundJob[] = [];
+    const unhandled: InboundJob[] = [];
+    handle.startWorker(
+      (received) => {
+        handled.push(received);
+        return Promise.resolve('done' as const);
+      },
+      {
+        onUnhandledFailure: (failed) => {
+          unhandled.push(failed);
+          return Promise.resolve();
+        },
+      },
+    );
+    try {
+      await waitFor(() => unhandled.length === 1, 'gancho de falha sem handler', 20_000);
+    } finally {
+      await crashing.close(true).catch(() => undefined);
+    }
+
+    assert.deepEqual(unhandled[0], job);
+    assert.equal(handled.length, 0, 'o handler nunca viu o job');
+    assert.equal(await metricValue(metrics, 'failed'), 1);
+    const line = logs.lines().find((entry) => entry.msg === 'job falhou sem passar pelo handler');
+    assert.equal(line?.level, 50);
+    assert.equal(line.jobKind, 'text');
+    const raw2 = logs.raw();
+    for (const secret of [SECRET_TEXT, CONTACT, job.externalId, job.clientId, inboundJobId(job)]) {
+      assert.ok(!raw2.includes(secret), `vazou em log: ${secret}`);
+    }
   });
 });
 

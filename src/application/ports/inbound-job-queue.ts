@@ -93,6 +93,13 @@ export type InboundJobHandler = (
 ) => Promise<InboundJobOutcome>;
 
 /**
+ * Chamado quando um job **termina em falha sem ter passado pelo handler** (ex.: parado/"stalled"
+ * mais vezes que o limite, depois de uma queda do processo). A implementação tenta, sem duplicar,
+ * que o contato não fique no silêncio. Nunca deve lançar (a fila só registra a falha dela).
+ */
+export type InboundJobFailureHandler = (job: InboundJob) => Promise<void>;
+
+/**
  * Erro que não adianta retentar (token inválido, janela fechada, cliente removido...): a fila
  * marca o job como falho de vez. O `context` nunca leva texto do contato nem destinatário.
  */
