@@ -43,19 +43,19 @@ O projeto é tocado por mais de um agente, em sessões separadas e em máquinas 
 
 Gerenciador de pacotes: **pnpm**. Primeiro uso: `pnpm install`, `pnpm db:generate` (o Prisma Client não vai para o git e o `typecheck` precisa dele), `cp .env.example .env`, `cp .env.test.example .env.test` (preencha a senha nos dois) e a preparação do banco em "Ambiente local" abaixo.
 
-| Script | O que faz |
-| --- | --- |
-| `pnpm dev` | Sobe o servidor com `tsx watch` (log colorido via `pino-pretty`) |
-| `pnpm build` | Compila para `dist/` (`tsc -p tsconfig.build.json`, sem testes) |
-| `pnpm start` | Roda `node dist/index.js` (rode `pnpm build` antes) |
-| `pnpm test` | Testes **unitários** com `node --test` + `tsx` (`src/**/*.test.ts`, exceto `*.integration.test.ts`); não precisam de Postgres nem de Redis |
-| `pnpm test:integration` | Testes de integração (`src/**/*.integration.test.ts`); exigem Postgres e Redis no ar, leem `.env.test` e só rodam contra `soprei_test` e Redis `/15` |
-| `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm lint` | ESLint (flat config, `typescript-eslint` strict type-checked) |
-| `pnpm format` / `pnpm format:check` | Prettier (escreve / só verifica) |
-| `pnpm db:generate` | `prisma generate` (Prisma Client em `src/generated/prisma`, ignorado pelo git) |
-| `pnpm db:migrate` | `prisma migrate dev` (cria e aplica migration no banco de desenvolvimento; exige PostgreSQL acessível em `DATABASE_URL` e usa shadow database) |
-| `pnpm db:migrate:deploy` | `prisma migrate deploy` (aplica migrations pendentes; é o que o CI roda) |
+| Script                              | O que faz                                                                                                                                            |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                          | Sobe o servidor com `tsx watch` (log colorido via `pino-pretty`)                                                                                     |
+| `pnpm build`                        | Compila para `dist/` (`tsc -p tsconfig.build.json`, sem testes)                                                                                      |
+| `pnpm start`                        | Roda `node dist/index.js` (rode `pnpm build` antes)                                                                                                  |
+| `pnpm test`                         | Testes **unitários** com `node --test` + `tsx` (`src/**/*.test.ts`, exceto `*.integration.test.ts`); não precisam de Postgres nem de Redis           |
+| `pnpm test:integration`             | Testes de integração (`src/**/*.integration.test.ts`); exigem Postgres e Redis no ar, leem `.env.test` e só rodam contra `soprei_test` e Redis `/15` |
+| `pnpm typecheck`                    | `tsc --noEmit`                                                                                                                                       |
+| `pnpm lint`                         | ESLint (flat config, `typescript-eslint` strict type-checked)                                                                                        |
+| `pnpm format` / `pnpm format:check` | Prettier (escreve / só verifica)                                                                                                                     |
+| `pnpm db:generate`                  | `prisma generate` (Prisma Client em `src/generated/prisma`, ignorado pelo git)                                                                       |
+| `pnpm db:migrate`                   | `prisma migrate dev` (cria e aplica migration no banco de desenvolvimento; exige PostgreSQL acessível em `DATABASE_URL` e usa shadow database)       |
+| `pnpm db:migrate:deploy`            | `prisma migrate deploy` (aplica migrations pendentes; é o que o CI roda)                                                                             |
 
 Antes de dar uma spec como pronta: `pnpm typecheck && pnpm lint && pnpm test && pnpm test:integration`. O CI roda esses quatro (mais `db:generate` e `db:migrate:deploy`) em Node 22 e na LTS mais recente, com Postgres e Redis como services do job.
 
