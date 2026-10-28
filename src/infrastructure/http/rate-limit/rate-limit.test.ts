@@ -63,6 +63,11 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       readiness: ALL_UP,
       metrics,
       metricsToken: 'm'.repeat(32),
+      whatsapp: {
+        appSecret: 'a'.repeat(32),
+        verifyToken: 'v'.repeat(32),
+        intake: { accept: () => Promise.resolve({ enqueued: 0, discarded: 0, failed: 0 }) },
+      },
       admin: {
         apiKey: randomUUID(),
         clients: new ClientService(clients),
@@ -89,9 +94,15 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     await app.ready();
     await app.close();
 
-    assert.ok(routes.length >= 9, `rotas vistas: ${String(routes.length)}`);
+    assert.ok(routes.length >= 11, `rotas vistas: ${String(routes.length)}`);
     const urls = new Set(routes.map((route) => route.url));
-    for (const expected of ['/health', '/health/ready', '/metrics', '/admin/clients']) {
+    for (const expected of [
+      '/health',
+      '/health/ready',
+      '/metrics',
+      '/admin/clients',
+      '/webhooks/whatsapp',
+    ]) {
       assert.ok(
         [...urls].some((url) => url.startsWith(expected)),
         `rota ${expected} registrada`,
@@ -111,6 +122,13 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       );
       if (infrastructure.has(route.url)) {
         assert.equal(route.config.rateLimit, false, `${label} deve ser opt-out explícito`);
+      } else if (route.url.startsWith('/webhooks/')) {
+        // O primeiro endpoint público (spec 011): perfil `webhook`, nunca o `public` por omissão.
+        assert.equal(
+          route.config.rateLimitProfile,
+          'webhook',
+          `${label} deve ser do perfil webhook`,
+        );
       } else if (route.url.startsWith('/admin/')) {
         assert.equal(route.config.rateLimitProfile, 'admin', `${label} deve ser do perfil admin`);
       } else {

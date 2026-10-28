@@ -1,5 +1,6 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, LogController } from 'fastify';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
+import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ClientService } from '../../application/clients/client.service.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
@@ -8,6 +9,7 @@ import {
   type ReadinessChecks,
 } from '../../presentation/system/health.controller.js';
 import { metricsController } from '../../presentation/system/metrics.controller.js';
+import { whatsappWebhookController } from '../../presentation/webhooks/whatsapp-webhook.controller.js';
 import type { TrustProxySetting } from '../config/trust-proxy.js';
 import type { Metrics } from '../metrics/index.js';
 import { errorHandler, notFoundHandler } from './error-handler.js';
@@ -22,11 +24,22 @@ export interface AdminRoutesParams {
   readonly attendance?: AttendanceService;
 }
 
+/** Canal WhatsApp (spec 011): sem isto as rotas `/webhooks/whatsapp` NÃO existem (404). */
+export interface WhatsappRoutesParams {
+  /** `WHATSAPP_APP_SECRET`: só valida a assinatura. */
+  readonly appSecret: string;
+  /** `WHATSAPP_VERIFY_TOKEN`: só o handshake de verificação. */
+  readonly verifyToken: string;
+  readonly intake: Pick<ChannelIntakeService, 'accept'>;
+}
+
 export interface BuildServerParams {
   readonly logger: FastifyBaseLogger;
   readonly readiness: ReadinessChecks;
   /** Sem isto as rotas /admin não são registradas (ex.: testes que não precisam delas). */
   readonly admin?: AdminRoutesParams;
+  /** Canal WhatsApp (spec 011). Opt-in: sem isto (`WHATSAPP_ENABLED=false`) as rotas não existem. */
+  readonly whatsapp?: WhatsappRoutesParams;
   /** Métricas do processo. Sem isto não há métricas HTTP nem `GET /metrics`. */
   readonly metrics?: Metrics;
   /**
@@ -56,6 +69,7 @@ export function buildServer({
   logger,
   readiness,
   admin,
+  whatsapp,
   metrics,
   metricsToken,
   rateLimit,
@@ -102,6 +116,15 @@ export function buildServer({
         attendance: admin.attendance,
       });
     }
+  }
+
+  if (whatsapp !== undefined) {
+    void app.register(whatsappWebhookController, {
+      appSecret: whatsapp.appSecret,
+      verifyToken: whatsapp.verifyToken,
+      intake: whatsapp.intake,
+      ...(metrics === undefined ? {} : { metrics }),
+    });
   }
 
   return app;
