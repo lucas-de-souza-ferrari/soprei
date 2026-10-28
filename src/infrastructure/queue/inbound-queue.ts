@@ -35,6 +35,8 @@ const DEFAULT_ENQUEUE_TIMEOUT_MS = 5_000;
 /** Quanto esperar o job ativo no encerramento antes de forçar (LLM 15 s + envio 10 s com folga). */
 const DEFAULT_WORKER_CLOSE_TIMEOUT_MS = 30_000;
 const CONNECT_TIMEOUT_MS = 5_000;
+/** Prazo para fechar fila e worker quando a conexão com o Redis não está pronta. */
+const DISCONNECTED_CLOSE_TIMEOUT_MS = 2_000;
 
 export interface InboundQueueOptions {
   readonly redisUrl: string;
@@ -228,11 +230,16 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
         if (current !== undefined) {
           // Espera o job ativo terminar (o BullMQ memoriza o fechamento: um segundo `close(true)` não
           // adiantaria). Passou do limite, segue para fechar fila e conexões: o job interrompido fica
-          // "parado" no Redis e volta a ser processado no próximo boot.
-          const graceful = current.close();
+          // "parado" no Redis e volta a ser processado no próximo boot. Sem conexão pronta não há job
+          // ativo para esperar (ex.: Redis fora no boot): o prazo é curto.
+          const connected = workerRedis?.status === 'ready';
+          const graceful = current.close(!connected);
           graceful.catch(() => undefined);
+          const waitMs = connected
+            ? workerCloseTimeoutMs
+            : Math.min(workerCloseTimeoutMs, DISCONNECTED_CLOSE_TIMEOUT_MS);
           try {
-            await withTimeout(graceful, workerCloseTimeoutMs, 'encerramento do worker');
+            await withTimeout(graceful, waitMs, 'encerramento do worker');
           } catch (error) {
             logger.warn(
               describeError(error),
@@ -240,9 +247,16 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
             );
           }
         }
-        await queue.close().catch((err: unknown) => {
+        // `queue.close()` espera a conexão ficar pronta: com o Redis fora ficaria pendurado. As
+        // conexões são fechadas à força logo depois, o que também solta qualquer espera do BullMQ.
+        const queueClosed = queue.close().catch((err: unknown) => {
           logger.warn(describeError(err), 'falha ao fechar a fila');
         });
+        try {
+          await withTimeout(queueClosed, DISCONNECTED_CLOSE_TIMEOUT_MS, 'fechamento da fila');
+        } catch (error) {
+          logger.warn(describeError(error), 'a fila não fechou no prazo; fechando as conexões');
+        }
         // As conexões são nossas (o BullMQ não fecha instância recebida): só agora, depois do worker.
         await Promise.allSettled([
           closeRedisClient(producerRedis),
