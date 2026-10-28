@@ -347,16 +347,81 @@ describe('AnthropicLlmProvider: cancelamento', () => {
     assert.equal(fake.requests.length, 0);
   });
 
-  it('abortar durante a espera entre repetições interrompe as repetições', async () => {
-    fake.always({ kind: 'error', status: 500 });
+  it('abortar durante a espera entre repetições interrompe as repetições (exatamente 1 pedido)', async () => {
+    // O 500 chega com retry-after longo: o SDK dorme antes da segunda tentativa.
+    fake.always({ kind: 'error', status: 500, retryAfterMs: 8_000 });
     const controller = new AbortController();
+    const started = Date.now();
     const pending = makeProvider({ maxRetries: 3 }).generate(input(), {
       signal: controller.signal,
     });
+    const deadline = Date.now() + 5_000;
+    while (fake.requests.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(fake.requests.length, 1, 'o primeiro 500 chegou ao servidor');
+    // Dá tempo de o SDK ler o 500 e entrar no sono da repetição antes de abortar.
+    await new Promise((resolve) => setTimeout(resolve, 150));
     controller.abort();
+
     const result = await pending;
     assert.equal(result.ok, false);
-    assert.ok(fake.requests.length <= 1);
+    assert.equal(result.error.context['errorType'], 'timeout');
+    assert.ok(Date.now() - started < 4_000, 'não esperou o retry-after de 8 s');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(fake.requests.length, 1, 'nenhuma repetição depois do abort');
+  });
+});
+
+describe('AnthropicLlmProvider: redirecionamento e ambiente', () => {
+  const SECRET = 'TEXTO-SECRETO-REDIRECT-4411';
+
+  it('um redirecionamento (307) não é seguido: erro seguro e o segundo servidor não recebe corpo algum', async () => {
+    const other = new FakeAnthropicApi();
+    await other.start();
+    try {
+      for (const status of [301, 302, 307, 308]) {
+        fake.reset();
+        other.reset();
+        fake.always({ kind: 'redirect', status, location: `${other.baseUrl}/v1/messages` });
+        const result = await makeProvider({ maxRetries: 0 }).generate({
+          systemPrompt: 'PERSONA-REDIRECT',
+          history: [],
+          userMessage: SECRET,
+        });
+        assert.equal(result.ok, false, `status ${String(status)}`);
+        assert.ok(result.error instanceof ExternalServiceError);
+        assert.deepEqual(Object.keys(result.error.context).sort(), [
+          'errorType',
+          'provider',
+          'retryable',
+          'status',
+        ]);
+        const everything = `${result.error.message}${inspect(result.error, { depth: 10 })}`;
+        assert.ok(!everything.includes(SECRET));
+        assert.ok(!everything.includes('PERSONA-REDIRECT'));
+        assert.ok(!everything.includes(API_KEY));
+        assert.equal(fake.requests.length, 1);
+        assert.equal(other.requests.length, 0, 'o destino do redirect não recebeu nada');
+      }
+    } finally {
+      await other.stop();
+    }
+  });
+
+  it('ANTHROPIC_CUSTOM_HEADERS do ambiente é ignorado e o ambiente é restaurado', async () => {
+    const previous = process.env['ANTHROPIC_CUSTOM_HEADERS'];
+    process.env['ANTHROPIC_CUSTOM_HEADERS'] = 'x-vazamento: segredo-do-ambiente';
+    try {
+      const provider = makeProvider();
+      assert.equal(process.env['ANTHROPIC_CUSTOM_HEADERS'], 'x-vazamento: segredo-do-ambiente');
+      await provider.generate(input());
+      assert.equal(fake.requests.length, 1);
+      assert.equal(fake.requests[0]?.headers['x-vazamento'], undefined);
+    } finally {
+      if (previous === undefined) delete process.env['ANTHROPIC_CUSTOM_HEADERS'];
+      else process.env['ANTHROPIC_CUSTOM_HEADERS'] = previous;
+    }
   });
 });
 

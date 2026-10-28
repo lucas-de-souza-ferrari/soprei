@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ExternalServiceError } from '../../../shared/errors/index.js';
+import { ExternalServiceError, ValidationError } from '../../../shared/errors/index.js';
 import { parseConfig } from '../../config/parse-config.js';
 import { AnthropicLlmProvider } from './anthropic-llm.provider.js';
 import { createLlmProvider } from './create-llm-provider.js';
@@ -139,5 +139,19 @@ describe('createLlmProvider', () => {
     const provider = createLlmProvider(parsed.value);
     assert.ok(provider instanceof AnthropicLlmProvider);
     assert.equal(provider.name, 'anthropic');
+  });
+
+  it('anthropic sem chave (config inconsistente) falha com ValidationError tipado, sem valor', () => {
+    const parsed = parseConfig({
+      ...base,
+      LLM_PROVIDER: 'anthropic',
+      ANTHROPIC_API_KEY: 'chave-de-teste-com-mais-de-20-caracteres',
+    });
+    assert.ok(parsed.ok);
+    assert.throws(
+      () => createLlmProvider({ ...parsed.value, ANTHROPIC_API_KEY: undefined }),
+      (error: unknown) =>
+        error instanceof ValidationError && error.context['variable'] === 'ANTHROPIC_API_KEY',
+    );
   });
 });

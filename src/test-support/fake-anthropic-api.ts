@@ -39,11 +39,15 @@ export type AnthropicBehavior =
       readonly errorType?: string;
       /** Como a API às vezes faz: o corpo do erro cita o pedido (texto de contato, histórico, persona). */
       readonly echoRequest?: boolean;
+      /** `retry-after-ms` enviado (padrão 5): valor longo mantém o SDK dormindo entre as tentativas. */
+      readonly retryAfterMs?: number;
     }
   /** Aceita a conexão e nunca responde (para testar cancelamento). */
   | { readonly kind: 'hang' }
   /** Derruba a conexão sem responder (erro de rede). */
-  | { readonly kind: 'drop' };
+  | { readonly kind: 'drop' }
+  /** Responde com redirecionamento (o SDK/fetch não deve seguir e reenviar o corpo). */
+  | { readonly kind: 'redirect'; readonly status: number; readonly location: string };
 
 export const textMessage = (
   text: string,
@@ -173,12 +177,17 @@ export class FakeAnthropicApi {
       socket.destroy();
       return;
     }
+    if (behavior.kind === 'redirect') {
+      response.writeHead(behavior.status, { location: behavior.location });
+      response.end();
+      return;
+    }
     if (behavior.kind === 'error') {
       const message = behavior.echoRequest === true ? `pedido recebido: ${raw}` : 'erro simulado';
       // O SDK respeita `retry-after-ms`: a repetição sai em milissegundos, não em segundos.
       response.writeHead(behavior.status, {
         'content-type': 'application/json',
-        'retry-after-ms': '5',
+        'retry-after-ms': String(behavior.retryAfterMs ?? 5),
       });
       response.end(
         JSON.stringify({

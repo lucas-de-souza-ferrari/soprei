@@ -124,15 +124,21 @@ export class AnthropicLlmProvider implements LlmProvider {
     this.model = options.model;
     this.effort = options.effort;
     this.maxOutputTokens = options.maxOutputTokens;
-    this.client = new Anthropic({
-      apiKey: options.apiKey,
-      ...(options.baseUrl === undefined ? {} : { baseURL: options.baseUrl }),
-      timeout: options.timeoutMs,
-      maxRetries: options.maxRetries,
-      // O SDK escreveria no console (fora do Pino e sem redact) e emitiria spans de tracing.
-      logLevel: 'off',
-      openTelemetry: false,
-    });
+    this.client = withoutCustomHeadersEnv(
+      () =>
+        new Anthropic({
+          apiKey: options.apiKey,
+          ...(options.baseUrl === undefined ? {} : { baseURL: options.baseUrl }),
+          timeout: options.timeoutMs,
+          maxRetries: options.maxRetries,
+          // O SDK escreveria no console (fora do Pino e sem redact) e emitiria spans de tracing.
+          logLevel: 'off',
+          openTelemetry: false,
+          // O SDK segue redirecionamentos e reenviaria o corpo (persona, histórico, texto do contato)
+          // a outro host: redirecionar vira erro de rede (seguro), nunca um segundo envio.
+          fetchOptions: { redirect: 'error' },
+        }),
+    );
   }
 
   async generate(
@@ -176,6 +182,21 @@ export class AnthropicLlmProvider implements LlmProvider {
     } catch (error) {
       return mapError(error);
     }
+  }
+}
+
+/**
+ * O SDK lê `ANTHROPIC_CUSTOM_HEADERS` direto de `process.env` ao criar o cliente e o mescla nos
+ * cabeçalhos de toda requisição: fora da nossa config e da validação. Aqui ele é ignorado (some só
+ * durante a construção, e é restaurado em seguida).
+ */
+function withoutCustomHeadersEnv<T>(build: () => T): T {
+  const saved = process.env['ANTHROPIC_CUSTOM_HEADERS'];
+  delete process.env['ANTHROPIC_CUSTOM_HEADERS'];
+  try {
+    return build();
+  } finally {
+    if (saved !== undefined) process.env['ANTHROPIC_CUSTOM_HEADERS'] = saved;
   }
 }
 

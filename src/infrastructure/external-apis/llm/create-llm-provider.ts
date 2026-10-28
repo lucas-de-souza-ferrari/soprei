@@ -1,4 +1,5 @@
 import type { LlmProvider } from '../../../application/ports/llm-provider.js';
+import { ValidationError } from '../../../shared/errors/index.js';
 import type { Config } from '../../config/index.js';
 import { AnthropicLlmProvider } from './anthropic-llm.provider.js';
 import { MockLlmProvider } from './mock-llm.provider.js';
@@ -21,7 +22,9 @@ const PROVIDERS: Readonly<Record<Config['LLM_PROVIDER'], (config: LlmConfig) => 
   anthropic: (config) => {
     // A config já exige a chave com `LLM_PROVIDER=anthropic`; isto só estreita o tipo.
     if (config.ANTHROPIC_API_KEY === undefined) {
-      throw new Error('ANTHROPIC_API_KEY ausente com LLM_PROVIDER=anthropic');
+      throw new ValidationError('ANTHROPIC_API_KEY ausente com LLM_PROVIDER=anthropic', {
+        context: { variable: 'ANTHROPIC_API_KEY' },
+      });
     }
     return new AnthropicLlmProvider({
       apiKey: config.ANTHROPIC_API_KEY,
