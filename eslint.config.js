@@ -31,6 +31,14 @@ const DATABASE_FOLDER_PATTERN = {
     'Application, presentation e domain não importam a camada de banco; dependa de interfaces do domínio e receba a implementação por injeção.',
 };
 
+// Fila e Redis são detalhes de infraestrutura (spec 011): application e presentation conhecem só as
+// portas (`InboundJobQueue`...), nunca o BullMQ nem o ioredis.
+const QUEUE_REDIS_PATTERN = {
+  group: ['bullmq', 'bullmq/**', 'ioredis', 'ioredis/**'],
+  message:
+    'BullMQ e ioredis só em src/infrastructure/**. Application e presentation dependem das portas (src/application/ports/), recebidas por injeção.',
+};
+
 const DOMAIN_PATTERNS = [
   {
     group: [
@@ -99,7 +107,7 @@ export default defineConfig(
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [...PRISMA_IMPORT_PATTERNS, DATABASE_FOLDER_PATTERN] },
+        { patterns: [...PRISMA_IMPORT_PATTERNS, DATABASE_FOLDER_PATTERN, QUEUE_REDIS_PATTERN] },
       ],
     },
   },

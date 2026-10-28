@@ -91,6 +91,53 @@ describe('lint: importar o Prisma fora de src/infrastructure/database', () => {
     }
   });
 
+  it('application e presentation não importam o BullMQ nem o ioredis (só as portas); a infraestrutura pode', async () => {
+    const imports = [
+      "import { Queue } from 'bullmq';",
+      "import { UnrecoverableError } from 'bullmq/dist/esm/index.js';",
+      "import { Redis } from 'ioredis';",
+      "import type { Redis } from 'ioredis';",
+      "import IORedis from 'ioredis';",
+    ];
+    for (const filePath of [
+      'src/application/fixture.ts',
+      'src/application/channel/fixture.ts',
+      'src/presentation/fixture.ts',
+      'src/presentation/webhooks/fixture.ts',
+    ]) {
+      for (const code of imports) {
+        assert.deepEqual(
+          await restrictedRules(
+            `${code}
+export {};
+`,
+            filePath,
+          ),
+          ['no-restricted-imports'],
+          `${filePath}: ${code}`,
+        );
+      }
+    }
+    for (const filePath of [
+      'src/infrastructure/queue/fixture.ts',
+      'src/infrastructure/cache/fixture.ts',
+      'src/index.ts',
+    ]) {
+      for (const code of imports) {
+        assert.deepEqual(
+          await restrictedRules(
+            `${code}
+export {};
+`,
+            filePath,
+          ),
+          [],
+          code,
+        );
+      }
+    }
+  });
+
   it('domain não importa de infrastructure, application, presentation nem Fastify', async () => {
     for (const code of [
       "import { x } from '../infrastructure/config/index.js';",
