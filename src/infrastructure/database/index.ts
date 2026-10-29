@@ -25,6 +25,8 @@ export type { RetryOptions, TransactionOptions } from './transaction.js';
 export { PrismaAttendanceUnitOfWork } from './repositories/attendance-unit-of-work.js';
 export { PrismaClientRepository } from './repositories/client.repository.js';
 export { PrismaConversationRepository } from './repositories/conversation.repository.js';
+export { PrismaPlatformAdminRepository } from './repositories/platform-admin.repository.js';
+export { PrismaUserRepository } from './repositories/user.repository.js';
 export { PrismaMessageRepository } from './repositories/message.repository.js';
 export { withRepositoryErrors } from './repositories/repository-errors.js';
 export { PrismaTenantRepository } from './repositories/tenant.repository.base.js';

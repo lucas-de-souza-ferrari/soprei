@@ -38,6 +38,7 @@ model Client {
 
   conversations Conversation[]
   messages      Message[]
+  users         User[]
 
   @@map("clients")
 }
@@ -105,4 +106,49 @@ model Message {
   @@unique([clientId, replyToId])
   @@index([clientId, conversationId, createdAt, id])
   @@map("messages")
+}
+
+enum UserRole {
+  OWNER
+  AGENT
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("user_status")
+}
+
+/// Pessoa de um cliente (TENANT). E-mail normalizado (NFKC, trim, minúsculas), único POR cliente.
+/// `passwordHash` (scrypt) nunca vai a log, resposta nem métrica. E-mail também é dado pessoal.
+model User {
+  id           String     @id @default(uuid(7)) @db.Uuid
+  clientId     String     @map("client_id") @db.Uuid
+  email        String
+  passwordHash String     @map("password_hash")
+  role         UserRole   @default(AGENT)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@unique([clientId, email])
+  @@index([clientId, createdAt, id])
+  @@map("users")
+}
+
+/// Operador da plataforma (GLOBAL: não pertence a cliente algum). E-mail único global.
+model PlatformAdmin {
+  id           String     @id @default(uuid(7)) @db.Uuid
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  @@map("platform_admins")
 }

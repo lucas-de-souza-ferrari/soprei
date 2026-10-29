@@ -30,3 +30,18 @@ export type { ConversationRepository } from './repositories/conversation.reposit
 export type { MessageRepository } from './repositories/message.repository.js';
 export type { TenantRepository, WithoutClientId } from './repositories/tenant.repository.js';
 export { ClientId } from './value-objects/client-id.js';
+export { EMAIL_MAX_LENGTH, USER_ROLES, USER_STATUSES } from './entities/user.js';
+export type {
+  NewPlatformAdmin,
+  NewUser,
+  PlatformAdmin,
+  PlatformAdminCredentials,
+  User,
+  UserCredentials,
+  UserRole,
+  UserStatus,
+  UserUpdate,
+} from './entities/user.js';
+export type { PlatformAdminRepository } from './repositories/platform-admin.repository.js';
+export type { UserRepository } from './repositories/user.repository.js';
+export { PlatformAdminId, UserId } from './value-objects/user-id.js';

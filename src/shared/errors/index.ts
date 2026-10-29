@@ -7,6 +7,7 @@ export {
   ForbiddenError,
   NotFoundError,
   RateLimitError,
+  ServiceUnavailableError,
   TenantScopeError,
   UnauthorizedError,
   ValidationError,

@@ -40,6 +40,7 @@ export class TestTenants {
 
   async cleanup(): Promise<void> {
     for (const id of this.created) {
+      await this.db.user.deleteMany({ where: { clientId: id } });
       // Mensagens antes das conversas: a chave estrangeira composta aponta para elas.
       await this.db.message.deleteMany({ where: { clientId: id } });
       await this.db.conversation.deleteMany({ where: { clientId: id } });

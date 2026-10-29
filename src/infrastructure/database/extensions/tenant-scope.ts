@@ -16,6 +16,8 @@ export const MODEL_SCOPES = {
   Client: 'global',
   Conversation: 'tenant',
   Message: 'tenant',
+  User: 'tenant',
+  PlatformAdmin: 'global',
 } as const satisfies Record<Prisma.ModelName, ModelScope>;
 
 /** Operações de model que carregam um `where` que pode (e precisa) conter `clientId`. */

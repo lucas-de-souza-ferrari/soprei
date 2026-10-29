@@ -1,8 +1,19 @@
-import { type Client, ClientId, type Conversation, type Message } from '../../../domain/index.js';
+import {
+  type Client,
+  ClientId,
+  type Conversation,
+  type Message,
+  type PlatformAdmin,
+  PlatformAdminId,
+  type User,
+  UserId,
+} from '../../../domain/index.js';
 import type {
   Client as ClientRow,
   Conversation as ConversationRow,
   Message as MessageRow,
+  PlatformAdmin as PlatformAdminRow,
+  User as UserRow,
 } from '../../../generated/prisma/client.js';
 
 /** Linha do Prisma para entidade de domínio. Nada do Prisma sai desta pasta. */
@@ -45,5 +56,28 @@ export function toMessage(row: MessageRow): Message {
     channelMessageId: row.channelMessageId,
     sentAt: row.sentAt,
     answeredById: row.answeredById,
+  };
+}
+
+/** Linha para entidade: o `passwordHash` fica de fora de propósito (só `UserCredentials` o leva). */
+export function toUser(row: UserRow): User {
+  return {
+    id: UserId.parse(row.id),
+    clientId: ClientId.parse(row.clientId),
+    email: row.email,
+    role: row.role,
+    status: row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function toPlatformAdmin(row: PlatformAdminRow): PlatformAdmin {
+  return {
+    id: PlatformAdminId.parse(row.id),
+    email: row.email,
+    status: row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }

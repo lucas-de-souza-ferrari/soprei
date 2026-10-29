@@ -88,3 +88,14 @@ export class RateLimitError extends BaseError {
     this.retryAfterSeconds = seconds;
   }
 }
+
+/**
+ * Dependência de que a operação não pode prescindir está fora (ex.: o Redis das sessões, spec
+ * 007): 503, operacional. É a falha **fechada** da autenticação: nada é aceito nem emitido. Não
+ * anexe `cause` de cliente Redis (o erro do ioredis carrega `command.args`).
+ */
+export class ServiceUnavailableError extends BaseError {
+  constructor(message = 'Serviço temporariamente indisponível', options: AppErrorOptions = {}) {
+    super({ message, code: 'SERVICE_UNAVAILABLE', statusCode: 503, ...options });
+  }
+}
