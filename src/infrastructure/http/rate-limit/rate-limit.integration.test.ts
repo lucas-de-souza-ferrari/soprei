@@ -7,6 +7,7 @@ import { rateLimitProfile } from '../../../presentation/common/rate-limit.js';
 import { Result } from '../../../shared/types/index.js';
 import { getClosedPort, withPort } from '../../../test-support/closed-port.js';
 import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
+import { buildTestAuth } from '../../../test-support/in-memory-auth.js';
 import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
 import { captureLogs, type LogCapture } from '../../../test-support/log-capture.js';
 import { TestKeyspace } from '../../../test-support/test-keyspace.js';
@@ -21,7 +22,6 @@ import { buildServer } from '../server.js';
 // Falha aqui (antes de abrir qualquer conexão) se o ambiente não for o de testes. Todo teste
 // usa o Redis /15 e um namespace único (TestKeyspace), e remove só as próprias chaves.
 const config = loadIntegrationConfig();
-const ADMIN_KEY = `it-${randomUUID()}-${randomUUID()}`;
 const METRICS_TOKEN = `it-${randomUUID()}-${randomUUID()}`;
 const REDIS_TIMEOUT_MS = 250;
 
@@ -40,6 +40,8 @@ function profiles(overrides: Partial<RateLimitProfiles> = {}): RateLimitProfiles
     public: { max: 1_000, windowSeconds: 60 },
     admin: { max: 1_000, windowSeconds: 60 },
     webhook: { max: 1_000, windowSeconds: 60 },
+    login: { max: 1_000, windowSeconds: 60 },
+    refresh: { max: 1_000, windowSeconds: 60 },
     ...overrides,
   };
 }
@@ -51,6 +53,8 @@ interface Harness {
   readonly handle: RateLimitRedisHandle;
   readonly keyspace: TestKeyspace;
   readonly prefix: string;
+  /** Access token de um `PlatformAdmin` (acesso a `/admin/clients`). */
+  readonly adminToken: string;
   /** Chaves do contador que existem agora neste teste (só as dele). */
   keys(): Promise<string[]>;
   get(url: string, options?: GetOptions): Promise<LightMyRequestResponse>;
@@ -95,12 +99,15 @@ async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
     assert.ok(await handle.waitUntilReady(5_000), 'conexão do rate limit não ficou pronta');
   }
 
+  const testAuth = buildTestAuth({ logger: logs.logger });
+  const adminToken = (await testAuth.platformToken()).accessToken;
   const app = buildServer({
     logger: logs.logger,
     readiness: ALL_UP,
     metrics,
     metricsToken: METRICS_TOKEN,
-    admin: { apiKey: ADMIN_KEY, clients: new ClientService(new InMemoryClientRepository()) },
+    auth: testAuth.service,
+    admin: { clients: new ClientService(new InMemoryClientRepository()) },
     ...(options.trustProxy === undefined ? {} : { trustProxy: options.trustProxy }),
     rateLimit: {
       redis: handle.client,
@@ -125,6 +132,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
     handle,
     keyspace,
     prefix,
+    adminToken,
     keys: () => keyspace.keysUnder(mainRedis.client, prefix),
     get: (url, { ip = '203.0.113.1', headers = {} } = {}) =>
       app.inject({ method: 'GET', url, remoteAddress: ip, headers }),
@@ -230,7 +238,7 @@ describe('perfis e cotas', () => {
         }),
       },
       async (h) => {
-        const auth = { authorization: `Bearer ${ADMIN_KEY}` };
+        const auth = { authorization: `Bearer ${h.adminToken}` };
         assert.deepEqual(
           statuses(await repeat(h, 5, '/test/sem-perfil')),
           [200, 200, 200, 429, 429],
@@ -319,7 +327,7 @@ describe('perfis e cotas', () => {
         assert.deepEqual(statuses(await repeat(h, 5, '/admin/clients')), [401, 401, 401, 429, 429]);
         // Credencial certa, mas depois do limite: também 429 (a chave nem é conferida).
         const withKey = await h.get('/admin/clients', {
-          headers: { authorization: `Bearer ${ADMIN_KEY}` },
+          headers: { authorization: `Bearer ${h.adminToken}` },
         });
         assert.equal(withKey.statusCode, 429);
       },
@@ -592,7 +600,7 @@ describe('métricas e logs', () => {
         }
         // Nenhum IP em nenhuma linha de log gerada por esta spec.
         assert.ok(!h.logs.raw().includes(ip), 'IP apareceu em log');
-        assert.ok(!h.logs.raw().includes(ADMIN_KEY));
+        assert.ok(!h.logs.raw().includes(h.adminToken));
       },
     );
   });

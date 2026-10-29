@@ -10,6 +10,8 @@ import {
 import { ClientService } from '../../application/clients/client.service.js';
 import type { LlmGenerateInput, LlmProvider } from '../../application/ports/llm-provider.js';
 import { Result } from '../../shared/types/index.js';
+import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
+import { ClientId } from '../../domain/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
@@ -31,10 +33,15 @@ import { buildServer } from './server.js';
 
 const config = loadIntegrationConfig();
 const logs = captureLogs();
-// Chaves descartáveis, só deste arquivo (e só na memória do processo de teste).
-const KEY = `it-${randomUUID()}-${randomUUID()}`;
+// Descartável, só deste arquivo (e só na memória do processo de teste).
 const METRICS_TOKEN = `it-${randomUUID()}-${randomUUID()}`;
-const auth = { authorization: `Bearer ${KEY}` };
+// `auth`: administrador da plataforma (CRUD de clientes); `as(clientId)`: o usuário do cliente, que
+// é quem usa o simulador e lê conversas (spec 007).
+let auth: { authorization: string };
+let makeUser: (clientId: string) => Promise<{ authorization: string }>;
+const userHeaders = new Map<string, { authorization: string }>();
+let anyUser: { authorization: string };
+const as = (clientId: string): { authorization: string } => userHeaders.get(clientId) ?? anyUser;
 
 interface ClientBody {
   id: string;
@@ -79,6 +86,12 @@ before(async () => {
   mock = new MockLlmProvider({ recordCalls: true });
   const clientRepository = new PrismaClientRepository(database.prisma);
   const metrics = createMetrics();
+  const testAuth = buildTestAuth({ logger: logs.logger, clients: clientRepository });
+  auth = bearer((await testAuth.platformToken()).accessToken);
+  makeUser = async (clientId) =>
+    bearer((await testAuth.userToken(ClientId.parse(clientId))).accessToken);
+  const seed = await tenants.createClient('base');
+  anyUser = await makeUser(seed.id);
   app = buildServer({
     logger: logs.logger,
     metrics,
@@ -87,8 +100,8 @@ before(async () => {
       database: () => database.check(),
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
+    auth: testAuth.service,
     admin: {
-      apiKey: KEY,
       clients: new ClientService(clientRepository),
       attendance: new AttendanceService({
         clients: clientRepository,
@@ -124,6 +137,7 @@ async function createClient(label: string, persona?: string): Promise<string> {
   assert.equal(created.statusCode, 201);
   const { id } = created.json<ClientBody>();
   tenants.track(id);
+  userHeaders.set(id, await makeUser(id));
   if (persona !== undefined) {
     const patched = await app.inject({
       method: 'PATCH',
@@ -144,7 +158,7 @@ function send(
   return app.inject({
     method: 'POST',
     url: `/admin/clients/${clientId}/messages`,
-    headers: { ...auth, ...headers },
+    headers: { ...as(clientId), ...headers },
     payload: payload as object,
   });
 }
@@ -195,7 +209,7 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     const history = await app.inject({
       method: 'GET',
       url: `/admin/clients/${clientId}/conversations/${firstBody.conversationId}/messages`,
-      headers: auth,
+      headers: as(clientId),
     });
     assert.equal(history.statusCode, 200);
     assert.deepEqual(
@@ -210,7 +224,7 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     const conversations = await app.inject({
       method: 'GET',
       url: `/admin/clients/${clientId}/conversations`,
-      headers: auth,
+      headers: as(clientId),
     });
     assert.equal(conversations.json<PageBody<unknown>>().items.length, 1);
   });
@@ -274,7 +288,7 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
       const list = await app.inject({
         method: 'GET',
         url: `/admin/clients/${id}/conversations`,
-        headers: auth,
+        headers: as(id),
       });
       if (id === suspended) assert.deepEqual(list.json<PageBody<unknown>>().items, []);
       else assert.equal(list.statusCode, 404);
@@ -298,7 +312,7 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     const none = await app.inject({
       method: 'GET',
       url: `/admin/clients/${clientId}/conversations`,
-      headers: auth,
+      headers: as(clientId),
     });
     assert.deepEqual(none.json<PageBody<unknown>>().items, []);
     // Persona com NUL: 400, não 500.
@@ -309,7 +323,8 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
       payload: { persona: 'com\u0000nul' },
     });
     assert.equal(patched.statusCode, 400);
-    assert.equal((await send('nao-uuid', { contactRef: 'c', text: 'oi' })).statusCode, 400);
+    // `:clientId` diferente do token (inclusive malformado): 404, igual a cliente inexistente.
+    assert.equal((await send('nao-uuid', { contactRef: 'c', text: 'oi' })).statusCode, 404);
   });
 
   it('dois pedidos simultâneos do mesmo externalId: um 201 e o outro 200 (mesma resposta) ou 409', async () => {
@@ -370,20 +385,20 @@ describe('isolamento via HTTP (clientes A e B)', () => {
     const cross = await app.inject({
       method: 'GET',
       url: `/admin/clients/${a}/conversations/${replyB.conversationId}/messages`,
-      headers: auth,
+      headers: as(a),
     });
     assert.equal(cross.statusCode, 404);
     assert.ok(!cross.body.includes('httpB-'));
     const listA = await app.inject({
       method: 'GET',
       url: `/admin/clients/${a}/conversations`,
-      headers: auth,
+      headers: as(a),
     });
     assert.ok(!listA.body.includes(replyB.conversationId));
     const historyA = await app.inject({
       method: 'GET',
       url: `/admin/clients/${a}/conversations/${replyA.conversationId}/messages`,
-      headers: auth,
+      headers: as(a),
     });
     assert.ok(!historyA.body.includes('httpB-'));
   });
@@ -437,13 +452,13 @@ describe('contexto de log e privacidade', () => {
     await app.inject({
       method: 'POST',
       url: `/admin/clients/${clientId}/messages`,
-      headers: { ...auth, 'content-type': 'application/json' },
+      headers: { ...as(clientId), 'content-type': 'application/json' },
       payload: `{"contactRef":"${contact}","text":"${secrets[1] ?? ''}`,
     });
     await app.inject({
       method: 'GET',
       url: `/admin/clients/${clientId}/conversations`,
-      headers: auth,
+      headers: as(clientId),
     });
 
     const raw = logs.raw();

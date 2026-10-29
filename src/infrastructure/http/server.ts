@@ -1,7 +1,9 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, LogController } from 'fastify';
+import type { AuthService } from '../../application/auth/auth.service.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ClientService } from '../../application/clients/client.service.js';
+import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
 import {
@@ -17,8 +19,6 @@ import { generateRequestId, registerObservability } from './observability/observ
 import { type RateLimitParams, registerRateLimit } from './rate-limit/rate-limit.js';
 
 export interface AdminRoutesParams {
-  /** `ADMIN_API_KEY`. Ausente: as rotas existem, mas respondem sempre 401. */
-  readonly apiKey: string | undefined;
   readonly clients: ClientService;
   /** Sem isto as rotas de mensagens e conversas (spec 010) não são registradas. */
   readonly attendance?: AttendanceService;
@@ -36,6 +36,11 @@ export interface WhatsappRoutesParams {
 export interface BuildServerParams {
   readonly logger: FastifyBaseLogger;
   readonly readiness: ReadinessChecks;
+  /**
+   * Autenticação (spec 007): registra `/auth/*` e verifica os access tokens das rotas `/admin`.
+   * Obrigatória quando `admin` é passado (rota protegida sem autenticação nunca sobe).
+   */
+  readonly auth?: AuthService;
   /** Sem isto as rotas /admin não são registradas (ex.: testes que não precisam delas). */
   readonly admin?: AdminRoutesParams;
   /** Canal WhatsApp (spec 011). Opt-in: sem isto (`WHATSAPP_ENABLED=false`) as rotas não existem. */
@@ -68,6 +73,7 @@ function fastifyTrustProxy(setting: TrustProxySetting): boolean | string[] {
 export function buildServer({
   logger,
   readiness,
+  auth,
   admin,
   whatsapp,
   metrics,
@@ -92,6 +98,9 @@ export function buildServer({
     }),
   });
 
+  // Preenchido pelo hook `authenticate` (spec 007); `null` nas rotas públicas.
+  app.decorateRequest('auth', null);
+
   registerObservability(app, { metrics });
   // Depois da observabilidade (o 429 entra no log e nas métricas HTTP) e antes das rotas (o
   // plugin liga o hook em cada rota registrada depois dele).
@@ -103,16 +112,25 @@ export function buildServer({
   if (metrics !== undefined && metricsToken !== undefined && metricsToken !== '') {
     void app.register(metricsController, { token: metricsToken, source: metrics });
   }
+  if (auth !== undefined) {
+    void app.register(authController, { prefix: '/auth', auth, metrics });
+  }
   if (admin !== undefined) {
+    // Rota /admin sem verificação de token nunca sobe: falha o boot, não vira rota aberta.
+    if (auth === undefined) {
+      throw new Error('as rotas /admin exigem o serviço de autenticação (auth)');
+    }
     void app.register(adminClientsController, {
       prefix: '/admin/clients',
-      apiKey: admin.apiKey,
+      auth,
+      metrics,
       clients: admin.clients,
     });
     if (admin.attendance !== undefined) {
       void app.register(adminAttendanceController, {
         prefix: '/admin/clients',
-        apiKey: admin.apiKey,
+        auth,
+        metrics,
         attendance: admin.attendance,
       });
     }

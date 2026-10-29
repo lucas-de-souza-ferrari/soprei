@@ -7,6 +7,7 @@ import { ClientService } from '../../../application/clients/client.service.js';
 import { BaseError } from '../../../shared/errors/index.js';
 import { setClientId } from '../../../shared/request-context/index.js';
 import { Result } from '../../../shared/types/index.js';
+import { bearer as bearerHeader, buildTestAuth } from '../../../test-support/in-memory-auth.js';
 import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
 import { captureLogs, type LogCapture, type LogLine } from '../../../test-support/log-capture.js';
 import { createMetrics, type Metrics } from '../../metrics/index.js';
@@ -30,6 +31,8 @@ interface Harness {
   readonly app: FastifyInstance;
   readonly capture: LogCapture;
   readonly metrics: Metrics;
+  /** Cabeçalho com o token de um `PlatformAdmin` (só com `admin: true`). */
+  adminHeaders(): Promise<{ authorization: string }>;
 }
 
 /** Serviço de mentira: usa o logger RAIZ (não o `request.log`), depois de um `await`. */
@@ -48,22 +51,21 @@ function numberHeader(value: string | string[] | undefined): number {
   return typeof value === 'string' ? Number(value) : 0;
 }
 
-function buildHarness(options: { admin?: string; metricsToken?: string } = {}): Harness {
+function buildHarness(options: { admin?: boolean; metricsToken?: string } = {}): Harness {
   const capture = captureLogs();
   const metrics = createMetrics();
+  const testAuth = buildTestAuth({ logger: capture.logger, metrics });
   const app = buildServer({
     logger: capture.logger,
     readiness: ALL_UP,
     metrics,
     ...(options.metricsToken === undefined ? {} : { metricsToken: options.metricsToken }),
-    ...(options.admin === undefined
-      ? {}
-      : {
-          admin: {
-            apiKey: options.admin,
-            clients: new ClientService(new InMemoryClientRepository()),
-          },
-        }),
+    ...(options.admin === true
+      ? {
+          auth: testAuth.service,
+          admin: { clients: new ClientService(new InMemoryClientRepository()) },
+        }
+      : {}),
   });
 
   // Hook de teste: define o cliente (como a autenticação fará) e loga depois de um await.
@@ -97,7 +99,12 @@ function buildHarness(options: { admin?: string; metricsToken?: string } = {}): 
     throw new BoomError();
   });
   app.get('/test/items/:id', () => ({ ok: true }));
-  return { app, capture, metrics };
+  return {
+    app,
+    capture,
+    metrics,
+    adminHeaders: async () => bearerHeader((await testAuth.platformToken()).accessToken),
+  };
 }
 
 function byRequestId(lines: readonly LogLine[], requestId: string): LogLine[] {
@@ -357,11 +364,12 @@ describe('request id', () => {
 });
 
 describe('log de requisição', () => {
-  const KEY = `k-${randomUUID()}-${randomUUID()}`;
   let h: Harness;
+  let admin: { authorization: string };
   before(async () => {
-    h = buildHarness({ admin: KEY });
+    h = buildHarness({ admin: true });
     await h.app.ready();
+    admin = await h.adminHeaders();
   });
   after(async () => {
     await h.app.close();
@@ -372,7 +380,7 @@ describe('log de requisição', () => {
     const response = await h.app.inject({
       method: 'GET',
       url: `/admin/clients/${id}`,
-      headers: { authorization: `Bearer ${KEY}`, 'x-request-id': 'req-route-0001' },
+      headers: { ...admin, 'x-request-id': 'req-route-0001' },
     });
     assert.equal(response.statusCode, 404);
     const line = endLine(h.capture.lines(), 'req-route-0001');
@@ -390,7 +398,7 @@ describe('log de requisição', () => {
     await h.app.inject({
       method: 'GET',
       url: '/admin/clients',
-      headers: { authorization: `Bearer ${KEY}`, 'x-request-id': 'req-list-00001' },
+      headers: { ...admin, 'x-request-id': 'req-list-00001' },
     });
     const line = endLine(h.capture.lines(), 'req-list-00001');
     assert.ok(line);
@@ -445,8 +453,6 @@ describe('log de requisição', () => {
 });
 
 describe('redação de segredos', () => {
-  const KEY = `k-${randomUUID()}-${randomUUID()}`;
-
   it('campos sensíveis saem como [Redacted], na raiz e aninhados', () => {
     const capture = captureLogs();
     const secrets = {
@@ -483,28 +489,26 @@ describe('redação de segredos', () => {
     assert.ok(!capture.raw().includes('segredo-'));
   });
 
-  it('a chave de admin usada numa requisição (certa ou errada) não aparece em nenhuma linha', async () => {
-    const h = buildHarness({ admin: KEY });
+  it('o token usado numa requisição (certo ou errado) não aparece em nenhuma linha', async () => {
+    const h = buildHarness({ admin: true });
     await h.app.ready();
+    const valid = await h.adminHeaders();
+    const token = valid.authorization.slice('Bearer '.length);
+    const forged = `${token.slice(0, -4)}AAAA`;
+    await h.app.inject({ method: 'GET', url: '/admin/clients', headers: valid });
     await h.app.inject({
       method: 'GET',
       url: '/admin/clients',
-      headers: { authorization: `Bearer ${KEY}` },
-    });
-    await h.app.inject({
-      method: 'GET',
-      url: '/admin/clients',
-      headers: { authorization: `Bearer ${KEY}-errada`, cookie: `sid=${KEY}` },
+      headers: { authorization: `Bearer ${forged}`, cookie: `sid=${token}` },
     });
     await h.app.inject({ method: 'GET', url: '/admin/clients' });
     await h.app.close();
 
     const raw = h.capture.raw();
     assert.ok(raw.length > 0);
-    assert.ok(!raw.includes(KEY), 'a chave apareceu no log');
-    const refused = h.capture
-      .lines()
-      .filter((line) => line.msg === 'acesso administrativo recusado');
+    assert.ok(!raw.includes(token), 'o token apareceu no log');
+    assert.ok(!raw.includes(forged), 'o token forjado apareceu no log');
+    const refused = h.capture.lines().filter((line) => line.msg === 'autenticação recusada');
     assert.equal(refused.length, 2);
     for (const line of refused) assert.equal(line.route, '/admin/clients');
   });
@@ -512,7 +516,6 @@ describe('redação de segredos', () => {
 
 describe('GET /metrics e métricas HTTP', () => {
   const TOKEN = `m-${randomUUID()}-${randomUUID()}`;
-  const KEY = `k-${randomUUID()}-${randomUUID()}`;
   const bearer = { authorization: `Bearer ${TOKEN}` };
 
   it('sem METRICS_TOKEN a rota não existe (404), com ou sem Authorization', async () => {
@@ -564,9 +567,9 @@ describe('GET /metrics e métricas HTTP', () => {
   });
 
   it('label route é o padrão (não o UUID) e "unmatched" para rota inexistente; /metrics não conta a si mesmo', async () => {
-    const h = buildHarness({ metricsToken: TOKEN, admin: KEY });
+    const h = buildHarness({ metricsToken: TOKEN, admin: true });
     await h.app.ready();
-    const admin = { authorization: `Bearer ${KEY}` };
+    const admin = await h.adminHeaders();
     await h.app.inject({ method: 'GET', url: `/admin/clients/${randomUUID()}`, headers: admin });
     await h.app.inject({ method: 'GET', url: `/admin/clients/${randomUUID()}`, headers: admin });
     await h.app.inject({ method: 'GET', url: '/rota/que/nao/existe/1' });
@@ -592,7 +595,7 @@ describe('GET /metrics e métricas HTTP', () => {
   });
 
   it('401 em /admin entra com o padrão da rota, não com a URL', async () => {
-    const h = buildHarness({ metricsToken: TOKEN, admin: KEY });
+    const h = buildHarness({ metricsToken: TOKEN, admin: true });
     await h.app.ready();
     await h.app.inject({ method: 'GET', url: `/admin/clients/${randomUUID()}` });
     const response = await h.app.inject({ method: 'GET', url: '/metrics', headers: bearer });

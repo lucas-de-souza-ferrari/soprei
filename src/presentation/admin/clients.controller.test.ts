@@ -4,11 +4,13 @@ import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import { ClientService } from '../../application/clients/client.service.js';
 import { buildTestServer } from '../../infrastructure/http/test-server.js';
+import { createLogger } from '../../infrastructure/logger/logger.js';
+import { bearer, buildTestAuth, type TestAuth } from '../../test-support/in-memory-auth.js';
 import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
 
-// Chaves descartáveis, só deste arquivo.
-const KEY = `test-${randomUUID()}-${randomUUID()}`;
-const auth = { authorization: `Bearer ${KEY}` };
+// Tokens emitidos por logins de verdade (autenticação em memória), só deste arquivo.
+const testAuth = buildTestAuth({ logger: createLogger({ NODE_ENV: 'test', LOG_LEVEL: 'silent' }) });
+let auth: { authorization: string };
 
 interface ClientBody {
   id: string;
@@ -24,19 +26,21 @@ interface ErrorBody {
   error: { code: string; message: string; details?: unknown[] };
 }
 
-function buildApp(apiKey: string | undefined): FastifyInstance {
-  return buildTestServer(undefined, {
-    apiKey,
-    clients: new ClientService(new InMemoryClientRepository()),
-  });
+function buildApp(source: TestAuth): FastifyInstance {
+  return buildTestServer(
+    undefined,
+    { clients: new ClientService(new InMemoryClientRepository()) },
+    { auth: source.service },
+  );
 }
 
 describe('rotas /admin/clients', () => {
   let app: FastifyInstance;
 
   before(async () => {
-    app = buildApp(KEY);
+    app = buildApp(testAuth);
     await app.ready();
+    auth = bearer((await testAuth.platformToken()).accessToken);
   });
   after(async () => {
     await app.close();
@@ -53,7 +57,7 @@ describe('rotas /admin/clients', () => {
     return response.json<ClientBody>();
   }
 
-  describe('CRUD com a chave', () => {
+  describe('CRUD com o token do administrador da plataforma', () => {
     it('POST cria (201) e devolve só campos seguros', async () => {
       const response = await app.inject({
         method: 'POST',
@@ -273,16 +277,16 @@ describe('rotas /admin/clients', () => {
       }
     });
 
-    it('com chave errada, esquema errado, prefixo parcial ou chave com sufixo: 401', async () => {
+    it('com token inválido, esquema errado ou Bearer malformado: 401 com WWW-Authenticate', async () => {
+      const valid = auth.authorization.slice('Bearer '.length);
       for (const authorization of [
-        'Bearer chave-errada',
-        `Bearer ${KEY}x`,
-        `Bearer ${KEY.slice(0, -1)}`,
-        `Basic ${KEY}`,
-        KEY,
+        'Bearer token-errado',
+        `Bearer ${valid}x`,
+        `Basic ${valid}`,
+        valid,
         'Bearer',
         'Bearer ',
-        `Bearer  ${KEY}`,
+        `Bearer  ${valid}`,
       ]) {
         const response = await app.inject({
           method: 'GET',
@@ -290,45 +294,37 @@ describe('rotas /admin/clients', () => {
           headers: { authorization },
         });
         assert.equal(response.statusCode, 401, authorization);
+        assert.equal(response.headers['www-authenticate'], 'Bearer');
       }
     });
 
-    it('a resposta 401 é igual com cabeçalho ausente e com chave errada (não revela qual)', async () => {
+    it('a resposta 401 é igual com cabeçalho ausente e com token errado (não revela qual)', async () => {
       const missing = await app.inject({ method: 'GET', url: '/admin/clients' });
       const wrong = await app.inject({
         method: 'GET',
         url: '/admin/clients',
-        headers: { authorization: 'Bearer errada' },
+        headers: { authorization: 'Bearer a.b.c' },
       });
       assert.equal(missing.json<ErrorBody>().error.message, wrong.json<ErrorBody>().error.message);
-      assert.ok(!missing.body.includes(KEY));
-      assert.ok(!wrong.body.includes(KEY));
+      assert.ok(!wrong.body.includes('a.b.c'));
     });
 
     it('aceita o esquema Bearer em qualquer caixa', async () => {
       const response = await app.inject({
         method: 'GET',
         url: '/admin/clients',
-        headers: { authorization: `bearer ${KEY}` },
+        headers: { authorization: `bearer ${auth.authorization.slice('Bearer '.length)}` },
       });
       assert.equal(response.statusCode, 200);
     });
 
-    it('ADMIN_API_KEY não configurada: 401 mesmo com cabeçalho Bearer, inclusive vazio', async () => {
-      for (const apiKey of [undefined, '']) {
-        const noKey = buildApp(apiKey);
-        try {
-          for (const authorization of [`Bearer ${KEY}`, 'Bearer undefined', 'Bearer ']) {
-            const response = await noKey.inject({
-              method: 'GET',
-              url: '/admin/clients',
-              headers: { authorization },
-            });
-            assert.equal(response.statusCode, 401, `${String(apiKey)} / ${authorization}`);
-          }
-        } finally {
-          await noKey.close();
-        }
+    it('token de User (de cliente) recebe 403 em todas as rotas /admin/clients', async () => {
+      const client = await testAuth.clients.create({ name: 'Cliente X', slug: 'cliente-x-403' });
+      const user = bearer((await testAuth.userToken(client.id)).accessToken);
+      for (const route of routes) {
+        const response = await app.inject({ ...route, headers: user });
+        assert.equal(response.statusCode, 403, `${route.method} ${route.url}`);
+        assert.equal(response.json<ErrorBody>().error.code, 'FORBIDDEN');
       }
     });
 

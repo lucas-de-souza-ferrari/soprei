@@ -2,9 +2,14 @@ import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
 import '../../../presentation/common/rate-limit.js';
-import { RateLimitError } from '../../../shared/errors/index.js';
+import {
+  BaseError,
+  RateLimitError,
+  ServiceUnavailableError,
+} from '../../../shared/errors/index.js';
 import {
   DEFAULT_RATE_LIMIT_PROFILE,
+  FAIL_CLOSED_RATE_LIMIT_PROFILES,
   isRateLimitProfile,
   RATE_LIMIT_PROFILES,
   type RateLimitProfile,
@@ -30,6 +35,10 @@ export type RateLimitProfileConfig = Pick<
   | 'RATE_LIMIT_ADMIN_WINDOW_SECONDS'
   | 'RATE_LIMIT_WEBHOOK_MAX'
   | 'RATE_LIMIT_WEBHOOK_WINDOW_SECONDS'
+  | 'RATE_LIMIT_LOGIN_MAX'
+  | 'RATE_LIMIT_LOGIN_WINDOW_SECONDS'
+  | 'RATE_LIMIT_REFRESH_MAX'
+  | 'RATE_LIMIT_REFRESH_WINDOW_SECONDS'
 >;
 
 /** Números de cada perfil, lidos da config (os perfis em si são só nomeados pelas rotas). */
@@ -46,6 +55,14 @@ export function rateLimitProfilesFromConfig(config: RateLimitProfileConfig): Rat
     webhook: {
       max: config.RATE_LIMIT_WEBHOOK_MAX,
       windowSeconds: config.RATE_LIMIT_WEBHOOK_WINDOW_SECONDS,
+    },
+    login: {
+      max: config.RATE_LIMIT_LOGIN_MAX,
+      windowSeconds: config.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+    },
+    refresh: {
+      max: config.RATE_LIMIT_REFRESH_MAX,
+      windowSeconds: config.RATE_LIMIT_REFRESH_WINDOW_SECONDS,
     },
   };
 }
@@ -84,14 +101,17 @@ export function rateLimitKey(request: FastifyRequest): string {
  *
  * - **Hook `onRequest` da instância raiz**, não o hook por rota do plugin (`global: true`): o
  *   hook da raiz roda antes de qualquer hook de plugin filho, como o de autenticação de
- *   `/admin` (`app.addHook('onRequest', adminAuthHook(...))` no controller). Com o hook por rota
- *   o limite rodaria DEPOIS da autenticação e tentativa de adivinhar a `ADMIN_API_KEY` recebia
+ *   `/admin` (`app.addHook('onRequest', authenticateHook(...))` no controller). Com o hook por rota
+ *   o limite rodaria DEPOIS da autenticação e tentativa de adivinhar credenciais recebia
  *   401 sem nunca esbarrar no 429 (o teste de integração pegou isso). Vale também para a 011
  *   (assinatura do webhook) e a 007 (JWT): o limiter é sempre o primeiro, antes de ler corpo;
  * - toda rota é limitada: sem perfil cai em `public`; opt-out só com `config: { rateLimit: false }`
  *   (`/health`, `/health/ready`, `/metrics`) e o 404 de rota inexistente não conta;
  * - store Redis (script atômico do plugin: INCR + PEXPIRE, sempre com TTL);
  * - `skipOnError: true`: Redis fora é fail-open, com log `error` e `rate_limit_store_errors_total`.
+ *   Exceção (spec 007): os perfis `login` e `refresh` são **fail-closed**: com o store fora a rota
+ *   responde 503 (`ServiceUnavailableError`) sem chegar ao handler (nada de senha verificada nem
+ *   token emitido sem limite). O plugin aceita `skipOnError` por chamada de `app.rateLimit(...)`.
  */
 export function registerRateLimit(
   app: FastifyInstance,
@@ -112,7 +132,7 @@ export function registerRateLimit(
     // Nunca `{ err }`: o ioredis anexa `command.args` (a chave, com o IP) ao erro e o Pino o copiaria.
     app.log.error(
       describeRedisError(err),
-      'rate limit: falha no Redis, requisição liberada (fail-open)',
+      'rate limit: falha no Redis (fail-open; os perfis de autenticação são fail-closed)',
     );
     try {
       metrics?.countRateLimitStoreError();
@@ -148,10 +168,25 @@ export function registerRateLimit(
   // subiria SEM limite; sem o parâmetro, o callback ainda roda e estoura fora do `ready`. Assim, se o
   // registro do plugin falhar, `app.ready()` rejeita com o erro original e o boot cai.
   let limit: ReturnType<FastifyInstance['rateLimit']> | undefined;
+  let strictLimit: ReturnType<FastifyInstance['rateLimit']> | undefined;
   app.addHook('onRequest', async function rateLimitHook(request, reply) {
     // 404 não tem perfil (e o plugin também não o cobriria); `rateLimit: false` é o opt-out.
     if (request.is404 || request.routeOptions.config.rateLimit === false) return;
-    limit ??= app.rateLimit();
-    await limit.call(app, request, reply);
+    if (!FAIL_CLOSED_RATE_LIMIT_PROFILES.includes(profileOf(request))) {
+      limit ??= app.rateLimit();
+      await limit.call(app, request, reply);
+      return;
+    }
+    strictLimit ??= app.rateLimit({ skipOnError: false });
+    try {
+      await strictLimit.call(app, request, reply);
+    } catch (error) {
+      // O 429 (RateLimitError do `errorResponseBuilder`) segue; qualquer outra falha é o store.
+      if (error instanceof BaseError) throw error;
+      request.log.error(
+        'rate limit: store fora, requisição de autenticação recusada (fail-closed)',
+      );
+      throw new ServiceUnavailableError('Serviço temporariamente indisponível');
+    }
   });
 }

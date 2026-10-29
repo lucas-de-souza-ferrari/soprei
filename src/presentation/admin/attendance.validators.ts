@@ -3,9 +3,6 @@ import { isUuid } from '../../shared/utils/index.js';
 import { inboundMessageSchema } from '../../application/attendance/attendance.schemas.js';
 import { clientIdSchema, listClientsQuerySchema } from './client.validators.js';
 
-/** `:clientId` vira `ClientId`; inválido é 400. */
-export const clientScopeParamsSchema = z.object({ clientId: clientIdSchema });
-
 /** `:conversationId` precisa ser um UUID; inválido é 400 (de outro cliente: 404, no service). */
 export const conversationParamsSchema = z.object({
   clientId: clientIdSchema,

@@ -1,19 +1,20 @@
 import type { FastifyPluginCallback } from 'fastify';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { Conversation, ListOptions, Message } from '../../domain/index.js';
-import { setClientId } from '../../shared/request-context/index.js';
+import type { AuthService } from '../../application/auth/auth.service.js';
+import type { Metrics } from '../../infrastructure/metrics/index.js';
+import { authenticateHook, requireUser, userAuth } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
-import { adminAuthHook } from './admin-auth.hook.js';
 import {
-  clientScopeParamsSchema,
   conversationParamsSchema,
   inboundMessageBodySchema,
   listQuerySchema,
 } from './attendance.validators.js';
 
 export interface AdminAttendanceControllerOptions {
-  /** `ADMIN_API_KEY`; ausente significa que toda requisição a /admin recebe 401. */
-  readonly apiKey: string | undefined;
+  /** Verificação do access token (spec 007). */
+  readonly auth: Pick<AuthService, 'authenticate'>;
+  readonly metrics?: Pick<Metrics, 'countAuthTokenRejection'> | undefined;
   readonly attendance: AttendanceService;
 }
 
@@ -65,43 +66,48 @@ function toListOptions(query: {
 }
 
 /**
- * Simulador do canal e consulta de conversas (spec 010), sob `ADMIN_API_KEY`. Registre com
- * `prefix: '/admin/clients'`. Rotas finas: validam com Zod, preenchem o `clientId` do contexto
- * de log (vem do path validado, nunca de corpo ou cabeçalho), chamam o service e deixam o erro
- * subir ao handler central. O conteúdo das mensagens só trafega na resposta; nunca vai a log.
+ * Simulador do canal e consulta de conversas (spec 010), só para `User` (spec 007). Registre com
+ * `prefix: '/admin/clients'`. O `:clientId` do caminho é **conferido** contra o do token assinado
+ * (`requireUser({ clientParam })`: divergência é 404, igual a cliente inexistente) e descartado; o
+ * service sempre recebe o `clientId` do token. Rotas finas: validam com Zod, chamam o service e
+ * deixam o erro subir ao handler central. O conteúdo das mensagens só trafega na resposta; nunca
+ * vai a log.
  */
 export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceControllerOptions> = (
   app,
-  { apiKey, attendance },
+  { auth, metrics, attendance },
   done,
 ) => {
-  app.addHook('onRequest', adminAuthHook(apiKey));
+  app.addHook('onRequest', authenticateHook({ auth, metrics }));
   // Rate limit por perfil (spec 005): todas as rotas daqui são `admin`.
   const config = rateLimitProfile('admin');
+  const onRequest = requireUser({ clientParam: 'clientId' });
 
-  app.post('/:clientId/messages', { config }, async (request, reply) => {
-    const { clientId } = clientScopeParamsSchema.parse(request.params);
-    setClientId(clientId);
+  app.post('/:clientId/messages', { config, onRequest }, async (request, reply) => {
+    const { clientId } = userAuth(request);
     const body = inboundMessageBodySchema.parse(request.body);
     const result = await attendance.handleInboundMessage(clientId, body);
     return reply.status(result.duplicate ? 200 : 201).send(result);
   });
 
-  app.get('/:clientId/conversations', { config }, async (request) => {
-    const { clientId } = clientScopeParamsSchema.parse(request.params);
-    setClientId(clientId);
+  app.get('/:clientId/conversations', { config, onRequest }, async (request) => {
+    const { clientId } = userAuth(request);
     const query = listQuerySchema.parse(request.query);
     const page = await attendance.listConversations(clientId, toListOptions(query));
     return { items: page.items.map(toConversationResponse), nextCursor: page.nextCursor };
   });
 
-  app.get('/:clientId/conversations/:conversationId/messages', { config }, async (request) => {
-    const { clientId, conversationId } = conversationParamsSchema.parse(request.params);
-    setClientId(clientId);
-    const query = listQuerySchema.parse(request.query);
-    const page = await attendance.listMessages(clientId, conversationId, toListOptions(query));
-    return { items: page.items.map(toMessageResponse), nextCursor: page.nextCursor };
-  });
+  app.get(
+    '/:clientId/conversations/:conversationId/messages',
+    { config, onRequest },
+    async (request) => {
+      const { conversationId } = conversationParamsSchema.parse(request.params);
+      const { clientId } = userAuth(request);
+      const query = listQuerySchema.parse(request.query);
+      const page = await attendance.listMessages(clientId, conversationId, toListOptions(query));
+      return { items: page.items.map(toMessageResponse), nextCursor: page.nextCursor };
+    },
+  );
 
   done();
 };

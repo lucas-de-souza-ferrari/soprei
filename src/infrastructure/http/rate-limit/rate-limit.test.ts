@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import type { Redis } from 'ioredis';
 import { AttendanceService } from '../../../application/attendance/attendance.service.js';
 import { ClientService } from '../../../application/clients/client.service.js';
 import { Result } from '../../../shared/types/index.js';
 import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
+import { REQUIRED_AUTH_KIND } from '../../../presentation/common/auth.hooks.js';
 import { rateLimitProfile } from '../../../presentation/common/rate-limit.js';
+import { buildTestAuth } from '../../../test-support/in-memory-auth.js';
 import { captureLogs, type LogLine } from '../../../test-support/log-capture.js';
 import { InMemoryAttendanceStore } from '../../../test-support/in-memory-attendance.js';
 import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
@@ -31,6 +32,8 @@ const PROFILES: RateLimitProfiles = {
   public: { max: 1, windowSeconds: 60 },
   admin: { max: 1, windowSeconds: 60 },
   webhook: { max: 1, windowSeconds: 60 },
+  login: { max: 1, windowSeconds: 60 },
+  refresh: { max: 1, windowSeconds: 60 },
 };
 
 describe('sem o parâmetro rateLimit', () => {
@@ -68,8 +71,8 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         verifyToken: 'v'.repeat(32),
         intake: { accept: () => Promise.resolve({ enqueued: 0, discarded: 0, failed: 0 }) },
       },
+      auth: buildTestAuth({ logger, clients }).service,
       admin: {
-        apiKey: randomUUID(),
         clients: new ClientService(clients),
         attendance: new AttendanceService({
           clients,
@@ -82,13 +85,22 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         }),
       },
     });
-    const routes: { url: string; method: string | string[]; config: Record<string, unknown> }[] =
-      [];
+    const routes: {
+      url: string;
+      method: string | string[];
+      config: Record<string, unknown>;
+      authKinds: unknown[];
+    }[] = [];
     app.addHook('onRoute', (route) => {
+      const hooks: unknown = route.onRequest;
+      const list: unknown[] = Array.isArray(hooks) ? hooks : hooks === undefined ? [] : [hooks];
       routes.push({
         url: route.url,
         method: route.method,
         config: { ...(route.config as Record<string, unknown> | undefined) },
+        authKinds: list.map(
+          (hook) => (hook as Record<symbol, unknown> | undefined)?.[REQUIRED_AUTH_KIND],
+        ),
       });
     });
     await app.ready();
@@ -101,6 +113,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/health/ready',
       '/metrics',
       '/admin/clients',
+      '/auth/login',
+      '/auth/platform/login',
+      '/auth/refresh',
+      '/auth/logout',
+      '/auth/logout-all',
+      '/auth/me',
       '/webhooks/whatsapp',
     ]) {
       assert.ok(
@@ -131,6 +149,23 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         );
       } else if (route.url.startsWith('/admin/')) {
         assert.equal(route.config.rateLimitProfile, 'admin', `${label} deve ser do perfil admin`);
+        // Spec 007: toda rota /admin declara a espécie de identidade que exige. CRUD de clientes
+        // é do administrador da plataforma; as rotas de um cliente (`:clientId`) são do usuário.
+        const expected = route.url.startsWith('/admin/clients/:clientId') ? 'user' : 'platform';
+        assert.ok(
+          route.authKinds.includes(expected),
+          `${label} deve declarar ${expected === 'user' ? 'requireUser()' : 'requirePlatform()'}`,
+        );
+      } else if (route.url.startsWith('/auth/')) {
+        const expected: Record<string, string> = {
+          '/auth/login': 'login',
+          '/auth/platform/login': 'login',
+          '/auth/refresh': 'refresh',
+          '/auth/logout': 'refresh',
+          '/auth/logout-all': 'admin',
+          '/auth/me': 'admin',
+        };
+        assert.equal(route.config.rateLimitProfile, expected[route.url], `${label} perfil`);
       } else {
         assert.ok(
           isRateLimitProfile(route.config.rateLimitProfile),
@@ -165,11 +200,17 @@ describe('registerRateLimit', () => {
         RATE_LIMIT_ADMIN_WINDOW_SECONDS: 4,
         RATE_LIMIT_WEBHOOK_MAX: 5,
         RATE_LIMIT_WEBHOOK_WINDOW_SECONDS: 6,
+        RATE_LIMIT_LOGIN_MAX: 7,
+        RATE_LIMIT_LOGIN_WINDOW_SECONDS: 8,
+        RATE_LIMIT_REFRESH_MAX: 9,
+        RATE_LIMIT_REFRESH_WINDOW_SECONDS: 10,
       }),
       {
         public: { max: 1, windowSeconds: 2 },
         admin: { max: 3, windowSeconds: 4 },
         webhook: { max: 5, windowSeconds: 6 },
+        login: { max: 7, windowSeconds: 8 },
+        refresh: { max: 9, windowSeconds: 10 },
       },
     );
   });

@@ -2,6 +2,8 @@ import { AttendanceService } from './application/attendance/attendance.service.j
 import { ChannelInboundProcessor } from './application/channel/channel-inbound.processor.js';
 import { ChannelIntakeService } from './application/channel/channel-intake.service.js';
 import { ClientService } from './application/clients/client.service.js';
+import { createAuthRedis } from './infrastructure/auth/auth-redis.js';
+import { createAuthComponents } from './infrastructure/auth/create-auth.js';
 import { createRateLimitRedis } from './infrastructure/cache/rate-limit-redis.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
 import {
@@ -34,6 +36,8 @@ import { createInboundQueue } from './infrastructure/queue/inbound-queue.js';
 
 /** Espera da conexão Redis do rate limit no boot; passou disso, segue em fail-open com `warn`. */
 const RATE_LIMIT_READY_TIMEOUT_MS = 2_000;
+/** Espera da conexão Redis das sessões no boot; passou disso, as rotas autenticadas respondem 503 até subir. */
+const AUTH_REDIS_READY_TIMEOUT_MS = 2_000;
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -52,6 +56,8 @@ async function main(): Promise<void> {
           metrics,
         });
 
+  // Conexão própria das sessões (spec 007): fail-closed, sem fila offline e com prazo curto.
+  const authRedis = createAuthRedis(config, logger);
   const infrastructure: Infrastructure = {
     database: getDatabase({
       config,
@@ -63,6 +69,7 @@ async function main(): Promise<void> {
     redis: getRedis({ config, logger }),
     // Conexão própria do limiter (spec 005), com fila offline desligada e prazo curto por comando.
     rateLimitRedis: config.RATE_LIMIT_ENABLED ? createRateLimitRedis(config, logger) : undefined,
+    authRedis,
     inboundQueue,
   };
 
@@ -85,6 +92,10 @@ async function main(): Promise<void> {
     // (com log e métrica por requisição) até a conexão dedicada subir.
     logger.warn('conexão Redis do rate limit ainda não está pronta; seguindo em fail-open');
   }
+  if (!(await authRedis.waitUntilReady(AUTH_REDIS_READY_TIMEOUT_MS))) {
+    // Fail-closed: até a conexão subir, login, refresh e rotas autenticadas respondem 503.
+    logger.warn('conexão Redis de autenticação ainda não está pronta; rotas autenticadas em 503');
+  }
   if (config.TRUST_PROXY === true) {
     logger.warn(
       'TRUST_PROXY=true confia em toda a cadeia X-Forwarded-For (o cliente escolhe o IP); use só em ambiente fechado',
@@ -93,6 +104,13 @@ async function main(): Promise<void> {
 
   const { prisma } = infrastructure.database;
   const clientRepository = new PrismaClientRepository(prisma);
+  const auth = createAuthComponents({
+    config,
+    logger,
+    prisma,
+    authRedis,
+    metrics,
+  });
   const attendance = new AttendanceService({
     clients: clientRepository,
     conversations: new PrismaConversationRepository(prisma),
@@ -155,6 +173,7 @@ async function main(): Promise<void> {
     logger,
     metrics,
     metricsToken: config.METRICS_TOKEN,
+    auth: auth.service,
     trustProxy: config.TRUST_PROXY,
     ...(rateLimitRedis === undefined
       ? {}
@@ -170,7 +189,6 @@ async function main(): Promise<void> {
       redis: () => infrastructure.redis.check(),
     },
     admin: {
-      apiKey: config.ADMIN_API_KEY,
       clients: new ClientService(clientRepository),
       attendance,
     },

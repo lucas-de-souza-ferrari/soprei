@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { ClientService } from '../../application/clients/client.service.js';
 import { Result } from '../../shared/types/index.js';
+import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { createDatabase, PrismaClientRepository, type Database } from '../database/index.js';
@@ -12,9 +13,8 @@ import { buildServer } from './server.js';
 
 const config = loadIntegrationConfig();
 const logger = createLogger(config);
-// Chave descartável, só deste arquivo (e só na memória do processo de teste).
-const KEY = `it-${randomUUID()}-${randomUUID()}`;
-const auth = { authorization: `Bearer ${KEY}` };
+// Token de um `PlatformAdmin` de teste (login em memória, só na memória do processo de teste).
+let auth: { authorization: string };
 
 interface ClientBody {
   id: string;
@@ -32,14 +32,16 @@ const slug = (label: string): string => `${label}-${randomBytes(6).toString('hex
 before(async () => {
   database = createDatabase(config, logger);
   tenants = new TestTenants(database.prisma);
+  const testAuth = buildTestAuth({ logger });
+  auth = bearer((await testAuth.platformToken()).accessToken);
   app = buildServer({
     logger,
     readiness: {
       database: () => database.check(),
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
+    auth: testAuth.service,
     admin: {
-      apiKey: KEY,
       clients: new ClientService(new PrismaClientRepository(database.prisma)),
     },
   });

@@ -57,7 +57,7 @@ describe('boot da aplicação (sem infraestrutura)', () => {
     const [dbPort, redisPort] = [await getClosedPort(), await getClosedPort()];
     const { status, output } = boot({
       NODE_ENV: 'production',
-      ADMIN_API_KEY: 'k'.repeat(32),
+      JWT_SECRET: 'k'.repeat(32),
       DATABASE_URL: `postgresql://u:p@127.0.0.1:${String(dbPort)}/db`,
       REDIS_URL: `redis://127.0.0.1:${String(redisPort)}/0`,
       DB_POOL_CONNECTION_TIMEOUT_MS: '1000',
@@ -66,27 +66,34 @@ describe('boot da aplicação (sem infraestrutura)', () => {
     assert.match(output, /dependência indisponível no boot: PostgreSQL, Redis/);
   });
 
-  describe('ADMIN_API_KEY em produção', () => {
+  describe('JWT_SECRET (spec 007)', () => {
     const infra = {
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://u:p@127.0.0.1:1/db',
       REDIS_URL: 'redis://127.0.0.1:1/0',
     };
 
-    it('sem a chave, não sobe: código 1 e mensagem clara, antes de tocar na infraestrutura', () => {
+    it('sem o segredo, não sobe: código 1 e mensagem clara, antes de tocar na infraestrutura', () => {
       const { status, output } = boot(infra);
       assert.equal(status, 1);
       assert.match(output, /Configuração inválida/);
-      assert.match(output, /ADMIN_API_KEY: obrigatória em produção, com no mínimo 32 caracteres/);
+      assert.match(output, /JWT_SECRET: variável obrigatória ausente/);
       assert.doesNotMatch(output, /dependência indisponível/);
     });
 
-    it('com chave curta, também não sobe e não ecoa o valor', () => {
-      const short = 'chave-curta-demais';
-      const { status, output } = boot({ ...infra, ADMIN_API_KEY: short });
+    it('com segredo curto, também não sobe e não ecoa o valor', () => {
+      const short = 'segredo-curto-demais';
+      const { status, output } = boot({ ...infra, JWT_SECRET: short });
       assert.equal(status, 1);
-      assert.match(output, /ADMIN_API_KEY/);
+      assert.match(output, /JWT_SECRET/);
       assert.ok(!output.includes(short));
+    });
+
+    it('ADMIN_API_KEY no ambiente não é mais exigida nem muda nada (é ignorada)', () => {
+      const { status, output } = boot({ ...infra, JWT_SECRET: 'k'.repeat(32), ADMIN_API_KEY: '' });
+      assert.equal(status, 1);
+      assert.doesNotMatch(output, /ADMIN_API_KEY/);
+      assert.match(output, /dependência indisponível/);
     });
   });
 });

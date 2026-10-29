@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { Database } from './database/index.js';
+import type { AuthRedisHandle } from './auth/auth-redis.js';
 import type { RateLimitRedisHandle } from './cache/rate-limit-redis.js';
 import type { RedisHandle } from './cache/redis.client.js';
 import type { InboundQueueHandle } from './queue/inbound-queue.js';
@@ -9,6 +10,8 @@ export interface Infrastructure {
   readonly redis: RedisHandle;
   /** Conexão Redis dedicada ao rate limit (spec 005); ausente com `RATE_LIMIT_ENABLED=false`. */
   readonly rateLimitRedis?: RateLimitRedisHandle | undefined;
+  /** Conexão Redis dedicada às sessões (spec 007); opcional só nos testes de ciclo de vida. */
+  readonly authRedis?: AuthRedisHandle | undefined;
   /** Fila de entrada do canal e seu worker (spec 011); ausente com `WHATSAPP_ENABLED=false`. */
   readonly inboundQueue?: Pick<InboundQueueHandle, 'close'> | undefined;
 }
@@ -42,7 +45,7 @@ export async function verifyInfrastructure(
  * ativo ainda usa o banco e o Redis. Um recurso que falha ao fechar não impede os outros.
  */
 export async function closeInfrastructure(
-  { database, redis, rateLimitRedis, inboundQueue }: Infrastructure,
+  { database, redis, rateLimitRedis, authRedis, inboundQueue }: Infrastructure,
   logger: FastifyBaseLogger,
 ): Promise<void> {
   if (inboundQueue !== undefined) {
@@ -59,6 +62,7 @@ export async function closeInfrastructure(
     database.close(),
     redis.close(),
     rateLimitRedis?.close(),
+    authRedis?.close(),
   ]);
   for (const result of results) {
     if (result.status === 'rejected') {

@@ -12,6 +12,8 @@ import { InMemoryClientRepository } from '../../test-support/in-memory-client.re
 import { captureLogs } from '../../test-support/log-capture.js';
 import { AnthropicLlmProvider } from '../external-apis/llm/anthropic-llm.provider.js';
 import { createMetrics } from '../metrics/index.js';
+import { ClientId } from '../../domain/index.js';
+import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
 import { buildServer } from './server.js';
 
 /**
@@ -19,10 +21,10 @@ import { buildServer } from './server.js';
  * AnthropicLlmProvider (SDK real) -> servidor falso local. Nunca chama a API de verdade.
  */
 
-const ADMIN_KEY = `test-${randomUUID()}-${randomUUID()}`;
 const METRICS_TOKEN = `metrics-${randomUUID()}-${randomUUID()}`;
 const API_KEY = `chave-falsa-${randomUUID()}`;
-const auth = { authorization: `Bearer ${ADMIN_KEY}` };
+let auth: { authorization: string };
+let userAuth: { authorization: string };
 
 const SECRET_PERSONA = 'PERSONA-SECRETA-0a1b2c';
 const SECRET_HISTORY = 'HISTORICO-SECRETO-3d4e5f';
@@ -43,6 +45,7 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
   const clients = new InMemoryClientRepository();
   const store = new InMemoryAttendanceStore(() => new Date());
   const metrics = createMetrics();
+  const testAuth = buildTestAuth({ logger: logs.logger, clients });
   app = buildServer({
     logger: logs.logger,
     metrics,
@@ -51,8 +54,8 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
       database: () => Promise.resolve(Result.ok(undefined)),
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
+    auth: testAuth.service,
     admin: {
-      apiKey: ADMIN_KEY,
       clients: new ClientService(clients),
       attendance: new AttendanceService({
         clients,
@@ -75,6 +78,7 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
     },
   });
   await app.ready();
+  auth = bearer((await testAuth.platformToken()).accessToken);
   const created = await app.inject({
     method: 'POST',
     url: '/admin/clients',
@@ -82,6 +86,7 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
     payload: { name: 'Empresa Teste', slug: 'empresa-014' },
   });
   clientId = created.json<{ id: string }>().id;
+  userAuth = bearer((await testAuth.userToken(ClientId.parse(clientId))).accessToken);
   const patched = await app.inject({
     method: 'PATCH',
     url: `/admin/clients/${clientId}`,
@@ -95,7 +100,7 @@ const send = (text: string, contactRef = 'c1') =>
   app.inject({
     method: 'POST',
     url: `/admin/clients/${clientId}/messages`,
-    headers: auth,
+    headers: userAuth,
     payload: { contactRef, text },
   });
 
