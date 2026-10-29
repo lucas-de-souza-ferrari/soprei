@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   type Client,
@@ -80,6 +80,17 @@ export interface AuthServiceDeps {
   readonly sessions: SessionStore;
   readonly logger: FastifyBaseLogger;
   readonly metrics?: AuthMetrics | undefined;
+  /**
+   * Chave do HMAC do contador de falhas de login (derivada do `JWT_SECRET` com rótulo fixo, ver
+   * `deriveLoginLockSecret`). O e-mail é dado pessoal de baixa entropia: um SHA-256 simples da
+   * chave do Redis permitiria testar candidatos offline; com o HMAC isso exige o segredo.
+   */
+  readonly loginLockSecret: string | Buffer;
+}
+
+/** Chave do HMAC do contador de login: HMAC do segredo do JWT com um rótulo fixo (separação de domínio). */
+export function deriveLoginLockSecret(jwtSecret: string): Buffer {
+  return createHmac('sha256', jwtSecret).update('soprei:auth:login-lock:v1').digest();
 }
 
 const REFRESH_SECRET_PATTERN = /^[A-Za-z0-9_-]{64}$/;
@@ -110,8 +121,8 @@ function sha256Hex(value: string): string {
  * `ClientId`": vale antes de existir `ClientId` e também para contas inexistentes). Só o hash sai
  * daqui; o prefixo `c`/`p` impede colisão entre um cliente de slug `platform` e o administrador.
  */
-function loginLockKey(parts: readonly string[]): string {
-  return sha256Hex(parts.join('\u0000'));
+function loginLockKey(secret: string | Buffer, parts: readonly string[]): string {
+  return createHmac('sha256', secret).update(parts.join('\u0000')).digest('hex');
 }
 
 interface LoginAccount {
@@ -134,8 +145,10 @@ export class AuthService {
   private readonly sessions: SessionStore;
   private readonly logger: FastifyBaseLogger;
   private readonly metrics: AuthMetrics | undefined;
+  private readonly loginLockSecret: string | Buffer;
 
   constructor(deps: AuthServiceDeps) {
+    this.loginLockSecret = deps.loginLockSecret;
     this.clients = deps.clients;
     this.users = deps.users;
     this.platformAdmins = deps.platformAdmins;
@@ -154,7 +167,7 @@ export class AuthService {
   }): Promise<Result<AuthTokens, LoginFailure>> {
     return this.loginFlow(
       'user',
-      loginLockKey(['c', input.clientSlug, input.email]),
+      loginLockKey(this.loginLockSecret, ['c', input.clientSlug, input.email]),
       input.password,
       async () => {
         const client = await this.findClient(input.clientSlug);
@@ -183,7 +196,7 @@ export class AuthService {
   }): Promise<Result<AuthTokens, LoginFailure>> {
     return this.loginFlow(
       'platform',
-      loginLockKey(['p', input.email]),
+      loginLockKey(this.loginLockSecret, ['p', input.email]),
       input.password,
       async () => {
         const found = await this.platformAdmins.findCredentialsByEmail(input.email);

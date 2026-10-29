@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
-import { AuthService } from '../../application/auth/auth.service.js';
+import { AuthService, deriveLoginLockSecret } from '../../application/auth/auth.service.js';
 import type { PlatformAdminRepository, UserRepository } from '../../domain/index.js';
 import type { Config } from '../config/index.js';
 import {
@@ -75,6 +75,20 @@ export function createAuthComponents(params: {
     sessions,
     logger,
     metrics,
+    loginLockSecret: deriveLoginLockSecret(config.JWT_SECRET),
   });
   return { service, hasher, sessions, users, platformAdmins };
+}
+
+/**
+ * Pré-aquece o hash fictício do login (`dummyHash` é preguiçoso): sem isto, a primeira consulta de
+ * conta inexistente depois do boot pagaria dois hashes e seria distinguível. Falha é ignorada (o
+ * hash é refeito na primeira necessidade).
+ */
+export async function warmUpAuth(components: Pick<AuthComponents, 'hasher'>): Promise<void> {
+  try {
+    await components.hasher.dummyHash();
+  } catch {
+    // Melhor esforço.
+  }
 }

@@ -3,7 +3,7 @@ import { ChannelInboundProcessor } from './application/channel/channel-inbound.p
 import { ChannelIntakeService } from './application/channel/channel-intake.service.js';
 import { ClientService } from './application/clients/client.service.js';
 import { createAuthRedis } from './infrastructure/auth/auth-redis.js';
-import { createAuthComponents } from './infrastructure/auth/create-auth.js';
+import { createAuthComponents, warmUpAuth } from './infrastructure/auth/create-auth.js';
 import { createRateLimitRedis } from './infrastructure/cache/rate-limit-redis.js';
 import { getRedis } from './infrastructure/cache/redis.client.js';
 import {
@@ -111,6 +111,7 @@ async function main(): Promise<void> {
     authRedis,
     metrics,
   });
+  await warmUpAuth(auth);
   const attendance = new AttendanceService({
     clients: clientRepository,
     conversations: new PrismaConversationRepository(prisma),

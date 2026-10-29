@@ -11,7 +11,8 @@ import {
   TEST_PASSWORD,
 } from '../../test-support/in-memory-auth.js';
 import { captureLogs, type LogCapture } from '../../test-support/log-capture.js';
-import { parseRefreshToken } from './auth.service.js';
+import { createHash, createHmac } from 'node:crypto';
+import { deriveLoginLockSecret, parseRefreshToken } from './auth.service.js';
 
 let clock = Date.UTC(2026, 5, 1, 12, 0, 0);
 const now = (): Date => new Date(clock);
@@ -588,5 +589,48 @@ describe('AuthService: privacidade dos logs', () => {
       'cliente-a',
     ];
     for (const secret of secrets) assert.ok(!raw.includes(secret), `vazou: ${secret.slice(0, 12)}`);
+  });
+});
+
+describe('AuthService: chave do contador de falhas de login', () => {
+  it('é um HMAC com chave derivada do JWT_SECRET (não um SHA-256 simples de slug + e-mail)', async () => {
+    const seen: string[] = [];
+    class Spy extends InMemorySessionStore {
+      override loginLockState(key: string) {
+        seen.push(key);
+        return super.loginLockState(key);
+      }
+    }
+    const logs = captureLogs();
+    const auth = buildTestAuth({ logger: logs.logger, sessions: new Spy() });
+    await auth.clients.create({ name: 'A', slug: 'cliente-a' });
+    await auth.service.login({
+      clientSlug: 'cliente-a',
+      email: SECRET_EMAIL,
+      password: TEST_PASSWORD,
+    });
+    await auth.service.loginPlatform({ email: SECRET_EMAIL, password: TEST_PASSWORD });
+    assert.equal(seen.length, 2);
+
+    const plain = createHash('sha256')
+      .update(['c', 'cliente-a', SECRET_EMAIL].join(' '))
+      .digest('hex');
+    const secret = deriveLoginLockSecret('segredo-de-teste-com-mais-de-32-caracteres-0123456789');
+    const expected = createHmac('sha256', secret)
+      .update(['c', 'cliente-a', SECRET_EMAIL].join(' '))
+      .digest('hex');
+    assert.match(seen[0] ?? '', /^[0-9a-f]{64}$/);
+    assert.notEqual(seen[0], plain, 'não é o SHA-256 simples');
+    assert.equal(seen[0], expected);
+    // Outro segredo de JWT produz outra chave (a chave depende do segredo); plataforma != cliente.
+    const other = createHmac(
+      'sha256',
+      deriveLoginLockSecret('outro-segredo-completamente-diferente-0000'),
+    )
+      .update(['c', 'cliente-a', SECRET_EMAIL].join(' '))
+      .digest('hex');
+    assert.notEqual(other, expected);
+    assert.notEqual(seen[1], seen[0]);
+    assert.notEqual(deriveLoginLockSecret('a'.repeat(32)).toString('hex'), 'a'.repeat(32));
   });
 });

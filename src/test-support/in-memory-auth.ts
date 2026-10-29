@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
-import { AuthService } from '../application/auth/auth.service.js';
+import { AuthService, deriveLoginLockSecret } from '../application/auth/auth.service.js';
 import type { PasswordHasher } from '../application/ports/password-hasher.js';
 import type {
   AccessCheck,
@@ -380,6 +380,7 @@ export function buildTestAuth(options: TestAuthOptions) {
     sessions,
     logger: options.logger,
     metrics: options.metrics,
+    loginLockSecret: deriveLoginLockSecret(TEST_JWT_SECRET),
   });
 
   async function userToken(
