@@ -185,60 +185,60 @@ Não há rota HTTP para criar usuário ou administrador nesta spec (a CRUD de us
 Cada item tem teste automatizado. Unitários com `SessionStore` em memória e hasher de custo baixo; integração em Redis `/15` (prefixo único por teste, só se remove o que o teste criou) e `soprei_test`.
 
 **Modelos e isolamento**
-- [ ] Migration cria `users` e `platform_admins`; `MODEL_SCOPES` classifica `User` (tenant) e `PlatformAdmin` (global) e o teste de cobertura passa.
-- [ ] Teste de isolamento do `UserRepository` (no molde de `conversation.repository.integration.test.ts`): o cliente A não encontra, lista, conta, atualiza nem remove usuário do cliente B (`NotFoundError`); `findCredentialsByEmail(A, emailDeB)` devolve `null`; **o mesmo e-mail existe nos dois clientes sem conflito** e repetir no mesmo cliente é `ConflictError`; consulta de `User` sem `clientId` lança `TenantScopeError`.
-- [ ] Teste: o `passwordHash` nunca aparece em entidade, resposta HTTP, log nem erro.
+- [x] Migration cria `users` e `platform_admins`; `MODEL_SCOPES` classifica `User` (tenant) e `PlatformAdmin` (global) e o teste de cobertura passa.
+- [x] Teste de isolamento do `UserRepository` (no molde de `conversation.repository.integration.test.ts`): o cliente A não encontra, lista, conta, atualiza nem remove usuário do cliente B (`NotFoundError`); `findCredentialsByEmail(A, emailDeB)` devolve `null`; **o mesmo e-mail existe nos dois clientes sem conflito** e repetir no mesmo cliente é `ConflictError`; consulta de `User` sem `clientId` lança `TenantScopeError`.
+- [x] Teste: o `passwordHash` nunca aparece em entidade, resposta HTTP, log nem erro.
 
 **Senha**
-- [ ] Teste: `hash` e `verify` conferem; sal diferente por hash; formato `scrypt$N$r$p$...` com os parâmetros esperados; hash malformado ou parâmetros fora do aceito falham como "inválido", sem lançar.
-- [ ] Teste: política (menos de 12, mais de 128, NUL) recusa; NFKC aplicado; sem regra de composição.
-- [ ] Teste: o teto de hashes simultâneos é respeitado (nunca mais que 2 em execução).
+- [x] Teste: `hash` e `verify` conferem; sal diferente por hash; formato `scrypt$N$r$p$...` com os parâmetros esperados; hash malformado ou parâmetros fora do aceito falham como "inválido", sem lançar.
+- [x] Teste: política (menos de 12, mais de 128, NUL) recusa; NFKC aplicado; sem regra de composição.
+- [x] Teste: o teto de hashes simultâneos é respeitado (nunca mais que 2 em execução).
 
 **Login**
-- [ ] Teste: login válido de `User` e de `PlatformAdmin` devolve `accessToken`, `refreshToken`, `tokenType`, `expiresIn` e `Cache-Control: no-store`.
-- [ ] Teste: slug inexistente, cliente removido, cliente suspenso, e-mail inexistente, usuário desativado e senha errada devolvem **o mesmo** 401 (status, código, mensagem e corpo idênticos) e **todos** chamam o `verify` do hasher exatamente uma vez (hash fictício quando não há usuário).
-- [ ] Teste: o mesmo e-mail de dois clientes entra cada um no seu cliente e o token traz o `cid` certo.
-- [ ] Teste: após `AUTH_LOGIN_MAX_FAILURES` falhas, a tentativa seguinte (mesmo com a senha certa) devolve 429 com `Retry-After` **sem** chamar o hasher; vale também para e-mail inexistente; sucesso antes do limite zera o contador; o contador expira.
-- [ ] Teste: 429 por IP ao exceder `RATE_LIMIT_LOGIN_MAX` em `/auth/login` e `/auth/platform/login`; `RATE_LIMIT_REFRESH_MAX` em `/auth/refresh` e `/auth/logout`.
-- [ ] Teste: com o Redis do limiter e com o Redis de auth fora, `POST /auth/login` e `POST /auth/refresh` respondem 503, **não** verificam senha e **não** emitem token (usa `ToggleProxy`).
+- [x] Teste: login válido de `User` e de `PlatformAdmin` devolve `accessToken`, `refreshToken`, `tokenType`, `expiresIn` e `Cache-Control: no-store`.
+- [x] Teste: slug inexistente, cliente removido, cliente suspenso, e-mail inexistente, usuário desativado e senha errada devolvem **o mesmo** 401 (status, código, mensagem e corpo idênticos) e **todos** chamam o `verify` do hasher exatamente uma vez (hash fictício quando não há usuário).
+- [x] Teste: o mesmo e-mail de dois clientes entra cada um no seu cliente e o token traz o `cid` certo.
+- [x] Teste: após `AUTH_LOGIN_MAX_FAILURES` falhas, a tentativa seguinte (mesmo com a senha certa) devolve 429 com `Retry-After` **sem** chamar o hasher; vale também para e-mail inexistente; sucesso antes do limite zera o contador; o contador expira.
+- [x] Teste: 429 por IP ao exceder `RATE_LIMIT_LOGIN_MAX` em `/auth/login` e `/auth/platform/login`; `RATE_LIMIT_REFRESH_MAX` em `/auth/refresh` e `/auth/logout`.
+- [x] Teste: com o Redis do limiter e com o Redis de auth fora, `POST /auth/login` e `POST /auth/refresh` respondem 503, **não** verificam senha e **não** emitem token (usa `ToggleProxy`).
 
 **Access token**
-- [ ] Teste: token expirado, de outro `iss`/`aud`, com `typ` errado, com algoritmo trocado (`none`, HS384) ou assinatura inválida, sem `kind`/`sub`, ou com `Bearer` malformado: 401 igual, com `WWW-Authenticate: Bearer`, sem revelar o motivo; a categoria vai só à métrica.
-- [ ] Teste: `clockTolerance` aceita token expirado há menos que a tolerância e recusa além dela.
-- [ ] Teste: `authenticate` preenche `userId` e `clientId` no contexto (o log da requisição os traz) e `request.auth` tem o tipo certo.
-- [ ] Teste: sessão revogada ou `iat` anterior ao `nbf` derruba o access token **ainda dentro do prazo**; com o Redis fora, 503 e a rota não executa.
-- [ ] Teste de config: `JWT_SECRET` ausente ou com menos de 32 caracteres impede o boot; `AUTH_SESSION_MAX_SECONDS` menor que `AUTH_REFRESH_TTL_SECONDS` falha; valores fora de faixa falham; `ADMIN_API_KEY` no ambiente é ignorada.
+- [x] Teste: token expirado, de outro `iss`/`aud`, com `typ` errado, com algoritmo trocado (`none`, HS384) ou assinatura inválida, sem `kind`/`sub`, ou com `Bearer` malformado: 401 igual, com `WWW-Authenticate: Bearer`, sem revelar o motivo; a categoria vai só à métrica.
+- [x] Teste: `clockTolerance` aceita token expirado há menos que a tolerância e recusa além dela.
+- [x] Teste: `authenticate` preenche `userId` e `clientId` no contexto (o log da requisição os traz) e `request.auth` tem o tipo certo.
+- [x] Teste: sessão revogada ou `iat` anterior ao `nbf` derruba o access token **ainda dentro do prazo**; com o Redis fora, 503 e a rota não executa.
+- [x] Teste de config: `JWT_SECRET` ausente ou com menos de 32 caracteres impede o boot; `AUTH_SESSION_MAX_SECONDS` menor que `AUTH_REFRESH_TTL_SECONDS` falha; valores fora de faixa falham; `ADMIN_API_KEY` no ambiente é ignorada.
 
 **Refresh, rotação e reuso**
-- [ ] Teste: `refresh` devolve par novo e o refresh antigo deixa de funcionar.
-- [ ] Teste: reuso do refresh antigo (em `used`) revoga a sessão: o refresh mais novo também falha e o access token da sessão é recusado (`rsid`); métrica `reuse`.
-- [ ] Teste: segredo inventado com `sessionId` válido é 401 **sem** revogar a sessão (o refresh legítimo continua funcionando).
-- [ ] Teste: refresh com `<escopo>` adulterado (ClientId de outro cliente) é 401 e **não** altera nenhuma sessão do outro cliente.
-- [ ] Teste (integração, Redis real): duas chamadas simultâneas com o mesmo refresh: no máximo uma rotação (script atômico) e a outra é reuso.
-- [ ] Teste: refresh de usuário desativado, de cliente suspenso ou removido falha; o papel do novo access token é o atual do banco.
-- [ ] Teste: TTL ocioso e teto absoluto respeitados (relógio injetável ou TTLs curtos por config); toda chave criada tem TTL.
-- [ ] Teste: o Redis guarda **apenas o hash**: após login e refresh, nenhuma chave nem valor com o prefixo contém o refresh token entregue nem o segredo.
-- [ ] Teste: todas as chaves de auth começam por `<prefixo><ClientId|platform>:`; nenhuma chave de usuário tem outro formato.
+- [x] Teste: `refresh` devolve par novo e o refresh antigo deixa de funcionar.
+- [x] Teste: reuso do refresh antigo (em `used`) revoga a sessão: o refresh mais novo também falha e o access token da sessão é recusado (`rsid`); métrica `reuse`.
+- [x] Teste: segredo inventado com `sessionId` válido é 401 **sem** revogar a sessão (o refresh legítimo continua funcionando).
+- [x] Teste: refresh com `<escopo>` adulterado (ClientId de outro cliente) é 401 e **não** altera nenhuma sessão do outro cliente.
+- [x] Teste (integração, Redis real): duas chamadas simultâneas com o mesmo refresh: no máximo uma rotação (script atômico) e a outra é reuso.
+- [x] Teste: refresh de usuário desativado, de cliente suspenso ou removido falha; o papel do novo access token é o atual do banco.
+- [x] Teste: TTL ocioso e teto absoluto respeitados (relógio injetável ou TTLs curtos por config); toda chave criada tem TTL.
+- [x] Teste: o Redis guarda **apenas o hash**: após login e refresh, nenhuma chave nem valor com o prefixo contém o refresh token entregue nem o segredo.
+- [x] Teste: todas as chaves de auth começam por `<prefixo><ClientId|platform>:`; nenhuma chave de usuário tem outro formato.
 
 **Logout e revogação**
-- [ ] Teste: `logout` com o refresh revoga a sessão (refresh e access dessa sessão falham), é idempotente (204 para refresh desconhecido) e não afeta outras sessões do mesmo usuário.
-- [ ] Teste: `logout-all` revoga todas as sessões e todos os access tokens do usuário (`nbf`), sem afetar outro usuário nem outro cliente.
+- [x] Teste: `logout` com o refresh revoga a sessão (refresh e access dessa sessão falham), é idempotente (204 para refresh desconhecido) e não afeta outras sessões do mesmo usuário.
+- [x] Teste: `logout-all` revoga todas as sessões e todos os access tokens do usuário (`nbf`), sem afetar outro usuário nem outro cliente.
 
 **Rotas existentes e isolamento nas rotas**
-- [ ] Teste: sem token, token inválido ou expirado: 401 em todas as rotas `/admin/*` e `/auth/me`.
-- [ ] Teste: token de `User` em `/admin/clients` (CRUD de clientes): 403; token de `PlatformAdmin` em `/admin/clients/:clientId/{messages,conversations,...}`: 403.
-- [ ] Teste de isolamento de ponta a ponta com dois clientes: usuário do cliente A com `:clientId` do cliente B recebe 404 idêntico ao de cliente inexistente, nenhum dado do B é tocado (nada gravado em `Message`/`Conversation` do B, nada lido) e o log não traz o texto das mensagens; usuário do A com o `:clientId` do A funciona, e o `ClientId` repassado ao service é o do token.
-- [ ] Teste: `GET /auth/me` devolve a identidade do token (`user` e `platform`), nunca o hash.
-- [ ] Teste: o inventário de rotas da 005 passa (perfis `login`/`refresh` declarados) e um novo inventário falha se uma rota `/admin/*` não declarar `requireUser()` ou `requirePlatform()`.
-- [ ] Teste: webhook do WhatsApp, `/health`, `/health/ready` e `/metrics` seguem funcionando sem token de usuário (suítes da 004, 005 e 011 verdes, sem enfraquecer asserções); as suítes de `/admin` migradas continuam cobrindo os mesmos cenários com tokens emitidos por um helper de teste.
-- [ ] Teste: não existe mais `ADMIN_API_KEY` na config, em `buildServer` nem em `adminAuthHook`.
+- [x] Teste: sem token, token inválido ou expirado: 401 em todas as rotas `/admin/*` e `/auth/me`.
+- [x] Teste: token de `User` em `/admin/clients` (CRUD de clientes): 403; token de `PlatformAdmin` em `/admin/clients/:clientId/{messages,conversations,...}`: 403.
+- [x] Teste de isolamento de ponta a ponta com dois clientes: usuário do cliente A com `:clientId` do cliente B recebe 404 idêntico ao de cliente inexistente, nenhum dado do B é tocado (nada gravado em `Message`/`Conversation` do B, nada lido) e o log não traz o texto das mensagens; usuário do A com o `:clientId` do A funciona, e o `ClientId` repassado ao service é o do token.
+- [x] Teste: `GET /auth/me` devolve a identidade do token (`user` e `platform`), nunca o hash.
+- [x] Teste: o inventário de rotas da 005 passa (perfis `login`/`refresh` declarados) e um novo inventário falha se uma rota `/admin/*` não declarar `requireUser()` ou `requirePlatform()`.
+- [x] Teste: webhook do WhatsApp, `/health`, `/health/ready` e `/metrics` seguem funcionando sem token de usuário (suítes da 004, 005 e 011 verdes, sem enfraquecer asserções); as suítes de `/admin` migradas continuam cobrindo os mesmos cenários com tokens emitidos por um helper de teste.
+- [x] Teste: não existe mais `ADMIN_API_KEY` na config, em `buildServer` nem em `adminAuthHook`.
 
 **CLI**
-- [ ] Teste (contra `soprei_test`): `create-platform-admin`, `create-user` e `reset-password` gravam hash (nunca a senha), recusam `--password`, recusam senha fora da política e e-mail repetido no mesmo cliente, `reset-password` revoga as sessões, e nada além do id é impresso; senha não aparece em saída nem em log.
+- [x] Teste (contra `soprei_test`): `create-platform-admin`, `create-user` e `reset-password` gravam hash (nunca a senha), recusam `--password`, recusam senha fora da política e e-mail repetido no mesmo cliente, `reset-password` revoga as sessões, e nada além do id é impresso; senha não aparece em saída nem em log.
 
 **Privacidade**
-- [ ] Teste de captura de log (`src/test-support/log-capture.ts`) em login válido, login inválido, bloqueio, refresh, reuso, logout, 401 e erro de Redis: uma senha, um e-mail, um access token, um refresh token e o `JWT_SECRET` **secretos** de teste não aparecem em nenhuma linha de log, em `message`/`context` de erro, em label de métrica nem em corpo de resposta de erro.
-- [ ] Teste: `/metrics` expõe os contadores `auth_*` com os labels fixos e nenhum id, e-mail ou IP.
+- [x] Teste de captura de log (`src/test-support/log-capture.ts`) em login válido, login inválido, bloqueio, refresh, reuso, logout, 401 e erro de Redis: uma senha, um e-mail, um access token, um refresh token e o `JWT_SECRET` **secretos** de teste não aparecem em nenhuma linha de log, em `message`/`context` de erro, em label de métrica nem em corpo de resposta de erro.
+- [x] Teste: `/metrics` expõe os contadores `auth_*` com os labels fixos e nenhum id, e-mail ou IP.
 
 **Geral**
 - [ ] `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24; suítes novas repetidas várias vezes em cada Node (testes de TTL e de simultaneidade são sensíveis a tempo: relógio injetável e sondagem com prazo, nunca sleep fixo); CI verde; revisão do `reviewer`.
@@ -301,3 +301,33 @@ Cada item tem teste automatizado. Unitários com `SessionStore` em memória e ha
 - **Fontes a reconferir pelo implementer antes de fixar valores** (a pesquisa do rascunho foi feita sem acesso à rede e os itens abaixo vêm do conhecimento prévio; nenhum foi verificado nesta sessão): OWASP Password Storage Cheat Sheet (parâmetros do scrypt e do argon2id), NIST SP 800-63B (política de senha), RFC 9068 (`typ: at+jwt`), RFC 6750 (`WWW-Authenticate: Bearer`), documentação do `jose` (`jwtVerify`, `algorithms`, `typ`, `clockTolerance`), documentação do `crypto.scrypt` do Node (`maxmem`) e do `@fastify/rate-limit` 11.x (modo de falha por rota).
 - Por ser autenticação, segredos, endpoint público e isolamento, **passa pelo agente `reviewer` antes do merge** (de preferência outro agente/modelo que o do implementer). Pontos que o `reviewer` deve olhar: fixação do algoritmo, rotação e reuso atômicos (script Lua), vazamento entre clientes nas chaves e no `:clientId`, enumeração e tempo na resposta de login, fail-closed, `redact`, remoção completa da `ADMIN_API_KEY`.
 - **Validação em níveis (handoff, experimento em curso):** typecheck e teste do arquivo a cada passo, lint e suíte da área antes de cada commit, bateria completa e repetições só no final; registrar quantas falhas só apareceram na validação final.
+
+## Registro da implementação
+
+Implementada na branch `spec/007-autenticacao-jwt` (um PR, commits na ordem da decisão 13) com todas as recomendações da seção "Decisões". A spec **não** está marcada como `concluída`: falta a revisão do `reviewer`, o CI verde e o merge (do dono).
+
+**Pastas finais (só as necessárias):** `src/domain/` (`entities/user.ts`, `value-objects/user-id.ts`, `repositories/{user,platform-admin}.repository.ts`), `src/application/auth/` (`auth.service.ts`, `credentials.ts`, `identity.ts`), `src/application/ports/` (`password-hasher.ts`, `access-token-service.ts`, `session-store.ts`), `src/infrastructure/auth/` (`scrypt-password-hasher.ts`, `jose-access-token.service.ts`, `redis-session-store.ts`, `auth-redis.ts`, `create-auth.ts`, `cli/`), `src/infrastructure/database/repositories/` (`user.repository.ts`, `platform-admin.repository.ts`), `src/presentation/auth/` (`auth.controller.ts`, `auth.validators.ts`), `src/presentation/common/auth.hooks.ts` (`authenticate`, `requireUser`, `requirePlatform`), migration `prisma/migrations/20261029120000_users_platform_admins/`. Removidos: `src/presentation/admin/admin-auth.hook.ts` e `ADMIN_API_KEY` (config, `.env.example`, `AdminRoutesParams`, `buildServer`, `index.ts`).
+
+**Decisões de implementação e desvios (com motivo):**
+
+1. **`PasswordHasher` ganhou `dummyHash()`** (a spec só dizia "hash fictício com os mesmos parâmetros"): o hasher o gera uma vez com os parâmetros dele e o memoiza, então o `verify` do login roda uma vez em todos os caminhos e o teste conta as chamadas ao `verify`.
+2. **`/auth/logout` confere o segredo:** só revoga se o hash apresentado é o vigente ou um já usado (Lua `revokeByRefresh`). A spec dizia "o refresh é a credencial"; sem isso, quem conhece só o `sessionId` (visível no `sid` do access token) derrubaria a sessão alheia com um segredo inventado, o mesmo problema que a regra do "outro valor não revoga" evita no refresh. Continua 204 idempotente.
+3. **Senha do login sem o mínimo de 12:** a política de 12 a 128 é de **criação** (CLI). No login só valem o teto, o NUL e a normalização NFKC; senha curta é 401 como qualquer outra errada (um 400 separaria "curta" de "errada" sem ganho). Corpo inválido segue 400 e não conta como falha.
+4. **Fail-closed do limiter sem contador próprio:** o `@fastify/rate-limit` 11.2.1 aceita `skipOnError` por chamada de `app.rateLimit(options)`, então o hook da raiz usa `app.rateLimit({ skipOnError: false })` para `login` e `refresh` (`FAIL_CLOSED_RATE_LIMIT_PROFILES`) e traduz a falha do store em `ServiceUnavailableError` (503). O texto do log do `observeStoreErrors` ganhou "(os perfis de autenticação são fail-closed)" (continua com "fail-open", que os testes da 005 procuram).
+5. **Lua:** `rotate`, `revokeByRefresh` e `create` recebem todas as chaves em `KEYS`. `revokeAll` recebe só `usess` e `nbf` em `KEYS` e monta as chaves de cada sessão do conjunto dentro do script a partir do prefixo `<prefixo><escopo>:` (em `ARGV`), porque as sessões só são conhecidas lendo o conjunto; só funciona sem cluster (o projeto usa um Redis único). O relógio dos prazos é o `TIME` do Redis (script de escrita depois de `TIME` exige replicação por efeitos, padrão desde o Redis 5; o CI usa Redis 8).
+6. **`nbf` por segundo:** compara `iat < nbf` (o JWT tem precisão de segundos). Um access token emitido no mesmo segundo do `logout-all` não cai pelo `nbf`, mas cai pelo `rsid` da própria sessão (o `revokeAll` revoga cada sessão do conjunto), então nenhuma sessão antiga sobrevive; um login novo no mesmo segundo vale.
+7. **Claims do token de plataforma:** `cid` e `role` precisam estar **ausentes** (token de plataforma com `cid` é inválido). `sub`, `sid` e `cid` precisam ser UUID.
+8. **`:clientId` malformado nas rotas de cliente passou de 400 a 404** (é divergente do `cid` do token, como qualquer outro valor); o `clientScopeParamsSchema` foi removido. O `:clientId` em maiúsculas é aceito (comparado em minúsculas).
+9. **`buildServer` recusa `admin` sem `auth`** (lança no boot do servidor): rota protegida sem verificação de token nunca sobe.
+10. **`AuthService.me`** lança `UnauthorizedError` se a conta sumiu depois do token (não devolve `Result`); o resto das falhas esperadas é `Result`.
+11. **Respostas de token** também levam `Pragma: no-cache`.
+12. **Refresh de conta que deixou de valer:** a rotação já foi consumida quando o serviço descobre usuário desativado, cliente suspenso ou removido; ele então revoga a sessão (`revokeSession`) e responde 401. Um erro de banco entre a rotação e a emissão do novo par perde o refresh novo (o cliente refaz o login): mesma limitação "sem janela de tolerância" da decisão 10.
+13. **`jose` 6.2.12** (publicada em 2026-09-05; a mais nova, 6.2.14, saiu no dia da implementação e foi evitada), versão exata no `package.json`.
+14. **`JWT_SECRET` fora do `.env.example` como valor:** a linha está comentada, sem valor padrão (um placeholder com 32 ou mais caracteres passaria na validação e viraria segredo público). `loadIntegrationConfig()` usa um segredo descartável se o `.env.test` não tiver o seu.
+15. **Cliente suspenso e `nbf`:** como na spec, suspender o cliente não grava `nbf` de cada usuário; o access token vale até 15 min.
+
+**Critérios com teste passando:** todos os da spec, exceto o item "Geral" (CI e `reviewer`, que são do dono). Mapa dos testes: isolamento do repositório em `infrastructure/database/repositories/user.repository.integration.test.ts`; hasher e política de senha em `infrastructure/auth/scrypt-password-hasher.test.ts`; token em `jose-access-token.service.test.ts`; fluxo de login, bloqueio, refresh, reuso, logout e privacidade de log em `application/auth/auth.service.test.ts`; rotas, `authenticate` e 503 em `presentation/auth/auth.controller.test.ts`; Redis real (rotação simultânea, TTL, só o hash, formato das chaves, bloqueio, Redis fora) em `infrastructure/auth/redis-session-store.integration.test.ts`; ponta a ponta com dois clientes, perfis `login`/`refresh` fail-closed e privacidade em `infrastructure/http/auth.integration.test.ts`; CLI em `infrastructure/auth/cli/auth-cli.integration.test.ts` (inclui o processo de verdade); inventário de rotas em `infrastructure/http/rate-limit/rate-limit.test.ts`; remoção da chave em `infrastructure/http/admin-key-removal.test.ts`; ESLint e `jose` em `src/eslint-rules.test.ts`; config em `infrastructure/config/config.test.ts` e `boot.test.ts`. As suítes de `/admin`, observabilidade, rate limit e métricas foram migradas para tokens emitidos por logins de verdade (`src/test-support/in-memory-auth.ts`) sem enfraquecer asserção (onde o comportamento mudou de propósito, como `:clientId` malformado, o teste diz isso).
+
+**Fontes consultadas (reconferidas nesta sessão, com a ressalva de que parte vem do conhecimento prévio, sem acesso a rede além do registro de pacotes):** `jose` 6.2.12 (API `SignJWT`/`jwtVerify`, `algorithms`, `typ`, `clockTolerance`, `currentDate`, `requiredClaims`, lida no código instalado), código do `@fastify/rate-limit` 11.2.1 (`skipOnError` por chamada, `createLimiterArgs`), documentação do `crypto.scrypt` do Node (`maxmem`), OWASP Password Storage Cheat Sheet (N = 2^17, r = 8, p = 1), NIST SP 800-63B, RFC 9068 e RFC 6750 (conhecimento prévio).
+
+**Validação (nível 4, uma execução por vez):** em Node 24.18.0 e 22.23.2, `pnpm typecheck`, `lint`, `format:check`, `test` (838 unitários) e `test:integration` (284), `rm -rf dist && pnpm build` e smoke do processo compilado (`/health/ready` 200, `POST /auth/login` com corpo vazio 400, `/admin/clients` sem token 401), tudo verde. Suítes novas e alteradas repetidas 5 vezes (9 unitárias, 129 testes; 7 de integração, 78 testes) em Node 24, sem falha; a repetição em Node 22 foi a execução completa. **Falhas que só apareceram na validação final: 0** (as que apareceram durante o trabalho foram pegas nos níveis 1 e 2: `z.undefined()` exigindo a chave, prefixo de Redis repetido entre testes e regra do ESLint pegando o próprio teste).
