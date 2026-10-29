@@ -39,6 +39,14 @@ const QUEUE_REDIS_PATTERN = {
     'BullMQ e ioredis só em src/infrastructure/**. Application e presentation dependem das portas (src/application/ports/), recebidas por injeção.',
 };
 
+// JWT (spec 007): a biblioteca `jose` fica atrás da porta `AccessTokenService`; só
+// src/infrastructure/auth/** a importa.
+const JOSE_PATTERN = {
+  group: ['jose', 'jose/**'],
+  message:
+    'A biblioteca de JWT (jose) só em src/infrastructure/auth/**. O resto do código usa a porta AccessTokenService (src/application/ports/).',
+};
+
 const DOMAIN_PATTERNS = [
   {
     group: [
@@ -103,11 +111,32 @@ export default defineConfig(
     },
   },
   {
+    // Fora da pasta de auth, `jose` é proibido (a regra seguinte, de application/presentation/domain,
+    // repete o padrão porque `no-restricted-imports` de um bloco substitui o do anterior).
+    files: ['src/**/*.ts'],
+    ignores: ['src/infrastructure/database/**', 'src/infrastructure/auth/**'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [...PRISMA_IMPORT_PATTERNS, JOSE_PATTERN] }],
+    },
+  },
+  {
+    // A pasta de banco precisa do Prisma, mas também não importa `jose`.
+    files: ['src/infrastructure/database/**/*.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [JOSE_PATTERN] }] },
+  },
+  {
     files: ['src/application/**/*.ts', 'src/presentation/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [...PRISMA_IMPORT_PATTERNS, DATABASE_FOLDER_PATTERN, QUEUE_REDIS_PATTERN] },
+        {
+          patterns: [
+            ...PRISMA_IMPORT_PATTERNS,
+            DATABASE_FOLDER_PATTERN,
+            QUEUE_REDIS_PATTERN,
+            JOSE_PATTERN,
+          ],
+        },
       ],
     },
   },
@@ -116,7 +145,14 @@ export default defineConfig(
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [...PRISMA_IMPORT_PATTERNS, DATABASE_FOLDER_PATTERN, ...DOMAIN_PATTERNS] },
+        {
+          patterns: [
+            ...PRISMA_IMPORT_PATTERNS,
+            DATABASE_FOLDER_PATTERN,
+            ...DOMAIN_PATTERNS,
+            JOSE_PATTERN,
+          ],
+        },
       ],
     },
   },

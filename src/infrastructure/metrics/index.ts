@@ -5,6 +5,11 @@ export {
   LLM_DURATION_BUCKETS,
 } from './metrics.js';
 export type {
+  AuthLoginKind,
+  AuthLoginResult,
+  AuthLogoutScope,
+  AuthRefreshResult,
+  AuthTokenRejectionReason,
   ChannelInboundResult,
   ChannelSendResult,
   ChannelSendSample,

@@ -121,6 +121,7 @@ describe('createLlmProvider', () => {
   const base = {
     DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
     REDIS_URL: 'redis://localhost:6379/0',
+    JWT_SECRET: 'j'.repeat(32),
   };
 
   it('LLM_PROVIDER=mock cria o MockLlmProvider', () => {

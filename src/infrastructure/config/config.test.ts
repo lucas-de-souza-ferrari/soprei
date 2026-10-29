@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { parseConfig } from './parse-config.js';
 
+const JWT_SECRET = 'j'.repeat(32);
+
 const VALID_ENV = {
   DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
   REDIS_URL: 'redis://localhost:6379/0',
+  JWT_SECRET,
 };
 
 describe('parseConfig', () => {
@@ -19,7 +22,7 @@ describe('parseConfig', () => {
   });
 
   it('falha citando DATABASE_URL quando ausente', () => {
-    const result = parseConfig({ REDIS_URL: VALID_ENV.REDIS_URL });
+    const result = parseConfig({ REDIS_URL: VALID_ENV.REDIS_URL, JWT_SECRET });
     assert.equal(result.ok, false);
     assert.match(result.error.message, /DATABASE_URL/);
     assert.match(result.error.message, /obrigatória ausente/);
@@ -182,7 +185,6 @@ describe('parseConfig', () => {
       const prod = {
         ...ANTHROPIC,
         NODE_ENV: 'production',
-        ADMIN_API_KEY: 'a'.repeat(32),
         ANTHROPIC_BASE_URL: 'http://127.0.0.1:4010',
       };
       const refused = parseConfig(prod);
@@ -285,52 +287,104 @@ describe('parseConfig', () => {
     }
   });
 
-  describe('ADMIN_API_KEY', () => {
-    const KEY = 'a'.repeat(32);
-
-    it('é opcional em desenvolvimento e em teste', () => {
-      for (const NODE_ENV of ['development', 'test']) {
-        const result = parseConfig({ ...VALID_ENV, NODE_ENV });
-        assert.ok(result.ok, NODE_ENV);
-        assert.equal(result.value.ADMIN_API_KEY, undefined);
+  describe('autenticação (spec 007)', () => {
+    it('JWT_SECRET é obrigatória em todos os ambientes', () => {
+      for (const NODE_ENV of ['development', 'test', 'production']) {
+        const result = parseConfig({
+          DATABASE_URL: VALID_ENV.DATABASE_URL,
+          REDIS_URL: VALID_ENV.REDIS_URL,
+          NODE_ENV,
+        });
+        assert.equal(result.ok, false, NODE_ENV);
+        assert.match(result.error.message, /JWT_SECRET: variável obrigatória ausente/);
       }
     });
 
-    it('aceita qualquer valor não vazio fora de produção e variável vazia vale como ausente', () => {
-      const short = parseConfig({ ...VALID_ENV, ADMIN_API_KEY: 'curta' });
-      assert.ok(short.ok);
-      assert.equal(short.value.ADMIN_API_KEY, 'curta');
-      const empty = parseConfig({ ...VALID_ENV, ADMIN_API_KEY: '' });
-      assert.ok(empty.ok);
-      assert.equal(empty.value.ADMIN_API_KEY, undefined);
+    it('JWT_SECRET com menos de 32 caracteres falha, sem ecoar o valor', () => {
+      const value = 'curto-demais-0123456789-abcdef';
+      assert.ok(value.length < 32);
+      for (const candidate of [value, '', 'a'.repeat(31)]) {
+        const result = parseConfig({ ...VALID_ENV, JWT_SECRET: candidate });
+        assert.equal(result.ok, false, candidate);
+        assert.match(result.error.message, /JWT_SECRET/);
+        assert.ok(!result.error.message.includes(value));
+      }
+      assert.ok(parseConfig({ ...VALID_ENV, JWT_SECRET: 'a'.repeat(32) }).ok);
     });
 
-    it('em produção é obrigatória, com mensagem clara', () => {
-      const result = parseConfig({ ...VALID_ENV, NODE_ENV: 'production' });
+    it('aplica os defaults dos prazos, do bloqueio e dos perfis de login e refresh', () => {
+      const result = parseConfig(VALID_ENV);
+      assert.ok(result.ok);
+      const config = result.value;
+      assert.equal(config.JWT_ISSUER, 'soprei');
+      assert.equal(config.JWT_AUDIENCE, 'soprei-api');
+      assert.equal(config.AUTH_ACCESS_TTL_SECONDS, 900);
+      assert.equal(config.AUTH_REFRESH_TTL_SECONDS, 604_800);
+      assert.equal(config.AUTH_SESSION_MAX_SECONDS, 2_592_000);
+      assert.equal(config.AUTH_CLOCK_TOLERANCE_SECONDS, 5);
+      assert.equal(config.AUTH_LOGIN_MAX_FAILURES, 5);
+      assert.equal(config.AUTH_LOGIN_LOCK_SECONDS, 900);
+      assert.equal(config.AUTH_REDIS_TIMEOUT_MS, 500);
+      assert.equal(config.AUTH_REDIS_PREFIX, 'soprei:auth:');
+      assert.equal(config.RATE_LIMIT_LOGIN_MAX, 10);
+      assert.equal(config.RATE_LIMIT_LOGIN_WINDOW_SECONDS, 900);
+      assert.equal(config.RATE_LIMIT_REFRESH_MAX, 60);
+      assert.equal(config.RATE_LIMIT_REFRESH_WINDOW_SECONDS, 900);
+    });
+
+    const outOfRange: readonly (readonly [string, string])[] = [
+      ['AUTH_ACCESS_TTL_SECONDS', '59'],
+      ['AUTH_ACCESS_TTL_SECONDS', '3601'],
+      ['AUTH_REFRESH_TTL_SECONDS', '3599'],
+      ['AUTH_REFRESH_TTL_SECONDS', '2592001'],
+      ['AUTH_CLOCK_TOLERANCE_SECONDS', '-1'],
+      ['AUTH_CLOCK_TOLERANCE_SECONDS', '61'],
+      ['AUTH_LOGIN_MAX_FAILURES', '0'],
+      ['AUTH_LOGIN_MAX_FAILURES', '21'],
+      ['AUTH_LOGIN_LOCK_SECONDS', '59'],
+      ['AUTH_LOGIN_LOCK_SECONDS', '86401'],
+      ['AUTH_REDIS_TIMEOUT_MS', '0'],
+      ['AUTH_REDIS_TIMEOUT_MS', '10001'],
+      ['AUTH_REDIS_PREFIX', 'com espaço'],
+      ['RATE_LIMIT_LOGIN_MAX', '0'],
+      ['RATE_LIMIT_REFRESH_WINDOW_SECONDS', '86401'],
+    ];
+    for (const [name, value] of outOfRange) {
+      it(`rejeita ${name}=${value}`, () => {
+        const result = parseConfig({ ...VALID_ENV, [name]: value });
+        assert.equal(result.ok, false);
+        assert.match(result.error.message, new RegExp(name));
+      });
+    }
+
+    it('AUTH_SESSION_MAX_SECONDS menor que AUTH_REFRESH_TTL_SECONDS falha (regra cruzada)', () => {
+      const result = parseConfig({
+        ...VALID_ENV,
+        AUTH_REFRESH_TTL_SECONDS: '86400',
+        AUTH_SESSION_MAX_SECONDS: '3600',
+      });
       assert.equal(result.ok, false);
-      assert.match(
-        result.error.message,
-        /ADMIN_API_KEY: obrigatória em produção, com no mínimo 32 caracteres/,
+      assert.match(result.error.message, /AUTH_SESSION_MAX_SECONDS/);
+      assert.ok(
+        parseConfig({
+          ...VALID_ENV,
+          AUTH_REFRESH_TTL_SECONDS: '86400',
+          AUTH_SESSION_MAX_SECONDS: '86400',
+        }).ok,
       );
     });
 
-    it('em produção, variável vazia ou com menos de 32 caracteres também falha', () => {
-      for (const value of ['', 'a'.repeat(31)]) {
-        const result = parseConfig({ ...VALID_ENV, NODE_ENV: 'production', ADMIN_API_KEY: value });
-        assert.equal(result.ok, false, value);
-        assert.match(result.error.message, /ADMIN_API_KEY/);
-        assert.ok(!result.error.message.includes(value) || value === '');
-      }
-    });
-
-    it('em produção aceita 32 caracteres ou mais', () => {
-      for (const value of [KEY, KEY + 'b']) {
-        const result = parseConfig({ ...VALID_ENV, NODE_ENV: 'production', ADMIN_API_KEY: value });
-        assert.ok(result.ok);
-        assert.equal(result.value.ADMIN_API_KEY, value);
+    it('ADMIN_API_KEY foi removida: no ambiente é ignorada (não quebra o boot) e não vira config', () => {
+      for (const value of ['', 'curta', 'a'.repeat(40)]) {
+        for (const NODE_ENV of ['development', 'production']) {
+          const result = parseConfig({ ...VALID_ENV, NODE_ENV, ADMIN_API_KEY: value });
+          assert.ok(result.ok, `${NODE_ENV} / ${value}`);
+          assert.ok(!('ADMIN_API_KEY' in result.value));
+        }
       }
     });
   });
+
   describe('METRICS_TOKEN', () => {
     const TOKEN = 'm'.repeat(32);
 
@@ -363,16 +417,14 @@ describe('parseConfig', () => {
       }
     });
 
-    it('a regra vale também em produção, junto com a da ADMIN_API_KEY', () => {
+    it('a regra vale também em produção', () => {
       const result = parseConfig({
         ...VALID_ENV,
         NODE_ENV: 'production',
-        ADMIN_API_KEY: 'a'.repeat(32),
         METRICS_TOKEN: 'curto',
       });
       assert.equal(result.ok, false);
       assert.match(result.error.message, /METRICS_TOKEN/);
-      assert.doesNotMatch(result.error.message, /ADMIN_API_KEY/);
     });
   });
 
@@ -380,7 +432,6 @@ describe('parseConfig', () => {
     const PRODUCTION = {
       ...VALID_ENV,
       NODE_ENV: 'production',
-      ADMIN_API_KEY: 'a'.repeat(32),
     };
 
     it('aplica os defaults: ligado, 100/15 min público, 600/min admin e webhook, 250 ms, sem proxy', () => {
@@ -504,7 +555,7 @@ describe('parseConfig', () => {
       WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
       WHATSAPP_ACCESS_TOKEN: 'token-de-envio-1234',
     };
-    const PRODUCTION = { ...VALID_ENV, NODE_ENV: 'production', ADMIN_API_KEY: 'a'.repeat(32) };
+    const PRODUCTION = { ...VALID_ENV, NODE_ENV: 'production' };
     const ENABLED = { ...VALID_ENV, ...SECRETS, WHATSAPP_ENABLED: 'true', TRUST_PROXY: 'false' };
 
     it('por padrão o canal está desligado e as variáveis têm defaults', () => {

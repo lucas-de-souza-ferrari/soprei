@@ -81,6 +81,14 @@ export type QueueJobResult = 'completed' | 'retried' | 'failed' | 'discarded';
 /** Status de entrega informado pelo canal (`other` agrupa qualquer valor desconhecido). */
 export type ChannelStatusEvent = 'sent' | 'delivered' | 'read' | 'played' | 'failed' | 'other';
 
+/** Resultado de um login (spec 007): `ok`, `invalid` (qualquer credencial recusada) ou `locked`. */
+export type AuthLoginResult = 'ok' | 'invalid' | 'locked';
+export type AuthLoginKind = 'user' | 'platform';
+export type AuthRefreshResult = 'ok' | 'invalid' | 'reuse' | 'unavailable';
+export type AuthTokenRejectionReason =
+  'missing' | 'malformed' | 'invalid' | 'expired' | 'revoked' | 'unavailable';
+export type AuthLogoutScope = 'session' | 'all';
+
 export interface DbQuerySample {
   readonly model: string;
   readonly operation: string;
@@ -124,6 +132,12 @@ export interface Metrics {
   countRateLimitRejected(profile: string): void;
   /** O store (Redis) do rate limit falhou e a requisição passou em fail-open (spec 005). */
   countRateLimitStoreError(): void;
+  /** Um login terminou (spec 007). Sem e-mail, slug nem IP em label. */
+  countAuthLogin(kind: AuthLoginKind, result: AuthLoginResult): void;
+  countAuthRefresh(result: AuthRefreshResult): void;
+  /** O `authenticate` recusou um access token; `reason` é a categoria (nunca vai à resposta). */
+  countAuthTokenRejection(reason: AuthTokenRejectionReason): void;
+  countAuthLogout(scope: AuthLogoutScope): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
 }
@@ -269,6 +283,31 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const authLogins = new Counter({
+    name: 'auth_logins_total',
+    help: 'Logins por tipo de identidade (user, platform) e resultado (ok, invalid, locked)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const authRefresh = new Counter({
+    name: 'auth_refresh_total',
+    help: 'Renovações de sessão por resultado (ok, invalid, reuse, unavailable)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const authTokenRejections = new Counter({
+    name: 'auth_token_rejections_total',
+    help: 'Access tokens recusados por categoria (missing, malformed, invalid, expired, revoked, unavailable)',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  });
+  const authLogouts = new Counter({
+    name: 'auth_logouts_total',
+    help: 'Logouts por escopo (session, all)',
+    labelNames: ['scope'] as const,
+    registers: [registry],
+  });
+
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
     name: 'db_pool_connections',
@@ -335,6 +374,18 @@ export function createMetrics(): Metrics {
     },
     countRateLimitStoreError() {
       rateLimitStoreErrors.inc();
+    },
+    countAuthLogin(kind, result) {
+      authLogins.inc({ kind, result });
+    },
+    countAuthRefresh(result) {
+      authRefresh.inc({ result });
+    },
+    countAuthTokenRejection(reason) {
+      authTokenRejections.inc({ reason });
+    },
+    countAuthLogout(scope) {
+      authLogouts.inc({ scope });
     },
     bindPool(source) {
       poolSource = source;

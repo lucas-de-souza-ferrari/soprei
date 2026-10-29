@@ -202,3 +202,51 @@ describe('lint: o código real do projeto', () => {
     assert.deepEqual(await restrictedRules(code, 'src/infrastructure/database/database.ts'), []);
   });
 });
+
+describe('lint: a biblioteca jose só dentro de src/infrastructure/auth/**', () => {
+  const imports = [
+    "import { SignJWT } from 'jose';",
+    "import * as jose from 'jose';",
+    "import { jwtVerify } from 'jose/jwt/verify';",
+    "import type { JWTPayload } from 'jose';",
+  ];
+  const OUTSIDE_JOSE = [
+    'src/presentation/fixture.ts',
+    'src/application/fixture.ts',
+    'src/domain/fixture.ts',
+    'src/infrastructure/http/fixture.ts',
+    'src/infrastructure/database/fixture.ts',
+    'src/infrastructure/queue/fixture.ts',
+    'src/shared/fixture.ts',
+    'src/test-support/fixture.ts',
+    'src/index.ts',
+  ];
+
+  for (const filePath of OUTSIDE_JOSE) {
+    for (const code of imports) {
+      it(`${filePath}: ${code}`, async () => {
+        assert.deepEqual(await restrictedRules(`${code}\nexport {};\n`, filePath), [
+          'no-restricted-imports',
+        ]);
+      });
+    }
+  }
+
+  it('dentro de src/infrastructure/auth/** (e subpastas) o import é permitido', async () => {
+    for (const filePath of [
+      'src/infrastructure/auth/fixture.ts',
+      'src/infrastructure/auth/cli/fixture.ts',
+    ]) {
+      for (const code of imports) {
+        assert.deepEqual(await restrictedRules(`${code}\nexport {};\n`, filePath), [], code);
+      }
+    }
+  });
+
+  it('a regra do Prisma continua valendo dentro da pasta de auth', async () => {
+    const code = "import { PrismaClient } from '../../generated/prisma/client.js';\nexport {};\n";
+    assert.deepEqual(await restrictedRules(code, 'src/infrastructure/auth/fixture.ts'), [
+      'no-restricted-imports',
+    ]);
+  });
+});

@@ -4,6 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import { ClientService } from '../../application/clients/client.service.js';
 import { Result } from '../../shared/types/index.js';
+import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { createDatabase, PrismaClientRepository, type Database } from '../database/index.js';
@@ -13,13 +14,13 @@ import { createMetrics, type Metrics } from './metrics.js';
 
 const config = loadIntegrationConfig();
 const logger = createLogger(config);
-const KEY = `it-${randomUUID()}-${randomUUID()}`;
 const TOKEN = `it-${randomUUID()}-${randomUUID()}`;
 
 let metrics: Metrics;
 let database: Database;
 let tenants: TestTenants;
 let app: FastifyInstance;
+let adminAuth: { authorization: string };
 
 before(async () => {
   metrics = createMetrics();
@@ -30,6 +31,8 @@ before(async () => {
   });
   metrics.bindPool(() => database.poolMetrics());
   tenants = new TestTenants(database.prisma);
+  const testAuth = buildTestAuth({ logger });
+  adminAuth = bearer((await testAuth.platformToken()).accessToken);
   app = buildServer({
     logger,
     metrics,
@@ -38,8 +41,8 @@ before(async () => {
       database: () => database.check(),
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
+    auth: testAuth.service,
     admin: {
-      apiKey: KEY,
       clients: new ClientService(new PrismaClientRepository(database.prisma)),
     },
   });
@@ -101,7 +104,7 @@ describe('métricas do banco contra o PostgreSQL de testes', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/admin/clients',
-      headers: { authorization: `Bearer ${KEY}` },
+      headers: adminAuth,
       payload: { name: 'Cliente Métricas', slug },
     });
     assert.equal(created.statusCode, 201);
@@ -110,7 +113,7 @@ describe('métricas do banco contra o PostgreSQL de testes', () => {
     await app.inject({
       method: 'GET',
       url: `/admin/clients/${id}`,
-      headers: { authorization: `Bearer ${KEY}` },
+      headers: adminAuth,
     });
 
     const response = await app.inject({

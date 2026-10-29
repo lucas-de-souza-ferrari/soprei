@@ -8,6 +8,7 @@ import {
   ForbiddenError,
   NotFoundError,
   RateLimitError,
+  ServiceUnavailableError,
   TenantScopeError,
   UnauthorizedError,
   ValidationError,
@@ -24,6 +25,7 @@ describe('hierarquia de erros', () => {
     { create: () => new DatabaseError(), statusCode: 500, code: 'DATABASE_ERROR' },
     { create: () => new TenantScopeError(), statusCode: 500, code: 'TENANT_SCOPE_ERROR' },
     { create: () => new ExternalServiceError(), statusCode: 502, code: 'EXTERNAL_SERVICE_ERROR' },
+    { create: () => new ServiceUnavailableError(), statusCode: 503, code: 'SERVICE_UNAVAILABLE' },
   ];
 
   for (const { create, statusCode, code } of cases) {
@@ -35,6 +37,10 @@ describe('hierarquia de erros', () => {
       assert.equal(error.code, code);
     });
   }
+
+  it('ServiceUnavailableError é operacional (falha esperada da dependência, não bug)', () => {
+    assert.equal(new ServiceUnavailableError().isOperational, true);
+  });
 
   it('guarda context e cause', () => {
     const cause = new Error('origem');

@@ -1,4 +1,5 @@
 import { type Config, parseConfig } from '../infrastructure/config/index.js';
+import { TEST_JWT_SECRET } from './in-memory-auth.js';
 
 export const TEST_DATABASE_NAME = 'soprei_test';
 export const TEST_REDIS_DB_INDEX = 15;
@@ -63,7 +64,16 @@ export function assertSafeIntegrationEnv(env: NodeJS.ProcessEnv): void {
  */
 export function loadIntegrationConfig(env: NodeJS.ProcessEnv = process.env): Config {
   assertSafeIntegrationEnv(env);
-  const parsed = parseConfig({ ...env, NODE_ENV: 'test', LOG_LEVEL: 'silent' });
+  // `JWT_SECRET` é obrigatória (spec 007); os testes não dependem de o `.env.test` a ter e usam um
+  // valor descartável, que nunca vale fora dos testes.
+  const jwtSecret =
+    env.JWT_SECRET === undefined || env.JWT_SECRET === '' ? TEST_JWT_SECRET : env.JWT_SECRET;
+  const parsed = parseConfig({
+    ...env,
+    JWT_SECRET: jwtSecret,
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'silent',
+  });
   if (!parsed.ok) throw parsed.error;
   return parsed.value;
 }

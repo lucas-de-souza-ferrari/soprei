@@ -59,4 +59,19 @@ describe('createLogger', () => {
     capture.logger.warn('visível');
     assert.equal(capture.lines().length, 1);
   });
+
+  it('segredos de autenticação (spec 007) saem como [Redacted], na raiz e aninhados', () => {
+    const capture = captureLogs();
+    const logger = capture.logger;
+    const keys = ['passwordHash', 'newPassword', 'currentPassword', 'JWT_SECRET', 'email'];
+    const secrets = Object.fromEntries(keys.map((key, i) => [key, `segredo-auth-${String(i)}`]));
+    logger.info({ ...secrets, visivel: 'ok' }, 'raiz');
+    logger.info({ dados: secrets, visivel: 'ok' }, 'aninhado');
+    assert.ok(!capture.raw().includes('segredo-auth-'), capture.raw());
+    const [root, nested] = capture.lines();
+    for (const key of keys) {
+      assert.equal(root?.[key], '[Redacted]', key);
+      assert.equal((nested?.dados as Record<string, unknown>)[key], '[Redacted]', key);
+    }
+  });
 });

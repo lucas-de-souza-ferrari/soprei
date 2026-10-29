@@ -12,6 +12,12 @@ const REDACTED_KEYS = [
   'accessToken',
   'token',
   'apiKey',
+  // Autenticação (spec 007): senha, hash, segredo do JWT e e-mail (dado pessoal) nunca em log.
+  'passwordHash',
+  'newPassword',
+  'currentPassword',
+  'JWT_SECRET',
+  'email',
   // Canal WhatsApp (spec 011): segredo do app, token de verificação do webhook e token de envio.
   'appSecret',
   'verifyToken',

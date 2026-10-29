@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { parseTrustProxy, type TrustProxySetting } from './trust-proxy.js';
 
-export const ADMIN_API_KEY_MIN_LENGTH = 32;
+/** Mínimo do `JWT_SECRET` (spec 007): 32 caracteres, ou seja, 256 bits para o HS256. */
+export const JWT_SECRET_MIN_LENGTH = 32;
 export const METRICS_TOKEN_MIN_LENGTH = 32;
 
 /** Provedores de LLM disponíveis: `mock` (testes e dev offline) e `anthropic` (spec 014). */
@@ -63,12 +64,30 @@ export const envSchema = z
     DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1).max(3_600_000).default(30_000),
     DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1).max(120_000).default(5_000),
     DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).max(600_000).default(30_000),
-    // Chave temporária das rotas /admin (spec 003); o destino dela é decidido nas specs 007/008.
-    // Variável vazia vale como ausente.
-    ADMIN_API_KEY: z
-      .string()
-      .optional()
-      .transform((value) => (value === '' ? undefined : value)),
+    // Autenticação (spec 007). `JWT_SECRET` é obrigatória em todos os ambientes e nunca vai a log.
+    // A antiga chave estática de administração foi removida: se ainda estiver no ambiente, é ignorada.
+    JWT_SECRET: z
+      .string({ error: 'variável obrigatória ausente' })
+      .min(
+        JWT_SECRET_MIN_LENGTH,
+        `precisa ter no mínimo ${String(JWT_SECRET_MIN_LENGTH)} caracteres`,
+      ),
+    JWT_ISSUER: z.preprocess(emptyAsUndefined, z.string().min(1).max(200).default('soprei')),
+    JWT_AUDIENCE: z.preprocess(emptyAsUndefined, z.string().min(1).max(200).default('soprei-api')),
+    AUTH_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
+    AUTH_REFRESH_TTL_SECONDS: z.coerce.number().int().min(3_600).max(2_592_000).default(604_800),
+    AUTH_SESSION_MAX_SECONDS: z.coerce.number().int().min(3_600).max(31_536_000).default(2_592_000),
+    AUTH_CLOCK_TOLERANCE_SECONDS: z.coerce.number().int().min(0).max(60).default(5),
+    AUTH_LOGIN_MAX_FAILURES: z.coerce.number().int().min(1).max(20).default(5),
+    AUTH_LOGIN_LOCK_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
+    AUTH_REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(10_000).default(500),
+    AUTH_REDIS_PREFIX: z.preprocess(
+      emptyAsUndefined,
+      z
+        .string()
+        .regex(/^[A-Za-z0-9:_-]{1,128}$/, 'letras, dígitos, ":", "_" e "-" (até 128)')
+        .default('soprei:auth:'),
+    ),
     // Token de GET /metrics (spec 004). Sem ele a rota não existe (404); vazia vale como ausente.
     METRICS_TOKEN: z
       .string()
@@ -103,6 +122,11 @@ export const envSchema = z
     RATE_LIMIT_ADMIN_WINDOW_SECONDS: rateLimitWindowSeconds(60),
     RATE_LIMIT_WEBHOOK_MAX: rateLimitMax(600),
     RATE_LIMIT_WEBHOOK_WINDOW_SECONDS: rateLimitWindowSeconds(60),
+    // Perfis de autenticação (spec 007): login e refresh/logout. Fail-closed (Redis fora: 503).
+    RATE_LIMIT_LOGIN_MAX: rateLimitMax(10),
+    RATE_LIMIT_LOGIN_WINDOW_SECONDS: rateLimitWindowSeconds(900),
+    RATE_LIMIT_REFRESH_MAX: rateLimitMax(60),
+    RATE_LIMIT_REFRESH_WINDOW_SECONDS: rateLimitWindowSeconds(900),
     // Prazo de cada comando da conexão Redis dedicada ao limiter; estourou: fail-open.
     RATE_LIMIT_REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(10_000).default(250),
     // Canal WhatsApp (spec 011). Opt-in: sem `WHATSAPP_ENABLED=true` as rotas do webhook não existem.
@@ -179,14 +203,12 @@ export const envSchema = z
         message: `precisa ser maior que LLM_TIMEOUT_MS (${String(env.LLM_TIMEOUT_MS)} ms), senão uma chamada ainda dentro do prazo seria retomada como abandonada`,
       });
     }
-    if (
-      env.NODE_ENV === 'production' &&
-      (env.ADMIN_API_KEY === undefined || env.ADMIN_API_KEY.length < ADMIN_API_KEY_MIN_LENGTH)
-    ) {
+    // O teto absoluto da sessão não pode ser menor que o prazo ocioso (senão o ocioso nunca valeria).
+    if (env.AUTH_SESSION_MAX_SECONDS < env.AUTH_REFRESH_TTL_SECONDS) {
       ctx.addIssue({
         code: 'custom',
-        path: ['ADMIN_API_KEY'],
-        message: `obrigatória em produção, com no mínimo ${String(ADMIN_API_KEY_MIN_LENGTH)} caracteres`,
+        path: ['AUTH_SESSION_MAX_SECONDS'],
+        message: `precisa ser maior ou igual a AUTH_REFRESH_TTL_SECONDS (${String(env.AUTH_REFRESH_TTL_SECONDS)} s)`,
       });
     }
   });

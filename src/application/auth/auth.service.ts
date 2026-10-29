@@ -1,0 +1,427 @@
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import type { FastifyBaseLogger } from 'fastify';
+import {
+  type Client,
+  ClientId,
+  type ClientRepository,
+  PlatformAdminId,
+  type PlatformAdminRepository,
+  UserId,
+  type UserRepository,
+  type UserRole,
+} from '../../domain/index.js';
+import type { Metrics } from '../../infrastructure/metrics/index.js';
+import {
+  NotFoundError,
+  ServiceUnavailableError,
+  UnauthorizedError,
+} from '../../shared/errors/index.js';
+import { Result } from '../../shared/types/index.js';
+import { isUuid } from '../../shared/utils/index.js';
+import type { AccessTokenService } from '../ports/access-token-service.js';
+import type { PasswordHasher } from '../ports/password-hasher.js';
+import type { SessionStore } from '../ports/session-store.js';
+import {
+  type AuthIdentity,
+  PLATFORM_SCOPE,
+  type PlatformIdentity,
+  scopeOf,
+  subjectIdOf,
+  type UserIdentity,
+} from './identity.js';
+
+export interface AuthTokens {
+  readonly accessToken: string;
+  /** Entregue **uma vez**; só o hash do segredo fica no Redis. */
+  readonly refreshToken: string;
+  readonly tokenType: 'Bearer';
+  readonly expiresIn: number;
+}
+
+/** Falhas esperadas do login; a camada de apresentação as traduz em erros da hierarquia. */
+export type LoginFailure =
+  | { readonly reason: 'invalid_credentials' }
+  | { readonly reason: 'locked'; readonly retryAfterSeconds: number }
+  | { readonly reason: 'unavailable' };
+
+export type RefreshFailure =
+  | { readonly reason: 'invalid_refresh' }
+  | { readonly reason: 'reuse_detected' }
+  | { readonly reason: 'unavailable' };
+
+export type AuthenticateFailure =
+  | { readonly reason: 'invalid' }
+  | { readonly reason: 'expired' }
+  | { readonly reason: 'revoked' }
+  | { readonly reason: 'unavailable' };
+
+export interface LogoutFailure {
+  readonly reason: 'unavailable';
+}
+
+export type MeResponse =
+  | {
+      readonly kind: 'user';
+      readonly id: string;
+      readonly email: string;
+      readonly role: UserRole;
+      readonly client: { readonly id: string; readonly name: string; readonly slug: string };
+    }
+  | { readonly kind: 'platform'; readonly id: string; readonly email: string };
+
+type AuthMetrics = Pick<Metrics, 'countAuthLogin' | 'countAuthRefresh' | 'countAuthLogout'>;
+
+export interface AuthServiceDeps {
+  readonly clients: ClientRepository;
+  readonly users: UserRepository;
+  readonly platformAdmins: PlatformAdminRepository;
+  readonly hasher: PasswordHasher;
+  readonly tokens: AccessTokenService;
+  readonly sessions: SessionStore;
+  readonly logger: FastifyBaseLogger;
+  readonly metrics?: AuthMetrics | undefined;
+}
+
+const REFRESH_SECRET_PATTERN = /^[A-Za-z0-9_-]{64}$/;
+
+interface ParsedRefresh {
+  readonly scope: string;
+  readonly sessionId: string;
+  readonly secret: string;
+}
+
+/** `<escopo>.<sessionId>.<segredo>`; qualquer outra forma é inválida. Escopo e sessão não são autoridade. */
+export function parseRefreshToken(value: string): ParsedRefresh | undefined {
+  if (value.length > 256) return undefined;
+  const parts = value.split('.');
+  if (parts.length !== 3) return undefined;
+  const [scope, sessionId, secret] = parts as [string, string, string];
+  if (scope !== PLATFORM_SCOPE && !isUuid(scope)) return undefined;
+  if (!isUuid(sessionId) || !REFRESH_SECRET_PATTERN.test(secret)) return undefined;
+  return { scope: scope.toLowerCase(), sessionId: sessionId.toLowerCase(), secret };
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+/**
+ * Identidade do pedido para o bloqueio por conta (exceção declarada à regra "chave deriva do
+ * `ClientId`": vale antes de existir `ClientId` e também para contas inexistentes). Só o hash sai
+ * daqui; o prefixo `c`/`p` impede colisão entre um cliente de slug `platform` e o administrador.
+ */
+function loginLockKey(parts: readonly string[]): string {
+  return sha256Hex(parts.join('\u0000'));
+}
+
+interface LoginAccount {
+  readonly passwordHash: string;
+  readonly active: boolean;
+  readonly identity: UserIdentity | PlatformIdentity;
+}
+
+/**
+ * Login, renovação, logout e verificação de access token (spec 007). Os erros esperados voltam
+ * como `Result`; o que é bug ou falha de banco sobe como exceção. **Nunca** loga senha, hash,
+ * token, e-mail nem slug: só ids e resultados.
+ */
+export class AuthService {
+  private readonly clients: ClientRepository;
+  private readonly users: UserRepository;
+  private readonly platformAdmins: PlatformAdminRepository;
+  private readonly hasher: PasswordHasher;
+  private readonly tokens: AccessTokenService;
+  private readonly sessions: SessionStore;
+  private readonly logger: FastifyBaseLogger;
+  private readonly metrics: AuthMetrics | undefined;
+
+  constructor(deps: AuthServiceDeps) {
+    this.clients = deps.clients;
+    this.users = deps.users;
+    this.platformAdmins = deps.platformAdmins;
+    this.hasher = deps.hasher;
+    this.tokens = deps.tokens;
+    this.sessions = deps.sessions;
+    this.logger = deps.logger;
+    this.metrics = deps.metrics;
+  }
+
+  /** Login de usuário de um cliente: `clientSlug` + e-mail (já normalizado) + senha (já normalizada). */
+  login(input: {
+    readonly clientSlug: string;
+    readonly email: string;
+    readonly password: string;
+  }): Promise<Result<AuthTokens, LoginFailure>> {
+    return this.loginFlow(
+      'user',
+      loginLockKey(['c', input.clientSlug, input.email]),
+      input.password,
+      async () => {
+        const client = await this.findClient(input.clientSlug);
+        if (client?.status !== 'ACTIVE') return undefined;
+        const found = await this.users.findCredentialsByEmail(client.id, input.email);
+        if (found === null) return undefined;
+        return {
+          passwordHash: found.passwordHash,
+          active: found.user.status === 'ACTIVE',
+          identity: {
+            kind: 'user',
+            userId: found.user.id,
+            clientId: client.id,
+            role: found.user.role,
+            sessionId: '',
+          },
+        };
+      },
+    );
+  }
+
+  /** Login de operador da plataforma. */
+  loginPlatform(input: {
+    readonly email: string;
+    readonly password: string;
+  }): Promise<Result<AuthTokens, LoginFailure>> {
+    return this.loginFlow(
+      'platform',
+      loginLockKey(['p', input.email]),
+      input.password,
+      async () => {
+        const found = await this.platformAdmins.findCredentialsByEmail(input.email);
+        if (found === null) return undefined;
+        return {
+          passwordHash: found.passwordHash,
+          active: found.admin.status === 'ACTIVE',
+          identity: { kind: 'platform', adminId: found.admin.id, sessionId: '' },
+        };
+      },
+    );
+  }
+
+  async refresh(refreshToken: string): Promise<Result<AuthTokens, RefreshFailure>> {
+    const parsed = parseRefreshToken(refreshToken);
+    if (parsed === undefined) {
+      this.metrics?.countAuthRefresh('invalid');
+      return Result.err({ reason: 'invalid_refresh' });
+    }
+    const { scope, sessionId, secret } = parsed;
+    try {
+      const newSecret = randomBytes(48).toString('base64url');
+      const outcome = await this.sessions.rotate({
+        scope,
+        sessionId,
+        presentedHash: sha256Hex(secret),
+        newHash: sha256Hex(newSecret),
+      });
+      if (outcome.status === 'invalid') {
+        this.metrics?.countAuthRefresh('invalid');
+        return Result.err({ reason: 'invalid_refresh' });
+      }
+      if (outcome.status === 'reuse') {
+        this.metrics?.countAuthRefresh('reuse');
+        this.logger.warn(
+          { sessionId, subjectId: outcome.subjectId, scope },
+          'reuso de refresh token detectado: sessão revogada',
+        );
+        return Result.err({ reason: 'reuse_detected' });
+      }
+      const identity = await this.resolveIdentity(scope, outcome.subjectId, sessionId);
+      if (identity === undefined) {
+        // Usuário desativado, cliente suspenso ou removido: a sessão não continua.
+        await this.sessions.revokeSession(scope, sessionId);
+        this.metrics?.countAuthRefresh('invalid');
+        return Result.err({ reason: 'invalid_refresh' });
+      }
+      const access = await this.tokens.issue(identity);
+      this.metrics?.countAuthRefresh('ok');
+      this.logger.info({ sessionId, subjectId: outcome.subjectId, scope }, 'sessão renovada');
+      return Result.ok({
+        accessToken: access.token,
+        refreshToken: `${scope}.${sessionId}.${newSecret}`,
+        tokenType: 'Bearer',
+        expiresIn: access.expiresIn,
+      });
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) {
+        this.metrics?.countAuthRefresh('unavailable');
+        return Result.err({ reason: 'unavailable' });
+      }
+      throw error;
+    }
+  }
+
+  /** Revoga a sessão do refresh. Idempotente: refresh desconhecido ou malformado também é sucesso. */
+  async logout(refreshToken: string): Promise<Result<void, LogoutFailure>> {
+    const parsed = parseRefreshToken(refreshToken);
+    if (parsed === undefined) return Result.ok(undefined);
+    try {
+      const revoked = await this.sessions.revokeByRefresh({
+        scope: parsed.scope,
+        sessionId: parsed.sessionId,
+        presentedHash: sha256Hex(parsed.secret),
+      });
+      if (revoked) {
+        this.metrics?.countAuthLogout('session');
+        this.logger.info({ sessionId: parsed.sessionId, scope: parsed.scope }, 'logout');
+      }
+      return Result.ok(undefined);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) return Result.err({ reason: 'unavailable' });
+      throw error;
+    }
+  }
+
+  async logoutAll(identity: AuthIdentity): Promise<Result<void, LogoutFailure>> {
+    try {
+      await this.sessions.revokeAllSessions(scopeOf(identity), subjectIdOf(identity));
+      this.metrics?.countAuthLogout('all');
+      this.logger.info(
+        { sessionId: identity.sessionId, subjectId: subjectIdOf(identity) },
+        'logout de todas as sessões',
+      );
+      return Result.ok(undefined);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) return Result.err({ reason: 'unavailable' });
+      throw error;
+    }
+  }
+
+  /** Verifica assinatura e claims e consulta a revogação. Redis fora: `unavailable` (fail-closed). */
+  async authenticate(token: string): Promise<Result<AuthIdentity, AuthenticateFailure>> {
+    const verified = await this.tokens.verify(token);
+    if (!verified.ok) return Result.err({ reason: verified.error });
+    const { identity, issuedAt } = verified.value;
+    try {
+      const check = await this.sessions.checkAccess({
+        scope: scopeOf(identity),
+        sessionId: identity.sessionId,
+        subjectId: subjectIdOf(identity),
+        issuedAt,
+      });
+      if (check === 'revoked') return Result.err({ reason: 'revoked' });
+      return Result.ok(identity);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) return Result.err({ reason: 'unavailable' });
+      throw error;
+    }
+  }
+
+  /** Identidade do token, lida do banco (nunca devolve o hash). */
+  async me(identity: AuthIdentity): Promise<MeResponse> {
+    try {
+      if (identity.kind === 'platform') {
+        const admin = await this.platformAdmins.findById(identity.adminId);
+        return { kind: 'platform', id: admin.id, email: admin.email };
+      }
+      const [user, client] = await Promise.all([
+        this.users.findById(identity.clientId, identity.userId),
+        this.clients.findById(identity.clientId),
+      ]);
+      return {
+        kind: 'user',
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        client: { id: client.id, name: client.name, slug: client.slug },
+      };
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new UnauthorizedError();
+      throw error;
+    }
+  }
+
+  private async findClient(slug: string): Promise<Client | undefined> {
+    try {
+      return await this.clients.findBySlug(slug);
+    } catch (error) {
+      if (error instanceof NotFoundError) return undefined;
+      throw error;
+    }
+  }
+
+  /**
+   * O mesmo trabalho em todos os caminhos: com ou sem conta, o `verify` roda **uma vez** (contra
+   * um hash fictício quando não há conta). Bloqueada, a conta responde 429 antes de gastar hash.
+   */
+  private async loginFlow(
+    kind: 'user' | 'platform',
+    lockKey: string,
+    password: string,
+    lookup: () => Promise<LoginAccount | undefined>,
+  ): Promise<Result<AuthTokens, LoginFailure>> {
+    try {
+      const lock = await this.sessions.loginLockState(lockKey);
+      if (lock.locked) {
+        this.metrics?.countAuthLogin(kind, 'locked');
+        this.logger.warn({ kind }, 'login bloqueado por excesso de falhas na conta');
+        return Result.err({ reason: 'locked', retryAfterSeconds: lock.retryAfterSeconds });
+      }
+
+      const account = await lookup();
+      const storedHash = account?.passwordHash ?? (await this.hasher.dummyHash());
+      const matches = await this.hasher.verify(password, storedHash);
+      if (account === undefined || !account.active || !matches) {
+        await this.sessions.recordLoginFailure(lockKey);
+        this.metrics?.countAuthLogin(kind, 'invalid');
+        this.logger.info({ kind, result: 'invalid' }, 'login recusado');
+        return Result.err({ reason: 'invalid_credentials' });
+      }
+      await this.sessions.resetLoginFailures(lockKey);
+
+      const sessionId = randomUUID();
+      const secret = randomBytes(48).toString('base64url');
+      const identity: AuthIdentity = { ...account.identity, sessionId };
+      const scope = scopeOf(identity);
+      await this.sessions.createSession({
+        scope,
+        sessionId,
+        subjectId: subjectIdOf(identity),
+        refreshHash: sha256Hex(secret),
+      });
+      const access = await this.tokens.issue(identity);
+      this.metrics?.countAuthLogin(kind, 'ok');
+      this.logger.info(
+        {
+          kind,
+          sessionId,
+          subjectId: subjectIdOf(identity),
+          ...(identity.kind === 'user' ? { clientId: identity.clientId } : {}),
+        },
+        'login ok',
+      );
+      return Result.ok({
+        accessToken: access.token,
+        refreshToken: `${scope}.${sessionId}.${secret}`,
+        tokenType: 'Bearer',
+        expiresIn: access.expiresIn,
+      });
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) return Result.err({ reason: 'unavailable' });
+      throw error;
+    }
+  }
+
+  /** Quem a sessão representa agora (papel atual do banco), ou `undefined` se não vale mais. */
+  private async resolveIdentity(
+    scope: string,
+    subjectId: string,
+    sessionId: string,
+  ): Promise<AuthIdentity | undefined> {
+    try {
+      if (scope === PLATFORM_SCOPE) {
+        const admin = await this.platformAdmins.findById(PlatformAdminId.parse(subjectId));
+        if (admin.status !== 'ACTIVE') return undefined;
+        return { kind: 'platform', adminId: admin.id, sessionId };
+      }
+      const clientId = ClientId.parse(scope);
+      const [client, user] = await Promise.all([
+        this.clients.findById(clientId),
+        this.users.findById(clientId, UserId.parse(subjectId)),
+      ]);
+      if (client.status !== 'ACTIVE' || user.status !== 'ACTIVE') return undefined;
+      return { kind: 'user', userId: user.id, clientId, role: user.role, sessionId };
+    } catch (error) {
+      if (error instanceof NotFoundError) return undefined;
+      throw error;
+    }
+  }
+}
