@@ -20,7 +20,8 @@
     "format:check": "prettier --check .",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:migrate:deploy": "prisma migrate deploy"
+    "db:migrate:deploy": "prisma migrate deploy",
+    "auth:cli": "tsx src/infrastructure/auth/cli/index.ts"
   },
   "license": "UNLICENSED",
   "dependencies": {
@@ -32,6 +33,7 @@
     "dotenv": "^18.0.9",
     "fastify": "^5.12.7",
     "ioredis": "^6.0.0",
+    "jose": "6.2.12",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "prom-client": "^15.1.3",
