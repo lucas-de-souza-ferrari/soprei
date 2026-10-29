@@ -138,7 +138,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 | Item | Spec | Gatilho |
 | --- | --- | --- |
-| Autenticação JWT + refresh | 007 | antes de existir usuário humano (painel ou atendente) |
+| Autenticação JWT + refresh | 007 | **em rascunho** (reescrita contra o código; aguarda aprovação do dono). Pré-requisito do onboarding de vários clientes (spec B); substitui a `ADMIN_API_KEY` |
 | RBAC | 008 | junto com a autenticação, quando houver mais de um papel |
 | Cache L1/L2 | 006 | quando medição mostrar leitura repetida custosa |
 | Tempo real (SSE/WebSocket) | 009 | quando o painel precisar de eventos ao vivo |
