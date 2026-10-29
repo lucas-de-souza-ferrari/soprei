@@ -2,18 +2,18 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs.
 
-**Última atualização:** 2026-10-28, por Claude Code (Sonnet 5.5).
+**Última atualização:** 2026-10-29, por Claude Code (Sonnet 5.5).
 
 ## Onde estamos
 
-- **Concluídas e mergeadas:** specs 001 a 005, 010, 011, 012 e 013 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta e com token permanente de usuário do sistema; o atendimento ainda responde com o `LlmProvider` `mock`.
-- **Branch em andamento:** `spec/014-provedor-llm-real` (spec 014 implementada, aguardando `reviewer`, push, PR e CI; o agente não dá push). Os docs da `docs/agent-handoff` entraram no primeiro commit dela.
-- **Verde na última verificação (branch da 014):** `pnpm typecheck`, `lint`, `format:check`, 718 testes unitários e 241 de integração, em Node 22.23.2 e 24.18.0; `rm -rf dist && pnpm build` e smoke do processo compilado com `LLM_PROVIDER=mock` e com `anthropic` apontando para um servidor falso. CI ainda não rodou.
+- **Concluídas e mergeadas:** specs 001 a 005 e 010 a 014 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta e com token permanente de usuário do sistema; o atendimento ainda responde com o `LlmProvider` `mock`.
+- **Branch em andamento:** `docs/validation-levels` (só docs: roteiro do implementer com validação em níveis e conclusão da 014); precisa de push e PR do humano.
+- **Verde na última verificação (main com a 014):** `pnpm typecheck`, `lint`, `format:check`, 721 testes unitários e 241 de integração, em Node 22.23.2 e 24.18.0, e CI verde.
 - **Estabilidade da 014:** suítes novas e alteradas repetidas de 4 a 5 vezes em cada Node, sem falha (`anthropic-llm.provider.test.ts`, `anthropic-attendance.test.ts`, `attendance-llm.service.test.ts`, config, métricas, `attendance.integration.test.ts`).
 
 ## Próximo passo sugerido
 
-1. **Spec 014 (provedor real de LLM, Claude Haiku 5.5):** implementada (ver o "Registro da implementação" na spec). Falta: o `reviewer` (de preferência outro agente; foco em vazamento de dado pessoal em erro, chave, cancelamento e o caminho do atendimento), push e PR pelo humano, CI verde, o **teste manual com a chave real** (criar a chave e **definir limite de gasto mensal** na conta da Anthropic; roteiro em `AGENTS.md`, "Provedor de LLM real") e a conferência da base legal e dos termos de dados (LGPD, decisão 7 da spec) antes de clientes reais. O dono marca a spec como `concluída` depois do merge.
+1. **Teste manual da 014 com a chave real** (Anthropic Console: defina um limite de gasto mensal antes; `LLM_PROVIDER=anthropic` e `ANTHROPIC_API_KEY` no `.env`; ver "Provedor de LLM real" em `AGENTS.md`). Depois, o dono confere os termos de dados da Anthropic (LGPD) antes de clientes reais.
 2. Antes de **dados reais de clientes**: política de retenção e LGPD (inclui limpeza do Redis, jobs do BullMQ e o último job retido), RLS do Postgres, varredura de mensagens pendentes antigas.
 
 ## Decisões do dono que não são óbvias no código
@@ -45,3 +45,7 @@
 - Suporte a contatos que usam nome de usuário do WhatsApp (BSUID, sem telefone): hoje a mensagem é descartada com métrica `missing_sender`.
 - Confirmar que o túnel usado acrescenta ao `X-Forwarded-For` em vez de repassar o cabeçalho do cliente.
 - Respostas gravadas e não enviadas (token expirado, falha do Graph) não são reenviadas sozinhas; `sentAt` aparece na API administrativa.
+
+## Experimento em curso (2026-10-29)
+
+- O roteiro do implementer passou a validar em níveis (typecheck e teste do arquivo a cada passo; lint e suíte da área antes de cada commit; bateria completa e repetições só no final). Na **próxima spec**, o humano ou o agente que a verificar conta quantas falhas só apareceram na validação final (e se algum teste intermitente chegou ao CI). Se forem mais que antes, volte ao ciclo antigo e registre aqui.

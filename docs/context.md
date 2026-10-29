@@ -127,10 +127,10 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 7. 012 — Reorganização de pastas: subpastas por área em `database`, `http`, `application` e `presentation`, sem mudança de comportamento
 8. 011 — Canal WhatsApp (webhook assinado, fila BullMQ, envio pela Cloud API, número de teste da Meta, LLM `mock`); teste manual do dono com a Meta funcionou de ponta a ponta
 9. 013 — Agrupamento de mensagens rápidas (janela de espera deslizante, lote respondido uma vez; mensagens gravadas no banco, `Message.answeredById`)
+10. 014 — Provedor real de LLM: `AnthropicLlmProvider` (Claude Haiku 5.5) atrás do `LlmProvider`, `AbortSignal` no prazo, erro sem texto do contato, `llm_tokens_total`; teste manual com a chave real ainda por fazer (limite de gasto na conta antes)
 
 **Próximas**
 
-- **Provedor real de LLM ([spec 014](specs/014-provedor-llm-real.md), aprovada em 2026-10-28):** `AnthropicLlmProvider` (Claude Haiku 5.5) atrás do `LlmProvider`, com `AbortSignal` (cancelar a chamada no prazo), erro sem texto do contato e métricas de tokens. Gemini só em spec futura, e só com conta de faturamento (o plano gratuito treina com os dados).
 - Pendências antes de dados reais: política de retenção e LGPD (inclui limpeza do Redis e dos jobs), RLS do Postgres, varredura de mensagens pendentes antigas, suporte a BSUID (contato sem telefone), confirmar que o túnel/proxy acrescenta ao `X-Forwarded-For`.
 
 

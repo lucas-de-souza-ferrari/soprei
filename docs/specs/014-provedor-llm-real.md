@@ -1,6 +1,6 @@
 # 014 — Provedor real de LLM (Claude Haiku 5.5)
 
-- **Status:** aprovada pelo dono em 2026-10-28, com todas as recomendações (Claude Haiku 5.5, esforço `low`, 1 024 tokens de saída, instrução de estilo, métricas de tokens, 1 repetição, `reviewer`); a base legal LGPD (decisão 7) o dono confere antes de clientes reais
+- **Status:** concluída (CI verde e merge confirmados pelo dono; teste manual com a chave real ainda por fazer). Aprovada pelo dono em 2026-10-28, com todas as recomendações (Claude Haiku 5.5, esforço `low`, 1 024 tokens de saída, instrução de estilo, métricas de tokens, 1 repetição, `reviewer`); a base legal LGPD (decisão 7) o dono confere antes de clientes reais
 - **Branch:** `spec/014-provedor-llm-real`
 - **Depende de:** 010 (atendimento, `LlmProvider`) e 011/013 (canal e agrupamento, para o teste de ponta a ponta)
 
