@@ -2,13 +2,13 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs.
 
-**Última atualização:** 2026-10-29, por Claude Code (Sonnet 5.5), fim da implementação da spec 007.
+**Última atualização:** 2026-10-29, por Claude Code (Sonnet 5.5), spec 007 mergeada e marcada concluída.
 
 ## Onde estamos
 
-- **Concluídas e mergeadas:** specs 001 a 005 e 010 a 014 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta e com token permanente de usuário do sistema; o atendimento ainda responde com o `LlmProvider` `mock`.
-- **Branch em andamento:** `spec/007-autenticacao-jwt` (spec 007 implementada, 5 commits de código + docs, árvore limpa); **falta o `reviewer` (spec de segurança, de preferência outro agente/modelo), push, PR e CI do humano.** A spec segue `aprovada` (o dono a marca `concluída` depois do merge). A branch `docs/validation-levels` (só docs) continua precisando de push e PR do humano, se ainda não foi.
-- **Verde na última verificação (branch da 007):** `pnpm typecheck`, `lint`, `format:check`, 838 testes unitários e 284 de integração, `pnpm build` e smoke do compilado, em Node 22.23.2 e 24.18.0 (local; CI ainda não rodou).
+- **Concluídas e mergeadas:** specs 001 a 005, 007 e 010 a 014 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta e com token permanente de usuário do sistema; o atendimento ainda responde com o `LlmProvider` `mock`.
+- **Branch em andamento:** `docs/spec-007-concluded` (só docs: marca a 007 como concluída); precisa de push e PR do humano. A 007 passou pelo `reviewer` (sem bloqueadores; ajustes aplicados em `b7ef179`) e foi mergeada.
+- **Verde na última verificação (007):** `pnpm typecheck`, `lint`, `format:check`, 841 testes unitários e 284 de integração, `pnpm build` e smoke do compilado, em Node 22.23.2 e 24.18.0 (local); CI verde segundo o dono.
 - **Estabilidade da 014:** suítes novas e alteradas repetidas de 4 a 5 vezes em cada Node, sem falha (`anthropic-llm.provider.test.ts`, `anthropic-attendance.test.ts`, `attendance-llm.service.test.ts`, config, métricas, `attendance.integration.test.ts`).
 
 ## Próximo passo sugerido
