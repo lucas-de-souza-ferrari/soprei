@@ -1,6 +1,6 @@
 # 007 — Autenticação com JWT e refresh token (substitui a `ADMIN_API_KEY`)
 
-- **Status:** rascunho (reescrita do esboço contra o código de `main` em `0c519fe`; **aguarda aprovação do dono**; passa pelo `reviewer` antes do merge, por ser spec de segurança: autenticação, segredos, endpoint público e isolamento)
+- **Status:** aprovada (2026-10-29, com todas as recomendações da seção "Decisões"; reescrita do esboço contra o código de `main` em `0c519fe`; passa pelo `reviewer` antes do merge, por ser spec de segurança: autenticação, segredos, endpoint público e isolamento)
 - **Branch:** `spec/007-autenticacao-jwt`
 - **Depende de:** 003 (isolamento), 004 (contexto e `redact`), 005 (perfis de rate limit). Prepara a 008 (RBAC) e a spec B (onboarding de vários clientes no canal).
 
