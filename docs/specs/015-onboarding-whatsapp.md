@@ -1,13 +1,13 @@
-# 015 — Onboarding de clientes no canal WhatsApp (credenciais por cliente)
+# 015 — Onboarding de clientes no canal WhatsApp (credenciais por cliente e Embedded Signup)
 
-- **Status:** rascunho (aguarda o dono; "spec B" do canal WhatsApp)
+- **Status:** aprovada (2026-10-30, com todas as recomendações da seção "Decisões para o dono"; "spec B" do canal WhatsApp; o dono decidiu em 2026-10-30 que o Embedded Signup entra nesta spec; passa pelo `reviewer` antes do merge)
 - **Branch:** `spec/015-onboarding-whatsapp`
 - **Depende de:** 011 (canal), 013 (agrupamento), 007 (autenticação), 008 (papéis, permissões, auditoria)
 - **Segurança:** guarda segredo de terceiros, toca isolamento e endpoint de administração: **passa pelo `reviewer` antes do merge** (foco: criptografia e uso do token, isolamento entre clientes, posse do número).
 
 ## Objetivo
 
-Hoje há um app Meta, um `WHATSAPP_ACCESS_TOKEN` global e o `Client.whatsappPhoneNumberId` gravado à mão pelo `PlatformAdmin`. Para atender vários clientes, cada um precisa ter **a própria credencial do canal**, guardada cifrada, e poder **conectar, trocar o token e desconectar o próprio número pela API**, sem o dono mexer no banco ou no `.env`. O envio passa a usar o token **do cliente do job**, nunca um global.
+Hoje há um app Meta, um `WHATSAPP_ACCESS_TOKEN` global e o `Client.whatsappPhoneNumberId` gravado à mão pelo `PlatformAdmin`. Para atender vários clientes, cada um precisa ter **a própria credencial do canal**, guardada cifrada, e poder **conectar (pelo Embedded Signup da Meta ou colando um token), trocar o token e desconectar o próprio número pela API**, sem o dono mexer no banco ou no `.env`. O frontend com o botão do Embedded Signup é de outro projeto; esta spec entrega o **contrato do backend** que ele usa. O envio passa a usar o token **do cliente do job**, nunca um global.
 
 ## Estado de partida (lido no código, 2026-10-30)
 
@@ -24,7 +24,7 @@ Hoje há um app Meta, um `WHATSAPP_ACCESS_TOKEN` global e o `Client.whatsappPhon
 - **Posse do número:** um token só enxerga os números das WABAs a que tem acesso. `GET /{waba_id}/phone_numbers` com o token do cliente lista os `phone_number_id` dessa WABA; se o número pedido não está na lista, o token **não prova** posse. É a prova usada aqui.
 - **`debug_token`:** `GET /debug_token?input_token=<token>` autenticado com o token de app (`app_id|app_secret`) devolve `is_valid`, `app_id`, `scopes`, `granular_scopes` (com os `target_ids`, onde aparecem as WABAs) e `expires_at` (0 = não expira). Serve para recusar token de **outro app** (o webhook só chega para o nosso app, então um token de outro app deixaria o cliente "conectado" e mudo) e token sem `whatsapp_business_messaging` / `whatsapp_business_management`.
 - **Receber mensagens exige o app assinado na WABA:** `POST /{waba_id}/subscribed_apps` (com o token do cliente) liga o webhook do app àquela WABA; `DELETE` desliga.
-- **Embedded Signup (não implementado aqui, ver decisão 1):** o navegador abre o fluxo com `FB.login` (config id do Facebook Login for Business), devolve um `code` de vida curta e, por evento `WA_EMBEDDED_SIGNUP`, `phone_number_id`, `waba_id` e `business_id`; o servidor troca o `code` por token em `GET /oauth/access_token` (app id e segredo), assina o app na WABA e, se preciso, registra o número (`/register`, PIN). Exige verificação de negócio, revisão do app com acesso avançado às duas permissões acima, domínio autorizado no JS SDK e uma **tela** que o Soprei ainda não tem.
+- **Embedded Signup:** o navegador abre o fluxo com `FB.login` (`config_id` do Facebook Login for Business, `response_type: 'code'`); ao fim a Meta entrega ao navegador um `code` de **uso único e vida curta** (minutos) e, por evento `message` `WA_EMBEDDED_SIGNUP` (`FINISH`), `phone_number_id`, `waba_id` e `business_id`. O servidor troca o `code` por token no endpoint OAuth do Graph (`/oauth/access_token`, com `client_id`, `client_secret` e `code`; no fluxo por popup do JS SDK normalmente **sem** `redirect_uri`, a confirmar), assina o app na WABA e, **se a documentação atual exigir**, registra o número (`/register`, PIN). Pré-requisitos no painel Meta, que o dono confirmou já existirem (2026-10-30): verificação de negócio, app publicado e Tech Provider, acesso avançado a `whatsapp_business_management` e `whatsapp_business_messaging`, `config_id` e domínio autorizado. Os dados do evento chegam **pelo navegador**, portanto são **não confiáveis** até revalidados na Graph com o token obtido. Confirmar também a validade do token de negócio resultante (`debug_token`: `expires_at`).
 
 ## Comportamento esperado
 
@@ -66,16 +66,30 @@ Todas em `/admin/clients/:clientId/channel`, com `requirePermission(..., { clien
   3. `POST /{wabaId}/subscribed_apps` com o token do cliente (sem isso o webhook não chega).
 
   Depois, **uma transação** (com `lockClient`, que serializa PUTs do mesmo cliente): cifra, faz upsert da conexão (`tokenVersion + 1`, `status = CONNECTED`, `tokenInvalidAt = null`), grava `Client.whatsappPhoneNumberId` e o evento de auditoria. Resposta 200 com o mesmo corpo do `GET`. Número já usado por **outro** cliente: 409 `CHANNEL_NUMBER_IN_USE` (mensagem fixa, não diz quem). Trocar de número no mesmo cliente é um PUT com outro `phoneNumberId` (o número antigo é liberado; os jobs já enfileirados para ele são descartados pelo processador, regra da 011).
+- `POST .../channel/embedded-signup` (`channel:manage`), **Embedded Signup**: ver a subseção seguinte. Mesmo resultado, mesmas validações e mesma gravação do `PUT`; só muda de onde vem o token.
 - `DELETE .../channel` (`channel:manage`) -> 204, idempotente (sem conexão também é 204). Numa transação: apaga a `ChannelConnection` (some o texto cifrado), limpa `Client.whatsappPhoneNumberId` e audita. **Depois** do commit, melhor esforço e sem o token ficar em lugar nenhum: `DELETE /{wabaId}/subscribed_apps` (falha só loga e conta). Cliente `LEGACY` também pode desconectar (só limpa o número).
 - Autorização: `channel:read` e `channel:manage` ao `OWNER` e ao `ADMIN` (matriz abaixo). O token é credencial do negócio do cliente: `AGENT` e `VIEWER` não veem nem o estado.
 
 | Permissão | OWNER | ADMIN | AGENT | VIEWER |
 | --- | :---: | :---: | :---: | :---: |
 | `channel:read` (`GET .../channel`) | x | x | | |
-| `channel:manage` (`PUT`, `DELETE .../channel`) | x | x | | |
+| `channel:manage` (`PUT`, `POST .../embedded-signup`, `DELETE .../channel`) | x | x | | |
 
 - Erros: corpo inválido 400 sem ecoar o valor; `accessToken` inválido, de outro app, sem escopo ou número fora da WABA: 400 com `code` fixo (`CHANNEL_TOKEN_REJECTED`, `CHANNEL_WRONG_APP`, `CHANNEL_MISSING_SCOPE`, `CHANNEL_NUMBER_NOT_IN_WABA`; `ValidationError` ganha `options.code` se preciso, como o `ConflictError`) e mensagem constante; Meta fora do ar, 5xx, 429 ou prazo: 502 (`ExternalServiceError`) **sem** gravar nada; conflito 409; sem permissão 403.
 - **`PATCH /admin/clients/:id` deixa de aceitar `whatsappPhoneNumberId`** (corpo com o campo = 400): duas portas para o número divergiriam. `persona`, `name` e `status` seguem iguais.
+
+### Embedded Signup: `POST /admin/clients/:clientId/channel/embedded-signup`
+
+**O que o frontend faz (só o contrato; a tela é de outro projeto):** (1) o `OWNER`/`ADMIN` já está logado (Bearer); (2) abre `FB.login` com o `config_id` e `response_type: 'code'`; (3) guarda o `code` da resposta e `waba_id` e `phone_number_id` do evento `WA_EMBEDDED_SIGNUP` `FINISH`; (4) envia os três ao endpoint **logo** (o `code` vale minutos e só uma vez); (5) trata a resposta (corpo do `GET .../channel`) e os erros abaixo, **sem** guardar nem reenviar o `code` (um novo fluxo gera outro).
+
+- **Corpo (Zod estrito):** `{ code, wabaId, phoneNumberId }`; `code` 1 a 512 caracteres sem espaço nem controle; `wabaId`/`phoneNumberId` 1 a 32 dígitos. Resposta 200 igual à do `GET .../channel`; mesmos 400/409/502 do `PUT`, mais `400 CHANNEL_CODE_INVALID` (code inválido, expirado, já usado ou de outro app; mensagem constante, sem distinguir).
+- **Passos no servidor:** (a) troca o `code` por token pelo `ChannelProvisioner.exchangeCode` (`WHATSAPP_APP_ID` e `WHATSAPP_APP_SECRET`; preferir `POST` com corpo `application/x-www-form-urlencoded` ou cabeçalho, para segredo e `code` não irem na URL, a confirmar na documentação); (b) **o mesmo fluxo do `PUT` com o token obtido**: `debug_token` (`app_id` igual a `WHATSAPP_APP_ID`, escopos, `wabaId` entre os `target_ids`), lista de números da WABA com o token (`phoneNumberId` precisa constar), `subscribed_apps`; (c) a mesma transação do `PUT` (cifra, upsert, número, auditoria `CHANNEL_CONNECTED` ou `CHANNEL_TOKEN_REPLACED`). O token trocado **só é gravado se tudo passar**; falhou em (b), é descartado da memória sem gravar.
+- **Os ids do navegador não são confiados:** `wabaId` e `phoneNumberId` só valem se a Graph, com o **token obtido do `code`**, confirmar. Um cliente que enviar a WABA ou o número de **outro** recebe `CHANNEL_NUMBER_NOT_IN_WABA` ou `CHANNEL_WRONG_APP`/`CHANNEL_MISSING_SCOPE` (o token do `code` dele não enxerga o que não é dele); número já ligado a outro cliente: 409 `CHANNEL_NUMBER_IN_USE`.
+- **`code`: uso único e sem Redis.** A Meta é quem garante o uso único (segundo uso = erro = `CHANNEL_CODE_INVALID`); o Soprei não guarda o `code`, nem o `hash` dele. Duas submissões simultâneas do mesmo `code`: uma vence, a outra recebe `CHANNEL_CODE_INVALID` (provado no servidor falso, que consome o `code` na primeira troca). Reenviar depois de 502 na troca pode já ter consumido o `code`: o frontend refaz o fluxo.
+- **CSRF e `state` (decisão 9):** o fluxo por **popup do JS SDK** não usa redirecionamento, e o endpoint é autenticado por `Authorization: Bearer` (não por cookie), então outro site não consegue fazer o navegador do cliente chamá-lo. O ataque que um `state` evitaria (injetar o `code` de **outra** conta na sessão da vítima) só conectaria o canal da vítima à WABA do atacante, e o `code` do atacante é um segredo que ele teria de fazer a vítima enviar com o Bearer dela; mesmo assim a posse do número é provada pela Graph com o token do próprio `code`. Por isso **não** há `state` nem nonce server-side nesta spec. Se o frontend decidir usar o fluxo por **redirecionamento**, `state` aleatório (de uso único, preso a `clientId` e usuário, TTL curto) passa a ser obrigatório e exige uma spec/ajuste antes.
+- **Rate limit:** perfil `admin` (já por IP) e serialização por cliente (`lockClient` na gravação). Cada chamada custa até 4 idas à Graph, com prazo `WHATSAPP_SEND_TIMEOUT_MS` cada; erro de Meta nunca vira 5xx do Soprei com corpo (502 genérico).
+- **Privacidade:** `code`, `client_secret` e o token trocado **nunca** vão a log, erro, métrica, auditoria nem resposta; o `code` entra no `redact`; erro de validação do corpo não ecoa valor; o erro do `ChannelProvisioner` leva só `{ operation, httpStatus, providerCode, retryable }`.
+- **A confirmar pelo implementer antes de codar (e, se mudar o desenho, ajustar a spec e passar pelo `reviewer`):** se o Embedded Signup atual exige `/register` do número (PIN) a cargo do servidor; se a troca do `code` precisa de `redirect_uri`; a validade do token de negócio; se `granular_scopes` traz a WABA do Embedded Signup.
 
 ### Envio com o token do cliente
 
@@ -102,26 +116,28 @@ Nada muda no fluxo (um app, um `WHATSAPP_APP_SECRET`, assinatura sobre o corpo c
 
 | Variável | Regra |
 | --- | --- |
-| `WHATSAPP_APP_ID` | obrigatória com `WHATSAPP_ENABLED=true`; dígitos |
+| `WHATSAPP_APP_ID` | obrigatória com `WHATSAPP_ENABLED=true`; dígitos; todo token (manual ou do Embedded Signup) precisa ter este `app_id` no `debug_token` |
+| `WHATSAPP_APP_SECRET` | já existe; passa a servir também à troca do `code` e ao token de app do `debug_token` |
+| (sem variável nova para o Embedded Signup) | o `config_id` e o domínio autorizado ficam no frontend e no painel Meta |
 | `CHANNEL_CREDENTIALS_KEYS` | obrigatória com o canal ligado; ver "Cifra"; entra no `redact` |
 | `CHANNEL_CREDENTIALS_ACTIVE_KEY_ID` | obrigatória com o canal ligado; precisa estar em `KEYS` |
 | `WHATSAPP_ACCESS_TOKEN` | **passa a opcional** (só para clientes `LEGACY`; mínimo 16 se informado) |
 
-Quem já usa o canal precisa **acrescentar as três variáveis novas** ao `.env` antes de subir (o boot falha com mensagem clara se faltar). O `redact` do logger ganha `accessToken` (já existe), `tokenCiphertext`, `CHANNEL_CREDENTIALS_KEYS` e `WHATSAPP_ACCESS_TOKEN`.
+Quem já usa o canal precisa **acrescentar as três variáveis novas** ao `.env` antes de subir (o boot falha com mensagem clara se faltar). O `redact` do logger ganha `accessToken` (já existe), `code`, `clientSecret`, `tokenCiphertext`, `CHANNEL_CREDENTIALS_KEYS` e `WHATSAPP_ACCESS_TOKEN`.
 
 ### Cliente Graph de administração
 
-Porta `ChannelProvisioner` (`application/ports/`: `inspectToken`, `listPhoneNumberIds(wabaId, token)`, `subscribeApp`, `unsubscribeApp`) e implementação `src/infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.ts`, no mesmo padrão do `WhatsappCloudApiClient` (`fetch`, `redirect: 'manual'`, prazo `WHATSAPP_SEND_TIMEOUT_MS`, leitura com teto de 64 KiB, schemas Zod tolerantes). O token do cliente vai em `Authorization: Bearer`; o token de app (`WHATSAPP_APP_ID|WHATSAPP_APP_SECRET`) também em cabeçalho, **nunca** em query string nem em log. O erro devolvido leva só `{ operation, httpStatus, providerCode, retryable }` (nunca o corpo da Meta, que pode ecoar token ou número).
+Porta `ChannelProvisioner` (`application/ports/`: `exchangeCode(code)`, `inspectToken`, `listPhoneNumberIds(wabaId, token)`, `subscribeApp`, `unsubscribeApp`) e implementação `src/infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.ts`, no mesmo padrão do `WhatsappCloudApiClient` (`fetch`, `redirect: 'manual'`, prazo `WHATSAPP_SEND_TIMEOUT_MS`, leitura com teto de 64 KiB, schemas Zod tolerantes). O token do cliente vai em `Authorization: Bearer`; o token de app (`WHATSAPP_APP_ID|WHATSAPP_APP_SECRET`) também em cabeçalho, **nunca** em query string nem em log. O erro devolvido leva só `{ operation, httpStatus, providerCode, retryable }` (nunca o corpo da Meta, que pode ecoar token ou número).
 
 ### Métricas (registry da 004; conjuntos fixos de labels, sem `clientId`, número, WABA ou token)
 
-- `channel_connections_total{action,result}`: `action` ∈ `connect`, `replace_token`, `disconnect`; `result` ∈ `ok`, `invalid_token`, `wrong_app`, `missing_scope`, `number_not_in_waba`, `number_in_use`, `graph_error`.
+- `channel_connections_total{action,result}`: `action` ∈ `connect`, `replace_token`, `embedded_signup`, `disconnect`; `result` ∈ `ok`, `invalid_token`, `invalid_code`, `wrong_app`, `missing_scope`, `number_not_in_waba`, `number_in_use`, `graph_error`.
 - `channel_state_transitions_total{to}`: `token_invalid`.
 - `channel_credential_errors_total{reason}`: `malformed`, `unknown_key`, `tampered`.
 
 ## Critérios de aceite
 
-Servidor Graph falso estendido (`src/test-support/fake-graph-api.ts`: `debug_token`, `GET /{waba}/phone_numbers`, `POST/DELETE /{waba}/subscribed_apps`, cenários de token inválido, outro app, escopo faltando, 5xx, demora, e registro do `Authorization` recebido por número). **Nenhum teste chama a Meta real.**
+Servidor Graph falso estendido (`src/test-support/fake-graph-api.ts`: troca de `code` por token com `code` de uso único, expirável e de outro app, `debug_token`, `GET /{waba}/phone_numbers`, `POST/DELETE /{waba}/subscribed_apps`, cenários de token inválido, outro app, escopo faltando, 5xx, demora, e registro do `Authorization` recebido por número). **Nenhum teste chama a Meta real.**
 
 - [ ] **Cifra:** roundtrip devolve o token; dois `encrypt` do mesmo texto dão saídas diferentes (IV aleatório); chave errada, `keyId` desconhecido, texto adulterado (um byte no IV, na tag e no cifrado), formato inválido e texto cifrado de outro `clientId` (AAD) lançam `CredentialDecryptionError` com `reason` correto e **sem** o texto nem a chave na mensagem, no `context` ou em `JSON.stringify`; rotação: texto cifrado com a chave antiga decifra enquanto ela está na lista, e o novo sai com a chave ativa.
 - [ ] **`SecretString`:** `String(s)`, `JSON.stringify(s)`, template string e `util.inspect(s)` devolvem `[redacted]`; só `reveal()` dá o valor.
@@ -130,6 +146,12 @@ Servidor Graph falso estendido (`src/test-support/fake-graph-api.ts`: `debug_tok
 - [ ] **PUT feliz:** com token válido do nosso app, escopos certos e número na WABA, responde 200 com `state = CONNECTED`, grava `Client.whatsappPhoneNumberId`, a conexão (texto cifrado **diferente** do token e que decifra para ele), chama `subscribed_apps`, grava `CHANNEL_CONNECTED` na mesma transação e **nenhuma** resposta, log ou métrica contém o token (captura de log e varredura do corpo e de `/metrics`).
 - [ ] **PUT recusado, sem gravar nada** (nem número, nem conexão, nem auditoria): token inválido (400 `CHANNEL_TOKEN_REJECTED`), de outro app (`CHANNEL_WRONG_APP`), sem escopo (`CHANNEL_MISSING_SCOPE`), número fora da WABA (`CHANNEL_NUMBER_NOT_IN_WABA`), Meta 5xx/429/prazo (502), corpo com campo extra, ausente ou com formato inválido (400 sem ecoar o valor).
 - [ ] **Posse do número:** o cliente B, com token válido de **outra WABA**, não consegue conectar o `phoneNumberId` que pertence à WABA do cliente A (`CHANNEL_NUMBER_NOT_IN_WABA`); o cliente B com token que lista o número **já conectado ao cliente A** recebe 409 `CHANNEL_NUMBER_IN_USE` sem revelar A, e A segue intacto; duas conexões concorrentes do mesmo número por clientes diferentes (Postgres real): exatamente uma vence, a outra recebe 409.
+- [ ] **Embedded Signup feliz:** `POST .../channel/embedded-signup` com `code` válido e `wabaId`/`phoneNumberId` corretos troca o `code` (o servidor falso recebe `client_id` = `WHATSAPP_APP_ID`, o segredo e o `code`, **fora da URL** se a Graph aceitar), valida como o `PUT`, grava a conexão cifrada, chama `subscribed_apps`, audita na mesma transação e responde 200 com o corpo do `GET`; o resultado no banco é equivalente ao do `PUT`.
+- [ ] **Embedded Signup recusado, sem gravar nada:** `code` inválido, expirado, **já usado** e de outro app (400 `CHANNEL_CODE_INVALID`, mensagem idêntica); duas submissões simultâneas do mesmo `code` (uma 200, a outra 400); token obtido de **outro `app_id`** (`CHANNEL_WRONG_APP`), sem escopo, `wabaId` ou `phoneNumberId` que o token do `code` não enxerga (`CHANNEL_NUMBER_NOT_IN_WABA`), troca ok e `subscribed_apps` com 5xx (502), Meta 5xx/429/prazo na troca (502); corpo com campo extra ou faltando (400 sem ecoar valor).
+- [ ] **Embedded Signup entre dois clientes:** o cliente B envia o `wabaId` e o `phoneNumberId` do cliente A com **o `code` de B**: recusado e A intacto; B tenta o número já conectado a A com WABA que o token dele enxerga: 409 `CHANNEL_NUMBER_IN_USE` sem revelar A; `code` de B não conecta A (o `clientId` vem do token de acesso, nunca do corpo).
+- [ ] **Vazamento no Embedded Signup:** captura de log, corpo de resposta, erros e `/metrics` em todos os cenários acima não contêm o `code`, o `client_secret`/`WHATSAPP_APP_SECRET`, o token trocado nem o corpo de erro do servidor falso (que os ecoa de propósito); o `redact` cobre `code`.
+- [ ] **`app_id` fixo no fluxo manual também:** `PUT` com token de outro `app_id` recusado (`CHANNEL_WRONG_APP`), idem ao do Embedded Signup.
+- [ ] **Permissões do Embedded Signup:** `AGENT`/`VIEWER` 403, `PlatformAdmin` 403, `:clientId` alheio 404, sem token 401; a rota está no inventário (`admin`, `requirePermission`) e não existe (404) com `WHATSAPP_ENABLED=false`.
 - [ ] **Trocar o token** (PUT sobre conexão existente): `tokenVersion` sobe, `status` volta a `CONNECTED`, evento `CHANNEL_TOKEN_REPLACED`, o texto cifrado muda; **trocar de número** libera o antigo (outro cliente consegue conectá-lo depois).
 - [ ] **DELETE:** apaga a linha (nenhum `tokenCiphertext` do cliente resta no banco), limpa o número, audita `CHANNEL_DISCONNECTED`, tenta o `DELETE .../subscribed_apps` depois do commit, é idempotente (segundo DELETE = 204, sem novo evento), e a falha do `unsubscribe` não desfaz nem muda o 204 (log `warn` e métrica, sem token). Webhook para o número desconectado: `unknown_number`, nada enfileirado.
 - [ ] **Remoção do cliente** (`DELETE /admin/clients/:id`) apaga a conexão na mesma transação (nenhum texto cifrado de cliente removido permanece).
@@ -147,7 +169,7 @@ Servidor Graph falso estendido (`src/test-support/fake-graph-api.ts`: `debug_tok
 
 ## Teste manual com a Meta (feito pelo dono; nenhum agente chama a API real)
 
-(1) no `.env`, acrescente `WHATSAPP_APP_ID` e as duas variáveis de chave (gerar com o comando acima); reinicie; (2) com o número de teste da Meta (a WABA de teste e o token **temporário de 24 h** do painel; token de usuário do sistema serve para o permanente), faça `POST /auth/login` como `OWNER` e `PUT /admin/clients/:clientId/channel` com `phoneNumberId`, `wabaId` e `accessToken`; (3) mande uma mensagem pelo WhatsApp: a resposta chega e `GET .../channel` mostra `CONNECTED`; (4) invalide o token (revogue ou espere expirar), mande outra: o canal passa a `TOKEN_INVALID` e nada é enviado; (5) `PUT` com token novo e `DELETE`; (6) cliente antigo: `GET .../channel` mostra `LEGACY` até o `PUT`.
+(1) no `.env`, acrescente `WHATSAPP_APP_ID` e as duas variáveis de chave (gerar com o comando acima); reinicie; (2) **Embedded Signup:** no frontend do dono (ou numa página mínima com o JS SDK, `config_id` e domínio autorizado), faça o fluxo com um número de teste e mande `{ code, wabaId, phoneNumberId }` ao `POST .../channel/embedded-signup` logado como `OWNER`; ou, pelo caminho manual, com a WABA de teste e um token do **nosso app** (o temporário de 24 h do painel serve; o de usuário do sistema é o permanente), `PUT /admin/clients/:clientId/channel` com `phoneNumberId`, `wabaId` e `accessToken`; token de **outro app** deve ser recusado; (3) mande uma mensagem pelo WhatsApp: a resposta chega e `GET .../channel` mostra `CONNECTED`; (4) invalide o token (revogue ou espere expirar), mande outra: o canal passa a `TOKEN_INVALID` e nada é enviado; (5) `PUT` com token novo e `DELETE`; (6) cliente antigo: `GET .../channel` mostra `LEGACY` até o `PUT`.
 
 ## Casos de borda e erros
 
@@ -172,8 +194,9 @@ Toca em dados de tenant e em segredo. Barreiras, cada uma com teste:
 
 ## Fora de escopo
 
-- **Embedded Signup** (troca de `code`, `business_id`, registro do número com PIN, evento `WA_EMBEDDED_SIGNUP`): spec 016, depois da tela de onboarding e da configuração no painel Meta (ver decisão 1). O `PUT` desta spec é o ponto que ela reaproveita (a troca do `code` só produz o token e o `waba_id`).
-- **Tela/frontend de onboarding** (painel admin, projeto separado).
+- **Tela/frontend do Embedded Signup e de onboarding** (projeto separado do dono; aqui só o contrato do backend). Fluxo por **redirecionamento** (exigiria `state`, ver decisão 9).
+- **Cadastro público** (o cliente se cadastra sozinho: criar `Client` e `OWNER` sem o `PlatformAdmin`, e-mail, anti-abuso): **spec própria depois**. Por ora cliente e `OWNER` inicial são criados pelo `PlatformAdmin` (`POST /admin/clients`) e por `pnpm auth:cli create-user`.
+- Se a documentação atual exigir **registro do número com PIN** (`/register`) ou `business_id` no Embedded Signup e isso não couber aqui, vira spec própria (o implementer avisa antes de codar).
 - **Templates de mensagem e janela de 24 h** (hoje 131047 é só erro permanente); mensagens iniciadas pela empresa.
 - **Mais de um número (ou WABA) por cliente**: o schema permite evoluir (`clientId` deixaria de ser único), mas não é feito.
 - **Mais de um app Meta** (lista de `WHATSAPP_APP_SECRET` testada em tempo constante) e conferência de `entry[].id` (WABA) do webhook contra a conexão do cliente.
@@ -192,22 +215,25 @@ Toca em dados de tenant e em segredo. Barreiras, cada uma com teste:
 
 ## Decisões para o dono (recomendação marcada; o dono decide)
 
-1. **Fatia desta spec.** **(recomendada) A: 015 = credenciais por cliente, cifra, estado, envio com o token do cliente e `PUT/GET/DELETE` do `OWNER`/`ADMIN` com validação pela Graph API; Embedded Signup vira a 016.** Motivo: o Embedded Signup precisa de tela, domínio autorizado, `config_id` e revisão do app no painel Meta (o que um agente não pode configurar nem testar) e, no fim, só produz `{ token, waba_id, phone_number_id }` para o mesmo `PUT`; tudo o que é crítico de segurança (cifra, isolamento, posse do número, estado) cabe e é testável agora com servidor falso. Alternativa B: incluir já o endpoint do `code` (troca por token, `subscribed_apps`, registro do número) nesta spec: PR bem maior, só verificável de ponta a ponta com tela e Meta reais. Alternativa C: só token manual para sempre (não escala sem o dono intermediar).
+1. **Fatia desta spec. DECIDIDO pelo dono (2026-10-30): o Embedded Signup entra na 015** (endpoint do `code` junto com credenciais por cliente, cifra, estado, envio com o token do cliente e `PUT/GET/DELETE`). Pré-requisitos Meta já existem. O que um agente não testa (a Meta real e o frontend) é coberto por servidor falso e pelo teste manual do dono. Se o PR passar de ~2 000 linhas, divide: **015a = credenciais, cifra, estado, envio e `PUT/GET/DELETE`; 015b = Embedded Signup** (troca do `code`, que reaproveita o serviço de conexão da 015a).
 2. **Quem opera o canal do cliente.** **(recomendada) `OWNER` e `ADMIN` do cliente; `PlatformAdmin` não** (consistente com a decisão 5 da 007: a plataforma não opera dentro do tenant e não manuseia o token do cliente). Alternativa: só `OWNER`; ou deixar o `PlatformAdmin` conectar em nome do cliente (mais fácil no começo, mas o dono passa a tocar credencial de terceiros e precisa de rota e auditoria próprias).
 3. **Token global.** **(recomendada) opcional e só para clientes `LEGACY`, removido pelo dono quando todos tiverem feito o `PUT`.** Alternativa: remover já (derruba o cliente atual até o `PUT`) ou manter como fallback permanente (um segredo compartilhado de que nada se livra).
 4. **Cifra.** **(recomendada) AES-256-GCM do `node:crypto`, chave mestra em variável de ambiente com lista de chaves e `keyId` (rotação), AAD com o `clientId`.** Alternativas: cifra por pgcrypto no banco (a chave passaria pelo SQL e pelos logs do Postgres); envelope com KMS (exige hospedagem, ainda não decidida).
 5. **Auditoria.** **(recomendada) reusar `AuditEvent` com `target_user_id` anulável e `CHECK` por ação.** Alternativa: tabela própria `ChannelEvent` (nenhuma mudança no contrato da 008, mas duas trilhas para o `OWNER` consultar).
 6. **Token inválido.** **(recomendada) marca `TOKEN_INVALID`, descarta os próximos `flush` sem LLM nem texto padrão e exige o `PUT`.** Alternativa: continuar tentando enviar (gasta LLM à toa e polui log) ou tentar o texto padrão (não há token que funcione).
 7. **Posse do número.** **(recomendada) provar com o token do próprio cliente (`debug_token` + lista de números da WABA), primeiro a provar leva, `@unique` global.** Alternativa: verificação extra por código no número (SMS) ou aprovação manual do dono (atrito sem ganho: o token já prova o acesso).
-8. **Um PR ou dois.** **(recomendada) um PR**, em commits por camada (cifra e config, model e repositório, cliente Graph, rotas, processador). Se passar de ~2 000 linhas, divide em 015a (cifra, model, envio por cliente, `TOKEN_INVALID`) e 015b (rotas e auditoria).
+8. **Um PR ou dois.** **(recomendada) um PR**, em commits por camada (cifra e config, model e repositório, cliente Graph, rotas, Embedded Signup, processador). Se passar de ~2 000 linhas, divide em 015a e 015b (ver decisão 1).
+9. **`state`/CSRF no Embedded Signup.** **(recomendada) sem `state` nem nonce server-side**, porque o fluxo é por popup do JS SDK (sem redirecionamento), o endpoint usa Bearer (não cookie) e tudo que vem do navegador é revalidado na Graph com o token do próprio `code`. Alternativa: nonce de uso único emitido por `POST .../channel/embedded-signup/session` (Redis, preso a `clientId` e usuário, TTL 10 min) e enviado de volta com o `code`: mais uma rota e uma dependência de Redis sem fechar um ataque real neste desenho; passa a ser obrigatório se o frontend usar redirecionamento.
 
-### Perguntas que só o dono responde
+### Decididas pelo dono (2026-10-30)
 
-- Embedded Signup agora ou só token manual por enquanto (decisão 1)? Em quanto tempo o primeiro cliente real vai conectar, e **quantos clientes** nos primeiros meses (mais de uns poucos justifica ir direto à 016)?
-- A verificação de negócio, o app publicado e o status de Tech Provider (informados em 2026-10-27) seguem valendo? O app já tem **acesso avançado** a `whatsapp_business_management` e `whatsapp_business_messaging`? Existe `config_id` de Embedded Signup e domínio autorizado?
-- Os tokens dos clientes serão **de usuário do sistema do próprio cliente** (manual) ou do **Embedded Signup** (token de negócio do nosso app)? Isso define se o `debug_token` com `app_id` fixo no nosso app, como proposto, serve para todos.
-- Quem cria o `OWNER` de cada cliente no começo (o dono, pelo CLI)? Confirma que o dono **não** quer conectar o canal em nome do cliente (decisão 2)?
-- Onde roda a aplicação (hospedagem ainda aberta): decide onde mora a chave mestra e como ela é rotacionada.
+Embedded Signup incluso na 015; verificação de negócio, app publicado, Tech Provider, acesso avançado às duas permissões, `config_id` e domínio autorizado já existem; o dono terá um frontend e o cliente se cadastra sozinho (**cadastro público é spec própria depois**; por ora `PlatformAdmin` e `pnpm auth:cli` criam cliente e `OWNER`); a aplicação roda em servidor (chave mestra só no ambiente do servidor, fora do git, rotação por `keyId`); `app_id` do `debug_token` igual a `WHATSAPP_APP_ID` para **todos** os tokens; `OWNER`/`ADMIN` operam o canal e `PlatformAdmin` recebe 403; token global só para `LEGACY`; auditoria reusa `AuditEvent`.
+
+### Perguntas ainda abertas
+
+- Confirma a decisão 9 (sem `state`, fluxo por popup do JS SDK)? O frontend usará popup ou redirecionamento?
+- Confirma cifra (decisão 4), `TOKEN_INVALID` (decisão 6), posse do número "primeiro a provar leva" (decisão 7) e um PR com divisão possível (decisão 8)?
+- O fluxo atual do Embedded Signup exige que o Soprei registre o número (`/register` com PIN)? O implementer confere na documentação; se exigir, o dono decide se entra aqui ou em spec própria.
 
 ## Decisões e dependências novas
 
