@@ -23,6 +23,8 @@ export {
 export { retryOnRecoverable, runInTransaction } from './transaction.js';
 export type { RetryOptions, TransactionOptions } from './transaction.js';
 export { PrismaAttendanceUnitOfWork } from './repositories/attendance-unit-of-work.js';
+export { PrismaChannelConnectionRepository } from './repositories/channel-connection.repository.js';
+export { PrismaChannelUnitOfWork } from './repositories/channel-unit-of-work.js';
 export { PrismaAuditRepository } from './repositories/audit.repository.js';
 export { PrismaUserAdminUnitOfWork } from './repositories/user-admin-unit-of-work.js';
 export { PrismaClientRepository } from './repositories/client.repository.js';

@@ -211,6 +211,25 @@ describe('createMetrics', () => {
     assert.doesNotMatch(body, /clientId|userId|phone|contact|text=/i);
   });
 
+  it('métricas de conexão do canal (spec 015): conjuntos fixos de labels, sem ids nem token', async () => {
+    const metrics = createMetrics();
+    metrics.countChannelConnection('connect', 'ok');
+    metrics.countChannelConnection('connect', 'wrong_app');
+    metrics.countChannelConnection('disconnect', 'unsubscribe_failed');
+    metrics.countChannelStateTransition('token_invalid');
+    metrics.countChannelCredentialError('tampered');
+    const body = await metrics.render();
+    assert.match(body, /channel_connections_total{action="connect",result="ok"} 1/);
+    assert.match(body, /channel_connections_total{action="connect",result="wrong_app"} 1/);
+    assert.match(
+      body,
+      /channel_connections_total{action="disconnect",result="unsubscribe_failed"} 1/,
+    );
+    assert.match(body, /channel_state_transitions_total{to="token_invalid"} 1/);
+    assert.match(body, /channel_credential_errors_total{reason="tampered"} 1/);
+    assert.doesNotMatch(body, /clientId|waba|phone|token="/i);
+  });
+
   it('métricas de autorização e de gestão de usuários (spec 008): só labels de conjunto fixo', async () => {
     const metrics = createMetrics();
     metrics.countAuthzDenial('user:manage');

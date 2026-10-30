@@ -69,6 +69,21 @@ export type ChannelInboundResult =
 
 export type ChannelSendResult = 'ok' | 'error';
 
+/** Operações de conexão do canal (spec 015) e seus resultados (conjuntos fixos). */
+export type ChannelConnectionAction =
+  'connect' | 'replace_token' | 'embedded_signup' | 'disconnect';
+export type ChannelConnectionResult =
+  | 'ok'
+  | 'invalid_token'
+  | 'invalid_code'
+  | 'wrong_app'
+  | 'missing_scope'
+  | 'number_not_in_waba'
+  | 'number_in_use'
+  | 'graph_error'
+  | 'unsubscribe_failed';
+export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
+
 export interface ChannelSendSample {
   /** Canal (`whatsapp`): conjunto pequeno e fixo, nunca dado do usuário. */
   readonly channel: string;
@@ -127,6 +142,12 @@ export interface Metrics {
   countChannelStatus(channel: string, status: ChannelStatusEvent): void;
   /** Um envio de mensagem ao canal terminou. */
   observeChannelSend(sample: ChannelSendSample): void;
+  /** Uma operação de conexão do canal terminou (spec 015). Sem `clientId`, número, WABA nem token. */
+  countChannelConnection(action: ChannelConnectionAction, result: ChannelConnectionResult): void;
+  /** A conexão do cliente passou a `TOKEN_INVALID` (spec 015). */
+  countChannelStateTransition(to: 'token_invalid'): void;
+  /** Falha ao decifrar uma credencial guardada (spec 015). */
+  countChannelCredentialError(reason: ChannelCredentialErrorReason): void;
   /** Um job da fila terminou (ou foi reagendado). `queue` é o nome fixo da fila. */
   countQueueJob(queue: string, result: QueueJobResult): void;
   /** Uma requisição foi recusada com 429 (spec 005). `profile` é um dos perfis fixos, nunca IP. */
@@ -281,6 +302,24 @@ export function createMetrics(): Metrics {
     buckets: [...HTTP_DURATION_BUCKETS],
     registers: [registry],
   });
+  const channelConnections = new Counter({
+    name: 'channel_connections_total',
+    help: 'Operações de conexão do canal por ação e resultado',
+    labelNames: ['action', 'result'] as const,
+    registers: [registry],
+  });
+  const channelStateTransitions = new Counter({
+    name: 'channel_state_transitions_total',
+    help: 'Transições de estado da conexão do canal (to=token_invalid)',
+    labelNames: ['to'] as const,
+    registers: [registry],
+  });
+  const channelCredentialErrors = new Counter({
+    name: 'channel_credential_errors_total',
+    help: 'Falhas ao decifrar credenciais do canal, por motivo',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  });
   const queueJobs = new Counter({
     name: 'queue_jobs_total',
     help: 'Jobs da fila por nome da fila e resultado (completed, retried, failed, discarded)',
@@ -383,6 +422,15 @@ export function createMetrics(): Metrics {
     observeChannelSend({ channel, result, durationSeconds }) {
       channelSend.inc({ channel, result });
       channelSendDuration.observe({ channel }, durationSeconds);
+    },
+    countChannelConnection(action, result) {
+      channelConnections.inc({ action, result });
+    },
+    countChannelStateTransition(to) {
+      channelStateTransitions.inc({ to });
+    },
+    countChannelCredentialError(reason) {
+      channelCredentialErrors.inc({ reason });
     },
     countQueueJob(queue, result) {
       queueJobs.inc({ queue, result });

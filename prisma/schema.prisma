@@ -36,10 +36,11 @@ model Client {
   /// Único ponto do sistema que leva de um identificador externo ao cliente (spec 011).
   whatsappPhoneNumberId String?      @unique @map("whatsapp_phone_number_id")
 
-  conversations Conversation[]
-  messages      Message[]
-  users         User[]
-  auditEvents   AuditEvent[]
+  conversations     Conversation[]
+  messages          Message[]
+  users             User[]
+  auditEvents       AuditEvent[]
+  channelConnection ChannelConnection?
 
   @@map("clients")
 }
@@ -155,6 +156,9 @@ enum AuditAction {
   USER_ENABLED
   USER_PASSWORD_RESET
   USER_PASSWORD_CHANGED
+  CHANNEL_CONNECTED
+  CHANNEL_TOKEN_REPLACED
+  CHANNEL_DISCONNECTED
 
   @@map("audit_action")
 }
@@ -167,14 +171,15 @@ model AuditEvent {
   clientId     String      @map("client_id") @db.Uuid
   action       AuditAction
   actorUserId  String      @map("actor_user_id") @db.Uuid
-  targetUserId String      @map("target_user_id") @db.Uuid
+  /// Nulo nas ações CHANNEL_* (spec 015); CHECK no banco: USER_* exige alvo, CHANNEL_* exige nulo.
+  targetUserId String?     @map("target_user_id") @db.Uuid
   fromRole     UserRole?   @map("from_role")
   toRole       UserRole?   @map("to_role")
   createdAt    DateTime    @default(now()) @map("created_at")
 
   client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
   actor  User   @relation("AuditActor", fields: [actorUserId, clientId], references: [id, clientId], onDelete: Restrict)
-  target User   @relation("AuditTarget", fields: [targetUserId, clientId], references: [id, clientId], onDelete: Restrict)
+  target User?  @relation("AuditTarget", fields: [targetUserId, clientId], references: [id, clientId], onDelete: Restrict)
 
   @@index([clientId, createdAt, id])
   @@map("audit_events")
@@ -190,4 +195,31 @@ model PlatformAdmin {
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
   @@map("platform_admins")
+}
+
+enum ChannelConnectionStatus {
+  CONNECTED
+  TOKEN_INVALID
+
+  @@map("channel_connection_status")
+}
+
+/// Credencial do canal WhatsApp de um cliente (TENANT, spec 015): no máximo uma por cliente. O token
+/// fica CIFRADO (AES-256-GCM, AAD ligada ao clientId); nunca em claro no banco, em log, resposta nem
+/// métrica. O número continua só em `Client.whatsappPhoneNumberId`.
+model ChannelConnection {
+  id              String                  @id @default(uuid(7)) @db.Uuid
+  clientId        String                  @unique @map("client_id") @db.Uuid
+  wabaId          String                  @map("waba_id")
+  tokenCiphertext String                  @map("token_ciphertext")
+  tokenVersion    Int                     @default(1) @map("token_version")
+  status          ChannelConnectionStatus @default(CONNECTED)
+  tokenExpiresAt  DateTime?               @map("token_expires_at")
+  tokenInvalidAt  DateTime?               @map("token_invalid_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@map("channel_connections")
 }

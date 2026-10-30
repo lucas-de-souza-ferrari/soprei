@@ -11,12 +11,30 @@ export const PERMISSIONS = [
   'user:read',
   'user:manage',
   'audit:read',
+  'channel:read',
+  'channel:manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 export const ROLE_PERMISSIONS: Readonly<Record<UserRole, readonly Permission[]>> = {
-  OWNER: ['conversation:read', 'conversation:simulate', 'user:read', 'user:manage', 'audit:read'],
-  ADMIN: ['conversation:read', 'conversation:simulate', 'user:read', 'user:manage', 'audit:read'],
+  OWNER: [
+    'conversation:read',
+    'conversation:simulate',
+    'user:read',
+    'user:manage',
+    'audit:read',
+    'channel:read',
+    'channel:manage',
+  ],
+  ADMIN: [
+    'conversation:read',
+    'conversation:simulate',
+    'user:read',
+    'user:manage',
+    'audit:read',
+    'channel:read',
+    'channel:manage',
+  ],
   AGENT: ['conversation:read', 'conversation:simulate'],
   VIEWER: ['conversation:read'],
 };

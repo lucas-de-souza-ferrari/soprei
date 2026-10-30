@@ -10,6 +10,9 @@ export const AUDIT_ACTIONS = [
   'USER_ENABLED',
   'USER_PASSWORD_RESET',
   'USER_PASSWORD_CHANGED',
+  'CHANNEL_CONNECTED',
+  'CHANNEL_TOKEN_REPLACED',
+  'CHANNEL_DISCONNECTED',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -22,7 +25,8 @@ export interface AuditEvent {
   readonly clientId: ClientId;
   readonly action: AuditAction;
   readonly actorUserId: string;
-  readonly targetUserId: string;
+  /** Nulo nas ações `CHANNEL_*` (spec 015). */
+  readonly targetUserId: string | null;
   readonly fromRole: UserRole | null;
   readonly toRole: UserRole | null;
   readonly createdAt: Date;
@@ -32,7 +36,8 @@ export interface AuditEvent {
 export interface NewAuditEvent extends WithoutClientId {
   readonly action: AuditAction;
   readonly actorUserId: string;
-  readonly targetUserId: string;
+  /** Obrigatório nas ações `USER_*`; ausente nas `CHANNEL_*` (o banco confere com um CHECK). */
+  readonly targetUserId?: string | null;
   readonly fromRole?: UserRole | null;
   readonly toRole?: UserRole | null;
 }

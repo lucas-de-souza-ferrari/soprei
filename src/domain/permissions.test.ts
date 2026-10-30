@@ -12,6 +12,8 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
         'user:read',
         'user:manage',
         'audit:read',
+        'channel:read',
+        'channel:manage',
       ],
       ADMIN: [
         'conversation:read',
@@ -19,6 +21,8 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
         'user:read',
         'user:manage',
         'audit:read',
+        'channel:read',
+        'channel:manage',
       ],
       AGENT: ['conversation:read', 'conversation:simulate'],
       VIEWER: ['conversation:read'],

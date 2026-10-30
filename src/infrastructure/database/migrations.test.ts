@@ -51,8 +51,36 @@ describe('migration da spec 008 (RBAC e auditoria)', () => {
 
   it('as migrations anteriores continuam intactas (nenhuma mexe em audit_events nem nos papéis novos)', () => {
     for (const file of migrationFiles()) {
-      if (file.name.endsWith('_rbac_audit')) continue;
+      if (file.name.endsWith('_rbac_audit') || file.name.endsWith('_channel_connections')) continue;
       assert.doesNotMatch(file.sql, /audit_events|audit_action|'VIEWER'/);
     }
+  });
+});
+
+describe('migration da spec 015 (conexão do canal)', () => {
+  const migration = migrationFiles().find((file) => file.name.endsWith('_channel_connections'));
+
+  it('é aditiva: tabela nova, ações novas e alvo anulável; nada apagado nem reescrito', () => {
+    assert.ok(migration !== undefined, 'migration _channel_connections existe');
+    const statements = migration.sql
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n');
+    // `DROP NOT NULL` só relaxa a coluna (aditivo); apagar tabela, coluna, tipo ou índice não.
+    for (const forbidden of [
+      /\bDROP\s+(TABLE|COLUMN|TYPE|INDEX|CONSTRAINT|DEFAULT)\b/i,
+      /\bDELETE\s+FROM\b/i,
+      /\bTRUNCATE\b/i,
+      /\bRENAME\b/i,
+    ]) {
+      assert.doesNotMatch(statements, forbidden);
+    }
+    assert.match(statements, /CREATE TABLE "channel_connections"/);
+    assert.match(statements, /CREATE UNIQUE INDEX "channel_connections_client_id_key"/);
+    assert.match(statements, /ADD VALUE IF NOT EXISTS 'CHANNEL_CONNECTED'/);
+    assert.match(statements, /ALTER COLUMN "target_user_id" DROP NOT NULL/);
+    assert.match(statements, /audit_events_target_by_action_check/);
+    // Nenhum token é cifrado (nem tocado) pela migration.
+    assert.doesNotMatch(statements, /UPDATE\s+"clients"|whatsapp_phone_number_id/);
   });
 });

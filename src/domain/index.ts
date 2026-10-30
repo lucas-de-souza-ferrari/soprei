@@ -50,3 +50,11 @@ export type { AuditAction, AuditEvent, NewAuditEvent } from './entities/audit-ev
 export { canManageRole, hasPermission, PERMISSIONS, ROLE_PERMISSIONS } from './permissions.js';
 export type { Permission } from './permissions.js';
 export type { AuditRepository } from './repositories/audit.repository.js';
+export { CHANNEL_CONNECTION_STATUSES, WABA_ID_PATTERN } from './entities/channel-connection.js';
+export type {
+  ChannelConnection,
+  ChannelConnectionStatus,
+  ChannelConnectionUpdate,
+  NewChannelConnection,
+} from './entities/channel-connection.js';
+export type { ChannelConnectionRepository } from './repositories/channel-connection.repository.js';

@@ -1,5 +1,6 @@
 import {
   type AuditEvent,
+  type ChannelConnection,
   type Client,
   ClientId,
   type Conversation,
@@ -11,6 +12,7 @@ import {
 } from '../../../domain/index.js';
 import type {
   AuditEvent as AuditEventRow,
+  ChannelConnection as ChannelConnectionRow,
   Client as ClientRow,
   Conversation as ConversationRow,
   Message as MessageRow,
@@ -94,5 +96,21 @@ export function toAuditEvent(row: AuditEventRow): AuditEvent {
     fromRole: row.fromRole,
     toRole: row.toRole,
     createdAt: row.createdAt,
+  };
+}
+
+/** Linha para entidade. O texto cifrado fica na entidade (só o serviço de credenciais o decifra). */
+export function toChannelConnection(row: ChannelConnectionRow): ChannelConnection {
+  return {
+    id: row.id,
+    clientId: ClientId.parse(row.clientId),
+    wabaId: row.wabaId,
+    tokenCiphertext: row.tokenCiphertext,
+    tokenVersion: row.tokenVersion,
+    status: row.status,
+    tokenExpiresAt: row.tokenExpiresAt,
+    tokenInvalidAt: row.tokenInvalidAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }

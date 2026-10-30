@@ -12,7 +12,8 @@ import { NotFoundError } from '../../../shared/errors/index.js';
 import { buildPageQuery, stableOrderBy, toPage } from './cursor.js';
 import { toClient } from './mappers.js';
 import { withRepositoryErrors } from './repository-errors.js';
-import type { TenantScopedDb } from '../extensions/tenant-scope.js';
+import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import { runInTransaction } from '../transaction.js';
 
 /**
  * `Client` é a raiz do tenant (model global): não é filtrado por `clientId`. Clientes
@@ -101,13 +102,23 @@ export class PrismaClientRepository implements ClientRepository {
 
   delete(id: ClientId): Promise<void> {
     return withRepositoryErrors('Client.delete', async () => {
-      const { count } = await this.db.client.updateMany({
-        where: { id, deletedAt: null },
-        // O número do WhatsApp é liberado junto: um cliente removido não recebe mais mensagens e o
-        // número pode ser ligado a outro cliente.
-        data: { deletedAt: new Date(), whatsappPhoneNumberId: null },
-      });
-      if (count === 0) throw notFound();
+      const remove = async (db: TenantScopedDb): Promise<void> => {
+        const { count } = await db.client.updateMany({
+          where: { id, deletedAt: null },
+          // O número do WhatsApp é liberado junto: um cliente removido não recebe mais mensagens e o
+          // número pode ser ligado a outro cliente.
+          data: { deletedAt: new Date(), whatsappPhoneNumberId: null },
+        });
+        if (count === 0) throw notFound();
+        // Spec 015: a credencial do canal (texto cifrado) some na mesma transação.
+        await db.channelConnection.deleteMany({ where: { clientId: id } });
+      };
+      // Fora de uma transação (client raiz) abre uma; dentro de uma, já está nela.
+      if ('$transaction' in this.db) {
+        await runInTransaction(this.db as TenantScopedPrisma, remove);
+      } else {
+        await remove(this.db);
+      }
     });
   }
 }
