@@ -1,6 +1,6 @@
 # 008 — Autorização por papéis, usuários do cliente pela API e auditoria (RBAC)
 
-- **Status:** rascunho (reescrita do esboço contra o código de `main` em 02310cc; aguarda aprovação do dono; **segurança: passa pelo `reviewer` antes do merge**, de preferência outro agente/modelo)
+- **Status:** aprovada (2026-10-30, com todas as recomendações da seção "Decisões para o dono"; reescrita do esboço contra o código de `main` em 02310cc; **segurança: passa pelo `reviewer` antes do merge**, de preferência outro agente/modelo)
 - **Branch:** `spec/008-rbac`
 - **Depende de:** 003 (isolamento), 005 (perfis de rate limit), 007 (identidade, `authenticate`, `requireUser`, `SessionStore`)
 
