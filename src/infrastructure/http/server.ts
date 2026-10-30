@@ -3,9 +3,11 @@ import type { AuthService } from '../../application/auth/auth.service.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ClientService } from '../../application/clients/client.service.js';
+import type { UserAdminService } from '../../application/users/user-admin.service.js';
 import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
+import { adminUsersController } from '../../presentation/admin/users.controller.js';
 import {
   healthController,
   type ReadinessChecks,
@@ -22,6 +24,8 @@ export interface AdminRoutesParams {
   readonly clients: ClientService;
   /** Sem isto as rotas de mensagens e conversas (spec 010) não são registradas. */
   readonly attendance?: AttendanceService;
+  /** Gestão de usuários do cliente e auditoria (spec 008). Sem isto essas rotas não são registradas. */
+  readonly users?: UserAdminService;
 }
 
 /** Canal WhatsApp (spec 011): sem isto as rotas `/webhooks/whatsapp` NÃO existem (404). */
@@ -126,6 +130,14 @@ export function buildServer({
       metrics,
       clients: admin.clients,
     });
+    if (admin.users !== undefined) {
+      void app.register(adminUsersController, {
+        prefix: '/admin/clients',
+        auth,
+        metrics,
+        users: admin.users,
+      });
+    }
     if (admin.attendance !== undefined) {
       void app.register(adminAttendanceController, {
         prefix: '/admin/clients',

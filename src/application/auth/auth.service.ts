@@ -121,7 +121,7 @@ function sha256Hex(value: string): string {
  * `ClientId`": vale antes de existir `ClientId` e também para contas inexistentes). Só o hash sai
  * daqui; o prefixo `c`/`p` impede colisão entre um cliente de slug `platform` e o administrador.
  */
-function loginLockKey(secret: string | Buffer, parts: readonly string[]): string {
+export function loginLockKey(secret: string | Buffer, parts: readonly string[]): string {
   return createHmac('sha256', secret).update(parts.join('\u0000')).digest('hex');
 }
 

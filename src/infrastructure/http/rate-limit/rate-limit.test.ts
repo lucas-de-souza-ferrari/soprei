@@ -110,6 +110,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     const clients = new InMemoryClientRepository();
     const store = new InMemoryAttendanceStore();
     const metrics = createMetrics();
+    const testAuth = buildTestAuth({ logger, clients });
     const app = buildServer({
       logger,
       readiness: ALL_UP,
@@ -120,9 +121,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         verifyToken: 'v'.repeat(32),
         intake: { accept: () => Promise.resolve({ enqueued: 0, discarded: 0, failed: 0 }) },
       },
-      auth: buildTestAuth({ logger, clients }).service,
+      auth: testAuth.service,
       admin: {
         clients: new ClientService(clients),
+        users: testAuth.userAdmin,
         attendance: new AttendanceService({
           clients,
           conversations: store.conversations,
@@ -166,6 +168,9 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/health/ready',
       '/metrics',
       '/admin/clients',
+      '/admin/clients/:clientId/users',
+      '/admin/clients/:clientId/users/:userId',
+      '/admin/clients/:clientId/users/:userId/password',
       '/auth/login',
       '/auth/platform/login',
       '/auth/refresh',

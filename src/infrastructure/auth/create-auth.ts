@@ -1,12 +1,15 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { AuthService, deriveLoginLockSecret } from '../../application/auth/auth.service.js';
+import { UserAdminService } from '../../application/users/user-admin.service.js';
 import type { PlatformAdminRepository, UserRepository } from '../../domain/index.js';
 import type { Config } from '../config/index.js';
 import {
+  PrismaAuditRepository,
   PrismaClientRepository,
   PrismaPlatformAdminRepository,
+  PrismaUserAdminUnitOfWork,
   PrismaUserRepository,
-  type TenantScopedDb,
+  type TenantScopedPrisma,
 } from '../database/index.js';
 import type { Metrics } from '../metrics/index.js';
 import type { AuthRedisHandle } from './auth-redis.js';
@@ -30,6 +33,8 @@ export type AuthConfig = Pick<
 
 export interface AuthComponents {
   readonly service: AuthService;
+  /** Gestão de usuários do cliente, troca da própria senha e auditoria (spec 008). */
+  readonly userAdmin: UserAdminService;
   readonly hasher: ScryptPasswordHasher;
   readonly sessions: RedisSessionStore;
   readonly users: UserRepository;
@@ -40,7 +45,7 @@ export interface AuthComponents {
 export function createAuthComponents(params: {
   readonly config: AuthConfig;
   readonly logger: FastifyBaseLogger;
-  readonly prisma: TenantScopedDb;
+  readonly prisma: TenantScopedPrisma;
   readonly authRedis: AuthRedisHandle;
   readonly metrics?: Metrics | undefined;
   /** Só para os testes (custo baixo do scrypt); em produção, o padrão. */
@@ -77,7 +82,17 @@ export function createAuthComponents(params: {
     metrics,
     loginLockSecret: deriveLoginLockSecret(config.JWT_SECRET),
   });
-  return { service, hasher, sessions, users, platformAdmins };
+  const userAdmin = new UserAdminService({
+    users,
+    audit: new PrismaAuditRepository(prisma),
+    unitOfWork: new PrismaUserAdminUnitOfWork(prisma),
+    hasher,
+    sessions,
+    logger,
+    metrics,
+    loginLockSecret: deriveLoginLockSecret(config.JWT_SECRET),
+  });
+  return { service, userAdmin, hasher, sessions, users, platformAdmins };
 }
 
 /**

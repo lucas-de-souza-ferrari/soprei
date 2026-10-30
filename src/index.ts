@@ -192,6 +192,7 @@ async function main(): Promise<void> {
     admin: {
       clients: new ClientService(clientRepository),
       attendance,
+      users: auth.userAdmin,
     },
   });
 

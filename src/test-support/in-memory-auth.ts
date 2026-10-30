@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { AuthService, deriveLoginLockSecret } from '../application/auth/auth.service.js';
+import { UserAdminService } from '../application/users/user-admin.service.js';
+import type {
+  UserAdminTransaction,
+  UserAdminUnitOfWork,
+} from '../application/ports/user-admin-unit-of-work.js';
 import type { PasswordHasher } from '../application/ports/password-hasher.js';
 import type {
   AccessCheck,
@@ -9,10 +14,13 @@ import type {
   SessionStore,
 } from '../application/ports/session-store.js';
 import {
+  type AuditEvent,
+  type AuditRepository,
   type ClientId,
   type ClientRepository,
   DEFAULT_LIST_LIMIT,
   type ListOptions,
+  type NewAuditEvent,
   type NewPlatformAdmin,
   type NewUser,
   type Page,
@@ -61,21 +69,36 @@ export class FakePasswordHasher implements PasswordHasher {
   }
 }
 
+/** Executa `fn` e devolve o resultado (ou a exceção) como promessa, como um repositório assíncrono. */
+function attempt<T>(fn: () => T): Promise<T> {
+  try {
+    return Promise.resolve(fn());
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
 /** `UserRepository` em memória com o mesmo isolamento do real: tudo filtrado por `ClientId`. */
 export class InMemoryUserRepository implements UserRepository {
   private readonly rows: { user: User; passwordHash: string }[] = [];
 
   findById(clientId: ClientId, id: string): Promise<User> {
-    return Promise.resolve(this.get(clientId, id).user);
+    return attempt(() => this.get(clientId, id).user);
   }
 
   list(clientId: ClientId, options: ListOptions = {}): Promise<Page<User>> {
     const limit = options.limit ?? DEFAULT_LIST_LIMIT;
-    const items = this.rows
-      .filter((row) => row.user.clientId === clientId)
-      .map((row) => row.user)
-      .slice(0, limit);
-    return Promise.resolve({ items, nextCursor: null });
+    const all = this.rows.filter((row) => row.user.clientId === clientId).map((row) => row.user);
+    return Promise.resolve(pageOf(all, limit, options.cursor));
+  }
+
+  /** Cópia do estado (para o "rollback" da unidade de trabalho em memória). */
+  snapshot(): { user: User; passwordHash: string }[] {
+    return this.rows.map((row) => ({ user: row.user, passwordHash: row.passwordHash }));
+  }
+
+  restore(snapshot: readonly { user: User; passwordHash: string }[]): void {
+    this.rows.splice(0, this.rows.length, ...snapshot.map((row) => ({ ...row })));
   }
 
   create(clientId: ClientId, data: NewUser): Promise<User> {
@@ -97,15 +120,18 @@ export class InMemoryUserRepository implements UserRepository {
   }
 
   update(clientId: ClientId, id: string, data: UserUpdate): Promise<User> {
-    const row = this.get(clientId, id);
-    row.user = { ...row.user, ...data, updatedAt: new Date() };
-    return Promise.resolve(row.user);
+    return attempt(() => {
+      const row = this.get(clientId, id);
+      row.user = { ...row.user, ...data, updatedAt: new Date() };
+      return row.user;
+    });
   }
 
   delete(clientId: ClientId, id: string): Promise<void> {
-    const row = this.get(clientId, id);
-    this.rows.splice(this.rows.indexOf(row), 1);
-    return Promise.resolve();
+    return attempt(() => {
+      const row = this.get(clientId, id);
+      this.rows.splice(this.rows.indexOf(row), 1);
+    });
   }
 
   count(clientId: ClientId): Promise<number> {
@@ -120,8 +146,10 @@ export class InMemoryUserRepository implements UserRepository {
   }
 
   findCredentialsById(clientId: ClientId, id: string): Promise<UserCredentials> {
-    const row = this.get(clientId, id);
-    return Promise.resolve({ user: row.user, passwordHash: row.passwordHash });
+    return attempt(() => {
+      const row = this.get(clientId, id);
+      return { user: row.user, passwordHash: row.passwordHash };
+    });
   }
 
   countActiveOwners(clientId: ClientId): Promise<number> {
@@ -136,14 +164,100 @@ export class InMemoryUserRepository implements UserRepository {
   }
 
   updatePassword(clientId: ClientId, id: string, passwordHash: string): Promise<void> {
-    this.get(clientId, id).passwordHash = passwordHash;
-    return Promise.resolve();
+    return attempt(() => {
+      this.get(clientId, id).passwordHash = passwordHash;
+    });
   }
 
   private get(clientId: ClientId, id: string): { user: User; passwordHash: string } {
     const row = this.rows.find((r) => r.user.clientId === clientId && r.user.id === id);
     if (row === undefined) throw new NotFoundError('Recurso não encontrado');
     return row;
+  }
+}
+
+/** Paginação por deslocamento opaco (o cursor é só o índice em base64), para os testes em memória. */
+function pageOf<T>(all: readonly T[], limit: number, cursor: string | undefined): Page<T> {
+  const start = cursor === undefined ? 0 : Number(Buffer.from(cursor, 'base64url').toString());
+  const items = all.slice(start, start + limit);
+  const next = start + limit;
+  return {
+    items,
+    nextCursor: next < all.length ? Buffer.from(String(next)).toString('base64url') : null,
+  };
+}
+
+/** Auditoria em memória: só `create` e `list` (mais recentes primeiro), como o repositório real. */
+export class InMemoryAuditRepository implements AuditRepository {
+  readonly events: AuditEvent[] = [];
+  /** Liga uma falha na gravação da trilha (para provar que a mudança do usuário é desfeita). */
+  failWith: Error | undefined;
+
+  create(clientId: ClientId, data: NewAuditEvent): Promise<AuditEvent> {
+    if (this.failWith !== undefined) return Promise.reject(this.failWith);
+    const event: AuditEvent = {
+      id: randomUUID(),
+      clientId,
+      action: data.action,
+      actorUserId: data.actorUserId,
+      targetUserId: data.targetUserId,
+      fromRole: data.fromRole ?? null,
+      toRole: data.toRole ?? null,
+      createdAt: new Date(),
+    };
+    this.events.push(event);
+    return Promise.resolve(event);
+  }
+
+  list(clientId: ClientId, options: ListOptions = {}): Promise<Page<AuditEvent>> {
+    const all = this.events.filter((event) => event.clientId === clientId).reverse();
+    return Promise.resolve(pageOf(all, options.limit ?? DEFAULT_LIST_LIMIT, options.cursor));
+  }
+
+  snapshot(): AuditEvent[] {
+    return [...this.events];
+  }
+
+  restore(snapshot: readonly AuditEvent[]): void {
+    this.events.splice(0, this.events.length, ...snapshot);
+  }
+}
+
+/**
+ * Unidade de trabalho em memória: serializa as execuções (o papel do bloqueio do cliente) e desfaz
+ * usuários e auditoria se `fn` lançar (o papel do rollback).
+ */
+export class InMemoryUserAdminUnitOfWork implements UserAdminUnitOfWork {
+  private tail: Promise<unknown> = Promise.resolve();
+  /** Quantas vezes `lockClient` foi chamado (os testes provam que toda escrita trava o cliente). */
+  lockCalls = 0;
+
+  constructor(
+    private readonly users: InMemoryUserRepository,
+    private readonly audit: InMemoryAuditRepository,
+  ) {}
+
+  run<T>(fn: (tx: UserAdminTransaction) => Promise<T>): Promise<T> {
+    const result = this.tail.then(async () => {
+      const users = this.users.snapshot();
+      const events = this.audit.snapshot();
+      try {
+        return await fn({
+          users: this.users,
+          audit: this.audit,
+          lockClient: () => {
+            this.lockCalls += 1;
+            return Promise.resolve();
+          },
+        });
+      } catch (error) {
+        this.users.restore(users);
+        this.audit.restore(events);
+        throw error;
+      }
+    });
+    this.tail = result.catch(() => undefined);
+    return result;
   }
 }
 
@@ -211,6 +325,8 @@ export class InMemorySessionStore implements SessionStore {
   private readonly failures = new Map<string, number>();
   /** Liga um "Redis fora": toda operação lança `error`. */
   failWith: Error | undefined;
+  /** Falha só em `revokeAllSessions` (o Redis "cai" depois do commit da gestão de usuários). */
+  failRevokeAllWith: Error | undefined;
 
   constructor(
     private readonly options: {
@@ -296,6 +412,7 @@ export class InMemorySessionStore implements SessionStore {
 
   revokeAllSessions(scope: string, subjectId: string): Promise<void> {
     this.check();
+    if (this.failRevokeAllWith !== undefined) return Promise.reject(this.failRevokeAllWith);
     for (const [key, session] of this.sessions) {
       if (key.startsWith(`${scope}:`) && session.subjectId === subjectId) {
         session.revoked = true;
@@ -387,6 +504,18 @@ export function buildTestAuth(options: TestAuthOptions) {
     clockToleranceSeconds: options.clockToleranceSeconds ?? 5,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
+  const audit = new InMemoryAuditRepository();
+  const unitOfWork = new InMemoryUserAdminUnitOfWork(users, audit);
+  const userAdmin = new UserAdminService({
+    users,
+    audit,
+    unitOfWork,
+    hasher,
+    sessions,
+    logger: options.logger,
+    metrics: options.metrics,
+    loginLockSecret: deriveLoginLockSecret(TEST_JWT_SECRET),
+  });
   const service = new AuthService({
     clients,
     users,
@@ -439,6 +568,9 @@ export function buildTestAuth(options: TestAuthOptions) {
     service,
     clients,
     users,
+    audit,
+    unitOfWork,
+    userAdmin,
     platformAdmins,
     hasher,
     sessions,

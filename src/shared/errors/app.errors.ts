@@ -42,8 +42,13 @@ export class ExternalServiceError extends BaseError {
 }
 
 export class ConflictError extends BaseError {
-  constructor(message = 'Conflito com o estado atual do recurso', options: AppErrorOptions = {}) {
-    super({ message, code: 'CONFLICT', statusCode: 409, ...options });
+  /** `options.code` dá ao conflito um código próprio (ex.: `LAST_OWNER`); sem ele, `CONFLICT`. */
+  constructor(
+    message = 'Conflito com o estado atual do recurso',
+    options: AppErrorOptions & { readonly code?: string } = {},
+  ) {
+    const { code, ...rest } = options;
+    super({ message, statusCode: 409, ...rest, code: code ?? 'CONFLICT' });
   }
 }
 

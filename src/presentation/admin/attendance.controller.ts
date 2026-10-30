@@ -1,10 +1,11 @@
 import type { FastifyPluginCallback, onRequestAsyncHookHandler } from 'fastify';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
-import type { Conversation, ListOptions, Message, Permission } from '../../domain/index.js';
+import type { Conversation, Message, Permission } from '../../domain/index.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, requirePermission, userAuth } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
+import { toListOptions } from './list-options.js';
 import {
   conversationParamsSchema,
   inboundMessageBodySchema,
@@ -52,16 +53,6 @@ function toMessageResponse(message: Message): {
     replyToId: message.replyToId,
     createdAt: message.createdAt.toISOString(),
     sentAt: message.sentAt === null ? null : message.sentAt.toISOString(),
-  };
-}
-
-function toListOptions(query: {
-  limit?: number | undefined;
-  cursor?: string | undefined;
-}): ListOptions {
-  return {
-    ...(query.limit === undefined ? {} : { limit: query.limit }),
-    ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
   };
 }
 
