@@ -112,39 +112,39 @@ model AuditEvent {
 Unitários com `buildTestAuth` e repositórios em memória; integração em `soprei_test` e Redis `/15` (prefixo único).
 
 **Permissões e hooks**
-- [ ] Teste (snapshot): o mapa `ROLE_PERMISSIONS` entrega a cada papel exatamente a matriz acima; `hasPermission` com papel fora de `USER_ROLES` devolve `false`; token de papel desconhecido continua 401.
-- [ ] Teste: para cada rota de tenant, cada papel recebe o status esperado pela matriz (200/201/204 ou 403), em tabela (`VIEWER` lê conversas mas leva 403 no simulador; `AGENT` leva 403 em `/users` e `/audit-events`).
-- [ ] Teste: sem token 401; `PlatformAdmin` 403 em todas as rotas de tenant; `:clientId` de outro cliente 404 **igual** ao de cliente inexistente mesmo para quem teria a permissão e também para quem não a tem (404 antes de 403); `authz_denials_total` conta a negação sem id nem e-mail.
-- [ ] Teste: o inventário de rotas falha se uma rota de tenant não declarar `requirePermission` (ou `POST /auth/password`) e perfil.
+- [x] Teste (snapshot): o mapa `ROLE_PERMISSIONS` entrega a cada papel exatamente a matriz acima; `hasPermission` com papel fora de `USER_ROLES` devolve `false`; token de papel desconhecido continua 401.
+- [x] Teste: para cada rota de tenant, cada papel recebe o status esperado pela matriz (200/201/204 ou 403), em tabela (`VIEWER` lê conversas mas leva 403 no simulador; `AGENT` leva 403 em `/users` e `/audit-events`).
+- [x] Teste: sem token 401; `PlatformAdmin` 403 em todas as rotas de tenant; `:clientId` de outro cliente 404 **igual** ao de cliente inexistente mesmo para quem teria a permissão e também para quem não a tem (404 antes de 403); `authz_denials_total` conta a negação sem id nem e-mail.
+- [x] Teste: o inventário de rotas falha se uma rota de tenant não declarar `requirePermission` (ou `POST /auth/password`) e perfil.
 
 **Gestão de usuários e hierarquia**
-- [ ] Teste: `OWNER` cria usuário de qualquer papel; `ADMIN` cria `AGENT`/`VIEWER` e recebe 403 ao criar `ADMIN` ou `OWNER`; e-mail repetido no mesmo cliente 409; o mesmo e-mail em dois clientes funciona; a resposta nunca traz hash; senha fora da política 400 sem ecoar o valor.
-- [ ] Teste: `ADMIN` não altera nem desativa nem redefine a senha de `OWNER` ou de outro `ADMIN` (403) e não promove ninguém a `ADMIN`/`OWNER`; `OWNER` faz tudo isso.
-- [ ] Teste: ninguém altera o próprio papel nem o próprio estado (403), nem o `OWNER` único; **auto-promoção** (`AGENT`/`ADMIN` pedindo `OWNER` para si) é 403 e o banco permanece intacto.
-- [ ] Teste: rebaixar ou desativar o último `OWNER` ativo é 409 `LAST_OWNER` e nada muda; com dois `OWNER`, um pode rebaixar o outro; um `OWNER` desativado não conta como `OWNER` ativo.
-- [ ] Teste (integração, Postgres real): dois `OWNER` se rebaixando **simultaneamente** (duas conexões): exatamente um pedido tem sucesso, o cliente termina com um `OWNER` ativo.
-- [ ] Teste: `PATCH` com papel e estado iguais ao atual não gera evento de auditoria; `PATCH` sem campos é 400.
-- [ ] Teste: `GET /users` lista só os usuários do cliente do token, paginado por cursor, sem hash.
+- [x] Teste: `OWNER` cria usuário de qualquer papel; `ADMIN` cria `AGENT`/`VIEWER` e recebe 403 ao criar `ADMIN` ou `OWNER`; e-mail repetido no mesmo cliente 409; o mesmo e-mail em dois clientes funciona; a resposta nunca traz hash; senha fora da política 400 sem ecoar o valor.
+- [x] Teste: `ADMIN` não altera nem desativa nem redefine a senha de `OWNER` ou de outro `ADMIN` (403) e não promove ninguém a `ADMIN`/`OWNER`; `OWNER` faz tudo isso.
+- [x] Teste: ninguém altera o próprio papel nem o próprio estado (403), nem o `OWNER` único; **auto-promoção** (`AGENT`/`ADMIN` pedindo `OWNER` para si) é 403 e o banco permanece intacto.
+- [x] Teste: rebaixar ou desativar o último `OWNER` ativo é 409 `LAST_OWNER` e nada muda; com dois `OWNER`, um pode rebaixar o outro; um `OWNER` desativado não conta como `OWNER` ativo. _(ver desvio 2 do Registro: o 409 `LAST_OWNER` é provado no service com a contagem de OWNER ativos simulada; pela API, a hierarquia e a regra de "ninguém altera a si mesmo" barram antes)_
+- [x] Teste (integração, Postgres real): dois `OWNER` se rebaixando **simultaneamente** (duas conexões): exatamente um pedido tem sucesso, o cliente termina com um `OWNER` ativo.
+- [x] Teste: `PATCH` com papel e estado iguais ao atual não gera evento de auditoria; `PATCH` sem campos é 400.
+- [x] Teste: `GET /users` lista só os usuários do cliente do token, paginado por cursor, sem hash.
 
 **Sessões e tokens**
-- [ ] Teste: após mudar o papel, desativar ou redefinir a senha de um usuário, o **access token ainda válido** dele é recusado (401, `nbf`/`rsid`), o refresh falha e o login com o papel novo funciona; usuário desativado não loga; outras pessoas e outros clientes não são afetados.
-- [ ] Teste: com o Redis de auth fora **depois** do commit, a API responde 503, a mudança e a auditoria ficam gravadas e repetir o `PATCH` (já aplicado) refaz a revogação.
-- [ ] Teste: `POST /auth/password` com senha atual errada é 401 e conta no contador (429 com `Retry-After` antes de gastar hash após `AUTH_LOGIN_MAX_FAILURES`); com a certa, troca o hash, devolve 204, derruba **todas** as sessões da pessoa (access e refresh) e o login com a senha nova funciona; sem Redis do limiter, 503 sem verificar senha.
+- [x] Teste: após mudar o papel, desativar ou redefinir a senha de um usuário, o **access token ainda válido** dele é recusado (401, `nbf`/`rsid`), o refresh falha e o login com o papel novo funciona; usuário desativado não loga; outras pessoas e outros clientes não são afetados.
+- [x] Teste: com o Redis de auth fora **depois** do commit, a API responde 503, a mudança e a auditoria ficam gravadas e repetir o `PATCH` (já aplicado) refaz a revogação.
+- [x] Teste: `POST /auth/password` com senha atual errada é 401 e conta no contador (429 com `Retry-After` antes de gastar hash após `AUTH_LOGIN_MAX_FAILURES`); com a certa, troca o hash, devolve 204, derruba **todas** as sessões da pessoa (access e refresh) e o login com a senha nova funciona; sem Redis do limiter, 503 sem verificar senha.
 
 **Auditoria**
-- [ ] Teste: cada operação gera um `AuditEvent` com ator, alvo, ação e papéis (`USER_ROLE_CHANGED` com `fromRole` e `toRole`) **na mesma transação**: falha da escrita da trilha desfaz a mudança do usuário e vice-versa.
-- [ ] Teste: o log `audit` traz só ids e enum; captura de log (`src/test-support/log-capture.ts`) prova que e-mail, senha, hash, access e refresh token **secretos** de teste não aparecem em log, erro, métrica nem corpo de erro em todas as rotas novas.
-- [ ] Teste: `AuditRepository` não expõe `update`/`delete`; a FK composta impede, no banco, um evento do cliente A apontar para usuário do B.
+- [x] Teste: cada operação gera um `AuditEvent` com ator, alvo, ação e papéis (`USER_ROLE_CHANGED` com `fromRole` e `toRole`) **na mesma transação**: falha da escrita da trilha desfaz a mudança do usuário e vice-versa.
+- [x] Teste: o log `audit` traz só ids e enum; captura de log (`src/test-support/log-capture.ts`) prova que e-mail, senha, hash, access e refresh token **secretos** de teste não aparecem em log, erro, métrica nem corpo de erro em todas as rotas novas.
+- [x] Teste: `AuditRepository` não expõe `update`/`delete`; a FK composta impede, no banco, um evento do cliente A apontar para usuário do B.
 
 **Isolamento**
-- [ ] Teste de isolamento do `UserRepository` (novos métodos) e do `AuditRepository` no molde de `user.repository.integration.test.ts`: o cliente A não lista, conta, atualiza nem lê usuário ou evento do B (`NotFoundError`); consulta sem `clientId` lança `TenantScopeError`; `MODEL_SCOPES` classifica `AuditEvent` (tenant) e o teste de cobertura passa.
-- [ ] Teste de ponta a ponta com dois clientes (`infrastructure/http/`): `OWNER` do A, com o `:clientId` do B ou o `userId`/`auditId` de um usuário do B, recebe 404 idêntico ao de inexistente, nada do B é lido nem alterado, e o `ClientId` repassado aos services é o do token.
+- [x] Teste de isolamento do `UserRepository` (novos métodos) e do `AuditRepository` no molde de `user.repository.integration.test.ts`: o cliente A não lista, conta, atualiza nem lê usuário ou evento do B (`NotFoundError`); consulta sem `clientId` lança `TenantScopeError`; `MODEL_SCOPES` classifica `AuditEvent` (tenant) e o teste de cobertura passa.
+- [x] Teste de ponta a ponta com dois clientes (`infrastructure/http/`): `OWNER` do A, com o `:clientId` do B ou o `userId`/`auditId` de um usuário do B, recebe 404 idêntico ao de inexistente, nada do B é lido nem alterado, e o `ClientId` repassado aos services é o do token.
 
 **CLI e config**
-- [ ] Teste: `pnpm auth:cli create-user --role ADMIN|VIEWER` funciona (contra `soprei_test`); config sem variável nova; migration só aditiva (enum e `audit_events`).
+- [x] Teste: `pnpm auth:cli create-user --role ADMIN|VIEWER` funciona (contra `soprei_test`); config sem variável nova; migration só aditiva (enum e `audit_events`).
 
 **Geral**
-- [ ] `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24 (o teste de concorrência com sondagem/prazo, sem sleep fixo); suítes novas repetidas várias vezes; revisão do `reviewer`; documentação atualizada (`AGENTS.md`, `docs/context.md`, `docs/handoff.md`).
+- [ ] **(parte do dono/revisor)** `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24: **feito pelo implementer** (ver o Registro da implementação); faltam a revisão do `reviewer`, o CI e o merge. Documentação atualizada (`AGENTS.md`, `docs/context.md`, `docs/handoff.md`): feita.
 
 ## Casos de borda e erros
 
@@ -194,3 +194,32 @@ O `ClientId` vem **só** do token (`userAuth(request).clientId`); o `:clientId` 
 - **Fontes:** sem API externa. OWASP Authorization Cheat Sheet e NIST SP 800-63B (para a política de senha, já usada na 007), a serem reconferidas pelo implementer.
 - Por ser autorização e isolamento, **passa pelo agente `reviewer` antes do merge.** Pontos a olhar: ordem 401/403/404 do hook, hierarquia no service (não só no hook), auto-alteração, regra do último `OWNER` sob concorrência, revogação de sessões após cada mudança (e a falha de Redis depois do commit), FKs compostas da auditoria, privacidade de log e métrica, inventário de rotas.
 - **Validação em níveis** (experimento do handoff): typecheck e teste do arquivo a cada passo, lint e suíte da área antes de cada commit, bateria completa e repetições só no final; registrar quantas falhas só apareceram na validação final.
+
+## Registro da implementação
+
+Implementada na branch `spec/008-rbac` (um PR) com todas as recomendações da seção "Decisões para o dono". A spec **não** está marcada como `concluída`: faltam a revisão do `reviewer`, o CI verde e o merge (do dono).
+
+**Commits (ordem):** (1) teto da fila do hasher scrypt (decisão 8, commit próprio); (2) papéis, mapa de permissões, hierarquia, migration e repositórios de auditoria; (3) `requirePermission` e as rotas de conversa por permissão; (4) `UserAdminService` e as rotas de usuários; (5) `POST /auth/password`; (6) `GET /audit-events`; (7) CLI com os quatro papéis, documentação e o teste da migration aditiva (mais três commits pequenos de correção do próprio teste da migration).
+
+**Pastas finais (só `application/users/` é nova):** `src/domain/` (`permissions.ts`, `entities/audit-event.ts`, `repositories/audit.repository.ts`; `USER_ROLES` com os quatro papéis; `UserRepository` ganhou `findCredentialsById` e `countActiveOwners`), `src/application/users/user-admin.service.ts`, `src/application/ports/user-admin-unit-of-work.ts`, `src/infrastructure/database/repositories/` (`audit.repository.ts`, `user-admin-unit-of-work.ts`, cursor decrescente em `cursor.ts`), `src/infrastructure/auth/create-auth.ts` (monta o `UserAdminService`), `src/presentation/admin/` (`users.controller.ts`, `users.validators.ts`, `audit.controller.ts`, `list-options.ts`), `src/presentation/auth/` (`POST /auth/password`), `src/presentation/common/auth.hooks.ts` (`requirePermission`, `REQUIRED_PERMISSION`), migration `prisma/migrations/20261030120000_rbac_audit/` (só `ALTER TYPE ... ADD VALUE`, `CREATE TYPE`, índice único `users(id, client_id)` e `audit_events` com FKs compostas; `prisma migrate diff` não acusa diferença entre migrations e schema).
+
+**Desvios e decisões de implementação (com motivo):**
+
+1. **Papel e estado do ator relidos do banco, dentro da transação** (a spec só pedia reaplicar permissão e hierarquia no service). Motivo: se a revogação de sessões falha (503 depois do commit), o token antigo de quem foi rebaixado ou desativado ainda vale até 15 min; com a releitura ele não age com o papel antigo. Custo: uma consulta a mais por escrita.
+2. **Consequência: o `LAST_OWNER` é uma invariante de defesa.** Pela API o ator precisa ser `OWNER` ativo (relido do banco) e não pode ser o alvo, então sempre há outro `OWNER` ativo (contagem >= 2) quando a regra seria testada; o perdedor de uma corrida entre dois `OWNER` que se rebaixam recebe **403** (papel relido), não 409. A regra continua implementada (checagem e escrita na mesma transação, depois do bloqueio do cliente) e testada no service com a contagem simulada (`user-admin.service.test.ts`), e a corrida real está em `user-admin.integration.test.ts` (12 rodadas de rebaixamento mútuo, 6 de desativação mútua, mais uma de promover e desativar o mesmo usuário; retirado o `FOR UPDATE`, os testes falham). O critério "rebaixar o último `OWNER` é 409 `LAST_OWNER`" está marcado `[x]` com essa ressalva.
+3. **`ConflictError` aceita `options.code`** (a spec pedia "`ConflictError` com code próprio"); `LAST_OWNER` é `ConflictError` 409 com esse código.
+4. **`FOR UPDATE` na linha de `clients`**, como na spec, filtrando também `deleted_at IS NULL`; cliente inexistente é `NotFoundError`.
+5. **O hash da senha é feito antes da transação** (criar, redefinir, trocar): o bloqueio do cliente não espera o scrypt. Para criar, há ainda um cheque barato pelo papel do token antes do hash (não gasta hash para quem não pode).
+6. **`PATCH` idempotente e revogação:** o pedido repetido (já aplicado) sem mudança **ainda** revoga as sessões quando traz `role` ou `status: DISABLED` (para refazer a revogação que parou no Redis); reativar (`status: ACTIVE`) nunca revoga.
+7. **`buildServer` recebe `userAdmin`** (parâmetro de topo) em vez de `admin.users`: ele serve tanto às rotas `/admin/.../users` e `.../audit-events` quanto a `POST /auth/password`.
+8. **Troca da própria senha** mora no `UserAdminService` (precisa da unidade de trabalho para gravar a senha e a auditoria juntas); `loginLockKey` foi exportada do `auth.service.ts` e reutilizada com `['pw', clientId, userId]`.
+9. **Teto da fila do hasher:** `MAX_QUEUED_HASHES = 32`; acima disso `ServiceUnavailableError` na hora (no login vira "indisponível"/503 e não conta como falha de senha). Sem variável nova.
+10. **Teste de papel desconhecido:** o `jose-access-token.service` já recusava papel fora de `USER_ROLES` (agora são quatro); o teste novo confirma 401 (`invalid`).
+11. **Inventário de rotas:** a regra "toda rota de tenant declara `requirePermission`" tem teste negativo (rota só com `requireUser` e permissão desconhecida são reprovadas).
+12. **Sem dependência nova, sem variável de ambiente nova, `.env.example` inalterado.**
+
+**Critérios com teste passando:** todos, exceto o item "Geral" (revisão do `reviewer`, CI e merge, que são do dono). Mapa dos testes: matriz, hierarquia e `authz_denials_total` em `domain/permissions.test.ts`, `presentation/admin/rbac.controller.test.ts` e `presentation/admin/users.controller.test.ts`; hierarquia exaustiva, bloqueio do cliente e `LAST_OWNER` em `application/users/user-admin.service.test.ts`; concorrência e atomicidade com Postgres real em `infrastructure/database/user-admin.integration.test.ts`; isolamento de `UserRepository`/`AuditRepository` e FKs compostas em `infrastructure/database/repositories/*.integration.test.ts`; troca da própria senha em `presentation/auth/password.controller.test.ts`; ponta a ponta com dois clientes, Redis real, limiter fail-closed e privacidade em `infrastructure/http/rbac.integration.test.ts`; inventário em `infrastructure/http/rate-limit/rate-limit.test.ts`; migration aditiva em `infrastructure/database/migrations.test.ts`; CLI em `infrastructure/auth/cli/auth-cli.integration.test.ts`; teto do hasher em `infrastructure/auth/scrypt-password-hasher.test.ts` e `application/auth/auth.service.test.ts`.
+
+**Fontes consultadas:** código do repositório (specs 003, 005, 007, 010), documentação do PostgreSQL sobre `SELECT ... FOR UPDATE` e `ALTER TYPE ... ADD VALUE` (conhecimento prévio; sem acesso a rede nesta sessão), OWASP Authorization Cheat Sheet (negar por padrão, checar permissão no servidor em todo pedido, validar no service além do hook) e NIST SP 800-63B (política de senha, já usada na 007), ambos de conhecimento prévio e a reconferir pelo `reviewer`.
+
+**Validação (nível 4, uma execução por vez):** em Node 24.18.0 e 22.23.2, `pnpm typecheck`, `lint`, `format:check`, `test` (964 unitários) e `test:integration` (308), `rm -rf dist && pnpm build` e smoke do processo compilado (`/health/ready` 200, login com corpo vazio 400, `/admin/clients`, `.../users`, `.../audit-events` e `POST /auth/password` sem token 401, nenhuma linha de erro no log), tudo verde. Suítes novas e alteradas repetidas 5 vezes em cada Node (11 arquivos unitários, 186 testes; 6 de integração, 51 testes), sem falha. **Falhas que só apareceram na validação final: 0.** As que apareceram durante o trabalho foram pegas nos níveis 1 e 2: repositório em memória lançando de forma síncrona (teste com `assert.rejects`), probes em rota que não estava registrada, comparação de 404 entre classes diferentes, regras de lint nos testes novos e, no teste da migration, uma regex estragada por `sed` (o `ON DELETE RESTRICT` casava com `DELETE`; o erro foi commitado duas vezes antes do conserto, por encadear `git commit` ao teste: três commits de correção, sem efeito no código de produção).
