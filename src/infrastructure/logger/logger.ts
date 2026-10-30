@@ -24,6 +24,11 @@ const REDACTED_KEYS = [
   'WHATSAPP_APP_SECRET',
   'WHATSAPP_VERIFY_TOKEN',
   'WHATSAPP_ACCESS_TOKEN',
+  // Credenciais por cliente (spec 015): token cifrado, chaves de cifra, code do Embedded Signup.
+  'tokenCiphertext',
+  'clientSecret',
+  'code',
+  'CHANNEL_CREDENTIALS_KEYS',
 ] as const;
 
 /**

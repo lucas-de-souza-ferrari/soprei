@@ -2,6 +2,7 @@ export { BaseError } from './base.error.js';
 export type { BaseErrorParams, ErrorContext } from './base.error.js';
 export {
   ConflictError,
+  CredentialDecryptionError,
   DatabaseError,
   ExternalServiceError,
   ForbiddenError,
@@ -12,4 +13,4 @@ export {
   UnauthorizedError,
   ValidationError,
 } from './app.errors.js';
-export type { AppErrorOptions } from './app.errors.js';
+export type { AppErrorOptions, CredentialDecryptionReason } from './app.errors.js';

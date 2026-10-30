@@ -6,8 +6,13 @@ export interface AppErrorOptions {
 }
 
 export class ValidationError extends BaseError {
-  constructor(message = 'Dados inválidos', options: AppErrorOptions = {}) {
-    super({ message, code: 'VALIDATION_ERROR', statusCode: 400, ...options });
+  /** `options.code` dá à validação um código próprio (ex.: `CHANNEL_WRONG_APP`); sem ele, `VALIDATION_ERROR`. */
+  constructor(
+    message = 'Dados inválidos',
+    options: AppErrorOptions & { readonly code?: string } = {},
+  ) {
+    const { code, ...rest } = options;
+    super({ message, statusCode: 400, ...rest, code: code ?? 'VALIDATION_ERROR' });
   }
 }
 
@@ -102,5 +107,28 @@ export class RateLimitError extends BaseError {
 export class ServiceUnavailableError extends BaseError {
   constructor(message = 'Serviço temporariamente indisponível', options: AppErrorOptions = {}) {
     super({ message, code: 'SERVICE_UNAVAILABLE', statusCode: 503, ...options });
+  }
+}
+
+export type CredentialDecryptionReason = 'malformed' | 'unknown_key' | 'tampered';
+
+/**
+ * Falha ao decifrar uma credencial guardada (spec 015): formato inválido, chave ausente ou tag que
+ * não confere (inclui texto cifrado de outro cliente, pela AAD). Mensagem fixa; o `context` leva só
+ * `reason`, **nunca** o texto cifrado, o `clientId` nem a chave. É falha nossa (não do cliente):
+ * 500 não operacional para quem chamar por HTTP, permanente no worker.
+ */
+export class CredentialDecryptionError extends BaseError {
+  readonly reason: CredentialDecryptionReason;
+
+  constructor(reason: CredentialDecryptionReason) {
+    super({
+      message: 'Não foi possível decifrar a credencial guardada',
+      code: 'CREDENTIAL_DECRYPTION_ERROR',
+      statusCode: 500,
+      isOperational: false,
+      context: { reason },
+    });
+    this.reason = reason;
   }
 }

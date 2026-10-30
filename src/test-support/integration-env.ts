@@ -68,8 +68,18 @@ export function loadIntegrationConfig(env: NodeJS.ProcessEnv = process.env): Con
   // valor descartável, que nunca vale fora dos testes.
   const jwtSecret =
     env.JWT_SECRET === undefined || env.JWT_SECRET === '' ? TEST_JWT_SECRET : env.JWT_SECRET;
+  // Credenciais por cliente (spec 015): se o `.env.test` não as tem, chaves e app id descartáveis
+  // (nunca valem fora dos testes). Só importam com `WHATSAPP_ENABLED=true`.
+  const blank = (value: string | undefined): boolean => value === undefined || value === '';
   const parsed = parseConfig({
     ...env,
+    ...(blank(env.CHANNEL_CREDENTIALS_KEYS)
+      ? {
+          CHANNEL_CREDENTIALS_KEYS: `teste:${'A'.repeat(43)}`,
+          CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: 'teste',
+        }
+      : {}),
+    ...(blank(env.WHATSAPP_APP_ID) ? { WHATSAPP_APP_ID: '1234567890123' } : {}),
     JWT_SECRET: jwtSecret,
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',

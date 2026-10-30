@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseCredentialKeys } from '../security/aes-gcm-credential-cipher.js';
 import { parseTrustProxy, type TrustProxySetting } from './trust-proxy.js';
 
 /** Mínimo do `JWT_SECRET` (spec 007): 32 caracteres, ou seja, 256 bits para o HS256. */
@@ -133,7 +134,14 @@ export const envSchema = z
     WHATSAPP_ENABLED: z.preprocess(emptyAsUndefined, booleanLiteral(false)),
     WHATSAPP_APP_SECRET: optionalSecret,
     WHATSAPP_VERIFY_TOKEN: optionalSecret,
+    // Token global de transição (spec 015): só para clientes `LEGACY` (número gravado antes da 015 e
+    // sem conexão própria). Opcional; quando nenhum cliente estiver `LEGACY`, basta apagá-la.
     WHATSAPP_ACCESS_TOKEN: optionalSecret,
+    // `app_id` esperado no `debug_token` de todo token de cliente (spec 015); dígitos.
+    WHATSAPP_APP_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
+    // Chaves de cifra das credenciais por cliente (spec 015): `keyId:<32 bytes base64url>,...`.
+    CHANNEL_CREDENTIALS_KEYS: optionalSecret,
+    CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
     WHATSAPP_API_BASE_URL: z.preprocess(
       emptyAsUndefined,
       z.url().default('https://graph.facebook.com'),
@@ -263,6 +271,9 @@ function refineWhatsapp(
     readonly WHATSAPP_APP_SECRET: string | undefined;
     readonly WHATSAPP_VERIFY_TOKEN: string | undefined;
     readonly WHATSAPP_ACCESS_TOKEN: string | undefined;
+    readonly WHATSAPP_APP_ID?: string | undefined;
+    readonly CHANNEL_CREDENTIALS_KEYS?: string | undefined;
+    readonly CHANNEL_CREDENTIALS_ACTIVE_KEY_ID?: string | undefined;
     readonly WHATSAPP_API_BASE_URL: string;
     readonly QUEUE_ATTEMPTS: number;
     readonly QUEUE_BACKOFF_MS: number;
@@ -291,7 +302,9 @@ function refineWhatsapp(
   for (const name of [
     'WHATSAPP_APP_SECRET',
     'WHATSAPP_VERIFY_TOKEN',
-    'WHATSAPP_ACCESS_TOKEN',
+    'WHATSAPP_APP_ID',
+    'CHANNEL_CREDENTIALS_KEYS',
+    'CHANNEL_CREDENTIALS_ACTIVE_KEY_ID',
   ] as const) {
     if (env[name] === undefined) {
       ctx.addIssue({
@@ -301,6 +314,14 @@ function refineWhatsapp(
       });
     }
   }
+  if (env.WHATSAPP_APP_ID !== undefined && !/^[0-9]{1,32}$/.test(env.WHATSAPP_APP_ID)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WHATSAPP_APP_ID'],
+      message: 'deve ter de 1 a 32 dígitos',
+    });
+  }
+  refineCredentialKeys(env, ctx);
   for (const name of ['WHATSAPP_APP_SECRET', 'WHATSAPP_ACCESS_TOKEN'] as const) {
     const value = env[name];
     if (value !== undefined && value.length < WHATSAPP_SECRET_MIN_LENGTH) {
@@ -338,6 +359,30 @@ function refineWhatsapp(
       code: 'custom',
       path: ['CHANNEL_BATCH_MAX_WAIT_MS'],
       message: `precisa ser maior ou igual a CHANNEL_BATCH_WINDOW_MS (${String(env.CHANNEL_BATCH_WINDOW_MS)} ms)`,
+    });
+  }
+}
+
+/** Chaves de cifra (spec 015): nenhuma mensagem inclui o valor de uma chave. */
+function refineCredentialKeys(
+  env: {
+    readonly CHANNEL_CREDENTIALS_KEYS?: string | undefined;
+    readonly CHANNEL_CREDENTIALS_ACTIVE_KEY_ID?: string | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (env.CHANNEL_CREDENTIALS_KEYS === undefined) return;
+  const parsed = parseCredentialKeys(env.CHANNEL_CREDENTIALS_KEYS);
+  if (!parsed.ok) {
+    ctx.addIssue({ code: 'custom', path: ['CHANNEL_CREDENTIALS_KEYS'], message: parsed.message });
+    return;
+  }
+  const active = env.CHANNEL_CREDENTIALS_ACTIVE_KEY_ID;
+  if (active !== undefined && !parsed.keys.some((entry) => entry.keyId === active)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['CHANNEL_CREDENTIALS_ACTIVE_KEY_ID'],
+      message: 'precisa ser um dos keyId de CHANNEL_CREDENTIALS_KEYS',
     });
   }
 }

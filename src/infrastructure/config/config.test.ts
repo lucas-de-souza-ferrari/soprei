@@ -553,7 +553,9 @@ describe('parseConfig', () => {
     const SECRETS = {
       WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
       WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
-      WHATSAPP_ACCESS_TOKEN: 'token-de-envio-1234',
+      WHATSAPP_APP_ID: '123456789012345',
+      CHANNEL_CREDENTIALS_KEYS: `k1:${'A'.repeat(43)}`,
+      CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: 'k1',
     };
     const PRODUCTION = { ...VALID_ENV, NODE_ENV: 'production' };
     const ENABLED = { ...VALID_ENV, ...SECRETS, WHATSAPP_ENABLED: 'true', TRUST_PROXY: 'false' };
@@ -581,6 +583,30 @@ describe('parseConfig', () => {
         assert.equal(result.ok, false, invalid);
         assert.match(result.error.message, /WHATSAPP_ENABLED/);
       }
+    });
+
+    it('WHATSAPP_ACCESS_TOKEN é opcional (só clientes LEGACY); se informado, mínimo 16', () => {
+      assert.ok(parseConfig(ENABLED).ok);
+      assert.ok(parseConfig({ ...ENABLED, WHATSAPP_ACCESS_TOKEN: 'x'.repeat(16) }).ok);
+      assert.equal(parseConfig({ ...ENABLED, WHATSAPP_ACCESS_TOKEN: 'curto' }).ok, false);
+    });
+
+    it('chaves de cifra: tamanho, keyId repetido, ativo fora da lista e APP_ID inválido falham sem ecoar a chave', () => {
+      const secretKey = 'B'.repeat(43);
+      const cases: Record<string, Record<string, string>> = {
+        CHANNEL_CREDENTIALS_KEYS: { CHANNEL_CREDENTIALS_KEYS: `k1:${'C'.repeat(20)}` },
+        repetido: { CHANNEL_CREDENTIALS_KEYS: `k1:${secretKey},k1:${secretKey}` },
+        CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: { CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: 'k9' },
+        WHATSAPP_APP_ID: { WHATSAPP_APP_ID: 'abc' },
+      };
+      for (const [label, override] of Object.entries(cases)) {
+        const result = parseConfig({ ...ENABLED, ...override });
+        assert.equal(result.ok, false, label);
+        assert.ok(!result.error.message.includes(secretKey), label);
+        assert.ok(!result.error.message.includes('C'.repeat(20)), label);
+      }
+      // Desligado, nada disso é exigido.
+      assert.ok(parseConfig({ ...VALID_ENV, WHATSAPP_ENABLED: 'false' }).ok);
     });
 
     it('habilitado com os três segredos e TRUST_PROXY explícito passa', () => {
@@ -712,7 +738,9 @@ describe('parseConfig', () => {
       ...VALID_ENV,
       WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
       WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
-      WHATSAPP_ACCESS_TOKEN: 'token-de-envio-1234',
+      WHATSAPP_APP_ID: '123456789012345',
+      CHANNEL_CREDENTIALS_KEYS: `k1:${'A'.repeat(43)}`,
+      CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: 'k1',
       WHATSAPP_ENABLED: 'true',
       TRUST_PROXY: 'false',
     };
