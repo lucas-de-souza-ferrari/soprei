@@ -1,4 +1,5 @@
 import {
+  type AuditEvent,
   type Client,
   ClientId,
   type Conversation,
@@ -9,6 +10,7 @@ import {
   UserId,
 } from '../../../domain/index.js';
 import type {
+  AuditEvent as AuditEventRow,
   Client as ClientRow,
   Conversation as ConversationRow,
   Message as MessageRow,
@@ -79,5 +81,18 @@ export function toPlatformAdmin(row: PlatformAdminRow): PlatformAdmin {
     status: row.status,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+export function toAuditEvent(row: AuditEventRow): AuditEvent {
+  return {
+    id: row.id,
+    clientId: ClientId.parse(row.clientId),
+    action: row.action,
+    actorUserId: row.actorUserId,
+    targetUserId: row.targetUserId,
+    fromRole: row.fromRole,
+    toRole: row.toRole,
+    createdAt: row.createdAt,
   };
 }

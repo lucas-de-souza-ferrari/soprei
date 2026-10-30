@@ -40,6 +40,8 @@ export class TestTenants {
 
   async cleanup(): Promise<void> {
     for (const id of this.created) {
+      // Auditoria antes dos usuários: as chaves estrangeiras compostas apontam para eles (Restrict).
+      await this.db.auditEvent.deleteMany({ where: { clientId: id } });
       await this.db.user.deleteMany({ where: { clientId: id } });
       // Mensagens antes das conversas: a chave estrangeira composta aponta para elas.
       await this.db.message.deleteMany({ where: { clientId: id } });

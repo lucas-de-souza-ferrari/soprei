@@ -119,6 +119,22 @@ export class InMemoryUserRepository implements UserRepository {
     );
   }
 
+  findCredentialsById(clientId: ClientId, id: string): Promise<UserCredentials> {
+    const row = this.get(clientId, id);
+    return Promise.resolve({ user: row.user, passwordHash: row.passwordHash });
+  }
+
+  countActiveOwners(clientId: ClientId): Promise<number> {
+    return Promise.resolve(
+      this.rows.filter(
+        (row) =>
+          row.user.clientId === clientId &&
+          row.user.role === 'OWNER' &&
+          row.user.status === 'ACTIVE',
+      ).length,
+    );
+  }
+
   updatePassword(clientId: ClientId, id: string, passwordHash: string): Promise<void> {
     this.get(clientId, id).passwordHash = passwordHash;
     return Promise.resolve();

@@ -2,8 +2,11 @@ import type { WithoutClientId } from '../repositories/tenant.repository.js';
 import type { ClientId } from '../value-objects/client-id.js';
 import type { PlatformAdminId, UserId } from '../value-objects/user-id.js';
 
-/** Papéis de `User` (spec 007). Nesta spec só são carregados; a spec 008 define permissões. */
-export const USER_ROLES = ['OWNER', 'AGENT'] as const;
+/**
+ * Papéis de `User` (specs 007 e 008). O que cada papel pode fazer está em `permissions.ts`; o
+ * token carrega só o papel e as permissões são derivadas no servidor.
+ */
+export const USER_ROLES = ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 export const USER_STATUSES = ['ACTIVE', 'DISABLED'] as const;

@@ -39,6 +39,7 @@ model Client {
   conversations Conversation[]
   messages      Message[]
   users         User[]
+  auditEvents   AuditEvent[]
 
   @@map("clients")
 }
@@ -110,7 +111,9 @@ model Message {
 
 enum UserRole {
   OWNER
+  ADMIN
   AGENT
+  VIEWER
 
   @@map("user_role")
 }
@@ -134,11 +137,47 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  client        Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  auditAsActor  AuditEvent[] @relation("AuditActor")
+  auditAsTarget AuditEvent[] @relation("AuditTarget")
 
+  // `[id, clientId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
+  @@unique([id, clientId])
   @@unique([clientId, email])
   @@index([clientId, createdAt, id])
   @@map("users")
+}
+
+enum AuditAction {
+  USER_CREATED
+  USER_ROLE_CHANGED
+  USER_DISABLED
+  USER_ENABLED
+  USER_PASSWORD_RESET
+  USER_PASSWORD_CHANGED
+
+  @@map("audit_action")
+}
+
+/// Trilha de auditoria imutável (TENANT, spec 008). Sem texto livre, sem e-mail, sem IP: só ids e
+/// valores de enum. As chaves estrangeiras são COMPOSTAS com `clientId`: um evento nunca aponta para
+/// usuário de outro cliente. A API não atualiza nem apaga eventos; usuário nunca é apagado (Restrict).
+model AuditEvent {
+  id           String      @id @default(uuid(7)) @db.Uuid
+  clientId     String      @map("client_id") @db.Uuid
+  action       AuditAction
+  actorUserId  String      @map("actor_user_id") @db.Uuid
+  targetUserId String      @map("target_user_id") @db.Uuid
+  fromRole     UserRole?   @map("from_role")
+  toRole       UserRole?   @map("to_role")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  actor  User   @relation("AuditActor", fields: [actorUserId, clientId], references: [id, clientId], onDelete: Restrict)
+  target User   @relation("AuditTarget", fields: [targetUserId, clientId], references: [id, clientId], onDelete: Restrict)
+
+  @@index([clientId, createdAt, id])
+  @@map("audit_events")
 }
 
 /// Operador da plataforma (GLOBAL: não pertence a cliente algum). E-mail único global.

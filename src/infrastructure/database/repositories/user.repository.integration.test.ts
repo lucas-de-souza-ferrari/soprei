@@ -184,3 +184,49 @@ describe('PlatformAdmin (model global)', () => {
     await assert.rejects(admins.updatePassword(created.id, HASH_A), NotFoundError);
   });
 });
+
+describe('UserRepository: papéis novos e métodos da spec 008', () => {
+  it('aceita os quatro papéis e atualiza entre eles', async () => {
+    for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const) {
+      const created = await users.create(clientA.id, {
+        email: email(`papel-${role.toLowerCase()}`),
+        passwordHash: HASH_A,
+        role,
+      });
+      assert.equal(created.role, role);
+    }
+    const target = await users.create(clientA.id, { email: email('troca'), passwordHash: HASH_A });
+    assert.equal((await users.update(clientA.id, target.id, { role: 'VIEWER' })).role, 'VIEWER');
+    assert.equal((await users.update(clientA.id, target.id, { role: 'ADMIN' })).role, 'ADMIN');
+  });
+
+  it('findCredentialsById: do próprio cliente devolve o hash; de outro cliente ou id inválido, NotFoundError', async () => {
+    const found = await users.findCredentialsById(clientB.id, userB.id);
+    assert.equal(found.passwordHash, HASH_B);
+    assert.equal(found.user.id, userB.id);
+    assert.ok(!('passwordHash' in found.user));
+    await assert.rejects(users.findCredentialsById(clientA.id, userB.id), NotFoundError);
+    await assert.rejects(users.findCredentialsById(clientB.id, 'nao-e-uuid'), NotFoundError);
+  });
+
+  it('countActiveOwners conta só OWNER ativo do próprio cliente', async () => {
+    const fresh = await tenants.createClient('usr-own');
+    assert.equal(await users.countActiveOwners(fresh.id), 0);
+    const first = await users.create(fresh.id, {
+      email: email('o1'),
+      passwordHash: HASH_A,
+      role: 'OWNER',
+    });
+    await users.create(fresh.id, { email: email('o2'), passwordHash: HASH_A, role: 'OWNER' });
+    await users.create(fresh.id, { email: email('adm'), passwordHash: HASH_A, role: 'ADMIN' });
+    assert.equal(await users.countActiveOwners(fresh.id), 2);
+    await users.update(fresh.id, first.id, { status: 'DISABLED' });
+    assert.equal(await users.countActiveOwners(fresh.id), 1);
+    // Os OWNER de outros clientes não entram na conta.
+    assert.equal(await users.countActiveOwners(clientB.id), 1);
+    assert.equal(
+      await users.countActiveOwners(ClientId.parse('01900000-0000-7000-8000-000000000000')),
+      0,
+    );
+  });
+});

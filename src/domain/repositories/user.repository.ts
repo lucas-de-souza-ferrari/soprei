@@ -12,6 +12,10 @@ export interface UserRepository extends TenantRepository<User, NewUser, UserUpda
    * que devolve o hash; nunca consulta sem `ClientId`.
    */
   findCredentialsByEmail(clientId: ClientId, email: string): Promise<UserCredentials | null>;
+  /** Usuário e hash da senha pelo id neste cliente. Lança `NotFoundError` se não é deste cliente. */
+  findCredentialsById(clientId: ClientId, id: string): Promise<UserCredentials>;
+  /** Quantos `OWNER` **ativos** o cliente tem (regra do último `OWNER`, spec 008). */
+  countActiveOwners(clientId: ClientId): Promise<number>;
   /** Troca o hash da senha. Lança `NotFoundError` se o usuário não é deste cliente. */
   updatePassword(clientId: ClientId, id: string, passwordHash: string): Promise<void>;
 }

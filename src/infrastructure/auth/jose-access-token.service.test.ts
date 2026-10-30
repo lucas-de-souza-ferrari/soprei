@@ -86,6 +86,39 @@ function unsigned(): string {
   })}.`;
 }
 
+describe('JoseAccessTokenService: papéis (spec 008)', () => {
+  it('emite e verifica token dos quatro papéis; o papel volta igual', async () => {
+    const tokens = service();
+    for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const) {
+      const identity: AuthIdentity = {
+        kind: 'user',
+        userId: UserId.parse(randomUUID()),
+        clientId: ClientId.parse(randomUUID()),
+        role,
+        sessionId: randomUUID(),
+      };
+      const verified = await tokens.verify((await tokens.issue(identity)).token);
+      assert.ok(verified.ok);
+      assert.deepEqual(verified.value.identity, identity);
+    }
+  });
+
+  it('token com papel desconhecido (assinado direito) continua 401, não 403 nem 500', async () => {
+    const verified = await service().verify(
+      await craft({
+        claims: {
+          kind: 'user',
+          cid: randomUUID(),
+          role: 'SUPERADMIN',
+          sid: user.sessionId,
+        },
+      }),
+    );
+    assert.ok(!verified.ok);
+    assert.equal(verified.error, 'invalid');
+  });
+});
+
 describe('JoseAccessTokenService', () => {
   it('emite e verifica o token de User e o de PlatformAdmin, com o expiresIn configurado', async () => {
     const tokens = service();

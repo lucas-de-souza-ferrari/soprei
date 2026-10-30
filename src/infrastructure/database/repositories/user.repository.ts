@@ -63,6 +63,21 @@ export class PrismaUserRepository
     });
   }
 
+  findCredentialsById(clientId: ClientId, id: string): Promise<UserCredentials> {
+    return this.run('findCredentialsById', async () => {
+      if (!isUuid(id)) throw notFound();
+      const row = await this.db.user.findFirst({ where: { clientId, id } });
+      if (row === null) throw notFound();
+      return { user: toUser(row), passwordHash: row.passwordHash };
+    });
+  }
+
+  countActiveOwners(clientId: ClientId): Promise<number> {
+    return this.run('countActiveOwners', () =>
+      this.db.user.count({ where: { clientId, role: 'OWNER', status: 'ACTIVE' } }),
+    );
+  }
+
   updatePassword(clientId: ClientId, id: string, passwordHash: string): Promise<void> {
     return this.run('updatePassword', async () => {
       if (!isUuid(id)) throw notFound();

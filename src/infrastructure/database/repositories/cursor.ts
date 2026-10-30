@@ -29,6 +29,16 @@ export function stableOrderBy(): StableOrderBy {
 /** Condição "depois do cursor" para a ordem (`createdAt`, `id`). */
 export type AfterCursor = { createdAt: { gt: Date } } | { createdAt: Date; id: { gt: string } };
 
+/** Ordem decrescente (mais recentes primeiro), usada pela trilha de auditoria. */
+export type DescOrderBy = [{ createdAt: 'desc' }, { id: 'desc' }];
+
+export function descOrderBy(): DescOrderBy {
+  return [{ createdAt: 'desc' }, { id: 'desc' }];
+}
+
+/** Condição "depois do cursor" para a ordem decrescente (`createdAt`, `id`). */
+export type AfterCursorDesc = { createdAt: { lt: Date } } | { createdAt: Date; id: { lt: string } };
+
 /** Cursor opaco para quem chama; por dentro, `[createdAt ISO, id]` em base64url. */
 export function encodeCursor(position: CursorPosition): string {
   return Buffer.from(JSON.stringify([position.createdAt.toISOString(), position.id])).toString(
@@ -83,6 +93,27 @@ export function buildPageQuery(options: ListOptions | undefined): PageQuery {
         : [
             { createdAt: { gt: cursor.createdAt } },
             { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+          ],
+  };
+}
+
+/** Como `buildPageQuery`, para a ordem decrescente: o cursor vira "antes de (createdAt, id)". */
+export function buildDescPageQuery(options: ListOptions | undefined): {
+  readonly limit: number;
+  readonly take: number;
+  readonly after: AfterCursorDesc[] | undefined;
+} {
+  const limit = resolveLimit(options?.limit);
+  const cursor = options?.cursor === undefined ? undefined : decodeCursor(options.cursor);
+  return {
+    limit,
+    take: limit + 1,
+    after:
+      cursor === undefined
+        ? undefined
+        : [
+            { createdAt: { lt: cursor.createdAt } },
+            { createdAt: cursor.createdAt, id: { lt: cursor.id } },
           ],
   };
 }

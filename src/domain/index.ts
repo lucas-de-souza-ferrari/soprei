@@ -45,3 +45,8 @@ export type {
 export type { PlatformAdminRepository } from './repositories/platform-admin.repository.js';
 export type { UserRepository } from './repositories/user.repository.js';
 export { PlatformAdminId, UserId } from './value-objects/user-id.js';
+export { AUDIT_ACTIONS } from './entities/audit-event.js';
+export type { AuditAction, AuditEvent, NewAuditEvent } from './entities/audit-event.js';
+export { canManageRole, hasPermission, PERMISSIONS, ROLE_PERMISSIONS } from './permissions.js';
+export type { Permission } from './permissions.js';
+export type { AuditRepository } from './repositories/audit.repository.js';
