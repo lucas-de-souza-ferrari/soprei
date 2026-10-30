@@ -1,5 +1,7 @@
 # Passagem de turno entre agentes
 
+> 2026-10-30, Codex: rascunho da spec 016 na branch `spec/016-frontend-base`. Propõe separar `backend/` e `frontend/` e a primeira fatia do painel; escopo, stack, sessão, workspace e identidade visual aguardam decisão do dono. Nenhum código foi alterado nem validação executada. Próximo passo: recolher as decisões, ajustar e submeter a spec à aprovação; seguir o roteiro do reviewer para a parte de autenticação e isolamento.
+
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs.
 
 **Última atualização:** 2026-10-30, por Claude Code (Sonnet 5.5), spec 015 completa (015a e 015b, Embedded Signup) na branch `spec/015-onboarding-whatsapp`, pronta para o reviewer.
