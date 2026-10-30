@@ -1,6 +1,6 @@
 # Passagem de turno entre agentes
 
-> 2026-10-30, Codex: rascunho da spec 016 na branch `spec/016-frontend-base`. Propõe separar `backend/` e `frontend/` e a primeira fatia do painel; escopo, stack, sessão, workspace e identidade visual aguardam decisão do dono. Nenhum código foi alterado nem validação executada. Próximo passo: recolher as decisões, ajustar e submeter a spec à aprovação; seguir o roteiro do reviewer para a parte de autenticação e isolamento.
+> 2026-10-30, Codex: rascunho da spec 016 na branch `spec/016-frontend-base`. O dono escolheu site de apresentação como primeira fatia e pediu `backend/` e `frontend/`; enviará referências de identidade visual. Conteúdo, chamada, stack e workspace aguardam definição. Nenhum código foi alterado nem validação executada. Próximo passo: incorporar as referências e decisões, ajustar e submeter a spec à aprovação.
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs.
 
