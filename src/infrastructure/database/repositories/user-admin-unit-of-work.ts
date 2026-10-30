@@ -11,13 +11,17 @@ import { PrismaUserRepository } from './user.repository.js';
 
 /**
  * Trava a linha do cliente até o fim da transação. SQL **controlado**: um único `SELECT ... FOR
- * UPDATE` parametrizado por `clientId` (cast para uuid; nenhum valor concatenado), numa tabela
+ * NO KEY UPDATE` parametrizado por `clientId` (cast para uuid; nenhum valor concatenado), numa tabela
  * global (`clients`), que a `tenant-scope` não intercepta. Quem chama pelo `lockClient` já recebeu
  * o `ClientId` do token.
+ *
+ * `FOR NO KEY UPDATE` (e não `FOR UPDATE`): continua excluindo outro `FOR NO KEY UPDATE` (as
+ * operações de gestão do mesmo cliente seguem serializadas), mas não bloqueia o `FOR KEY SHARE` que
+ * as chaves estrangeiras tomam em `clients` quando se grava mensagem, conversa ou usuário.
  */
 async function lockClientRow(db: TenantScopedDb, clientId: ClientId): Promise<void> {
   const rows = await db.$queryRaw<{ id: string }[]>`
-    SELECT id FROM clients WHERE id = ${clientId}::uuid AND deleted_at IS NULL FOR UPDATE`;
+    SELECT id FROM clients WHERE id = ${clientId}::uuid AND deleted_at IS NULL FOR NO KEY UPDATE`;
   if (rows.length === 0) {
     throw new NotFoundError('Cliente não encontrado', { context: { entity: 'Client' } });
   }

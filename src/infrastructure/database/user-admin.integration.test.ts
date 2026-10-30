@@ -129,6 +129,37 @@ describe('UserAdminUnitOfWork (Postgres real)', () => {
     await first;
   });
 
+  it('o bloqueio não impede gravar conversa do mesmo cliente (FOR NO KEY UPDATE não toma o KEY SHARE das FKs)', async () => {
+    const client = await tenants.createClient('uow-keyshare');
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const holder = unitOfWork.run(async (tx) => {
+      await tx.lockClient(client.id);
+      held = true;
+      await gate;
+    });
+    await until(() => held);
+    try {
+      const created = await Promise.race([
+        database.prisma.conversation
+          .create({ data: { clientId: client.id, contactRef: 'contato-livre' } })
+          .then(() => 'gravou'),
+        new Promise<string>((resolve) => {
+          setTimeout(() => {
+            resolve('bloqueou');
+          }, 3_000);
+        }),
+      ]);
+      assert.equal(created, 'gravou');
+    } finally {
+      release?.();
+      await holder;
+    }
+  });
+
   it('lockClient de cliente inexistente é NotFoundError', async () => {
     await assert.rejects(
       unitOfWork.run((tx) => tx.lockClient(ClientId.parse('01900000-0000-7000-8000-000000000000'))),
