@@ -214,7 +214,7 @@ export class ChannelConnectionService {
   /**
    * PIN do registro: o que já está guardado para este cliente (o número já foi registrado com ele e
    * registrar de novo com o mesmo PIN é aceito), senão um novo, aleatório. PIN guardado que não
-   * decifra é ignorado (gera outro).
+   * decifra é ignorado, com `warn` só com o `clientId` (gera outro).
    */
   private async registrationPin(clientId: ClientId): Promise<SecretString> {
     const existing = await this.deps.connections.find(clientId);
@@ -222,7 +222,12 @@ export class ChannelConnectionService {
       try {
         return this.deps.cipher.decrypt(clientId, existing.registrationPinCiphertext);
       } catch {
-        // Falha ao decifrar: segue com um PIN novo.
+        // Falha ao decifrar (chave removida, texto adulterado): segue com um PIN novo, mas avisa. O
+        // log leva só o `clientId`: nada do PIN, do texto cifrado nem do erro.
+        this.deps.logger.warn(
+          { clientId },
+          'PIN de registro guardado não pôde ser decifrado; gerando um PIN novo',
+        );
       }
     }
     const generate = this.deps.generatePin ?? (() => randomInt(0, 1_000_000).toString());

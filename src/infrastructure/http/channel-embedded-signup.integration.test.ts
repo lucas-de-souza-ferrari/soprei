@@ -561,6 +561,53 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
     });
   });
 
+  it('PIN guardado que não decifra: gera um PIN novo, avisa só com o clientId e não vaza nenhum PIN', async () => {
+    await withHarness(async (h) => {
+      const client = await tenants.createClient('es-badpin');
+      const owner = await enroll(h, client, 'OWNER');
+      const s1 = givenSignup();
+      await signup(h, owner, client.id, {
+        code: s1.code,
+        wabaId: s1.waba,
+        phoneNumberId: s1.number,
+      });
+      const first = (await dbState(client.id)).connection;
+      assert.ok(first?.registrationPinCiphertext);
+      const oldPin = h.stack.cipher.decrypt(client.id, first.registrationPinCiphertext).reveal();
+      // Texto do PIN adulterado (como se a chave tivesse sido removida).
+      await database.prisma.channelConnection.updateMany({
+        where: { clientId: client.id },
+        data: { registrationPinCiphertext: 'v1.teste.AAAA.BBBB.CCCC' },
+      });
+
+      const s2 = givenSignup();
+      const response = await signup(h, owner, client.id, {
+        code: s2.code,
+        wabaId: s2.waba,
+        phoneNumberId: s2.number,
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      const [, registerAgain] = graph.ofOperation('register');
+      const newPin = (registerAgain?.body as { pin: string }).pin;
+      assert.match(newPin, /^[0-9]{6}$/);
+      const stored = (await dbState(client.id)).connection;
+      assert.equal(
+        h.stack.cipher.decrypt(client.id, stored?.registrationPinCiphertext ?? '').reveal(),
+        newPin,
+      );
+      const warning = h.logs
+        .lines()
+        .find((line) => String(line.msg).includes('PIN de registro guardado'));
+      assert.equal(warning?.level, 40);
+      assert.equal(warning.clientId, client.id);
+      const raw = h.logs.raw();
+      for (const secret of [oldPin, newPin, 'AAAA.BBBB.CCCC']) {
+        assert.ok(!raw.includes(secret), 'log');
+      }
+    });
+  });
+
   it('permissões: AGENT/VIEWER 403, PlatformAdmin 403, :clientId alheio 404, sem token 401; sem canal habilitado 404', async () => {
     await withHarness(async (h) => {
       const a = await tenants.createClient('es-perm-a');
