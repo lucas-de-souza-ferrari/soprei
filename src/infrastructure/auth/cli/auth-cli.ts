@@ -39,7 +39,7 @@ export interface AuthCliDeps {
 export const AUTH_CLI_USAGE = [
   'uso:',
   '  pnpm auth:cli create-platform-admin --email <e-mail>',
-  '  pnpm auth:cli create-user --client <slug> --email <e-mail> --role OWNER|AGENT',
+  '  pnpm auth:cli create-user --client <slug> --email <e-mail> --role OWNER|ADMIN|AGENT|VIEWER',
   '  pnpm auth:cli reset-password (--platform-admin | --client <slug>) --email <e-mail>',
   'A senha é pedida no terminal (sem eco); nunca por argumento nem por variável de ambiente.',
 ].join('\n');
@@ -157,7 +157,7 @@ async function createUser(
   const slug = clientSlugSchema.safeParse(values.client);
   if (!slug.success) throw new CliUsageError('informe --client <slug> válido');
   const role = roleSchema.safeParse(values.role);
-  if (!role.success) throw new CliUsageError('informe --role OWNER ou AGENT');
+  if (!role.success) throw new CliUsageError('informe --role OWNER, ADMIN, AGENT ou VIEWER');
   const client = await deps.clients.findBySlug(slug.data);
   const password = await readNewPassword(deps);
   if (password === undefined) return 1;

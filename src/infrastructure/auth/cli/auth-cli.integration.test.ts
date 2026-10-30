@@ -126,6 +126,30 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
       assert.ok(!everything.includes(secret));
   });
 
+  it('create-user aceita os quatro papéis (ADMIN e VIEWER da spec 008) e recusa outro', async () => {
+    const client = await tenants.createClient('cli-roles');
+    for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const) {
+      const email = emailFor(role.toLowerCase());
+      const created = await run(
+        ['create-user', '--client', client.slug, '--email', email, '--role', role],
+        [PASSWORD, PASSWORD],
+      );
+      assert.equal(created.code, 0, role);
+      assert.equal(
+        (await components.users.findCredentialsByEmail(client.id, email))?.user.role,
+        role,
+      );
+    }
+    const refused = await run(
+      ['create-user', '--client', client.slug, '--email', emailFor('x'), '--role', 'SUPERADMIN'],
+      [PASSWORD, PASSWORD],
+    );
+    assert.equal(refused.code, 1);
+    assert.deepEqual(refused.out, []);
+    // O CLI é a operação local do dono: não grava auditoria nem aplica a hierarquia da API.
+    assert.equal(await database.prisma.auditEvent.count({ where: { clientId: client.id } }), 0);
+  });
+
   it('create-user grava no cliente certo, com o papel, e o mesmo e-mail em outro cliente não conflita', async () => {
     const clientA = await tenants.createClient('cli-a');
     const clientB = await tenants.createClient('cli-b');
