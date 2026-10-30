@@ -127,7 +127,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 7. 012 — Reorganização de pastas: subpastas por área em `database`, `http`, `application` e `presentation`, sem mudança de comportamento
 8. 011 — Canal WhatsApp (webhook assinado, fila BullMQ, envio pela Cloud API, número de teste da Meta, LLM `mock`); teste manual do dono com a Meta funcionou de ponta a ponta
 9. 013 — Agrupamento de mensagens rápidas (janela de espera deslizante, lote respondido uma vez; mensagens gravadas no banco, `Message.answeredById`)
-10. 014 — Provedor real de LLM: `AnthropicLlmProvider` (Claude Haiku 5.5) atrás do `LlmProvider`, `AbortSignal` no prazo, erro sem texto do contato, `llm_tokens_total`; teste manual com a chave real ainda por fazer (limite de gasto na conta antes)
+10. 014 — Provedor real de LLM: `AnthropicLlmProvider` (Claude Haiku 5.5) atrás do `LlmProvider`, `AbortSignal` no prazo, erro sem texto do contato, `llm_tokens_total`; teste manual com a chave real ainda por fazer (limite de gasto na conta antes)11. 015 — Onboarding de clientes no canal WhatsApp (spec B): **em rascunho**, aguardando o dono ([spec](specs/015-onboarding-whatsapp.md)). Credenciais por cliente cifradas (AES-256-GCM), `PUT/GET/DELETE .../channel` por `OWNER`/`ADMIN`, estado `TOKEN_INVALID`, envio com o token do cliente; Embedded Signup proposto como 016. Passa pelo `reviewer`
 
 **Próximas**
 
@@ -150,7 +150,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 **Produto (esboço, depois da fatia vertical)**
 
 - Provedor real de LLM atrás do `LLMProvider`
-- Canal WhatsApp, em duas specs: (A) webhook de entrada com validação de assinatura, envio da resposta e mapeamento `phone_number_id` → cliente, com número de teste da Meta, fila e rate limit (spec 005 como pré-requisito); (B) onboarding de vários clientes com Embedded Signup, que exige autenticação (spec 007/008), tela de onboarding e tokens por cliente guardados cifrados
+- Canal WhatsApp, em duas specs: (A) webhook de entrada com validação de assinatura, envio da resposta e mapeamento `phone_number_id` → cliente, com número de teste da Meta, fila e rate limit (spec 005 como pré-requisito); (B, spec 015, **em rascunho**) onboarding de vários clientes com Embedded Signup, que exige autenticação (spec 007/008), tela de onboarding e tokens por cliente guardados cifrados
 - Base de conhecimento (ingestão de documentos + busca)
 - Painel admin (separado)
 - Deploy
