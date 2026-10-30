@@ -5,7 +5,13 @@ import { AttendanceService } from '../../../application/attendance/attendance.se
 import { ClientService } from '../../../application/clients/client.service.js';
 import { Result } from '../../../shared/types/index.js';
 import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
-import { REQUIRED_AUTH_KIND } from '../../../presentation/common/auth.hooks.js';
+import {
+  REQUIRED_AUTH_KIND,
+  REQUIRED_PERMISSION,
+  requirePermission,
+  requireUser,
+} from '../../../presentation/common/auth.hooks.js';
+import { PERMISSIONS } from '../../../domain/index.js';
 import { rateLimitProfile } from '../../../presentation/common/rate-limit.js';
 import { buildTestAuth } from '../../../test-support/in-memory-auth.js';
 import { captureLogs, type LogLine } from '../../../test-support/log-capture.js';
@@ -56,6 +62,49 @@ describe('sem o parâmetro rateLimit', () => {
   });
 });
 
+/** Problema da declaração de permissão de uma rota de tenant (spec 008), ou `undefined` se está certa. */
+function permissionProblem(permissions: readonly unknown[]): string | undefined {
+  const declared = permissions.filter((permission) => permission !== undefined);
+  if (declared.length !== 1) return 'deve declarar requirePermission(...)';
+  if (!(PERMISSIONS as readonly unknown[]).includes(declared[0])) {
+    return 'declara uma permissão desconhecida';
+  }
+  return undefined;
+}
+
+describe('inventário: o verificador de permissão de rota de tenant (spec 008)', () => {
+  it('falha para rota que só declara requireUser, para dois hooks e para permissão desconhecida', async () => {
+    const app = buildServer({ logger, readiness: ALL_UP });
+    const seen = new Map<string, unknown[]>();
+    app.addHook('onRoute', (route) => {
+      const hooks: unknown = route.onRequest;
+      const list: unknown[] = Array.isArray(hooks) ? hooks : hooks === undefined ? [] : [hooks];
+      seen.set(
+        route.url,
+        list.map((hook) => (hook as Record<symbol, unknown> | undefined)?.[REQUIRED_PERMISSION]),
+      );
+    });
+    app.get(
+      '/admin/clients/:clientId/so-requireuser',
+      { onRequest: requireUser({ clientParam: 'clientId' }) },
+      () => ({}),
+    );
+    app.get(
+      '/admin/clients/:clientId/com-permissao',
+      { onRequest: requirePermission('user:read', { clientParam: 'clientId' }) },
+      () => ({}),
+    );
+    await app.ready();
+    await app.close();
+    const onlyUser = seen.get('/admin/clients/:clientId/so-requireuser') ?? [];
+    const withPermission = seen.get('/admin/clients/:clientId/com-permissao') ?? [];
+    assert.match(permissionProblem(onlyUser) ?? '', /deve declarar requirePermission/);
+    assert.equal(permissionProblem(withPermission), undefined);
+    assert.match(permissionProblem(['a', 'b']) ?? '', /deve declarar/);
+    assert.match(permissionProblem(['user:destroy']) ?? '', /desconhecida/);
+  });
+});
+
 describe('inventário de rotas: toda rota declara o seu perfil', () => {
   it('toda rota tem perfil declarado; /admin é admin e só /health e /metrics ficam sem limite', async () => {
     const clients = new InMemoryClientRepository();
@@ -90,6 +139,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       method: string | string[];
       config: Record<string, unknown>;
       authKinds: unknown[];
+      permissions: unknown[];
     }[] = [];
     app.addHook('onRoute', (route) => {
       const hooks: unknown = route.onRequest;
@@ -100,6 +150,9 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         config: { ...(route.config as Record<string, unknown> | undefined) },
         authKinds: list.map(
           (hook) => (hook as Record<symbol, unknown> | undefined)?.[REQUIRED_AUTH_KIND],
+        ),
+        permissions: list.map(
+          (hook) => (hook as Record<symbol, unknown> | undefined)?.[REQUIRED_PERMISSION],
         ),
       });
     });
@@ -156,6 +209,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           route.authKinds.includes(expected),
           `${label} deve declarar ${expected === 'user' ? 'requireUser()' : 'requirePlatform()'}`,
         );
+        if (expected === 'user') {
+          // Spec 008: nenhuma rota de tenant sem permissão explícita (e a permissão existe).
+          assert.equal(permissionProblem(route.permissions), undefined, label);
+        }
       } else if (route.url.startsWith('/auth/')) {
         const expected: Record<string, string> = {
           '/auth/login': 'login',

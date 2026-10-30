@@ -1,3 +1,4 @@
+import type { AuditAction, Permission } from '../../domain/index.js';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 
 /** Fotografia do pool de conexões (mesma forma de `Database.poolMetrics()`). */
@@ -138,6 +139,10 @@ export interface Metrics {
   /** O `authenticate` recusou um access token; `reason` é a categoria (nunca vai à resposta). */
   countAuthTokenRejection(reason: AuthTokenRejectionReason): void;
   countAuthLogout(scope: AuthLogoutScope): void;
+  /** O hook `requirePermission` negou uma permissão (spec 008). `permission` é do conjunto fixo, nunca id. */
+  countAuthzDenial(permission: Permission): void;
+  /** Uma operação de gestão de usuários foi confirmada (spec 008). `action` é o `AuditAction`. */
+  countUserAdminAction(action: AuditAction): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
 }
@@ -308,6 +313,19 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const authzDenials = new Counter({
+    name: 'authz_denials_total',
+    help: 'Negações de permissão pelo hook requirePermission, por permissão (conjunto fixo)',
+    labelNames: ['permission'] as const,
+    registers: [registry],
+  });
+  const userAdminActions = new Counter({
+    name: 'user_admin_actions_total',
+    help: 'Operações de gestão de usuários confirmadas, por ação de auditoria (conjunto fixo)',
+    labelNames: ['action'] as const,
+    registers: [registry],
+  });
+
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
     name: 'db_pool_connections',
@@ -386,6 +404,12 @@ export function createMetrics(): Metrics {
     },
     countAuthLogout(scope) {
       authLogouts.inc({ scope });
+    },
+    countAuthzDenial(permission) {
+      authzDenials.inc({ permission });
+    },
+    countUserAdminAction(action) {
+      userAdminActions.inc({ action });
     },
     bindPool(source) {
       poolSource = source;

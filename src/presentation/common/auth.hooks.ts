@@ -5,6 +5,7 @@ import {
   subjectIdOf,
   type UserIdentity,
 } from '../../application/auth/identity.js';
+import { hasPermission, type Permission } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import {
   ForbiddenError,
@@ -90,11 +91,44 @@ export function authenticateHook({
   };
 }
 
+/** Marca (para o teste de inventário) de qual permissão o hook `requirePermission` da rota exige. */
+export const REQUIRED_PERMISSION = Symbol.for('soprei.requiredPermission');
+
 function tagged(
   kind: 'user' | 'platform',
   handler: onRequestAsyncHookHandler,
 ): onRequestAsyncHookHandler {
   return Object.assign(handler, { [REQUIRED_AUTH_KIND]: kind });
+}
+
+/** Adapta uma checagem síncrona (que lança) ao formato assíncrono dos hooks do Fastify. */
+function asHook(check: (request: FastifyRequest) => void): onRequestAsyncHookHandler {
+  return (request) => {
+    try {
+      check(request);
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    return Promise.resolve();
+  };
+}
+
+/**
+ * As checagens de `requireUser`, em ordem: 401 (sem identidade) -> 403 (`PlatformAdmin`) -> 404
+ * (`:clientId` do caminho diverge do token). Devolve a identidade do `User`.
+ */
+function checkUser(request: FastifyRequest, clientParam: string | undefined): UserIdentity {
+  const auth = request.auth;
+  if (auth === null) throw new UnauthorizedError();
+  if (auth.kind !== 'user') throw new ForbiddenError();
+  if (clientParam !== undefined) {
+    const params = request.params as Readonly<Record<string, unknown>> | undefined;
+    const fromPath = params?.[clientParam];
+    if (typeof fromPath !== 'string' || fromPath.toLowerCase() !== auth.clientId) {
+      throw new NotFoundError('Cliente não encontrado', { context: { entity: 'Client' } });
+    }
+  }
+  return auth;
 }
 
 /**
@@ -106,21 +140,51 @@ function tagged(
 export function requireUser(
   options: { readonly clientParam?: string } = {},
 ): onRequestAsyncHookHandler {
-  return tagged('user', (request) => {
-    const auth = request.auth;
-    if (auth === null) return Promise.reject(new UnauthorizedError());
-    if (auth.kind !== 'user') return Promise.reject(new ForbiddenError());
-    if (options.clientParam !== undefined) {
-      const params = request.params as Readonly<Record<string, unknown>> | undefined;
-      const fromPath = params?.[options.clientParam];
-      if (typeof fromPath !== 'string' || fromPath.toLowerCase() !== auth.clientId) {
-        return Promise.reject(
-          new NotFoundError('Cliente não encontrado', { context: { entity: 'Client' } }),
-        );
+  return tagged(
+    'user',
+    asHook((request) => {
+      checkUser(request, options.clientParam);
+    }),
+  );
+}
+
+export interface RequirePermissionOptions {
+  /** Como em `requireUser`: o parâmetro de caminho conferido contra o `ClientId` do token. */
+  readonly clientParam?: string;
+  /** Conta a negação em `authz_denials_total{permission}`. */
+  readonly metrics?: Pick<Metrics, 'countAuthzDenial'> | undefined;
+}
+
+/**
+ * RBAC (spec 008): a rota exige a **permissão** (nunca um papel). Construído sobre `requireUser`
+ * (mesmas checagens e mesma marca, então o inventário de rotas o reconhece): 401 -> 403
+ * (`PlatformAdmin`) -> 404 (`:clientId` divergente: vem **antes** da permissão, para não revelar a
+ * existência de um cliente a quem não é dele) -> 403 se o papel do token não tem a permissão. O
+ * `ClientId` continua vindo só do token. A negação vira métrica (conjunto fixo) e log `warn` só
+ * com padrão de rota, permissão e papel (os ids vão pelo contexto; nunca e-mail).
+ */
+export function requirePermission(
+  permission: Permission,
+  options: RequirePermissionOptions = {},
+): onRequestAsyncHookHandler {
+  const handler = tagged(
+    'user',
+    asHook((request) => {
+      const auth = checkUser(request, options.clientParam);
+      if (hasPermission(auth.role, permission)) return;
+      try {
+        options.metrics?.countAuthzDenial(permission);
+      } catch (error) {
+        request.log.warn({ err: error }, 'falha ao registrar métrica de autorização');
       }
-    }
-    return Promise.resolve();
-  });
+      request.log.warn(
+        { route: routePattern(request), permission, role: auth.role },
+        'permissão negada',
+      );
+      throw new ForbiddenError();
+    }),
+  );
+  return Object.assign(handler, { [REQUIRED_PERMISSION]: permission });
 }
 
 /** A rota exige um `PlatformAdmin`. `User` recebe 403. */

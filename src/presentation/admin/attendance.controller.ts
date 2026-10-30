@@ -1,9 +1,9 @@
-import type { FastifyPluginCallback } from 'fastify';
+import type { FastifyPluginCallback, onRequestAsyncHookHandler } from 'fastify';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
-import type { Conversation, ListOptions, Message } from '../../domain/index.js';
+import type { Conversation, ListOptions, Message, Permission } from '../../domain/index.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
-import { authenticateHook, requireUser, userAuth } from '../common/auth.hooks.js';
+import { authenticateHook, requirePermission, userAuth } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import {
   conversationParamsSchema,
@@ -14,7 +14,7 @@ import {
 export interface AdminAttendanceControllerOptions {
   /** Verificação do access token (spec 007). */
   readonly auth: Pick<AuthService, 'authenticate'>;
-  readonly metrics?: Pick<Metrics, 'countAuthTokenRejection'> | undefined;
+  readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   readonly attendance: AttendanceService;
 }
 
@@ -81,25 +81,35 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
   // Rate limit por perfil (spec 005): todas as rotas daqui são `admin`.
   const config = rateLimitProfile('admin');
-  const onRequest = requireUser({ clientParam: 'clientId' });
+  // Permissão explícita em toda rota de tenant (spec 008); o `:clientId` é conferido contra o token.
+  const guard = (permission: Permission): onRequestAsyncHookHandler =>
+    requirePermission(permission, { clientParam: 'clientId', metrics });
 
-  app.post('/:clientId/messages', { config, onRequest }, async (request, reply) => {
-    const { clientId } = userAuth(request);
-    const body = inboundMessageBodySchema.parse(request.body);
-    const result = await attendance.handleInboundMessage(clientId, body);
-    return reply.status(result.duplicate ? 200 : 201).send(result);
-  });
+  app.post(
+    '/:clientId/messages',
+    { config, onRequest: guard('conversation:simulate') },
+    async (request, reply) => {
+      const { clientId } = userAuth(request);
+      const body = inboundMessageBodySchema.parse(request.body);
+      const result = await attendance.handleInboundMessage(clientId, body);
+      return reply.status(result.duplicate ? 200 : 201).send(result);
+    },
+  );
 
-  app.get('/:clientId/conversations', { config, onRequest }, async (request) => {
-    const { clientId } = userAuth(request);
-    const query = listQuerySchema.parse(request.query);
-    const page = await attendance.listConversations(clientId, toListOptions(query));
-    return { items: page.items.map(toConversationResponse), nextCursor: page.nextCursor };
-  });
+  app.get(
+    '/:clientId/conversations',
+    { config, onRequest: guard('conversation:read') },
+    async (request) => {
+      const { clientId } = userAuth(request);
+      const query = listQuerySchema.parse(request.query);
+      const page = await attendance.listConversations(clientId, toListOptions(query));
+      return { items: page.items.map(toConversationResponse), nextCursor: page.nextCursor };
+    },
+  );
 
   app.get(
     '/:clientId/conversations/:conversationId/messages',
-    { config, onRequest },
+    { config, onRequest: guard('conversation:read') },
     async (request) => {
       const { conversationId } = conversationParamsSchema.parse(request.params);
       const { clientId } = userAuth(request);

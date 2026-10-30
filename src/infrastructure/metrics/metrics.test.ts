@@ -210,4 +210,19 @@ describe('createMetrics', () => {
     assert.match(body, /queue_jobs_total{queue="channel-inbound",result="retried"} 1/);
     assert.doesNotMatch(body, /clientId|userId|phone|contact|text=/i);
   });
+
+  it('métricas de autorização e de gestão de usuários (spec 008): só labels de conjunto fixo', async () => {
+    const metrics = createMetrics();
+    metrics.countAuthzDenial('user:manage');
+    metrics.countAuthzDenial('user:manage');
+    metrics.countAuthzDenial('conversation:simulate');
+    metrics.countUserAdminAction('USER_CREATED');
+    metrics.countUserAdminAction('USER_ROLE_CHANGED');
+    const body = await metrics.render();
+    assert.match(body, /authz_denials_total{permission="user:manage"} 2/);
+    assert.match(body, /authz_denials_total{permission="conversation:simulate"} 1/);
+    assert.match(body, /user_admin_actions_total{action="USER_CREATED"} 1/);
+    assert.match(body, /user_admin_actions_total{action="USER_ROLE_CHANGED"} 1/);
+    assert.doesNotMatch(body, /clientId|userId|actorUserId|email/i);
+  });
 });
