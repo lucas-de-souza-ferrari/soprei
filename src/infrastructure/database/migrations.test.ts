@@ -17,7 +17,7 @@ function migrationFiles(): { name: string; sql: string }[] {
 describe('migration da spec 008 (RBAC e auditoria)', () => {
   const migration = migrationFiles().find((file) => file.name.endsWith('_rbac_audit'));
 
-  it('existe e só acrescenta: nenhum DROP, DELETE, TRUNCATE, RENAME nem ALTER COLUMN', () => {
+  it('existe e só acrescenta: nenhum DROP, DELETE FROM, TRUNCATE, RENAME nem ALTER COLUMN', () => {
     assert.ok(migration !== undefined, 'migration _rbac_audit existe');
     const statements = migration.sql
       .split('\n')
