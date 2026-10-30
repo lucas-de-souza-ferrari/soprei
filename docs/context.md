@@ -131,6 +131,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 **Próximas**
 
+- Pendências da spec 008 (revisão): imutabilidade da auditoria só por convenção do repositório (considerar gatilho ou `REVOKE` na spec de retenção/LGPD, que também decide o expurgo); a migration `20261030120000_rbac_audit` usa `ALTER TYPE ... ADD VALUE`, que exige PostgreSQL >= 12.
+
 - Pendências da spec 007 (revisão): teto do tamanho da fila de espera do hasher (`scrypt-password-hasher.ts`) e limpeza periódica de sessões expiradas no conjunto `usess` do Redis; incluir o IP na chave do bloqueio por conta se virar problema.
 - Pendências antes de dados reais: política de retenção e LGPD (inclui limpeza do Redis e dos jobs), RLS do Postgres, varredura de mensagens pendentes antigas, suporte a BSUID (contato sem telefone), confirmar que o túnel/proxy acrescenta ao `X-Forwarded-For`.
 
