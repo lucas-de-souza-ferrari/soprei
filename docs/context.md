@@ -140,7 +140,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 | Item | Spec | Gatilho |
 | --- | --- | --- |
 | Autenticação JWT + refresh | 007 | **concluída** (aprovada em 2026-10-29 com todas as recomendações; revisada, CI verde e mergeada). Pré-requisito do onboarding de vários clientes (spec B); substitui a `ADMIN_API_KEY`, que foi removida |
-| RBAC | 008 | junto com a autenticação, quando houver mais de um papel |
+| RBAC | 008 | **em rascunho** (escolhida pelo dono como próxima; permissões por papel, usuários do cliente pela API, troca da própria senha, auditoria; aguarda aprovação e passa pelo `reviewer`) |
 | Cache L1/L2 | 006 | quando medição mostrar leitura repetida custosa |
 | Tempo real (SSE/WebSocket) | 009 | quando o painel precisar de eventos ao vivo |
 | Row Level Security do Postgres | a escrever | **antes de dados reais de clientes** (decisão do dono); revisão pelo `reviewer` |

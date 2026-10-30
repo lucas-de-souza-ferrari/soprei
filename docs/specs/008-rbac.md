@@ -1,50 +1,196 @@
-# 008 — Autorização por papéis e permissões (RBAC)
+# 008 — Autorização por papéis, usuários do cliente pela API e auditoria (RBAC)
 
-- **Status:** esboço (sob demanda: reler contra o código antes de aprovar; gatilho: junto com a autenticação, com mais de um papel; exige revisão do `reviewer`)
+- **Status:** rascunho (reescrita do esboço contra o código de `main` em 02310cc; aguarda aprovação do dono; **segurança: passa pelo `reviewer` antes do merge**, de preferência outro agente/modelo)
 - **Branch:** `spec/008-rbac`
-- **Depende de:** 007
+- **Depende de:** 003 (isolamento), 005 (perfis de rate limit), 007 (identidade, `authenticate`, `requireUser`, `SessionStore`)
 
 ## Objetivo
 
-Controlar o que cada usuário pode fazer dentro do seu cliente, com papéis e permissões declarados no código e verificados por hooks reutilizáveis.
+Hoje todo `User` ativo de um cliente tem o mesmo acesso (a 007 só **carrega** `OWNER`/`AGENT`) e só dá para criar usuário pelo CLI do dono. Esta spec faz o papel **valer**: permissões por papel verificadas em hook, gestão de usuários do próprio cliente pela API (criar, listar, mudar papel, desativar, redefinir senha), troca da própria senha, a regra do último `OWNER` e uma trilha de auditoria. É pré-requisito do painel e da spec B (onboarding), em que o cliente passa a administrar a própria equipe.
+
+## Estado de partida (herdado do código real)
+
+- `UserRole` = `OWNER | AGENT` (`src/domain/entities/user.ts`; enum Postgres `user_role`); `User` tem `status` `ACTIVE | DISABLED`. O papel vai no access token (claim `role`) e em `request.auth` (`UserIdentity.role`). `jose-access-token.service.ts` aceita só os papéis conhecidos; outro valor é 401 (a 007 deixou a política de papéis futuros para esta spec).
+- Hooks em `src/presentation/common/auth.hooks.ts`: `authenticateHook` (preenche `request.auth`), `requireUser({ clientParam })` (403 para `PlatformAdmin`; `:clientId` divergente do `cid` = 404 idêntico a cliente inexistente), `requirePlatform()`, `userAuth(request)`. Hooks marcam `REQUIRED_AUTH_KIND` para o teste de inventário de `rate-limit.test.ts`, que falha se uma rota `/admin/*` não declarar `requireUser()` ou `requirePlatform()` e o perfil.
+- `UserRepository` (`TenantRepository` mais `findCredentialsByEmail` e `updatePassword`); `UserUpdate` já aceita `role` e `status`. `User` **não** tem `@@unique([id, clientId])` (a 007 deixou para esta spec se a auditoria virar tabela).
+- `SessionStore.revokeAllSessions(scope, subjectId)` (grava `nbf` e `rsid` de cada sessão) já existe e é a operação que a 007 reservou para "desativar usuário pela API"; `authenticate` não consulta o banco, então desativação e troca de papel só valem de imediato se a sessão for revogada.
+- Rotas `/admin/clients/:clientId/{messages,conversations,conversations/:id/messages}` usam `requireUser({ clientParam: 'clientId' })` sem distinção de papel; `/admin/clients` (CRUD de `Client`, inclusive `persona` e `whatsappPhoneNumberId`) é só `PlatformAdmin`. `GET /auth/me`, `logout-all` valem para qualquer identidade. `pnpm auth:cli` cria `OWNER|AGENT` e redefine senha.
+- O contador de falhas de login (`loginLockState`/`recordLoginFailure`/`resetLoginFailures`) aceita qualquer chave opaca; pode ser reutilizado.
 
 ## Comportamento esperado
 
-- Enum de papéis em `src/domain/` (valores iniciais propostos: `OWNER`, `ADMIN`, `AGENT`, `VIEWER`) e enum/união de permissões por recurso e ação (ex.: `conversation:read`, `conversation:reply`, `user:manage`).
-- Mapa estático `papel -> permissões` em `src/domain/`, versionado em código e coberto por teste. O token carrega só o papel; as permissões são derivadas no servidor, então mudar o mapa vale na hora sem reemitir tokens.
-- Hooks do Fastify em `src/presentation/`:
-  - `requirePermissions([...])`: exige **todas** as permissões listadas, senão 403;
-  - `requireRoles([...])`: exige **ao menos um** dos papéis, senão 403;
-  - ambos assumem `authenticate` anterior (401 se não houver identidade).
-- Rotas administrativas da spec 003 (CRUD de `Client`) e de usuários (`User`) passam a exigir permissão adequada.
-- CRUD de usuários do próprio cliente (criar, alterar papel, desativar) protegido por `user:manage`; impossível alterar papel de usuário de outro cliente; um usuário não pode elevar o próprio papel.
-- Log de auditoria (estruturado, via Pino) para mudança de papel e desativação de usuário.
+### Papéis e permissões (lista fixa em código, decisão 1)
+
+- `USER_ROLES` ganha `ADMIN` e `VIEWER`: `OWNER`, `ADMIN`, `AGENT`, `VIEWER`. Migration **aditiva** (`ALTER TYPE user_role ADD VALUE`); nada de migration antiga é reescrita. O padrão de criação continua `AGENT`.
+- `src/domain/permissions.ts` (puro, sem dependência): união `Permission` e mapa estático `ROLE_PERMISSIONS`, mais `hasPermission(role, permission)`. Papel desconhecido (valor fora de `USER_ROLES`, ex.: token adulterado que passasse) nunca concede nada. O token continua carregando só o papel; permissões são derivadas no servidor.
+
+| Permissão | Ação | OWNER | ADMIN | AGENT | VIEWER |
+| --- | --- | :-: | :-: | :-: | :-: |
+| `conversation:read` | `GET .../conversations` e `.../messages` | x | x | x | x |
+| `conversation:simulate` | `POST .../messages` (simulador) | x | x | x | |
+| `user:read` | `GET .../users` | x | x | | |
+| `user:manage` | criar, mudar papel/estado, redefinir senha de outro | x | x | | |
+| `audit:read` | `GET .../audit-events` | x | x | | |
+
+- **Hierarquia dentro de `user:manage`** (função pura `canManageRole` no domínio, aplicada **no service**, defesa em profundidade além do hook): `OWNER` gerencia qualquer papel (inclusive criar e promover `OWNER`); `ADMIN` só gerencia usuários `AGENT` e `VIEWER` e só atribui esses dois papéis. `ADMIN` não toca em `OWNER` nem em outro `ADMIN`. **Ninguém altera o próprio papel nem o próprio estado** (nem `OWNER`); a própria senha só pela rota de troca abaixo.
+- Persona e `whatsappPhoneNumberId` seguem em `PATCH /admin/clients/:id` (só `PlatformAdmin`); configuração do cliente pelo próprio cliente fica para a spec B.
+
+### Hook `requirePermission`
+
+`requirePermission(permission, { clientParam }?)` em `auth.hooks.ts`, **construído sobre `requireUser`** (mesmas checagens e mesma marca `REQUIRED_AUTH_KIND = 'user'`, então o inventário o reconhece): ordem 401 (sem identidade) -> 403 (`PlatformAdmin`) -> 404 (`:clientId` divergente do token; vem **antes** da permissão, para não revelar a existência de um cliente a quem não é dele) -> 403 (`ForbiddenError`, mensagem constante) se `!hasPermission(auth.role, permission)`. O `ClientId` continua vindo **só** do token (`userAuth(request).clientId`). Nenhum hook `requireRoles` (decisão 1: papéis não aparecem em rota, só permissões). Negação incrementa `authz_denials_total{permission}` (conjunto fixo) e loga `warn` com `route` (padrão), `permission`, `role`, ids; nunca e-mail.
+
+### Classificação das rotas atuais e novas (tudo em `/admin/clients/:clientId/...`, `clientParam: 'clientId'`, perfil `admin`)
+
+| Rota | Permissão |
+| --- | --- |
+| `GET /conversations`, `GET /conversations/:id/messages` | `conversation:read` |
+| `POST /messages` (simulador) | `conversation:simulate` |
+| `GET /users` | `user:read` |
+| `POST /users` | `user:manage` |
+| `PATCH /users/:userId` (`{ role?, status? }`, ao menos um campo) | `user:manage` |
+| `POST /users/:userId/password` (`{ newPassword }`) | `user:manage` |
+| `GET /audit-events` | `audit:read` |
+| `POST /auth/password` (`{ currentPassword, newPassword }`; perfil `login`, fail-closed) | qualquer `User` autenticado (`requireUser()`) |
+| `/admin/clients` (CRUD de `Client`), `/auth/*`, webhook, `/health`, `/metrics` | **sem mudança** |
+
+O teste de inventário passa a exigir também que toda rota `requireUser`/`requirePermission` de tenant em `/admin/clients/:clientId/...` declare `requirePermission` (nenhuma rota de tenant sem permissão explícita; exceção declarada: `POST /auth/password`).
+
+### Gestão de usuários (`UserAdminService`, `src/application/users/`)
+
+Os métodos recebem a identidade do ator (`UserIdentity`: `clientId`, `userId`, `role`) e o **service** reaplica permissão e hierarquia (o hook sozinho não expressa "ADMIN não toca em OWNER").
+
+- **Criar** `POST /users` `{ email, password, role }`: e-mail normalizado como no login (NFKC, `trim`, minúsculas, até 254), senha pela mesma política da 007 (12 a 128, NFKC, sem NUL), hash `scrypt`. E-mail repetido **no mesmo** cliente: `ConflictError` 409. Devolve `{ id, email, role, status, createdAt }`, nunca o hash. A senha inicial é definida por quem cria e combinada fora da API (sem e-mail de convite: fora de escopo, decisão 5).
+- **Listar** `GET /users`: paginação por cursor (como as conversas), `{ items: [{ id, email, role, status, createdAt }], nextCursor }`, só do cliente do token.
+- **Mudar papel / desativar / reativar** `PATCH /users/:userId`: respeita a hierarquia (a **origem** e o **destino** do papel precisam ser gerenciáveis pelo ator) e "ninguém altera a si mesmo". Papel e estado iguais ao atual: sem efeito e **sem** auditoria, 200.
+- **Redefinir a senha de outro** `POST /users/:userId/password`: mesma hierarquia; grava o hash e revoga as sessões do alvo.
+- **Última pessoa `OWNER`:** nenhuma operação pode deixar o cliente sem ao menos um `OWNER` **ativo** (rebaixar ou desativar o último = `ConflictError` 409, código `LAST_OWNER`). A checagem e a escrita acontecem **na mesma transação**, com o cliente travado (`SELECT ... FOR UPDATE` na linha de `clients`, SQL controlado dentro de `infrastructure/database/`, no molde do `message.repository`), porque dois `OWNER` podendo se rebaixar ao mesmo tempo passariam cada um pela checagem sozinha. Porta `UserAdminUnitOfWork` (como `AttendanceUnitOfWork`): o `application` não importa `infrastructure/database`.
+- **Troca da própria senha** `POST /auth/password`: confere `currentPassword` (um `verify`; contador de falhas reutilizando `loginLockState`/`recordLoginFailure` com chave `HMAC(['pw', clientId, userId])`, mesmo segredo derivado, 429 com `Retry-After` antes de gastar hash), grava o novo hash e **revoga todas as sessões do usuário, inclusive a atual** (`revokeAllSessions`, sem método novo na porta): responde 204 e a pessoa faz login de novo (decisão 4). Senha nova igual à atual é aceita (sem regra de composição, como na 007).
+- **Convivência com `pnpm auth:cli`:** o CLI continua sendo o caminho de recuperação do dono (criar o primeiro `OWNER`, `reset-password` quando todos perderam a senha) e passa a aceitar os quatro papéis. Ele **não** grava auditoria nem aplica hierarquia (é operação local do dono da máquina, não da API); cada comando já imprime só o id.
+
+### Efeito imediato sobre sessões e tokens (decisão 3)
+
+Depois de gravar no banco, mudança de papel, desativação e redefinição de senha de outro chamam `sessions.revokeAllSessions(clientId, targetUserId)`: o `nbf` derruba os access tokens ainda válidos e cada sessão cai (refresh incluso); o alvo faz login e recebe o papel novo. Reativar não precisa revogar. A troca do papel também vale na hora para quem **sobe** de papel (refaz login). Ordem: **banco primeiro, revogação depois, ambas dentro do mesmo pedido**; se o Redis falhar após o commit, a API responde 503 (`ServiceUnavailableError`) com a mudança já gravada e a auditoria feita; repetir o pedido é idempotente e refaz a revogação (um `PATCH` igual ao estado atual **ainda** chama a revogação: ver critério). `authenticate` continua sem consultar o banco por requisição (a 007 manteve o custo fora do caminho quente).
+
+### Auditoria (tabela de tenant, decisão 2)
+
+```prisma
+enum AuditAction { USER_CREATED USER_ROLE_CHANGED USER_DISABLED USER_ENABLED USER_PASSWORD_RESET USER_PASSWORD_CHANGED  @@map("audit_action") }
+
+/// (TENANT) Trilha imutável. Sem texto livre, sem e-mail, sem IP: só ids e valores de enum.
+model AuditEvent {
+  id           String      @id @default(uuid(7)) @db.Uuid
+  clientId     String      @map("client_id") @db.Uuid
+  action       AuditAction
+  actorUserId  String      @map("actor_user_id") @db.Uuid
+  targetUserId String      @map("target_user_id") @db.Uuid
+  fromRole     UserRole?   @map("from_role")
+  toRole       UserRole?   @map("to_role")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  client       Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  actor        User        @relation("AuditActor",  fields: [actorUserId, clientId],  references: [id, clientId], onDelete: Restrict)
+  target       User        @relation("AuditTarget", fields: [targetUserId, clientId], references: [id, clientId], onDelete: Restrict)
+
+  @@index([clientId, createdAt, id])
+  @@map("audit_events")
+}
+```
+
+- `User` ganha `@@unique([id, clientId])` (FK composta: auditoria de um cliente não aponta para usuário de outro, no próprio banco, como na 010). `MODEL_SCOPES`: `AuditEvent: 'tenant'`. Repositório `AuditRepository` (`ClientId` primeiro; só `create` e `list`; sem `update`/`delete`, a trilha é imutável pela API). `User` nunca é apagado fisicamente (não há `DELETE` de usuário; `Restrict` garante).
+- O evento é gravado **na mesma transação** da mudança (`UserAdminUnitOfWork`): sem mudança sem trilha, nem trilha sem mudança. Além da linha, um log Pino `info` (`audit`, `action`, `clientId`, `actorUserId`, `targetUserId`, `fromRole`, `toRole`): só ids e enum, **nunca** e-mail, senha, hash nem token.
+- `GET /audit-events`: cursor, mais recentes primeiro, `{ id, action, actorUserId, targetUserId, fromRole, toRole, createdAt }`. Autoprotegida pelo `clientId` do token.
+- **Retenção:** sem expurgo nesta spec (guardar é o objetivo da trilha); entra na política de retenção/LGPD já pendente antes de dados reais (os ids de pessoa são dado pessoal indireto).
+
+### Rate limit, erros, validação, config
+
+- Rotas novas no perfil `admin` (e `POST /auth/password` no `login`, fail-closed: o Redis do limiter fora = 503, sem verificar senha). Corpo e parâmetros com Zod; `:userId` UUID inválido = 404 uniforme (não 400); erros de validação não ecoam o valor (senha, e-mail). Erros da hierarquia: `ForbiddenError` 403 (sem permissão ou hierarquia), `NotFoundError` 404 (usuário de outro cliente ou inexistente, **idêntico**), `ConflictError` 409 (e-mail repetido, `LAST_OWNER`), `ServiceUnavailableError` 503.
+- **Sem variável de ambiente nova.** Sem dependência nova.
+- Métrica nova: `authz_denials_total{permission}`; `user_admin_actions_total{action}` (valores do `AuditAction`). Nenhum id, e-mail ou IP em label.
+- `redact` e privacidade herdados da 007 (`newPassword`, `currentPassword`, `passwordHash`, `email` já cobertos).
 
 ## Critérios de aceite
 
-- [ ] Teste: cada papel recebe exatamente as permissões do mapa (snapshot do mapa).
-- [ ] Teste: `requirePermissions` exige todas; falta uma = 403.
-- [ ] Teste: `requireRoles` aceita qualquer um da lista; fora dela = 403.
-- [ ] Teste: sem token, 401; com token válido mas sem permissão, 403.
-- [ ] Teste: usuário não eleva o próprio papel; `ADMIN` não cria `OWNER` (ou regra equivalente definida nesta spec).
-- [ ] Teste de isolamento: admin do cliente A não lista, altera nem desativa usuários do cliente B.
-- [ ] Teste: mudança de papel gera log de auditoria com quem mudou, quem foi alterado e papéis antigo e novo.
+Unitários com `buildTestAuth` e repositórios em memória; integração em `soprei_test` e Redis `/15` (prefixo único).
+
+**Permissões e hooks**
+- [ ] Teste (snapshot): o mapa `ROLE_PERMISSIONS` entrega a cada papel exatamente a matriz acima; `hasPermission` com papel fora de `USER_ROLES` devolve `false`; token de papel desconhecido continua 401.
+- [ ] Teste: para cada rota de tenant, cada papel recebe o status esperado pela matriz (200/201/204 ou 403), em tabela (`VIEWER` lê conversas mas leva 403 no simulador; `AGENT` leva 403 em `/users` e `/audit-events`).
+- [ ] Teste: sem token 401; `PlatformAdmin` 403 em todas as rotas de tenant; `:clientId` de outro cliente 404 **igual** ao de cliente inexistente mesmo para quem teria a permissão e também para quem não a tem (404 antes de 403); `authz_denials_total` conta a negação sem id nem e-mail.
+- [ ] Teste: o inventário de rotas falha se uma rota de tenant não declarar `requirePermission` (ou `POST /auth/password`) e perfil.
+
+**Gestão de usuários e hierarquia**
+- [ ] Teste: `OWNER` cria usuário de qualquer papel; `ADMIN` cria `AGENT`/`VIEWER` e recebe 403 ao criar `ADMIN` ou `OWNER`; e-mail repetido no mesmo cliente 409; o mesmo e-mail em dois clientes funciona; a resposta nunca traz hash; senha fora da política 400 sem ecoar o valor.
+- [ ] Teste: `ADMIN` não altera nem desativa nem redefine a senha de `OWNER` ou de outro `ADMIN` (403) e não promove ninguém a `ADMIN`/`OWNER`; `OWNER` faz tudo isso.
+- [ ] Teste: ninguém altera o próprio papel nem o próprio estado (403), nem o `OWNER` único; **auto-promoção** (`AGENT`/`ADMIN` pedindo `OWNER` para si) é 403 e o banco permanece intacto.
+- [ ] Teste: rebaixar ou desativar o último `OWNER` ativo é 409 `LAST_OWNER` e nada muda; com dois `OWNER`, um pode rebaixar o outro; um `OWNER` desativado não conta como `OWNER` ativo.
+- [ ] Teste (integração, Postgres real): dois `OWNER` se rebaixando **simultaneamente** (duas conexões): exatamente um pedido tem sucesso, o cliente termina com um `OWNER` ativo.
+- [ ] Teste: `PATCH` com papel e estado iguais ao atual não gera evento de auditoria; `PATCH` sem campos é 400.
+- [ ] Teste: `GET /users` lista só os usuários do cliente do token, paginado por cursor, sem hash.
+
+**Sessões e tokens**
+- [ ] Teste: após mudar o papel, desativar ou redefinir a senha de um usuário, o **access token ainda válido** dele é recusado (401, `nbf`/`rsid`), o refresh falha e o login com o papel novo funciona; usuário desativado não loga; outras pessoas e outros clientes não são afetados.
+- [ ] Teste: com o Redis de auth fora **depois** do commit, a API responde 503, a mudança e a auditoria ficam gravadas e repetir o `PATCH` (já aplicado) refaz a revogação.
+- [ ] Teste: `POST /auth/password` com senha atual errada é 401 e conta no contador (429 com `Retry-After` antes de gastar hash após `AUTH_LOGIN_MAX_FAILURES`); com a certa, troca o hash, devolve 204, derruba **todas** as sessões da pessoa (access e refresh) e o login com a senha nova funciona; sem Redis do limiter, 503 sem verificar senha.
+
+**Auditoria**
+- [ ] Teste: cada operação gera um `AuditEvent` com ator, alvo, ação e papéis (`USER_ROLE_CHANGED` com `fromRole` e `toRole`) **na mesma transação**: falha da escrita da trilha desfaz a mudança do usuário e vice-versa.
+- [ ] Teste: o log `audit` traz só ids e enum; captura de log (`src/test-support/log-capture.ts`) prova que e-mail, senha, hash, access e refresh token **secretos** de teste não aparecem em log, erro, métrica nem corpo de erro em todas as rotas novas.
+- [ ] Teste: `AuditRepository` não expõe `update`/`delete`; a FK composta impede, no banco, um evento do cliente A apontar para usuário do B.
+
+**Isolamento**
+- [ ] Teste de isolamento do `UserRepository` (novos métodos) e do `AuditRepository` no molde de `user.repository.integration.test.ts`: o cliente A não lista, conta, atualiza nem lê usuário ou evento do B (`NotFoundError`); consulta sem `clientId` lança `TenantScopeError`; `MODEL_SCOPES` classifica `AuditEvent` (tenant) e o teste de cobertura passa.
+- [ ] Teste de ponta a ponta com dois clientes (`infrastructure/http/`): `OWNER` do A, com o `:clientId` do B ou o `userId`/`auditId` de um usuário do B, recebe 404 idêntico ao de inexistente, nada do B é lido nem alterado, e o `ClientId` repassado aos services é o do token.
+
+**CLI e config**
+- [ ] Teste: `pnpm auth:cli create-user --role ADMIN|VIEWER` funciona (contra `soprei_test`); config sem variável nova; migration só aditiva (enum e `audit_events`).
+
+**Geral**
+- [ ] `typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e 24 (o teste de concorrência com sondagem/prazo, sem sleep fixo); suítes novas repetidas várias vezes; revisão do `reviewer`; documentação atualizada (`AGENTS.md`, `docs/context.md`, `docs/handoff.md`).
 
 ## Casos de borda e erros
 
-- Papel desconhecido em token antigo: tratado como sem permissões (403), nunca como erro 500.
-- Último `OWNER` do cliente não pode ser removido nem rebaixado.
+- **Token emitido antes desta spec** (papel `OWNER`/`AGENT`): continua válido; o mapa os cobre.
+- **Papel desconhecido no token:** 401 como hoje (não 403/500; o esboço previa 403, mas o token com papel fora da lista não é um token nosso).
+- **Usuário do alvo some ou é de outro cliente:** 404 uniforme.
+- **Dois pedidos simultâneos que se contradizem** (promover e desativar o mesmo usuário): serializados pelo mesmo bloqueio de cliente; o resultado final respeita a regra do último `OWNER`.
+- **Cliente suspenso:** a 007 já o trata no login/refresh; `/admin` de `User` de cliente suspenso segue como hoje (access token vale até expirar, limitação da 007 inalterada).
+- **Redis fora:** como na 007, 503 fail-closed em `authenticate`; nas rotas de gestão que mudam sessões, ver "Efeito imediato".
+- **Banco fora:** `DatabaseError` 500 do handler central; nada é emitido nem revogado.
 
 ## Isolamento entre clientes
 
-Papéis valem **dentro** do cliente. Não existe papel que atravesse clientes nesta spec.
+O `ClientId` vem **só** do token (`userAuth(request).clientId`); o `:clientId` do caminho é conferido e descartado (007). `User` e `AuditEvent` são models de tenant (repositório com `ClientId` primeiro, `tenant-scope`, lint). FKs compostas `(actorUserId, clientId)` e `(targetUserId, clientId)` impedem trilha cruzada no banco. O `FOR UPDATE` da regra do último `OWNER` é SQL controlado, filtrando por `clientId`, dentro de `infrastructure/database/`. Chaves do Redis seguem `<prefixo><ClientId>:...` (revogação por `revokeAllSessions(clientId, userId)`; o contador de troca de senha usa HMAC, exceção declarada como a do login). Provas: critérios de isolamento acima.
 
 ## Fora de escopo
 
-- Papel de super-admin da plataforma (cross-tenant): exige decisão e spec própria, por ser o ponto de maior risco de vazamento.
-- Permissões por objeto individual (ABAC) e papéis customizáveis por cliente.
+- **Papel de super-admin da plataforma lendo dados de cliente:** continua vetado (decisão 5 da 007); `PlatformAdmin` só alcança `/admin/clients`.
+- **Permissões customizáveis por cliente, papéis em tabela, ABAC/permissão por objeto:** só se o produto pedir (decisão 1).
+- **Convite por e-mail, recuperação de senha por e-mail, verificação de e-mail, alterar o próprio e-mail, "obrigar troca de senha no primeiro login", SSO/OAuth, 2FA/MFA:** spec de contas.
+- **Remoção física de usuário (LGPD):** a spec de retenção; aqui só se desativa.
+- **Edição de persona e `whatsappPhoneNumberId` pelo próprio cliente, onboarding:** spec B.
+- **Tempo real (SSE/Socket.IO):** spec 009 (ela herdará `requirePermission` e as salas por `ClientId`).
+- **Expurgo/retenção da auditoria, exportação, auditoria de leitura, auditoria dos comandos do CLI.**
+- **Pendências da 007 que a 008 NÃO resolve:** teto da fila do hasher scrypt e limpeza de sessões expiradas em `usess` (ver decisão 8); bloqueio por conta que permite negar acesso a um e-mail conhecido e o 503 depois de rotação confirmada seguem como limitações aceitas, **não tocadas**. A 008 só **usa** `revokeAllSessions` (que lê o `usess`, então a limpeza segue relevante, mas sem mudança de comportamento) e reutiliza o contador de falhas só para o novo `POST /auth/password`.
+- **Suspender cliente gravando `nbf` em massa:** continua pendência da 007.
+
+## Decisões para o dono
+
+1. **Modelo de permissões.** (a) **Quatro papéis (`OWNER`, `ADMIN`, `AGENT`, `VIEWER`) com mapa fixo papel -> permissão em código, hook por permissão, sem `requireRoles` [recomendado]:** o mais simples que atende, versionado e testado por snapshot, mudar o mapa vale na hora sem reemitir tokens. (b) Tabelas `Role`/`Permission` por cliente: flexível, mas é spec própria (migração, cache, UI) sem demanda. (c) Manter só `OWNER`/`AGENT`: não atende "somente leitura". Matriz da tabela acima: confirma quem pode o quê (em especial `AGENT` poder usar o simulador e `ADMIN` não tocar em `OWNER`/`ADMIN`)?
+2. **Auditoria.** (a) **Tabela `AuditEvent` imutável por cliente, escrita na mesma transação, com `GET /audit-events` [recomendado]:** sem texto livre nem e-mail, só ids e enum; a retenção entra na política de LGPD. (b) Só log Pino (como no esboço): barato, mas some com a rotação de log e não é consultável pelo cliente. (c) Adiar a auditoria: a gestão de usuários sairia sem trilha; não recomendo, é o motivo de mexer em papéis.
+3. **Efeito imediato.** (a) **Revogar as sessões do alvo (`nbf` + `rsid`) a cada mudança de papel, desativação e redefinição de senha [recomendado]:** reaproveita `revokeAllSessions`, sem consulta ao banco por requisição; custo: quem muda de papel precisa logar de novo. (b) Checar papel e estado no banco a cada requisição: efeito imediato sem relogar, mas um acesso ao banco por requisição e mais superfície. (c) Aceitar a janela de 15 min (papel antigo valendo até o token expirar): simples, mas um `ADMIN` rebaixado ou um usuário desativado continuaria agindo; não recomendo.
+4. **Troca da própria senha revoga todas as sessões, inclusive a atual (204, refaz login) [recomendado]** (sem método novo no `SessionStore`). Alternativa: manter a sessão atual e derrubar só as outras, com método novo na porta e emissão de tokens novos na resposta.
+5. **Senha inicial de usuário criado pela API.** (a) **Quem cria define a senha e combina fora da API [recomendado]:** sem e-mail de convite hoje; a pessoa a troca por `POST /auth/password`. Risco: quem cria conhece a senha inicial até a troca (aceito). (b) Esperar uma spec de convite/e-mail antes de ter criação por API: o cliente não administraria a equipe até lá.
+6. **Última pessoa `OWNER`.** (a) **Impossível rebaixar ou desativar o último `OWNER` ativo, serializado por bloqueio do cliente no banco [recomendado].** (b) Só checar sem bloqueio: duas operações simultâneas furam a regra. Resgate se o cliente ficar sem `OWNER` mesmo assim: `pnpm auth:cli` (dono da máquina).
+7. **`ADMIN` e a hierarquia.** (a) **`ADMIN` gerencia só `AGENT`/`VIEWER`; só `OWNER` cria/promove/rebaixa `OWNER` e `ADMIN` [recomendado].** (b) `ADMIN` igual a `OWNER` salvo o último `OWNER`: mais simples, mas um `ADMIN` comprometido assumiria o cliente.
+8. **Hasher.** Criar usuário, redefinir e trocar senha acrescentam chamadas autenticadas ao `scrypt` (hoje só login e CLI). O perfil `admin` (600 por minuto) deixa passar muita coisa para uma fila de hashes sem teto (pendência da 007). (a) **Incluir nesta spec só o teto da fila do hasher [recomendado se o dono quiser fechar a pendência agora; é pequeno e fica num commit próprio].** (b) Deixar para spec própria e aceitar o risco com usuários autenticados e rate limit por IP. Qual?
+9. **`POST /auth/password` no perfil `login` (fail-closed, 10 por 15 min por IP) [recomendado]** e `POST /users` e redefinição no `admin`. Alternativa: perfil novo.
+10. **Um PR [recomendado]**, commits: domínio (papéis, permissões, hierarquia) -> migration e repositórios -> `requirePermission` e reclassificação das rotas atuais -> `UserAdminService` e rotas de usuários -> troca da própria senha -> auditoria -> CLI e documentação. Alternativa: dois PRs (008a permissões e reclassificação; 008b usuários, senha e auditoria).
 
 ## Decisões e dependências novas
 
-- Sem dependências novas.
-- **Pergunta:** quais papéis e permissões iniciais o produto realmente precisa? A lista acima é uma proposta.
+- Sem dependência nova nem variável de ambiente.
+- **Camadas (o ESLint impõe):** `domain/` ganha `permissions.ts`, `AuditEvent`, `AuditRepository` e `UserAdminUnitOfWork` (porta em `application/ports/`); `application/users/` (`UserAdminService`); `infrastructure/database/repositories/` (`audit.repository.ts`, unit of work com o bloqueio do cliente); `presentation/admin/` (`users.controller.ts`, `audit.controller.ts`), `presentation/auth/` (`POST /auth/password`) e `presentation/common/auth.hooks.ts` (`requirePermission`). Pastas novas só `application/users/`. Sem barrel novo, sem alias.
+- **Erros:** `LAST_OWNER` como `ConflictError` com `code` próprio; nenhum `throw new Error` genérico.
+- **Documentação a atualizar na implementação:** `AGENTS.md` (seção "Autenticação": papéis, matriz, `requirePermission`, rotas de usuários, auditoria, `authz_denials_total`, `POST /auth/password`; "Acesso a dados": `AuditEvent` e o bloqueio do cliente), `docs/context.md` (roadmap), `docs/handoff.md`.
+- **Fontes:** sem API externa. OWASP Authorization Cheat Sheet e NIST SP 800-63B (para a política de senha, já usada na 007), a serem reconferidas pelo implementer.
+- Por ser autorização e isolamento, **passa pelo agente `reviewer` antes do merge.** Pontos a olhar: ordem 401/403/404 do hook, hierarquia no service (não só no hook), auto-alteração, regra do último `OWNER` sob concorrência, revogação de sessões após cada mudança (e a falha de Redis depois do commit), FKs compostas da auditoria, privacidade de log e métrica, inventário de rotas.
+- **Validação em níveis** (experimento do handoff): typecheck e teste do arquivo a cada passo, lint e suíte da área antes de cada commit, bateria completa e repetições só no final; registrar quantas falhas só apareceram na validação final.
