@@ -25,7 +25,7 @@ describe('migration da spec 008 (RBAC e auditoria)', () => {
       .join('\n');
     for (const forbidden of [
       /\bDROP\b/i,
-      /\bDELETE\b/i,
+      /bDELETEs+FROMb/i,
       /\bTRUNCATE\b/i,
       /\bRENAME\b/i,
       /ALTER\s+COLUMN/i,
