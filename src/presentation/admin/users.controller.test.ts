@@ -125,6 +125,11 @@ describe('rotas de usuários (/admin/clients/:clientId/users), spec 008', () => 
           call('PATCH', `${base(env.clientA)}/${target.userId}`, who, { role: 'AGENT' }),
       },
       {
+        label: 'GET /audit-events',
+        allowed: ['OWNER', 'ADMIN'],
+        run: (_target, who) => call('GET', `/admin/clients/${env.clientA.id}/audit-events`, who),
+      },
+      {
         label: 'POST /users/:id/password',
         allowed: ['OWNER', 'ADMIN'],
         run: (target, who) =>
@@ -824,6 +829,107 @@ describe('rotas de usuários (/admin/clients/:clientId/users), spec 008', () => 
       assert.equal(env.auth.audit.events.length, 0);
       // O OWNER de B segue com acesso ao que é dele.
       assert.equal((await call('GET', base(env.clientB), ownerB)).statusCode, 200);
+    });
+  });
+
+  describe('GET /audit-events', () => {
+    const auditUrl = (client: Client): string => `/admin/clients/${client.id}/audit-events`;
+    interface AuditBody {
+      items: {
+        id: string;
+        action: string;
+        actorUserId: string;
+        targetUserId: string;
+        fromRole: UserRole | null;
+        toRole: UserRole | null;
+        createdAt: string;
+      }[];
+      nextCursor: string | null;
+    }
+
+    it('só os eventos do cliente do token, mais recentes primeiro, só ids e enum (sem e-mail)', async () => {
+      const ownerA = await login(env.clientA, 'OWNER');
+      const ownerB = await login(env.clientB, 'OWNER');
+      const agent = await login(env.clientA, 'AGENT');
+      const agentB = await login(env.clientB, 'AGENT');
+      await call('PATCH', `${base(env.clientA)}/${agent.userId}`, ownerA, { role: 'VIEWER' });
+      await call('PATCH', `${base(env.clientA)}/${agent.userId}`, ownerA, { status: 'DISABLED' });
+      await call('PATCH', `${base(env.clientB)}/${agentB.userId}`, ownerB, { role: 'ADMIN' });
+      const response = await call('GET', auditUrl(env.clientA), ownerA);
+      assert.equal(response.statusCode, 200);
+      const body = response.json<AuditBody>();
+      assert.deepEqual(
+        body.items.map((item) => item.action),
+        ['USER_DISABLED', 'USER_ROLE_CHANGED'],
+      );
+      assert.deepEqual(Object.keys(body.items[0] ?? {}).sort(), [
+        'action',
+        'actorUserId',
+        'createdAt',
+        'fromRole',
+        'id',
+        'targetUserId',
+        'toRole',
+      ]);
+      assert.ok(body.items.every((item) => item.targetUserId === agent.userId));
+      assert.ok(!response.body.includes(ownerA.email) && !response.body.includes(agent.email));
+      // O cliente B enxerga só o dele.
+      const bodyB = (await call('GET', auditUrl(env.clientB), ownerB)).json<AuditBody>();
+      assert.deepEqual(
+        bodyB.items.map((item) => item.targetUserId),
+        [agentB.userId],
+      );
+    });
+
+    it('pagina por cursor sem repetir nem perder evento', async () => {
+      const owner = await login(env.clientA, 'OWNER');
+      const agent = await login(env.clientA, 'AGENT');
+      for (const role of ['VIEWER', 'ADMIN', 'VIEWER', 'ADMIN', 'AGENT'] as const) {
+        await call('PATCH', `${base(env.clientA)}/${agent.userId}`, owner, { role });
+        // O refresh do alvo fica inválido, mas o ator (OWNER) segue autenticado.
+      }
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const response = await call(
+          'GET',
+          `${auditUrl(env.clientA)}?limit=2${cursor === undefined ? '' : `&cursor=${cursor}`}`,
+          owner,
+        );
+        const page = response.json<AuditBody>();
+        seen.push(...page.items.map((item) => item.id));
+        cursor = page.nextCursor ?? undefined;
+        pages += 1;
+      } while (cursor !== undefined);
+      assert.equal(pages, 3);
+      assert.equal(new Set(seen).size, 5);
+      assert.deepEqual(seen, env.auth.audit.events.map((event) => event.id).reverse());
+    });
+
+    it('sem token 401; PlatformAdmin 403; :clientId alheio 404 igual ao inexistente', async () => {
+      const ownerA = await login(env.clientA, 'OWNER');
+      const platform = await env.auth.platformToken();
+      assert.equal((await call('GET', auditUrl(env.clientA))).statusCode, 401);
+      assert.equal((await call('GET', auditUrl(env.clientA), platform)).statusCode, 403);
+      const strip = (body: string): string => body.replace(/"requestId":"[^"]*"/, '');
+      const alien = await call('GET', auditUrl(env.clientB), ownerA);
+      const ghost = await call('GET', `/admin/clients/${randomUUID()}/audit-events`, ownerA);
+      assert.equal(alien.statusCode, 404);
+      assert.equal(strip(alien.body), strip(ghost.body));
+    });
+
+    it('a trilha é só leitura pela API: não há rota de escrita nem de remoção', async () => {
+      const owner = await login(env.clientA, 'OWNER');
+      for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'] as const) {
+        const response = await env.app.inject({
+          method,
+          url: auditUrl(env.clientA),
+          headers: bearer(owner.accessToken),
+          payload: {},
+        });
+        assert.equal(response.statusCode, 404, method);
+      }
     });
   });
 });

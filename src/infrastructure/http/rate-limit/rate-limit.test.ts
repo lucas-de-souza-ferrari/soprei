@@ -169,6 +169,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/metrics',
       '/admin/clients',
       '/admin/clients/:clientId/users',
+      '/admin/clients/:clientId/audit-events',
       '/admin/clients/:clientId/users/:userId',
       '/admin/clients/:clientId/users/:userId/password',
       '/auth/login',

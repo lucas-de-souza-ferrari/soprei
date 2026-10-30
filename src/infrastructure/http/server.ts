@@ -6,6 +6,7 @@ import type { ClientService } from '../../application/clients/client.service.js'
 import type { UserAdminService } from '../../application/users/user-admin.service.js';
 import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
+import { adminAuditController } from '../../presentation/admin/audit.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
 import { adminUsersController } from '../../presentation/admin/users.controller.js';
 import {
@@ -142,6 +143,12 @@ export function buildServer({
     });
     if (userAdmin !== undefined) {
       void app.register(adminUsersController, {
+        prefix: '/admin/clients',
+        auth,
+        metrics,
+        users: userAdmin,
+      });
+      void app.register(adminAuditController, {
         prefix: '/admin/clients',
         auth,
         metrics,

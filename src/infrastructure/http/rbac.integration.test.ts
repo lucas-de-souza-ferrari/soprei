@@ -271,6 +271,81 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
     });
   });
 
+  it('GET /audit-events: cada cliente lê só a própria trilha (Postgres real), com cursor, e o VIEWER recebe 403', async () => {
+    await withHarness({}, async (h) => {
+      const a = await tenants.createClient('rbac-aud-a');
+      const b = await tenants.createClient('rbac-aud-b');
+      const ownerA = await enroll(h, a, 'OWNER');
+      const ownerB = await enroll(h, b, 'OWNER');
+      const viewer = await enroll(h, a, 'VIEWER');
+      const agentA = await enroll(h, a, 'AGENT');
+      const agentB = await enroll(h, b, 'AGENT');
+      for (const role of ['VIEWER', 'ADMIN', 'AGENT'] as const) {
+        const done = await as(h, ownerA, 'PATCH', `/admin/clients/${a.id}/users/${agentA.id}`, {
+          role,
+        });
+        assert.equal(done.statusCode, 200);
+        await sleep(3);
+      }
+      assert.equal(
+        (
+          await as(h, ownerB, 'PATCH', `/admin/clients/${b.id}/users/${agentB.id}`, {
+            role: 'ADMIN',
+          })
+        ).statusCode,
+        200,
+      );
+      interface Page {
+        items: {
+          id: string;
+          action: string;
+          actorUserId: string;
+          targetUserId: string;
+          toRole: string | null;
+        }[];
+        nextCursor: string | null;
+      }
+      const seen: Page['items'] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const response = await as(
+          h,
+          ownerA,
+          'GET',
+          `/admin/clients/${a.id}/audit-events?limit=2${cursor === undefined ? '' : `&cursor=${cursor}`}`,
+        );
+        assert.equal(response.statusCode, 200);
+        const page = response.json<Page>();
+        seen.push(...page.items);
+        cursor = page.nextCursor ?? undefined;
+        pages += 1;
+      } while (cursor !== undefined);
+      assert.equal(pages, 2);
+      assert.deepEqual(
+        seen.map((event) => event.toRole),
+        ['AGENT', 'ADMIN', 'VIEWER'],
+        'mais recentes primeiro',
+      );
+      assert.ok(
+        seen.every((event) => event.actorUserId === ownerA.id && event.targetUserId === agentA.id),
+      );
+      const fromB = (
+        await as(h, ownerB, 'GET', `/admin/clients/${b.id}/audit-events`)
+      ).json<Page>();
+      assert.equal(fromB.items.length, 1);
+      assert.ok(!seen.some((event) => fromB.items.some((other) => other.id === event.id)));
+      assert.equal(
+        (await as(h, viewer, 'GET', `/admin/clients/${a.id}/audit-events`)).statusCode,
+        403,
+      );
+      assert.equal(
+        (await as(h, ownerA, 'GET', `/admin/clients/${b.id}/audit-events`)).statusCode,
+        404,
+      );
+    });
+  });
+
   it('mudar papel, desativar e redefinir senha derrubam o access token ainda válido e o refresh (Redis real); o login traz o papel novo', async () => {
     await withHarness({}, async (h) => {
       const client = await tenants.createClient('rbac-sess');
