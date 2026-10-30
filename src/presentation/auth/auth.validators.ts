@@ -3,6 +3,7 @@ import {
   clientSlugSchema,
   emailSchema,
   loginPasswordSchema,
+  newPasswordSchema,
 } from '../../application/auth/credentials.js';
 
 /**
@@ -19,3 +20,11 @@ export const platformLoginBodySchema = z
 
 /** O refresh é opaco (`<escopo>.<sessionId>.<segredo>`); o serviço confere o formato. */
 export const refreshBodySchema = z.object({ refreshToken: z.string().min(1).max(512) }).strict();
+
+/**
+ * `POST /auth/password` (spec 008): a atual vale como no login (sem mínimo, só o teto); a nova
+ * segue a política de criação (12 a 128). Nenhum dos dois valores é ecoado.
+ */
+export const changePasswordBodySchema = z
+  .object({ currentPassword: loginPasswordSchema, newPassword: newPasswordSchema })
+  .strict();

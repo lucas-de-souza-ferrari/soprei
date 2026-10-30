@@ -24,8 +24,6 @@ export interface AdminRoutesParams {
   readonly clients: ClientService;
   /** Sem isto as rotas de mensagens e conversas (spec 010) não são registradas. */
   readonly attendance?: AttendanceService;
-  /** Gestão de usuários do cliente e auditoria (spec 008). Sem isto essas rotas não são registradas. */
-  readonly users?: UserAdminService;
 }
 
 /** Canal WhatsApp (spec 011): sem isto as rotas `/webhooks/whatsapp` NÃO existem (404). */
@@ -45,6 +43,12 @@ export interface BuildServerParams {
    * Obrigatória quando `admin` é passado (rota protegida sem autenticação nunca sobe).
    */
   readonly auth?: AuthService;
+  /**
+   * Gestão de usuários do cliente, auditoria e troca da própria senha (spec 008): registra
+   * `POST /auth/password` e, com `admin`, as rotas `/admin/clients/:clientId/users` e
+   * `.../audit-events`. Exige `auth`. Sem isto essas rotas não existem.
+   */
+  readonly userAdmin?: UserAdminService;
   /** Sem isto as rotas /admin não são registradas (ex.: testes que não precisam delas). */
   readonly admin?: AdminRoutesParams;
   /** Canal WhatsApp (spec 011). Opt-in: sem isto (`WHATSAPP_ENABLED=false`) as rotas não existem. */
@@ -78,6 +82,7 @@ export function buildServer({
   logger,
   readiness,
   auth,
+  userAdmin,
   admin,
   whatsapp,
   metrics,
@@ -117,7 +122,12 @@ export function buildServer({
     void app.register(metricsController, { token: metricsToken, source: metrics });
   }
   if (auth !== undefined) {
-    void app.register(authController, { prefix: '/auth', auth, metrics });
+    void app.register(authController, {
+      prefix: '/auth',
+      auth,
+      metrics,
+      ...(userAdmin === undefined ? {} : { userAdmin }),
+    });
   }
   if (admin !== undefined) {
     // Rota /admin sem verificação de token nunca sobe: falha o boot, não vira rota aberta.
@@ -130,12 +140,12 @@ export function buildServer({
       metrics,
       clients: admin.clients,
     });
-    if (admin.users !== undefined) {
+    if (userAdmin !== undefined) {
       void app.register(adminUsersController, {
         prefix: '/admin/clients',
         auth,
         metrics,
-        users: admin.users,
+        users: userAdmin,
       });
     }
     if (admin.attendance !== undefined) {

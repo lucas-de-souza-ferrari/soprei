@@ -122,9 +122,9 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         intake: { accept: () => Promise.resolve({ enqueued: 0, discarded: 0, failed: 0 }) },
       },
       auth: testAuth.service,
+      userAdmin: testAuth.userAdmin,
       admin: {
         clients: new ClientService(clients),
-        users: testAuth.userAdmin,
         attendance: new AttendanceService({
           clients,
           conversations: store.conversations,
@@ -177,6 +177,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/auth/logout',
       '/auth/logout-all',
       '/auth/me',
+      '/auth/password',
       '/webhooks/whatsapp',
     ]) {
       assert.ok(
@@ -226,6 +227,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           '/auth/logout': 'refresh',
           '/auth/logout-all': 'admin',
           '/auth/me': 'admin',
+          '/auth/password': 'login',
         };
         assert.equal(route.config.rateLimitProfile, expected[route.url], `${label} perfil`);
       } else {

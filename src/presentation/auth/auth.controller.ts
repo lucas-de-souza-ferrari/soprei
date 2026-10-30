@@ -11,13 +11,21 @@ import {
   ServiceUnavailableError,
   UnauthorizedError,
 } from '../../shared/errors/index.js';
-import { authenticateHook, requestAuth } from '../common/auth.hooks.js';
+import type { UserAdminService } from '../../application/users/user-admin.service.js';
+import { authenticateHook, requestAuth, requireUser, userAuth } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
-import { loginBodySchema, platformLoginBodySchema, refreshBodySchema } from './auth.validators.js';
+import {
+  changePasswordBodySchema,
+  loginBodySchema,
+  platformLoginBodySchema,
+  refreshBodySchema,
+} from './auth.validators.js';
 
 export interface AuthControllerOptions {
   readonly auth: AuthService;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection'> | undefined;
+  /** Troca da própria senha (spec 008). Sem isto `POST /auth/password` não existe. */
+  readonly userAdmin?: Pick<UserAdminService, 'changeOwnPassword'>;
 }
 
 const INVALID_CREDENTIALS = 'Credenciais inválidas';
@@ -65,7 +73,7 @@ function refreshError(failure: RefreshFailure): Error {
  */
 export const authController: FastifyPluginCallback<AuthControllerOptions> = (
   app,
-  { auth, metrics },
+  { auth, metrics, userAdmin },
   done,
 ) => {
   const authenticate = authenticateHook({ auth, metrics });
@@ -110,6 +118,21 @@ export const authController: FastifyPluginCallback<AuthControllerOptions> = (
       return reply.status(204).send();
     },
   );
+
+  if (userAdmin !== undefined) {
+    // Perfil `login` (fail-closed: sem o Redis do limiter, 503 sem verificar a senha). Qualquer
+    // `User` autenticado troca a própria senha; `PlatformAdmin` recebe 403. Responde 204 e derruba
+    // todas as sessões da pessoa, inclusive a atual: ela faz login de novo.
+    app.post(
+      '/password',
+      { config: loginConfig, onRequest: [authenticate, requireUser()] },
+      async (request, reply) => {
+        const body = changePasswordBodySchema.parse(request.body);
+        await userAdmin.changeOwnPassword(userAuth(request), body);
+        return reply.status(204).send();
+      },
+    );
+  }
 
   app.get('/me', { config: adminConfig, onRequest: authenticate }, async (request) =>
     auth.me(requestAuth(request)),

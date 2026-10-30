@@ -13,7 +13,10 @@ const ALL_UP: ReadinessChecks = {
 export function buildTestServer(
   readiness: ReadinessChecks = ALL_UP,
   admin?: AdminRoutesParams,
-  extra: Pick<BuildServerParams, 'metrics' | 'metricsToken' | 'whatsapp' | 'auth'> = {},
+  extra: Pick<
+    BuildServerParams,
+    'metrics' | 'metricsToken' | 'whatsapp' | 'auth' | 'userAdmin'
+  > = {},
 ): FastifyInstance {
   return buildServer({
     logger: createLogger({ NODE_ENV: 'test', LOG_LEVEL: 'silent' }),

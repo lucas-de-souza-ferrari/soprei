@@ -60,7 +60,8 @@ async function setup(): Promise<Env> {
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
     auth: auth.service,
-    admin: { clients: new ClientService(auth.clients), users: auth.userAdmin },
+    userAdmin: auth.userAdmin,
+    admin: { clients: new ClientService(auth.clients) },
   });
   await app.ready();
   const clientA = await auth.clients.create({ name: 'Cliente A', slug: 'cliente-a' });

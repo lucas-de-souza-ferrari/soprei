@@ -175,6 +175,7 @@ async function main(): Promise<void> {
     metrics,
     metricsToken: config.METRICS_TOKEN,
     auth: auth.service,
+    userAdmin: auth.userAdmin,
     trustProxy: config.TRUST_PROXY,
     ...(rateLimitRedis === undefined
       ? {}
@@ -192,7 +193,6 @@ async function main(): Promise<void> {
     admin: {
       clients: new ClientService(clientRepository),
       attendance,
-      users: auth.userAdmin,
     },
   });
 
