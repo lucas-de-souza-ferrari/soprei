@@ -634,3 +634,33 @@ describe('AuthService: chave do contador de falhas de login', () => {
     assert.notEqual(deriveLoginLockSecret('a'.repeat(32)).toString('hex'), 'a'.repeat(32));
   });
 });
+
+describe('AuthService.login com a fila do hasher cheia (spec 008)', () => {
+  it('ServiceUnavailableError do hasher vira "unavailable" (503) e não conta como falha de senha', async () => {
+    const env = await setup(2);
+    const { auth, clientA } = env;
+    await auth.users.create(clientA.id, {
+      email: SECRET_EMAIL,
+      passwordHash: await auth.hasher.hash(TEST_PASSWORD),
+    });
+    const verify = auth.hasher.verify.bind(auth.hasher);
+    auth.hasher.verify = () => Promise.reject(new ServiceUnavailableError());
+    for (let i = 0; i < 5; i += 1) {
+      const result = await auth.service.login({
+        clientSlug: 'cliente-a',
+        email: SECRET_EMAIL,
+        password: TEST_PASSWORD,
+      });
+      assert.ok(!result.ok);
+      assert.equal(result.error.reason, 'unavailable');
+    }
+    auth.hasher.verify = verify;
+    // Nada foi contado como falha: o login certo ainda passa (o limite de 2 não foi atingido).
+    const ok = await auth.service.login({
+      clientSlug: 'cliente-a',
+      email: SECRET_EMAIL,
+      password: TEST_PASSWORD,
+    });
+    assert.ok(ok.ok);
+  });
+});

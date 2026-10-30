@@ -1,5 +1,6 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { PasswordHasher } from '../../application/ports/password-hasher.js';
+import { ServiceUnavailableError } from '../../shared/errors/index.js';
 
 /** Parâmetros do scrypt (OWASP Password Storage Cheat Sheet: N = 2^17, r = 8, p = 1). */
 export interface ScryptCost {
@@ -20,6 +21,13 @@ const SCRYPT_MAXMEM = 256 * 1024 * 1024;
  * espera na fila (o rate limit por IP e o bloqueio por conta limitam o tamanho dela).
  */
 export const MAX_CONCURRENT_HASHES = 2;
+/**
+ * Teto da fila de espera (spec 008): a fila cresce com os pedidos autenticados que pagam um hash
+ * (login, criação de usuário, troca e redefinição de senha), e cada espera é uma requisição
+ * pendurada. Passou do teto, o pedido falha na hora com `ServiceUnavailableError` (503), sem gastar
+ * hash nem memória, em vez de enfileirar sem limite.
+ */
+export const MAX_QUEUED_HASHES = 32;
 
 /** Faixa de parâmetros aceita ao **verificar** (um hash adulterado não pode pedir gigabytes). */
 const MIN_N = 2 ** 10;
@@ -53,6 +61,8 @@ export interface ScryptPasswordHasherOptions {
   /** Custo dos hashes novos. Os testes passam um custo baixo para não pagar 128 MiB por teste. */
   readonly cost?: ScryptCost;
   readonly maxConcurrent?: number;
+  /** Pedidos esperando uma vaga além dos em execução; passou disso, 503. Padrão `MAX_QUEUED_HASHES`. */
+  readonly maxQueued?: number;
   /** Só para os testes (contar a concorrência). */
   readonly derive?: ScryptDerive;
 }
@@ -113,6 +123,7 @@ function parseStoredHash(stored: string): ParsedHash | undefined {
 export class ScryptPasswordHasher implements PasswordHasher {
   private readonly cost: ScryptCost;
   private readonly maxConcurrent: number;
+  private readonly maxQueued: number;
   private readonly derive: ScryptDerive;
   private active = 0;
   private readonly waiting: (() => void)[] = [];
@@ -121,8 +132,12 @@ export class ScryptPasswordHasher implements PasswordHasher {
   constructor(options: ScryptPasswordHasherOptions = {}) {
     this.cost = options.cost ?? DEFAULT_SCRYPT_COST;
     this.maxConcurrent = options.maxConcurrent ?? MAX_CONCURRENT_HASHES;
+    this.maxQueued = options.maxQueued ?? MAX_QUEUED_HASHES;
     this.derive = options.derive ?? nodeScrypt;
     if (this.maxConcurrent < 1) throw new RangeError('maxConcurrent precisa ser >= 1');
+    if (!Number.isInteger(this.maxQueued) || this.maxQueued < 0) {
+      throw new RangeError('maxQueued precisa ser um inteiro >= 0');
+    }
     if (!isAcceptedCost(this.cost)) throw new RangeError('custo do scrypt fora da faixa aceita');
   }
 
@@ -152,6 +167,11 @@ export class ScryptPasswordHasher implements PasswordHasher {
 
   private async limited<T>(task: () => Promise<T>): Promise<T> {
     if (this.active >= this.maxConcurrent) {
+      if (this.waiting.length >= this.maxQueued) {
+        throw new ServiceUnavailableError('Serviço temporariamente indisponível', {
+          context: { reason: 'hash_queue_full' },
+        });
+      }
       // A vaga é passada direto por quem termina (o contador não muda).
       await new Promise<void>((resolve) => {
         this.waiting.push(resolve);

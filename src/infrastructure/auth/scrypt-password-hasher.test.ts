@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { newPasswordSchema } from '../../application/auth/credentials.js';
+import { ServiceUnavailableError } from '../../shared/errors/index.js';
 import {
   DEFAULT_SCRYPT_COST,
   MAX_CONCURRENT_HASHES,
+  MAX_QUEUED_HASHES,
   type ScryptDerive,
   ScryptPasswordHasher,
 } from './scrypt-password-hasher.js';
@@ -141,6 +143,59 @@ describe('ScryptPasswordHasher', () => {
     const hasher = new ScryptPasswordHasher({ cost: LOW, derive, maxConcurrent: 1 });
     await assert.rejects(hasher.hash('a'), /falha de teste/);
     assert.match(await hasher.hash('b'), /^scrypt\$/);
+  });
+});
+
+describe('teto da fila de espera do hasher (spec 008)', () => {
+  it('passou do teto, o pedido falha na hora com ServiceUnavailableError e a fila anda depois', async () => {
+    assert.equal(MAX_QUEUED_HASHES, 32);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const derive: ScryptDerive = async (_password, _salt, keyLength) => {
+      calls += 1;
+      await gate;
+      return Buffer.alloc(keyLength, 3);
+    };
+    const hasher = new ScryptPasswordHasher({ cost: LOW, derive, maxConcurrent: 1, maxQueued: 2 });
+    // 1 em execução, 2 esperando: cabem.
+    const accepted = [hasher.hash('a'), hasher.hash('b'), hasher.hash('c')];
+    // O 4º passa do teto: recusado sem gastar derivação.
+    await assert.rejects(hasher.hash('d'), ServiceUnavailableError);
+    await assert.rejects(
+      hasher.verify(
+        'x',
+        'scrypt$1024$8$1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaA==',
+      ),
+      ServiceUnavailableError,
+    );
+    assert.equal(calls, 1, 'só o primeiro começou; o recusado não gastou hash');
+    release?.();
+    const results = await Promise.all(accepted);
+    assert.equal(results.length, 3);
+    assert.equal(calls, 3);
+    // Esvaziada a fila, volta a aceitar.
+    assert.match(await hasher.hash('e'), /^scrypt\$/);
+  });
+
+  it('maxQueued inválido é recusado; zero significa "sem fila"', async () => {
+    assert.throws(() => new ScryptPasswordHasher({ cost: LOW, maxQueued: -1 }), RangeError);
+    assert.throws(() => new ScryptPasswordHasher({ cost: LOW, maxQueued: 1.5 }), RangeError);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const derive: ScryptDerive = async (_p, _s, keyLength) => {
+      await gate;
+      return Buffer.alloc(keyLength, 1);
+    };
+    const hasher = new ScryptPasswordHasher({ cost: LOW, derive, maxConcurrent: 1, maxQueued: 0 });
+    const first = hasher.hash('a');
+    await assert.rejects(hasher.hash('b'), ServiceUnavailableError);
+    release?.();
+    await first;
   });
 });
 
