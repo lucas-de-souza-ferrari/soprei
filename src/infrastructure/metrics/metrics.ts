@@ -80,6 +80,7 @@ export type ChannelConnectionResult =
   | 'missing_scope'
   | 'number_not_in_waba'
   | 'number_in_use'
+  | 'registration_failed'
   | 'graph_error'
   | 'unsubscribe_failed';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';

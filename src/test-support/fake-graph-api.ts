@@ -16,7 +16,13 @@ export interface GraphRequest {
 }
 
 export type GraphOperation =
-  'messages' | 'debug_token' | 'phone_numbers' | 'subscribe' | 'unsubscribe';
+  | 'messages'
+  | 'debug_token'
+  | 'phone_numbers'
+  | 'subscribe'
+  | 'unsubscribe'
+  | 'oauth_token'
+  | 'register';
 
 /** Um token que o servidor falso conhece (spec 015). */
 export interface FakeToken {
@@ -77,6 +83,12 @@ export class FakeGraphApi {
   private readonly operationScripts = new Map<GraphOperation, GraphBehavior[]>();
   /** Token de app esperado no `debug_token` (`app_id|app_secret`); se definido, outro valor é recusado. */
   expectedAppToken: string | undefined;
+  /** `code` do Embedded Signup (spec 015b): uso único, expirável. */
+  private readonly codes = new Map<string, { token: string; used: boolean; expired: boolean }>();
+  /** `client_id` e `client_secret` esperados na troca do `code`; se definido, outro valor é recusado. */
+  expectedApp: { readonly id: string; readonly secret: string } | undefined;
+  /** PIN com que cada número já está registrado (`null` = não registrado). */
+  readonly registeredPins = new Map<string, string | null>();
   /** WABAs com o app assinado (`subscribed_apps`). */
   readonly subscribed = new Set<string>();
   /** Bytes que o modo `flood` escreveu e se o cliente fechou a conexão antes do fim do teste. */
@@ -124,7 +136,13 @@ export class FakeGraphApi {
           (operation === undefined ? undefined : this.operationScripts.get(operation)?.shift()) ??
           this.scripted.shift() ??
           this.fallback ??
-          this.channelBehavior(operation, url.pathname, request.headers.authorization, query) ??
+          this.channelBehavior(
+            operation,
+            url.pathname,
+            request.headers.authorization,
+            query,
+            body,
+          ) ??
           this.success();
         if (behavior.kind === 'hang') return;
         if (behavior.kind === 'flood') {
@@ -193,6 +211,16 @@ export class FakeGraphApi {
     this.fallback = behavior;
   }
 
+  /** Registra um `code` do Embedded Signup que, trocado, devolve `token` (uso único). */
+  addCode(code: string, token: string, options: { expired?: boolean } = {}): void {
+    this.codes.set(code, { token, used: false, expired: options.expired ?? false });
+  }
+
+  /** Marca o número como já registrado com `pin` (2FA), para provar o erro de PIN diferente. */
+  setRegistered(phoneNumberId: string, pin: string | null): void {
+    this.registeredPins.set(phoneNumberId, pin);
+  }
+
   /** Registra um token que o `debug_token` e as consultas com `Authorization: Bearer <token>` reconhecem. */
   addToken(token: string, info: FakeToken): void {
     this.tokens.set(token, info);
@@ -229,15 +257,44 @@ export class FakeGraphApi {
     pathname: string,
     authorization: string | undefined,
     query: Readonly<Record<string, string>>,
+    body: unknown,
   ): GraphBehavior | undefined {
     const bearer = authorization?.replace(/^Bearer /, '');
     // O corpo de erro ECOA o token de propósito: o cliente nunca pode repassá-lo.
-    const echo = `eco: ${authorization ?? ''} ${query.input_token ?? ''}`;
+    const echo = `eco: ${authorization ?? ''} ${query.input_token ?? ''} ${query.client_secret ?? ''} ${query.code ?? ''} ${JSON.stringify(body ?? '')}`;
     const fail = (status: number, code: number): GraphBehavior => ({
       kind: 'respond',
       status,
       body: { error: { message: echo, type: 'OAuthException', code } },
     });
+    if (operation === 'oauth_token') {
+      if (
+        this.expectedApp !== undefined &&
+        (query.client_id !== this.expectedApp.id || query.client_secret !== this.expectedApp.secret)
+      ) {
+        return fail(400, 101);
+      }
+      const entry = this.codes.get(query.code ?? '');
+      if (entry === undefined || entry.used || entry.expired) return fail(400, 100);
+      entry.used = true;
+      return {
+        kind: 'respond',
+        status: 200,
+        body: { access_token: entry.token, token_type: 'bearer' },
+      };
+    }
+    if (operation === 'register') {
+      const info = this.tokens.get(bearer ?? '');
+      if (info === undefined || info.valid === false) return fail(401, 190);
+      const phone = pathname.split('/')[2] ?? '';
+      const pin = (body as { pin?: unknown } | undefined)?.pin;
+      if (typeof pin !== 'string' || !/^[0-9]{6}$/.test(pin)) return fail(400, 100);
+      const current = this.registeredPins.get(phone) ?? null;
+      // Número com verificação em duas etapas e outro PIN: a Meta recusa (133005).
+      if (current !== null && current !== pin) return fail(400, 133005);
+      this.registeredPins.set(phone, pin);
+      return { kind: 'respond', status: 200, body: { success: true } };
+    }
     if (operation === 'debug_token') {
       if (this.expectedAppToken !== undefined && bearer !== this.expectedAppToken) {
         return fail(400, 190);
@@ -292,6 +349,9 @@ export class FakeGraphApi {
     this.wabas.clear();
     this.operationScripts.clear();
     this.subscribed.clear();
+    this.codes.clear();
+    this.registeredPins.clear();
+    this.expectedApp = undefined;
     this.expectedAppToken = undefined;
     this.scripted = [];
     this.fallback = undefined;
@@ -317,6 +377,8 @@ export class FakeGraphApi {
 }
 
 function operationOf(method: string, pathname: string): GraphOperation | undefined {
+  if (method === 'GET' && /^\/[^/]+\/oauth\/access_token$/.test(pathname)) return 'oauth_token';
+  if (method === 'POST' && /^\/[^/]+\/[^/]+\/register$/.test(pathname)) return 'register';
   if (method === 'POST' && /^\/[^/]+\/[^/]+\/messages$/.test(pathname)) return 'messages';
   if (method === 'GET' && /^\/[^/]+\/debug_token$/.test(pathname)) return 'debug_token';
   if (method === 'GET' && /^\/[^/]+\/[^/]+\/phone_numbers$/.test(pathname)) {

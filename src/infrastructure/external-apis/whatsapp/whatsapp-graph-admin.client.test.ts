@@ -148,4 +148,40 @@ describe('WhatsappGraphAdminClient', () => {
     assert.equal(result.error.reason, 'invalid_response');
     assert.equal(result.error.retryable, false);
   });
+
+  it('troca do code: client_id, segredo e code na query (nunca em log), sem Authorization; code de uso único', async () => {
+    graph.addCode('code-valido-123', 'EAAG-token-trocado-secreto');
+    const first = await client().exchangeCode(new SecretString('code-valido-123'));
+    assert.ok(first.ok);
+    assert.equal(first.value.reveal(), 'EAAG-token-trocado-secreto');
+    const [request] = graph.requests;
+    assert.equal(request?.operation, 'oauth_token');
+    assert.equal(request.query.client_id, APP_ID);
+    assert.equal(request.query.client_secret, APP_SECRET);
+    assert.equal(request.headers.authorization, undefined);
+    const second = await client().exchangeCode(new SecretString('code-valido-123'));
+    assert.ok(!second.ok);
+    assert.equal(second.error.httpStatus, 400);
+    assert.equal(second.error.retryable, false);
+    const shown = JSON.stringify(second.error.context) + second.error.message;
+    assert.ok(!shown.includes('code-valido-123') && !shown.includes(APP_SECRET));
+    graph.addCode('code-velho', 'x', { expired: true });
+    assert.ok(!(await client().exchangeCode(new SecretString('code-velho'))).ok);
+  });
+
+  it('register: PIN no corpo e token em Authorization; PIN diferente de número com 2FA vira erro 133005 sem corpo da Meta', async () => {
+    givenToken();
+    const pin = new SecretString('123456');
+    assert.ok((await client().registerNumber('111', TOKEN, pin)).ok);
+    const [request] = graph.requests;
+    assert.equal(request?.headers.authorization, `Bearer ${TOKEN.reveal()}`);
+    assert.deepEqual(request.body, { messaging_product: 'whatsapp', pin: '123456' });
+    assert.ok(!request.path.includes('123456'));
+    graph.setRegistered('222', '999999');
+    const wrong = await client().registerNumber('222', TOKEN, pin);
+    assert.ok(!wrong.ok);
+    assert.equal(wrong.error.providerCode, 133005);
+    assert.equal(wrong.error.retryable, false);
+    assert.ok(!JSON.stringify(wrong.error.context).includes('123456'));
+  });
 });

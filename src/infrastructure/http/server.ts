@@ -31,7 +31,10 @@ export interface AdminRoutesParams {
    * Conexão do canal WhatsApp do cliente (spec 015): `GET`, `PUT` e `DELETE` em
    * `/admin/clients/:clientId/channel`. Só existe com `WHATSAPP_ENABLED=true` (sem isto, 404).
    */
-  readonly channel?: Pick<ChannelConnectionService, 'getState' | 'connect' | 'disconnect'>;
+  readonly channel?: Pick<
+    ChannelConnectionService,
+    'getState' | 'connect' | 'disconnect' | 'embeddedSignup'
+  >;
 }
 
 /** Canal WhatsApp (spec 011): sem isto as rotas `/webhooks/whatsapp` NÃO existem (404). */

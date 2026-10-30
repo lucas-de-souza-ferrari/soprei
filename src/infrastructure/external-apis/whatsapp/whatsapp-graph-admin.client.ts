@@ -5,7 +5,7 @@ import {
   type ProvisionOperation,
   type TokenInspection,
 } from '../../../application/ports/channel-provisioner.js';
-import { Result, type SecretString } from '../../../shared/types/index.js';
+import { Result, SecretString } from '../../../shared/types/index.js';
 import {
   isRetryableGraphFailure,
   isTimeout,
@@ -53,6 +53,8 @@ const phoneNumbersSchema = z.object({
 
 const successSchema = z.object({ success: z.boolean() });
 
+const accessTokenSchema = z.object({ access_token: z.string().min(1).max(2048) });
+
 export interface WhatsappGraphAdminClientOptions {
   readonly baseUrl: string;
   readonly graphApiVersion: string;
@@ -68,9 +70,11 @@ interface CallParams {
   readonly operation: ProvisionOperation;
   readonly method: 'GET' | 'POST' | 'DELETE';
   readonly path: string;
-  /** Valor de `Authorization: Bearer`. */
-  readonly bearer: string;
+  /** Valor de `Authorization: Bearer`; ausente na troca do `code` (autentica por client_id/secret). */
+  readonly bearer?: string;
   readonly query?: Readonly<Record<string, string>>;
+  /** Corpo JSON (só o `/register`). */
+  readonly body?: unknown;
 }
 
 /**
@@ -88,6 +92,46 @@ export class WhatsappGraphAdminClient implements ChannelProvisioner {
   constructor(private readonly options: WhatsappGraphAdminClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.fetchFn = options.fetch ?? fetch;
+  }
+
+  /**
+   * `GET /oauth/access_token` com `client_id`, `client_secret` e `code` (como a documentação do
+   * Embedded Signup descreve). Esses três vão na query string, que **nunca** é logada; o token
+   * devolvido só existe como `SecretString`.
+   */
+  async exchangeCode(code: SecretString): Promise<Result<SecretString, ChannelProvisionError>> {
+    const result = await this.call({
+      operation: 'exchange_code',
+      method: 'GET',
+      path: 'oauth/access_token',
+      query: {
+        client_id: this.options.appId,
+        client_secret: this.options.appSecret,
+        code: code.reveal(),
+      },
+    });
+    if (!result.ok) return result;
+    const parsed = accessTokenSchema.safeParse(result.value);
+    if (!parsed.success) return invalid('exchange_code');
+    return Result.ok(new SecretString(parsed.data.access_token));
+  }
+
+  async registerNumber(
+    phoneNumberId: string,
+    token: SecretString,
+    pin: SecretString,
+  ): Promise<Result<void, ChannelProvisionError>> {
+    const result = await this.call({
+      operation: 'register',
+      method: 'POST',
+      path: `${encodeURIComponent(phoneNumberId)}/register`,
+      bearer: token.reveal(),
+      body: { messaging_product: 'whatsapp', pin: pin.reveal() },
+    });
+    if (!result.ok) return result;
+    const parsed = successSchema.safeParse(result.value);
+    if (!parsed.success || !parsed.data.success) return invalid('register');
+    return Result.ok(undefined);
   }
 
   async inspectToken(token: SecretString): Promise<Result<TokenInspection, ChannelProvisionError>> {
@@ -183,7 +227,11 @@ export class WhatsappGraphAdminClient implements ChannelProvisioner {
     try {
       response = await this.fetchFn(url, {
         method: params.method,
-        headers: { authorization: `Bearer ${params.bearer}` },
+        headers: {
+          ...(params.bearer === undefined ? {} : { authorization: `Bearer ${params.bearer}` }),
+          ...(params.body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(params.body === undefined ? {} : { body: JSON.stringify(params.body) }),
         redirect: 'manual',
         signal: AbortSignal.timeout(this.options.timeoutMs),
       });

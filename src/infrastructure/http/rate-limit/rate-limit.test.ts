@@ -129,6 +129,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           getState: () => Promise.reject(new Error('inventário')),
           connect: () => Promise.reject(new Error('inventário')),
           disconnect: () => Promise.reject(new Error('inventário')),
+          embeddedSignup: () => Promise.reject(new Error('inventário')),
         },
         attendance: new AttendanceService({
           clients,
@@ -176,6 +177,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/clients/:clientId/users',
       '/admin/clients/:clientId/audit-events',
       '/admin/clients/:clientId/channel',
+      '/admin/clients/:clientId/channel/embedded-signup',
       '/admin/clients/:clientId/users/:userId',
       '/admin/clients/:clientId/users/:userId/password',
       '/auth/login',
@@ -204,6 +206,14 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       ['DELETE:channel:manage', 'GET:channel:read', 'HEAD:channel:read', 'PUT:channel:manage']
         .filter((entry) => channelRoutes.some((route) => entry.startsWith(String(route.method))))
         .sort(),
+    );
+
+    const signup = routes.filter(
+      (route) => route.url === '/admin/clients/:clientId/channel/embedded-signup',
+    );
+    assert.deepEqual(
+      signup.map((route) => `${String(route.method)}:${String(route.permissions.find(Boolean))}`),
+      ['POST:channel:manage'],
     );
 
     // Regra do projeto: rota nova declara o perfil (cair em `public` por omissão é só a rede de

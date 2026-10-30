@@ -7,12 +7,15 @@ import type {
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, requirePermission, userAuth } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
-import { putChannelBodySchema } from './channel.validators.js';
+import { embeddedSignupBodySchema, putChannelBodySchema } from './channel.validators.js';
 
 export interface AdminChannelControllerOptions {
   readonly auth: Pick<AuthService, 'authenticate'>;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
-  readonly channel: Pick<ChannelConnectionService, 'getState' | 'connect' | 'disconnect'>;
+  readonly channel: Pick<
+    ChannelConnectionService,
+    'getState' | 'connect' | 'disconnect' | 'embeddedSignup'
+  >;
 }
 
 interface ChannelResponse {
@@ -68,6 +71,20 @@ export const adminChannelController: FastifyPluginCallback<AdminChannelControlle
     async (request) => {
       const body = putChannelBodySchema.parse(request.body);
       return toResponse(await channel.connect(userAuth(request), body));
+    },
+  );
+
+  // Embedded Signup (spec 015b): o `code` do navegador vira o token no servidor; mesma prova de posse
+  // do PUT. Nunca loga nem devolve o `code`; resposta igual à do GET.
+  app.post(
+    '/:clientId/channel/embedded-signup',
+    {
+      config,
+      onRequest: requirePermission('channel:manage', { clientParam: 'clientId', metrics }),
+    },
+    async (request) => {
+      const body = embeddedSignupBodySchema.parse(request.body);
+      return toResponse(await channel.embeddedSignup(userAuth(request), body));
     },
   );
 

@@ -1,7 +1,8 @@
 import { ExternalServiceError } from '../../shared/errors/index.js';
 import type { Result, SecretString } from '../../shared/types/index.js';
 
-export type ProvisionOperation = 'inspect_token' | 'list_numbers' | 'subscribe' | 'unsubscribe';
+export type ProvisionOperation =
+  'exchange_code' | 'inspect_token' | 'list_numbers' | 'subscribe' | 'register' | 'unsubscribe';
 export type ProvisionFailureReason = 'network' | 'timeout' | 'http_error' | 'invalid_response';
 
 export interface ChannelProvisionErrorDetails {
@@ -62,6 +63,17 @@ export interface TokenInspection {
  * `Authorization: Bearer`; erros esperados voltam como `Result.err`.
  */
 export interface ChannelProvisioner {
+  /**
+   * Troca o `code` do Embedded Signup (uso único, vida de ~30 s) pelo token de negócio, com o app id
+   * e o segredo do app. O `code` e o token nunca vão a log nem a erro.
+   */
+  exchangeCode(code: SecretString): Promise<Result<SecretString, ChannelProvisionError>>;
+  /** Registra o número na Cloud API (`/register`) com o PIN de 6 dígitos (spec 015b). */
+  registerNumber(
+    phoneNumberId: string,
+    token: SecretString,
+    pin: SecretString,
+  ): Promise<Result<void, ChannelProvisionError>>;
   /** `debug_token`, autenticado com o token de app (`WHATSAPP_APP_ID|WHATSAPP_APP_SECRET`). */
   inspectToken(token: SecretString): Promise<Result<TokenInspection, ChannelProvisionError>>;
   /** `phone_number_id` dos números da WABA que o token enxerga. */

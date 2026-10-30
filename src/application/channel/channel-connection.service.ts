@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   type AuditAction,
@@ -35,6 +36,8 @@ export const CHANNEL_ERRORS = {
   CHANNEL_MISSING_SCOPE: 'O token não tem as permissões necessárias do WhatsApp',
   CHANNEL_NUMBER_NOT_IN_WABA: 'O número informado não pertence à conta WhatsApp Business do token',
   CHANNEL_NUMBER_IN_USE: 'Este número já está conectado a outro cliente',
+  CHANNEL_CODE_INVALID: 'O código do Embedded Signup é inválido, expirou ou já foi usado',
+  CHANNEL_REGISTRATION_FAILED: 'Não foi possível registrar o número na Meta',
 } as const;
 export type ChannelErrorCode = keyof typeof CHANNEL_ERRORS;
 
@@ -45,6 +48,8 @@ type MetricResult =
   | 'missing_scope'
   | 'number_not_in_waba'
   | 'number_in_use'
+  | 'invalid_code'
+  | 'registration_failed'
   | 'graph_error';
 
 const RESULT_BY_CODE: Readonly<Record<ChannelErrorCode, MetricResult>> = {
@@ -53,6 +58,8 @@ const RESULT_BY_CODE: Readonly<Record<ChannelErrorCode, MetricResult>> = {
   CHANNEL_MISSING_SCOPE: 'missing_scope',
   CHANNEL_NUMBER_NOT_IN_WABA: 'number_not_in_waba',
   CHANNEL_NUMBER_IN_USE: 'number_in_use',
+  CHANNEL_CODE_INVALID: 'invalid_code',
+  CHANNEL_REGISTRATION_FAILED: 'registration_failed',
 };
 
 export type ChannelState = 'NOT_CONNECTED' | 'CONNECTED' | 'TOKEN_INVALID' | 'LEGACY';
@@ -73,8 +80,20 @@ export interface ConnectChannelInput {
   readonly accessToken: string;
 }
 
+/** Corpo do Embedded Signup: o `code` e os ids que o navegador entregou (não confiáveis). */
+/** O que a prova de posse e a gravação usam: o número e a WABA (o token vem à parte). */
+export type ChannelTarget = Pick<ConnectChannelInput, 'phoneNumberId' | 'wabaId'>;
+
+export interface EmbeddedSignupInput {
+  readonly code: string;
+  readonly wabaId: string;
+  readonly phoneNumberId: string;
+}
+
 export interface ChannelConnectionServiceDeps {
-  readonly clients: Pick<ClientRepository, 'findById'>;
+  /** Gera o PIN de 6 dígitos do registro; por padrão `crypto.randomInt` (CSPRNG). Só os testes trocam. */
+  readonly generatePin?: () => string;
+  readonly clients: Pick<ClientRepository, 'findById' | 'findByWhatsappPhoneNumberId'>;
   readonly connections: Pick<ChannelConnectionRepository, 'find'>;
   readonly unitOfWork: ChannelUnitOfWork;
   readonly cipher: CredentialCipher;
@@ -149,6 +168,67 @@ export class ChannelConnectionService {
     }
   }
 
+  /**
+   * Embedded Signup (spec 015b): troca o `code` pelo token de negócio, faz a **mesma** prova de posse
+   * do `PUT` (os ids do navegador não são confiados: valem só se a Graph os confirmar com o token
+   * obtido), registra o número com um PIN aleatório de 6 dígitos gerado aqui (nunca visto nem
+   * digitado pelo cliente) e grava tudo cifrado, com auditoria, na mesma transação do `PUT`. Se o
+   * `/register` falhar, **nada é gravado** (o cliente refaz o fluxo, que gera outro `code`). O `code`,
+   * o token e o PIN nunca vão a log, erro, métrica nem resposta.
+   */
+  async embeddedSignup(actor: UserIdentity, input: EmbeddedSignupInput): Promise<ChannelStateView> {
+    this.requirePermission(actor, 'channel:manage');
+    try {
+      const exchanged = await this.deps.provisioner.exchangeCode(new SecretString(input.code));
+      if (!exchanged.ok) throw this.providerFailure(exchanged.error);
+      const token = exchanged.value;
+      const expiresAt = await this.proveOwnership(token, input);
+      // Número de OUTRO cliente: 409 antes de registrar. Sem isto, um token que enxerga a WABA
+      // compartilhada trocaria o PIN do número alheio pelo `/register`. (A corrida entre dois
+      // clientes ainda é decidida pelo `@unique`, na transação.)
+      const owner = await this.deps.clients.findByWhatsappPhoneNumberId(input.phoneNumberId);
+      if (owner !== null && owner.id !== actor.clientId) throw channelConflict();
+      const pin = await this.registrationPin(actor.clientId);
+      const registered = await this.deps.provisioner.registerNumber(
+        input.phoneNumberId,
+        token,
+        pin,
+      );
+      if (!registered.ok) throw this.providerFailure(registered.error);
+      const outcome = await this.persist(
+        actor,
+        input,
+        token,
+        expiresAt,
+        this.deps.cipher.encrypt(actor.clientId, pin),
+      );
+      this.afterCommit(actor, [{ action: outcome.audit }]);
+      this.count('embedded_signup', 'ok');
+      return outcome.view;
+    } catch (error) {
+      this.count('embedded_signup', resultOf(error));
+      throw error;
+    }
+  }
+
+  /**
+   * PIN do registro: o que já está guardado para este cliente (o número já foi registrado com ele e
+   * registrar de novo com o mesmo PIN é aceito), senão um novo, aleatório. PIN guardado que não
+   * decifra é ignorado (gera outro).
+   */
+  private async registrationPin(clientId: ClientId): Promise<SecretString> {
+    const existing = await this.deps.connections.find(clientId);
+    if (existing?.registrationPinCiphertext != null) {
+      try {
+        return this.deps.cipher.decrypt(clientId, existing.registrationPinCiphertext);
+      } catch {
+        // Falha ao decifrar: segue com um PIN novo.
+      }
+    }
+    const generate = this.deps.generatePin ?? (() => randomInt(0, 1_000_000).toString());
+    return new SecretString(generate().padStart(6, '0'));
+  }
+
   /** Desconecta (idempotente): apaga a conexão, limpa o número e audita; o `unsubscribe` é melhor esforço. */
   async disconnect(actor: UserIdentity): Promise<void> {
     this.requirePermission(actor, 'channel:manage');
@@ -197,10 +277,7 @@ export class ChannelConnectionService {
    * Prova de posse com o token do cliente, antes de gravar qualquer coisa. Devolve a validade
    * informada pela Meta (`null` = não expira).
    */
-  private async proveOwnership(
-    token: SecretString,
-    input: ConnectChannelInput,
-  ): Promise<Date | null> {
+  private async proveOwnership(token: SecretString, input: ChannelTarget): Promise<Date | null> {
     const inspected = await this.deps.provisioner.inspectToken(token);
     if (!inspected.ok) throw this.providerFailure(inspected.error);
     const inspection = inspected.value;
@@ -230,9 +307,10 @@ export class ChannelConnectionService {
   /** Cifra e grava, numa transação com o cliente travado: conexão, número e auditoria juntos. */
   private async persist(
     actor: UserIdentity,
-    input: ConnectChannelInput,
+    input: ChannelTarget,
     token: SecretString,
     expiresAt: Date | null,
+    pinCiphertext?: string,
   ): Promise<{ readonly audit: AuditAction; readonly view: ChannelStateView }> {
     const ciphertext = this.deps.cipher.encrypt(actor.clientId, token);
     try {
@@ -242,6 +320,7 @@ export class ChannelConnectionService {
           wabaId: input.wabaId,
           tokenCiphertext: ciphertext,
           tokenExpiresAt: expiresAt,
+          ...(pinCiphertext === undefined ? {} : { registrationPinCiphertext: pinCiphertext }),
         });
         const client = await tx.clients.update(actor.clientId, {
           whatsappPhoneNumberId: input.phoneNumberId,
@@ -275,6 +354,10 @@ export class ChannelConnectionService {
       });
     if (error.operation === 'inspect_token') return unavailable();
     if (error.retryable || error.reason !== 'http_error') return unavailable();
+    // `code` inválido, expirado, usado ou de outro app: uma só mensagem, sem distinguir.
+    if (error.operation === 'exchange_code') return channelError('CHANNEL_CODE_INVALID');
+    // PIN recusado (número já registrado com 2FA e outro PIN), número bloqueado etc.: mensagem fixa.
+    if (error.operation === 'register') return channelError('CHANNEL_REGISTRATION_FAILED');
     if (error.providerCode === 190 || error.httpStatus === 401) {
       return channelError('CHANNEL_TOKEN_REJECTED');
     }
