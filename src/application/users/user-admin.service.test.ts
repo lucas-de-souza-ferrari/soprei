@@ -296,3 +296,23 @@ describe('UserAdminService: bloqueio do cliente e regra do último OWNER', () =>
     assert.ok(loser?.status === 'rejected' && loser.reason instanceof ForbiddenError);
   });
 });
+
+describe('UserAdminService: hashes pagos pela administração usam a fila de administração', () => {
+  it('criar, redefinir e trocar a própria senha pedem lane admin ao hasher', async () => {
+    const env = await setup();
+    const owner = await seed(env, 'OWNER');
+    const agent = await seed(env, 'AGENT');
+    env.auth.hasher.lanes.length = 0;
+    await env.auth.userAdmin.createUser(identity(owner), {
+      email: 'lane@exemplo.test',
+      password: PASSWORD,
+      role: 'AGENT',
+    });
+    await env.auth.userAdmin.resetPassword(identity(owner), agent.id, PASSWORD);
+    await env.auth.userAdmin.changeOwnPassword(identity(owner), {
+      currentPassword: PASSWORD,
+      newPassword: PASSWORD,
+    });
+    assert.deepEqual(env.auth.hasher.lanes, ['admin', 'admin', 'admin', 'admin']);
+  });
+});

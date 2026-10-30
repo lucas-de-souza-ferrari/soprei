@@ -6,7 +6,11 @@ import type {
   UserAdminTransaction,
   UserAdminUnitOfWork,
 } from '../application/ports/user-admin-unit-of-work.js';
-import type { PasswordHasher } from '../application/ports/password-hasher.js';
+import type {
+  HashLane,
+  HashOptions,
+  PasswordHasher,
+} from '../application/ports/password-hasher.js';
 import type {
   AccessCheck,
   LoginLock,
@@ -51,14 +55,18 @@ export const TEST_PASSWORD = 'senha-de-teste-forte-123';
 export class FakePasswordHasher implements PasswordHasher {
   verifyCalls = 0;
   hashCalls = 0;
+  /** A fila pedida em cada `hash`/`verify` (prova que a administração usa a lane `admin`). */
+  readonly lanes: (HashLane | undefined)[] = [];
 
-  hash(password: string): Promise<string> {
+  hash(password: string, options?: HashOptions): Promise<string> {
     this.hashCalls += 1;
+    this.lanes.push(options?.lane);
     return Promise.resolve(`fake$${createHash('sha256').update(password).digest('hex')}`);
   }
 
-  verify(password: string, storedHash: string): Promise<boolean> {
+  verify(password: string, storedHash: string, options?: HashOptions): Promise<boolean> {
     this.verifyCalls += 1;
+    this.lanes.push(options?.lane);
     return Promise.resolve(
       storedHash === `fake$${createHash('sha256').update(password).digest('hex')}`,
     );

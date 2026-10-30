@@ -32,6 +32,9 @@ import type {
   UserAdminUnitOfWork,
 } from '../ports/user-admin-unit-of-work.js';
 
+/** Hashes desta classe usam a fila de administração do hasher (teto menor; não esgotam o login). */
+const ADMIN_LANE = { lane: 'admin' } as const;
+
 /** Código do `ConflictError` quando a operação deixaria o cliente sem `OWNER` ativo. */
 export const LAST_OWNER_CODE = 'LAST_OWNER';
 
@@ -146,7 +149,7 @@ export class UserAdminService {
     // da transação (papel relido do banco).
     this.requireManage(actor, input.role);
     const email = normalizeEmail(input.email);
-    const passwordHash = await this.hasher.hash(input.password);
+    const passwordHash = await this.hasher.hash(input.password, ADMIN_LANE);
 
     const created = await this.unitOfWork.run(async (tx) => {
       await tx.lockClient(actor.clientId);
@@ -243,7 +246,7 @@ export class UserAdminService {
 
   async resetPassword(actor: UserIdentity, targetId: string, newPassword: string): Promise<void> {
     this.requirePermission(actor, 'user:manage');
-    const passwordHash = await this.hasher.hash(newPassword);
+    const passwordHash = await this.hasher.hash(newPassword, ADMIN_LANE);
 
     const targetUserId = await this.unitOfWork.run(async (tx) => {
       await tx.lockClient(actor.clientId);
@@ -285,7 +288,11 @@ export class UserAdminService {
     }
     if (credentials.user.status !== 'ACTIVE') throw new UnauthorizedError();
 
-    const matches = await this.hasher.verify(input.currentPassword, credentials.passwordHash);
+    const matches = await this.hasher.verify(
+      input.currentPassword,
+      credentials.passwordHash,
+      ADMIN_LANE,
+    );
     if (!matches) {
       await this.sessions.recordLoginFailure(lockKey);
       this.logger.info({ result: 'invalid' }, 'troca de senha recusada');
@@ -293,7 +300,7 @@ export class UserAdminService {
     }
     await this.sessions.resetLoginFailures(lockKey);
 
-    const passwordHash = await this.hasher.hash(input.newPassword);
+    const passwordHash = await this.hasher.hash(input.newPassword, ADMIN_LANE);
     await this.unitOfWork.run(async (tx) => {
       await tx.users.updatePassword(actor.clientId, actor.userId, passwordHash);
       await this.record(tx, actor, {

@@ -5,6 +5,7 @@ import { ServiceUnavailableError } from '../../shared/errors/index.js';
 import {
   DEFAULT_SCRYPT_COST,
   MAX_CONCURRENT_HASHES,
+  MAX_QUEUED_ADMIN_HASHES,
   MAX_QUEUED_HASHES,
   type ScryptDerive,
   ScryptPasswordHasher,
@@ -228,5 +229,41 @@ describe('política de senha (Zod)', () => {
     );
     // A contagem é depois da normalização: 6 ligaduras viram 12 caracteres e valem.
     assert.equal(newPasswordSchema.safeParse('ﬁ'.repeat(6)).success, true);
+  });
+});
+
+describe('fila separada dos hashes de administração (spec 008, revisão I-1)', () => {
+  it('a fila cheia de administração recusa só a administração; o login segue com as vagas restantes', async () => {
+    assert.equal(MAX_QUEUED_ADMIN_HASHES, 8);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const derive: ScryptDerive = async (_p, _s, keyLength) => {
+      await gate;
+      return Buffer.alloc(keyLength, 2);
+    };
+    const hasher = new ScryptPasswordHasher({
+      cost: LOW,
+      derive,
+      maxConcurrent: 1,
+      maxQueued: 5,
+      maxQueuedAdmin: 2,
+    });
+    const accepted: Promise<unknown>[] = [hasher.hash('em-execucao')];
+    accepted.push(hasher.hash('a1', { lane: 'admin' }), hasher.hash('a2', { lane: 'admin' }));
+    // Teto de administração atingido: recusa imediata, só para ela.
+    await assert.rejects(hasher.hash('a3', { lane: 'admin' }), ServiceUnavailableError);
+    // Login (lane padrão) ainda cabe nas vagas restantes: 3 do total de 5.
+    for (const name of ['l1', 'l2', 'l3']) accepted.push(hasher.hash(name));
+    // Total cheio: aí sim o login também é recusado.
+    await assert.rejects(hasher.hash('l4'), ServiceUnavailableError);
+    release?.();
+    await Promise.all(accepted);
+    assert.match(await hasher.hash('depois', { lane: 'admin' }), /^scrypt\$/);
+  });
+
+  it('maxQueuedAdmin inválido é recusado', () => {
+    assert.throws(() => new ScryptPasswordHasher({ cost: LOW, maxQueuedAdmin: -1 }), RangeError);
   });
 });

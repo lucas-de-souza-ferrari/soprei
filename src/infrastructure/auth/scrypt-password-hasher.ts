@@ -1,5 +1,9 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-import type { PasswordHasher } from '../../application/ports/password-hasher.js';
+import type {
+  HashLane,
+  HashOptions,
+  PasswordHasher,
+} from '../../application/ports/password-hasher.js';
 import { ServiceUnavailableError } from '../../shared/errors/index.js';
 
 /** Parâmetros do scrypt (OWASP Password Storage Cheat Sheet: N = 2^17, r = 8, p = 1). */
@@ -28,6 +32,13 @@ export const MAX_CONCURRENT_HASHES = 2;
  * hash nem memória, em vez de enfileirar sem limite.
  */
 export const MAX_QUEUED_HASHES = 32;
+/**
+ * Dentro do teto acima, no máximo este tanto de esperas pode ser de hashes de **administração**
+ * (`lane: 'admin'`): sobram pelo menos `MAX_QUEUED_HASHES - MAX_QUEUED_ADMIN_HASHES` vagas para
+ * login e refresh, então a fila cheia de administração recusa só a rota de administração (503) e
+ * nunca o login dos clientes.
+ */
+export const MAX_QUEUED_ADMIN_HASHES = 8;
 
 /** Faixa de parâmetros aceita ao **verificar** (um hash adulterado não pode pedir gigabytes). */
 const MIN_N = 2 ** 10;
@@ -63,6 +74,8 @@ export interface ScryptPasswordHasherOptions {
   readonly maxConcurrent?: number;
   /** Pedidos esperando uma vaga além dos em execução; passou disso, 503. Padrão `MAX_QUEUED_HASHES`. */
   readonly maxQueued?: number;
+  /** Teto das esperas de `lane: 'admin'` (<= `maxQueued`). Padrão `MAX_QUEUED_ADMIN_HASHES`. */
+  readonly maxQueuedAdmin?: number;
   /** Só para os testes (contar a concorrência). */
   readonly derive?: ScryptDerive;
 }
@@ -124,34 +137,44 @@ export class ScryptPasswordHasher implements PasswordHasher {
   private readonly cost: ScryptCost;
   private readonly maxConcurrent: number;
   private readonly maxQueued: number;
+  private readonly maxQueuedAdmin: number;
   private readonly derive: ScryptDerive;
   private active = 0;
-  private readonly waiting: (() => void)[] = [];
+  private readonly waiting: { readonly lane: HashLane; readonly resume: () => void }[] = [];
   private dummy: Promise<string> | undefined;
 
   constructor(options: ScryptPasswordHasherOptions = {}) {
     this.cost = options.cost ?? DEFAULT_SCRYPT_COST;
     this.maxConcurrent = options.maxConcurrent ?? MAX_CONCURRENT_HASHES;
     this.maxQueued = options.maxQueued ?? MAX_QUEUED_HASHES;
+    this.maxQueuedAdmin = Math.min(
+      options.maxQueuedAdmin ?? MAX_QUEUED_ADMIN_HASHES,
+      this.maxQueued,
+    );
     this.derive = options.derive ?? nodeScrypt;
     if (this.maxConcurrent < 1) throw new RangeError('maxConcurrent precisa ser >= 1');
     if (!Number.isInteger(this.maxQueued) || this.maxQueued < 0) {
       throw new RangeError('maxQueued precisa ser um inteiro >= 0');
     }
+    if (!Number.isInteger(this.maxQueuedAdmin) || this.maxQueuedAdmin < 0) {
+      throw new RangeError('maxQueuedAdmin precisa ser um inteiro >= 0');
+    }
     if (!isAcceptedCost(this.cost)) throw new RangeError('custo do scrypt fora da faixa aceita');
   }
 
-  async hash(password: string): Promise<string> {
+  async hash(password: string, options: HashOptions = {}): Promise<string> {
     const salt = randomBytes(SALT_BYTES);
-    const key = await this.limited(() => this.derive(password, salt, KEY_BYTES, this.cost));
+    const key = await this.limited(options.lane ?? 'auth', () =>
+      this.derive(password, salt, KEY_BYTES, this.cost),
+    );
     const { N, r, p } = this.cost;
     return [PREFIX, N, r, p, salt.toString('base64'), key.toString('base64')].join('$');
   }
 
-  async verify(password: string, storedHash: string): Promise<boolean> {
+  async verify(password: string, storedHash: string, options: HashOptions = {}): Promise<boolean> {
     const parsed = parseStoredHash(storedHash);
     if (parsed === undefined) return false;
-    const key = await this.limited(() =>
+    const key = await this.limited(options.lane ?? 'auth', () =>
       this.derive(password, parsed.salt, parsed.key.length, parsed.cost),
     );
     return key.length === parsed.key.length && timingSafeEqual(key, parsed.key);
@@ -165,16 +188,20 @@ export class ScryptPasswordHasher implements PasswordHasher {
     return this.dummy;
   }
 
-  private async limited<T>(task: () => Promise<T>): Promise<T> {
+  private async limited<T>(lane: HashLane, task: () => Promise<T>): Promise<T> {
     if (this.active >= this.maxConcurrent) {
-      if (this.waiting.length >= this.maxQueued) {
+      const adminWaiting = this.waiting.filter((entry) => entry.lane === 'admin').length;
+      if (
+        this.waiting.length >= this.maxQueued ||
+        (lane === 'admin' && adminWaiting >= this.maxQueuedAdmin)
+      ) {
         throw new ServiceUnavailableError('Serviço temporariamente indisponível', {
           context: { reason: 'hash_queue_full' },
         });
       }
       // A vaga é passada direto por quem termina (o contador não muda).
       await new Promise<void>((resolve) => {
-        this.waiting.push(resolve);
+        this.waiting.push({ lane, resume: resolve });
       });
     } else {
       this.active += 1;
@@ -184,7 +211,7 @@ export class ScryptPasswordHasher implements PasswordHasher {
     } finally {
       const next = this.waiting.shift();
       if (next === undefined) this.active -= 1;
-      else next();
+      else next.resume();
     }
   }
 }
