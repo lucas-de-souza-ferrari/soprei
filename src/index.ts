@@ -1,4 +1,6 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { ChannelConnectionService } from './application/channel/channel-connection.service.js';
+import { ChannelCredentialsService } from './application/channel/channel-credentials.service.js';
 import { ChannelInboundProcessor } from './application/channel/channel-inbound.processor.js';
 import { ChannelIntakeService } from './application/channel/channel-intake.service.js';
 import { ClientService } from './application/clients/client.service.js';
@@ -16,11 +18,14 @@ import {
 import {
   getDatabase,
   PrismaAttendanceUnitOfWork,
+  PrismaChannelConnectionRepository,
+  PrismaChannelUnitOfWork,
   PrismaClientRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
+import { WhatsappGraphAdminClient } from './infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.js';
 import { WhatsappCloudApiClient } from './infrastructure/external-apis/whatsapp/whatsapp-cloud-api.client.js';
 import { rateLimitProfilesFromConfig } from './infrastructure/http/rate-limit/rate-limit.js';
 import { buildServer, type WhatsappRoutesParams } from './infrastructure/http/server.js';
@@ -32,6 +37,10 @@ import {
 } from './infrastructure/lifecycle.js';
 import { createLogger } from './infrastructure/logger/logger.js';
 import { createMetrics } from './infrastructure/metrics/index.js';
+import {
+  AesGcmCredentialCipher,
+  parseCredentialKeys,
+} from './infrastructure/security/aes-gcm-credential-cipher.js';
 import { createInboundQueue } from './infrastructure/queue/inbound-queue.js';
 
 /** Espera da conexão Redis do rate limit no boot; passou disso, segue em fail-open com `warn`. */
@@ -127,8 +136,30 @@ async function main(): Promise<void> {
   });
 
   let whatsappRoutes: WhatsappRoutesParams | undefined;
+  let channelService: ChannelConnectionService | undefined;
   if (whatsapp !== undefined && inboundQueue !== undefined) {
     const channelLogger = logger;
+    // Credenciais por cliente (spec 015): a config já validou as chaves; aqui só se monta a cifra.
+    const parsedKeys = parseCredentialKeys(whatsapp.credentialKeys);
+    if (!parsedKeys.ok) throw new Error('CHANNEL_CREDENTIALS_KEYS inválida');
+    const cipher = new AesGcmCredentialCipher(parsedKeys.keys, whatsapp.credentialActiveKeyId);
+    const connections = new PrismaChannelConnectionRepository(prisma);
+    channelService = new ChannelConnectionService({
+      clients: clientRepository,
+      connections,
+      unitOfWork: new PrismaChannelUnitOfWork(prisma),
+      cipher,
+      provisioner: new WhatsappGraphAdminClient({
+        baseUrl: whatsapp.apiBaseUrl,
+        graphApiVersion: whatsapp.graphApiVersion,
+        appId: whatsapp.appId,
+        appSecret: whatsapp.appSecret,
+        timeoutMs: whatsapp.sendTimeoutMs,
+      }),
+      appId: whatsapp.appId,
+      logger,
+      metrics,
+    });
     const processor = new ChannelInboundProcessor({
       attendance,
       clients: clientRepository,
@@ -136,10 +167,18 @@ async function main(): Promise<void> {
       sender: new WhatsappCloudApiClient({
         baseUrl: whatsapp.apiBaseUrl,
         graphApiVersion: whatsapp.graphApiVersion,
-        accessToken: whatsapp.accessToken,
         timeoutMs: whatsapp.sendTimeoutMs,
         metrics,
       }),
+      credentials: new ChannelCredentialsService({
+        clients: clientRepository,
+        connections,
+        cipher,
+        legacyToken: whatsapp.legacyAccessToken,
+        metrics,
+      }),
+      connections,
+      metrics,
       queue: inboundQueue.queue,
       batch: batchSettings(config),
       logger: channelLogger,
@@ -165,6 +204,7 @@ async function main(): Promise<void> {
       {
         trustProxyMode: trustProxyMode(config.TRUST_PROXY),
         graphApiVersion: whatsapp.graphApiVersion,
+        legacyTokenConfigured: whatsapp.legacyAccessToken !== undefined,
       },
       'canal WhatsApp habilitado',
     );
@@ -193,6 +233,7 @@ async function main(): Promise<void> {
     admin: {
       clients: new ClientService(clientRepository),
       attendance,
+      ...(channelService === undefined ? {} : { channel: channelService }),
     },
   });
 

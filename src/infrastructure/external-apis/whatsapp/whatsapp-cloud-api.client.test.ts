@@ -3,6 +3,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { MessageSendError } from '../../../application/ports/message-sender.js';
 import { FakeGraphApi, graphError } from '../../../test-support/fake-graph-api.js';
 import { keepEventLoopAlive } from '../../../test-support/keep-alive.js';
+import { SecretString } from '../../../shared/types/index.js';
 import { createMetrics } from '../../metrics/index.js';
 import {
   isRetryableGraphFailure,
@@ -33,13 +34,17 @@ function makeClient(
   return new WhatsappCloudApiClient({
     baseUrl: graph.baseUrl,
     graphApiVersion: 'v26.0',
-    accessToken: TOKEN,
     timeoutMs: 2_000,
     ...overrides,
   });
 }
 
-const input = { phoneNumberId: PHONE_NUMBER_ID, to: CONTACT, text: SECRET_TEXT };
+const input = {
+  phoneNumberId: PHONE_NUMBER_ID,
+  accessToken: new SecretString(TOKEN),
+  to: CONTACT,
+  text: SECRET_TEXT,
+};
 
 async function expectFailure(client: WhatsappCloudApiClient): Promise<MessageSendError> {
   const result = await client.sendText(input);

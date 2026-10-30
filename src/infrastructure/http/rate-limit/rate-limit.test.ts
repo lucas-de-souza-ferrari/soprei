@@ -125,6 +125,11 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       userAdmin: testAuth.userAdmin,
       admin: {
         clients: new ClientService(clients),
+        channel: {
+          getState: () => Promise.reject(new Error('inventário')),
+          connect: () => Promise.reject(new Error('inventário')),
+          disconnect: () => Promise.reject(new Error('inventário')),
+        },
         attendance: new AttendanceService({
           clients,
           conversations: store.conversations,
@@ -170,6 +175,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/clients',
       '/admin/clients/:clientId/users',
       '/admin/clients/:clientId/audit-events',
+      '/admin/clients/:clientId/channel',
       '/admin/clients/:clientId/users/:userId',
       '/admin/clients/:clientId/users/:userId/password',
       '/auth/login',
@@ -186,6 +192,19 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         `rota ${expected} registrada`,
       );
     }
+
+    // Spec 015: as três rotas do canal existem e exigem a permissão certa (leitura x gestão).
+    const channelRoutes = routes.filter(
+      (route) => route.url === '/admin/clients/:clientId/channel',
+    );
+    assert.deepEqual(
+      channelRoutes
+        .map((route) => `${String(route.method)}:${String(route.permissions.find(Boolean))}`)
+        .sort(),
+      ['DELETE:channel:manage', 'GET:channel:read', 'HEAD:channel:read', 'PUT:channel:manage']
+        .filter((entry) => channelRoutes.some((route) => entry.startsWith(String(route.method))))
+        .sort(),
+    );
 
     // Regra do projeto: rota nova declara o perfil (cair em `public` por omissão é só a rede de
     // segurança). Só a infraestrutura fica sem limite, com opt-out explícito.

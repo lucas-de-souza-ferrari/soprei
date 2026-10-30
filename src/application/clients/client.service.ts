@@ -9,7 +9,6 @@ import {
   type NewClient,
   PERSONA_MAX_LENGTH,
   type Page,
-  WHATSAPP_PHONE_NUMBER_ID_PATTERN,
 } from '../../domain/index.js';
 import { ConflictError, ValidationError } from '../../shared/errors/index.js';
 
@@ -56,26 +55,18 @@ export class ClientService {
   }
 
   /**
-   * Atualiza nome, status, persona e/ou número do WhatsApp (`null` limpa a persona e o número).
-   * O slug não muda: ele identifica o cliente para sempre. Número já usado por outro cliente:
-   * `ConflictError`.
+   * Atualiza nome, status e/ou persona (`null` limpa a persona). O slug não muda: ele identifica o
+   * cliente para sempre. O número do WhatsApp **não** passa por aqui (spec 015): só o `OWNER`/`ADMIN`
+   * do cliente o liga, pelo `PUT /admin/clients/:clientId/channel`.
    */
-  async update(id: ClientId, input: ClientUpdate): Promise<Client> {
-    if (
-      input.name === undefined &&
-      input.status === undefined &&
-      input.persona === undefined &&
-      input.whatsappPhoneNumberId === undefined
-    ) {
-      throw new ValidationError('Informe name, status, persona ou whatsappPhoneNumberId');
+  async update(id: ClientId, input: Omit<ClientUpdate, 'whatsappPhoneNumberId'>): Promise<Client> {
+    if (input.name === undefined && input.status === undefined && input.persona === undefined) {
+      throw new ValidationError('Informe name, status ou persona');
     }
-    const data: ClientUpdate = {
+    const data: Omit<ClientUpdate, 'whatsappPhoneNumberId'> = {
       ...(input.name === undefined ? {} : { name: parseName(input.name) }),
       ...(input.status === undefined ? {} : { status: parseStatus(input.status) }),
       ...(input.persona === undefined ? {} : { persona: parsePersona(input.persona) }),
-      ...(input.whatsappPhoneNumberId === undefined
-        ? {}
-        : { whatsappPhoneNumberId: parsePhoneNumberId(input.whatsappPhoneNumberId) }),
     };
     return await this.clients.update(id, data);
   }
@@ -104,15 +95,6 @@ function parsePersona(value: string | null): string | null {
     );
   }
   return persona;
-}
-
-/** `null` desliga o número; senão 1 a 32 dígitos (o `phone_number_id` da Meta). */
-function parsePhoneNumberId(value: string | null): string | null {
-  if (value === null) return null;
-  if (!WHATSAPP_PHONE_NUMBER_ID_PATTERN.test(value)) {
-    throw new ValidationError('whatsappPhoneNumberId deve ter de 1 a 32 dígitos (ou null)');
-  }
-  return value;
 }
 
 function parseSlug(value: string): string {

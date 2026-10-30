@@ -2,11 +2,13 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance, LogController } 
 import type { AuthService } from '../../application/auth/auth.service.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
+import type { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
 import type { ClientService } from '../../application/clients/client.service.js';
 import type { UserAdminService } from '../../application/users/user-admin.service.js';
 import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminAuditController } from '../../presentation/admin/audit.controller.js';
+import { adminChannelController } from '../../presentation/admin/channel.controller.js';
 import { adminClientsController } from '../../presentation/admin/clients.controller.js';
 import { adminUsersController } from '../../presentation/admin/users.controller.js';
 import {
@@ -25,6 +27,11 @@ export interface AdminRoutesParams {
   readonly clients: ClientService;
   /** Sem isto as rotas de mensagens e conversas (spec 010) não são registradas. */
   readonly attendance?: AttendanceService;
+  /**
+   * Conexão do canal WhatsApp do cliente (spec 015): `GET`, `PUT` e `DELETE` em
+   * `/admin/clients/:clientId/channel`. Só existe com `WHATSAPP_ENABLED=true` (sem isto, 404).
+   */
+  readonly channel?: Pick<ChannelConnectionService, 'getState' | 'connect' | 'disconnect'>;
 }
 
 /** Canal WhatsApp (spec 011): sem isto as rotas `/webhooks/whatsapp` NÃO existem (404). */
@@ -153,6 +160,14 @@ export function buildServer({
         auth,
         metrics,
         users: userAdmin,
+      });
+    }
+    if (admin.channel !== undefined) {
+      void app.register(adminChannelController, {
+        prefix: '/admin/clients',
+        auth,
+        metrics,
+        channel: admin.channel,
       });
     }
     if (admin.attendance !== undefined) {

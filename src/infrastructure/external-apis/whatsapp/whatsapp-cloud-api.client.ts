@@ -18,7 +18,7 @@ export const WHATSAPP_CHANNEL = 'whatsapp';
  * leitura é abortada e a conexão cancelada: nada de bufferizar o corpo inteiro de uma resposta
  * hostil ou defeituosa.
  */
-const MAX_RESPONSE_BYTES = 64 * 1024;
+export const MAX_RESPONSE_BYTES = 64 * 1024;
 
 /**
  * Códigos de erro da Meta que são transitórios (limite de taxa e indisponibilidade), segundo a
@@ -55,8 +55,6 @@ export interface WhatsappCloudApiClientOptions {
   readonly baseUrl: string;
   /** `WHATSAPP_GRAPH_API_VERSION` (`v26.0`). */
   readonly graphApiVersion: string;
-  /** `WHATSAPP_ACCESS_TOKEN`. Nunca vai a log nem a erro. */
-  readonly accessToken: string;
   /** `WHATSAPP_SEND_TIMEOUT_MS`. */
   readonly timeoutMs: number;
   /** Observador de métricas (o `Metrics` da 004 satisfaz). Falha ao medir nunca derruba o envio. */
@@ -108,7 +106,7 @@ export class WhatsappCloudApiClient implements MessageSender {
       response = await this.fetchFn(url, {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${this.options.accessToken}`,
+          authorization: `Bearer ${input.accessToken.reveal()}`,
           'content-type': 'application/json',
         },
         body: JSON.stringify({
@@ -202,7 +200,7 @@ export class WhatsappCloudApiClient implements MessageSender {
  * Lê o corpo em pedaços e para ao passar de `maxBytes` (cancelando a conexão), mantendo o prazo do
  * `AbortSignal.timeout` da requisição. Erro de leitura (prazo, conexão) é relançado.
  */
-async function readCapped(
+export async function readCapped(
   response: Response,
   maxBytes: number,
 ): Promise<{ readonly text: string; readonly tooLarge: boolean }> {
@@ -225,10 +223,10 @@ async function readCapped(
   return { text: Buffer.concat(chunks).toString('utf8'), tooLarge: false };
 }
 
-function parseJson(text: string): unknown {
+export function parseJson(text: string): unknown {
   return text === '' ? undefined : (JSON.parse(text) as unknown);
 }
 
-function isTimeout(error: unknown): boolean {
+export function isTimeout(error: unknown): boolean {
   return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 }

@@ -18,7 +18,7 @@ function toAuditResponse(event: AuditEvent): {
   id: string;
   action: string;
   actorUserId: string;
-  targetUserId: string;
+  targetUserId: string | null;
   fromRole: string | null;
   toRole: string | null;
   createdAt: string;

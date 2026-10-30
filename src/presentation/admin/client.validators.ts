@@ -5,7 +5,6 @@ import {
   ClientId,
   MAX_LIST_LIMIT,
   PERSONA_MAX_LENGTH,
-  WHATSAPP_PHONE_NUMBER_ID_PATTERN,
 } from '../../domain/index.js';
 import { CLIENT_NAME_MAX_LENGTH } from '../../application/clients/client.service.js';
 import { ValidationError } from '../../shared/errors/index.js';
@@ -50,21 +49,11 @@ export const updateClientBodySchema = z
       .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL')
       .nullable()
       .optional(),
-    // `phone_number_id` da Meta (1 a 32 dígitos); `null` desliga o número. Único entre clientes.
-    whatsappPhoneNumberId: z
-      .string()
-      .regex(WHATSAPP_PHONE_NUMBER_ID_PATTERN, 'de 1 a 32 dígitos')
-      .nullable()
-      .optional(),
   })
   .strict()
   .refine(
-    (body) =>
-      body.name !== undefined ||
-      body.status !== undefined ||
-      body.persona !== undefined ||
-      body.whatsappPhoneNumberId !== undefined,
-    { message: 'informe name, status, persona ou whatsappPhoneNumberId' },
+    (body) => body.name !== undefined || body.status !== undefined || body.persona !== undefined,
+    { message: 'informe name, status ou persona' },
   );
 
 export const listClientsQuerySchema = z

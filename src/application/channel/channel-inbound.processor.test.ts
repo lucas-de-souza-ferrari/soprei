@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  CredentialDecryptionError,
   DatabaseError,
   ExternalServiceError,
   ForbiddenError,
   ValidationError,
 } from '../../shared/errors/index.js';
-import { Result } from '../../shared/types/index.js';
+import { Result, SecretString } from '../../shared/types/index.js';
 import { steppingClock } from '../../test-support/clock.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
@@ -27,6 +28,8 @@ import {
   type MessageSender,
   type SendTextInput,
 } from '../ports/message-sender.js';
+import type { ChannelCredentials, ChannelCredentialsResult } from '../ports/channel-credentials.js';
+import type { ClientId } from '../../domain/index.js';
 import { CHANNEL_NOTICE_TEXTS } from './channel-texts.js';
 import {
   type ChannelBatchSettings,
@@ -59,6 +62,40 @@ class FakeSender implements MessageSender {
       this.scripted.shift() ??
         Result.ok({ channelMessageId: `wamid.SENT${String(this.sequence)}` }),
     );
+  }
+}
+
+/**
+ * Credenciais de mentira (spec 015): número do banco (o cliente em memória), token por cliente e a
+ * marca `TOKEN_INVALID` que o processador grava ao receber 190. Registra as leituras por cliente.
+ */
+class FakeCredentials implements ChannelCredentials {
+  readonly invalid = new Set<string>();
+  readonly marks: { clientId: string; tokenVersion: number }[] = [];
+  tokenVersion = 1;
+
+  constructor(private readonly clients: InMemoryClientRepository) {}
+
+  tokenOf(clientId: string): string {
+    return `token-do-cliente-${clientId}`;
+  }
+
+  async forClient(clientId: ClientId): Promise<ChannelCredentialsResult> {
+    const client = await this.clients.findById(clientId);
+    if (client.whatsappPhoneNumberId === null) return { kind: 'none' };
+    if (this.invalid.has(clientId)) return { kind: 'token_invalid' };
+    return {
+      kind: 'ready',
+      phoneNumberId: client.whatsappPhoneNumberId,
+      token: new SecretString(this.tokenOf(clientId)),
+      tokenVersion: this.tokenVersion,
+    };
+  }
+
+  markTokenInvalid(clientId: ClientId, tokenVersion: number): Promise<boolean> {
+    this.marks.push({ clientId, tokenVersion });
+    this.invalid.add(clientId);
+    return Promise.resolve(true);
   }
 }
 
@@ -102,6 +139,7 @@ interface Harness {
   readonly store: InMemoryAttendanceStore;
   readonly llm: MockLlmProvider;
   readonly sender: FakeSender;
+  readonly credentials: FakeCredentials;
   readonly scheduler: FakeScheduler;
   readonly logs: ReturnType<typeof captureLogs>;
   readonly processor: ChannelInboundProcessor;
@@ -135,6 +173,7 @@ function setup(
     options: { llmTimeoutMs: 300, inFlightTimeoutMs: IN_FLIGHT_MS, now },
   });
   const sender = new FakeSender();
+  const credentials = new FakeCredentials(clients);
   const scheduler = new FakeScheduler();
   const processor = new ChannelInboundProcessor({
     attendance:
@@ -142,6 +181,8 @@ function setup(
     clients,
     messages: { ...store.messages, ...overrides.messages },
     sender,
+    credentials,
+    connections: credentials,
     queue: scheduler,
     batch: { ...BATCH, ...overrides.batch },
     logger: logs.logger,
@@ -152,6 +193,7 @@ function setup(
     store,
     llm,
     sender,
+    credentials,
     scheduler,
     logs,
     processor,
@@ -473,6 +515,7 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
     assert.equal(h.sender.calls.length, 1);
     assert.deepEqual(h.sender.calls[0], {
       phoneNumberId: '555009',
+      accessToken: new SecretString(h.credentials.tokenOf(client.id)),
       to: CONTACT,
       text: ATTENDANCE_FALLBACK_TEXT,
     });
@@ -586,7 +629,12 @@ describe('ChannelInboundProcessor: job que falhou sem passar pelo handler (parad
     await h.processor.handleUnprocessedFailure(textJob(client.id));
 
     assert.deepEqual(h.sender.calls, [
-      { phoneNumberId: '555001', to: CONTACT, text: ATTENDANCE_FALLBACK_TEXT },
+      {
+        phoneNumberId: '555001',
+        accessToken: new SecretString(h.credentials.tokenOf(client.id)),
+        to: CONTACT,
+        text: ATTENDANCE_FALLBACK_TEXT,
+      },
     ]);
     const line = h.logs.lines().find((entry) => String(entry.msg).includes('sem resposta gravada'));
     assert.equal(line?.level, 50);
@@ -1111,7 +1159,12 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
     assert.equal(h.sender.calls.length, 0);
     await assert.rejects(h.processor.process(flush, LAST), (e: unknown) => e === error);
     assert.deepEqual(h.sender.calls, [
-      { phoneNumberId: '555009', to: CONTACT, text: ATTENDANCE_FALLBACK_TEXT },
+      {
+        phoneNumberId: '555009',
+        accessToken: new SecretString(h.credentials.tokenOf(client.id)),
+        to: CONTACT,
+        text: ATTENDANCE_FALLBACK_TEXT,
+      },
     ]);
   });
 
@@ -1171,5 +1224,95 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
     const lines = h.logs.lines().filter((entry) => entry.msg === 'resposta enviada ao contato');
     assert.ok(lines.every((entry) => entry.clientId === client.id));
     assert.ok(lines.length >= 1);
+  });
+});
+
+describe('ChannelInboundProcessor: credencial por cliente (spec 015)', () => {
+  it('cada cliente envia com o token e o número dele, mesmo com mensagens dos dois seguidas', async () => {
+    const h = setup();
+    const a = await newClient(h, 'alfa', '555001');
+    const b = await newClient(h, 'beta', '555002');
+
+    await flow(h, textJob(a.id, { externalId: 'wamid.A' }), MORE);
+    await flow(h, textJob(b.id, { externalId: 'wamid.B' }), MORE);
+
+    assert.equal(h.sender.calls.length, 2);
+    const [first, second] = h.sender.calls;
+    assert.equal(first?.phoneNumberId, '555001');
+    assert.equal(first.accessToken.reveal(), h.credentials.tokenOf(a.id));
+    assert.equal(second?.phoneNumberId, '555002');
+    assert.equal(second.accessToken.reveal(), h.credentials.tokenOf(b.id));
+  });
+
+  it('190 marca TOKEN_INVALID (com a versão), é permanente e não tenta o texto padrão', async () => {
+    const h = setup();
+    h.credentials.tokenVersion = 3;
+    const client = await newClient(h, 'alfa', '555001');
+    h.sender.script(Result.err(permanent(190)));
+
+    await assert.rejects(
+      flow(h, textJob(client.id), MORE),
+      (e: unknown) => e instanceof NonRetryableJobError,
+    );
+
+    assert.deepEqual(h.credentials.marks, [{ clientId: client.id, tokenVersion: 3 }]);
+    assert.equal(h.sender.calls.length, 1, 'sem texto padrão: o token é o mesmo');
+    assert.ok(!h.logs.raw().includes(h.credentials.tokenOf(client.id)));
+  });
+
+  it('o flush seguinte de um cliente TOKEN_INVALID é descartado sem LLM e sem envio; o outro cliente segue', async () => {
+    const h = setup();
+    const a = await newClient(h, 'alfa', '555001');
+    const b = await newClient(h, 'beta', '555002');
+    h.credentials.invalid.add(a.id);
+
+    await h.processor.process(textJob(a.id), MORE);
+    assert.equal(await h.processor.process(flushOf(textJob(a.id)), MORE), 'discarded');
+    assert.equal(h.llm.calls.length, 0);
+    assert.equal(h.sender.calls.length, 0);
+
+    assert.equal(await flow(h, textJob(b.id, { externalId: 'wamid.B' }), MORE), 'done');
+    assert.equal(h.sender.calls[0]?.phoneNumberId, '555002');
+
+    // As mensagens de A seguem pendentes: depois de reconectar, o próximo flush as responde.
+    h.credentials.invalid.delete(a.id);
+    assert.equal(await h.processor.process(flushOf(textJob(a.id)), MORE), 'done');
+    assert.equal(h.llm.calls.length, 2);
+  });
+
+  it('aviso para cliente TOKEN_INVALID é descartado sem enviar', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    h.credentials.invalid.add(client.id);
+    assert.equal(await h.processor.process(noticeJob(client.id), MORE), 'discarded');
+    assert.equal(h.sender.calls.length, 0);
+  });
+
+  it('outro código permanente (janela de 24 h) não muda o estado', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      flow(h, textJob(client.id), MORE),
+      (e: unknown) => e instanceof NonRetryableJobError,
+    );
+    assert.deepEqual(h.credentials.marks, []);
+  });
+
+  it('texto cifrado que não decifra: permanente, sem envio e sem marcar TOKEN_INVALID', async () => {
+    const h = setup();
+    const client = await newClient(h, 'alfa', '555001');
+    const failure = new CredentialDecryptionError('tampered');
+    const original = h.credentials.forClient.bind(h.credentials);
+    let broken = false;
+    h.credentials.forClient = (id) => (broken ? Promise.reject(failure) : original(id));
+    await h.processor.process(textJob(client.id), MORE);
+    broken = true;
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(client.id)), MORE),
+      (e: unknown) => e instanceof NonRetryableJobError,
+    );
+    assert.equal(h.sender.calls.length, 0);
+    assert.deepEqual(h.credentials.marks, []);
   });
 });

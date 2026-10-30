@@ -3,6 +3,8 @@ import { randomBytes } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { ClientService } from '../../application/clients/client.service.js';
+import { ClientId } from '../../domain/index.js';
+import { ConflictError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
@@ -161,11 +163,11 @@ describe('/admin/clients contra o PostgreSQL de testes', () => {
   });
 });
 
-describe('whatsappPhoneNumberId no PATCH /admin/clients/:id, contra o banco (spec 011)', () => {
+describe('whatsappPhoneNumberId: único no banco e fora do PATCH (specs 011 e 015)', () => {
   const phoneNumber = (): string =>
     `8${randomBytes(6).readUIntBE(0, 6).toString().padStart(15, '0')}`;
 
-  it('define, devolve, limpa; número já usado por outro cliente é 409 e o @unique do banco é a barreira', async () => {
+  it('o PATCH recusa o campo (400); o @unique do banco continua sendo a barreira entre clientes', async () => {
     const first = (await post({ name: 'WA um', slug: slug('wa1') })).json<ClientBody>();
     const second = (await post({ name: 'WA dois', slug: slug('wa2') })).json<ClientBody>();
     tenants.track(first.id);
@@ -173,31 +175,26 @@ describe('whatsappPhoneNumberId no PATCH /admin/clients/:id, contra o banco (spe
     const number = phoneNumber();
     const patch = (id: string, payload: object): Promise<LightMyRequestResponse> =>
       app.inject({ method: 'PATCH', url: `/admin/clients/${id}`, headers: auth, payload });
+    assert.equal((await patch(first.id, { whatsappPhoneNumberId: number })).statusCode, 400);
 
-    const set = await patch(first.id, { whatsappPhoneNumberId: number });
-    assert.equal(set.statusCode, 200);
-    assert.equal(set.json<{ whatsappPhoneNumberId: string }>().whatsappPhoneNumberId, number);
+    // O número só entra pelo repositório (o canal do cliente, spec 015, o usa numa transação).
+    const repository = new PrismaClientRepository(database.prisma);
+    const firstId = ClientId.parse(first.id);
+    const secondId = ClientId.parse(second.id);
+    await repository.update(firstId, { whatsappPhoneNumberId: number });
     const read = await app.inject({
       method: 'GET',
       url: `/admin/clients/${first.id}`,
       headers: auth,
     });
     assert.equal(read.json<{ whatsappPhoneNumberId: string }>().whatsappPhoneNumberId, number);
-
-    assert.equal((await patch(second.id, { whatsappPhoneNumberId: number })).statusCode, 409);
-    assert.equal((await patch(second.id, { whatsappPhoneNumberId: 'abc' })).statusCode, 400);
-    // Pedidos simultâneos para o mesmo número: um 200 e o outro 409.
-    const other = phoneNumber();
-    const results = await Promise.all([
-      patch(first.id, { whatsappPhoneNumberId: other }),
-      patch(second.id, { whatsappPhoneNumberId: other }),
-    ]);
-    assert.deepEqual(results.map((r) => r.statusCode).sort(), [200, 409]);
-
-    const cleared = await patch(first.id, { whatsappPhoneNumberId: null });
-    assert.equal(cleared.json<{ whatsappPhoneNumberId: null }>().whatsappPhoneNumberId, null);
+    await assert.rejects(
+      repository.update(secondId, { whatsappPhoneNumberId: number }),
+      (error: unknown) => error instanceof ConflictError,
+    );
     // Remover o cliente libera o número para outro.
-    await app.inject({ method: 'DELETE', url: `/admin/clients/${second.id}`, headers: auth });
-    assert.equal((await patch(first.id, { whatsappPhoneNumberId: other })).statusCode, 200);
+    await app.inject({ method: 'DELETE', url: `/admin/clients/${first.id}`, headers: auth });
+    const moved = await repository.update(secondId, { whatsappPhoneNumberId: number });
+    assert.equal(moved.whatsappPhoneNumberId, number);
   });
 });

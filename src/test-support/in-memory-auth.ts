@@ -208,7 +208,7 @@ export class InMemoryAuditRepository implements AuditRepository {
       clientId,
       action: data.action,
       actorUserId: data.actorUserId,
-      targetUserId: data.targetUserId,
+      targetUserId: data.targetUserId ?? null,
       fromRole: data.fromRole ?? null,
       toRole: data.toRole ?? null,
       createdAt: new Date(),

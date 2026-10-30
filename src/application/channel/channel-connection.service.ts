@@ -1,0 +1,351 @@
+import type { FastifyBaseLogger } from 'fastify';
+import {
+  type AuditAction,
+  type ChannelConnection,
+  type ChannelConnectionRepository,
+  type Client,
+  type ClientId,
+  type ClientRepository,
+  hasPermission,
+  type Permission,
+} from '../../domain/index.js';
+import type { Metrics } from '../../infrastructure/metrics/index.js';
+import {
+  ConflictError,
+  ExternalServiceError,
+  ForbiddenError,
+  ValidationError,
+} from '../../shared/errors/index.js';
+import { SecretString } from '../../shared/types/index.js';
+import type { UserIdentity } from '../auth/identity.js';
+import type { ChannelUnitOfWork } from '../ports/channel-unit-of-work.js';
+import {
+  type ChannelProvisionError,
+  type ChannelProvisioner,
+} from '../ports/channel-provisioner.js';
+import type { CredentialCipher } from '../ports/credential-cipher.js';
+
+/** Escopos que todo token do canal precisa ter (spec 015). */
+const REQUIRED_SCOPES = ['whatsapp_business_messaging', 'whatsapp_business_management'] as const;
+
+/** Códigos fixos dos 400/409 do canal; as mensagens são constantes (nunca ecoam entrada nem a Meta). */
+export const CHANNEL_ERRORS = {
+  CHANNEL_TOKEN_REJECTED: 'O token informado foi recusado pela Meta',
+  CHANNEL_WRONG_APP: 'O token não pertence ao aplicativo do Soprei',
+  CHANNEL_MISSING_SCOPE: 'O token não tem as permissões necessárias do WhatsApp',
+  CHANNEL_NUMBER_NOT_IN_WABA: 'O número informado não pertence à conta WhatsApp Business do token',
+  CHANNEL_NUMBER_IN_USE: 'Este número já está conectado a outro cliente',
+} as const;
+export type ChannelErrorCode = keyof typeof CHANNEL_ERRORS;
+
+type MetricResult =
+  | 'ok'
+  | 'invalid_token'
+  | 'wrong_app'
+  | 'missing_scope'
+  | 'number_not_in_waba'
+  | 'number_in_use'
+  | 'graph_error';
+
+const RESULT_BY_CODE: Readonly<Record<ChannelErrorCode, MetricResult>> = {
+  CHANNEL_TOKEN_REJECTED: 'invalid_token',
+  CHANNEL_WRONG_APP: 'wrong_app',
+  CHANNEL_MISSING_SCOPE: 'missing_scope',
+  CHANNEL_NUMBER_NOT_IN_WABA: 'number_not_in_waba',
+  CHANNEL_NUMBER_IN_USE: 'number_in_use',
+};
+
+export type ChannelState = 'NOT_CONNECTED' | 'CONNECTED' | 'TOKEN_INVALID' | 'LEGACY';
+
+/** O que a API devolve do canal: nunca o token, o texto cifrado nem a chave. */
+export interface ChannelStateView {
+  readonly state: ChannelState;
+  readonly phoneNumberId: string | null;
+  readonly wabaId: string | null;
+  readonly tokenExpiresAt: Date | null;
+  readonly connectedAt: Date | null;
+  readonly tokenInvalidAt: Date | null;
+}
+
+export interface ConnectChannelInput {
+  readonly phoneNumberId: string;
+  readonly wabaId: string;
+  readonly accessToken: string;
+}
+
+export interface ChannelConnectionServiceDeps {
+  readonly clients: Pick<ClientRepository, 'findById'>;
+  readonly connections: Pick<ChannelConnectionRepository, 'find'>;
+  readonly unitOfWork: ChannelUnitOfWork;
+  readonly cipher: CredentialCipher;
+  readonly provisioner: ChannelProvisioner;
+  /** `WHATSAPP_APP_ID`: todo token precisa pertencer a este app. */
+  readonly appId: string;
+  readonly logger: FastifyBaseLogger;
+  readonly metrics?: Pick<Metrics, 'countChannelConnection' | 'countAuthzDenial'> | undefined;
+}
+
+interface PendingAudit {
+  readonly action: AuditAction;
+}
+
+function toView(client: Client, connection: ChannelConnection | null): ChannelStateView {
+  const number = client.whatsappPhoneNumberId;
+  if (connection === null) {
+    return {
+      state: number === null ? 'NOT_CONNECTED' : 'LEGACY',
+      phoneNumberId: number,
+      wabaId: null,
+      tokenExpiresAt: null,
+      connectedAt: null,
+      tokenInvalidAt: null,
+    };
+  }
+  return {
+    state: connection.status,
+    phoneNumberId: number,
+    wabaId: connection.wabaId,
+    tokenExpiresAt: connection.tokenExpiresAt,
+    connectedAt: connection.createdAt,
+    tokenInvalidAt: connection.tokenInvalidAt,
+  };
+}
+
+/**
+ * Conexão do canal WhatsApp do próprio cliente (spec 015): estado, conectar ou trocar o token
+ * (`PUT`) e desconectar. O `ClientId` vem sempre do ator (token de acesso). Antes de gravar, prova a
+ * posse do número com o **token do próprio cliente** (`debug_token` com `app_id` fixo, escopos, lista
+ * de números da WABA e `subscribed_apps`); a gravação (cifra, conexão, número do cliente e
+ * auditoria) é uma transação com o cliente travado. **Nunca** loga nem devolve token, texto cifrado,
+ * número ou WABA: só ids internos e enums.
+ */
+export class ChannelConnectionService {
+  constructor(private readonly deps: ChannelConnectionServiceDeps) {}
+
+  async getState(actor: UserIdentity): Promise<ChannelStateView> {
+    this.requirePermission(actor, 'channel:read');
+    const [client, connection] = await Promise.all([
+      this.deps.clients.findById(actor.clientId),
+      this.deps.connections.find(actor.clientId),
+    ]);
+    return toView(client, connection);
+  }
+
+  /** Conecta ou troca o token (idempotente; também reconecta depois de `TOKEN_INVALID`). */
+  async connect(actor: UserIdentity, input: ConnectChannelInput): Promise<ChannelStateView> {
+    this.requirePermission(actor, 'channel:manage');
+    const existing = await this.deps.connections.find(actor.clientId);
+    const action = existing === null ? 'connect' : 'replace_token';
+    const token = new SecretString(input.accessToken);
+    try {
+      const expiresAt = await this.proveOwnership(token, input);
+      const outcome = await this.persist(actor, input, token, expiresAt);
+      this.afterCommit(actor, [{ action: outcome.audit }]);
+      this.count(action, 'ok');
+      return outcome.view;
+    } catch (error) {
+      this.count(action, resultOf(error));
+      throw error;
+    }
+  }
+
+  /** Desconecta (idempotente): apaga a conexão, limpa o número e audita; o `unsubscribe` é melhor esforço. */
+  async disconnect(actor: UserIdentity): Promise<void> {
+    this.requirePermission(actor, 'channel:manage');
+    const outcome = await this.deps.unitOfWork.run(async (tx) => {
+      await tx.lockClient(actor.clientId);
+      const client = await tx.clients.findById(actor.clientId);
+      const connection = await tx.connections.find(actor.clientId);
+      // Nada a desconectar (segundo DELETE): sem mudança e sem evento.
+      if (connection === null && client.whatsappPhoneNumberId === null) {
+        return { changed: false as const };
+      }
+      if (connection !== null) await tx.connections.removeByClient(actor.clientId);
+      if (client.whatsappPhoneNumberId !== null) {
+        await tx.clients.update(actor.clientId, { whatsappPhoneNumberId: null });
+      }
+      await tx.audit.create(actor.clientId, {
+        action: 'CHANNEL_DISCONNECTED',
+        actorUserId: actor.userId,
+      });
+      return {
+        changed: true as const,
+        old:
+          connection === null
+            ? undefined
+            : { wabaId: connection.wabaId, ciphertext: connection.tokenCiphertext },
+      };
+    });
+    if (!outcome.changed) return;
+    this.afterCommit(actor, [{ action: 'CHANNEL_DISCONNECTED' }]);
+    this.count('disconnect', 'ok');
+    if (outcome.old !== undefined) await this.unsubscribe(actor.clientId, outcome.old);
+  }
+
+  // --- internos ---
+
+  private requirePermission(actor: UserIdentity, permission: Permission): void {
+    if (hasPermission(actor.role, permission)) return;
+    this.deps.logger.warn(
+      { actorUserId: actor.userId, role: actor.role, permission },
+      'operação do canal negada pela permissão',
+    );
+    throw new ForbiddenError();
+  }
+
+  /**
+   * Prova de posse com o token do cliente, antes de gravar qualquer coisa. Devolve a validade
+   * informada pela Meta (`null` = não expira).
+   */
+  private async proveOwnership(
+    token: SecretString,
+    input: ConnectChannelInput,
+  ): Promise<Date | null> {
+    const inspected = await this.deps.provisioner.inspectToken(token);
+    if (!inspected.ok) throw this.providerFailure(inspected.error);
+    const inspection = inspected.value;
+    if (!inspection.isValid) throw channelError('CHANNEL_TOKEN_REJECTED');
+    if (inspection.appId !== this.deps.appId) throw channelError('CHANNEL_WRONG_APP');
+    if (!REQUIRED_SCOPES.every((scope) => inspection.scopes.includes(scope))) {
+      throw channelError('CHANNEL_MISSING_SCOPE');
+    }
+    if (
+      inspection.wabaTargetIds !== undefined &&
+      !inspection.wabaTargetIds.includes(input.wabaId)
+    ) {
+      throw channelError('CHANNEL_NUMBER_NOT_IN_WABA');
+    }
+
+    const numbers = await this.deps.provisioner.listPhoneNumberIds(input.wabaId, token);
+    if (!numbers.ok) throw this.providerFailure(numbers.error);
+    if (!numbers.value.includes(input.phoneNumberId)) {
+      throw channelError('CHANNEL_NUMBER_NOT_IN_WABA');
+    }
+
+    const subscribed = await this.deps.provisioner.subscribeApp(input.wabaId, token);
+    if (!subscribed.ok) throw this.providerFailure(subscribed.error);
+    return inspection.expiresAt;
+  }
+
+  /** Cifra e grava, numa transação com o cliente travado: conexão, número e auditoria juntos. */
+  private async persist(
+    actor: UserIdentity,
+    input: ConnectChannelInput,
+    token: SecretString,
+    expiresAt: Date | null,
+  ): Promise<{ readonly audit: AuditAction; readonly view: ChannelStateView }> {
+    const ciphertext = this.deps.cipher.encrypt(actor.clientId, token);
+    try {
+      return await this.deps.unitOfWork.run(async (tx) => {
+        await tx.lockClient(actor.clientId);
+        const saved = await tx.connections.save(actor.clientId, {
+          wabaId: input.wabaId,
+          tokenCiphertext: ciphertext,
+          tokenExpiresAt: expiresAt,
+        });
+        const client = await tx.clients.update(actor.clientId, {
+          whatsappPhoneNumberId: input.phoneNumberId,
+        });
+        const audit: AuditAction = saved.replaced ? 'CHANNEL_TOKEN_REPLACED' : 'CHANNEL_CONNECTED';
+        await tx.audit.create(actor.clientId, { action: audit, actorUserId: actor.userId });
+        return { audit, view: toView(client, saved.connection) };
+      });
+    } catch (error) {
+      // O `@unique` de `whatsappPhoneNumberId` decide a corrida; a transação inteira foi desfeita.
+      if (error instanceof ConflictError) throw channelConflict();
+      throw error;
+    }
+  }
+
+  /** Erro da Meta vira 400 com código fixo (token ou posse) ou 502 genérico; nunca o corpo da Meta. */
+  private providerFailure(error: ChannelProvisionError): Error {
+    this.deps.logger.warn(
+      {
+        operation: error.operation,
+        reason: error.reason,
+        retryable: error.retryable,
+        httpStatus: error.httpStatus,
+        providerCode: error.providerCode,
+      },
+      'consulta ao provedor do canal falhou',
+    );
+    const unavailable = (): ExternalServiceError =>
+      new ExternalServiceError('Provedor do canal indisponível', {
+        context: { operation: error.operation },
+      });
+    if (error.operation === 'inspect_token') return unavailable();
+    if (error.retryable || error.reason !== 'http_error') return unavailable();
+    if (error.providerCode === 190 || error.httpStatus === 401) {
+      return channelError('CHANNEL_TOKEN_REJECTED');
+    }
+    return channelError(
+      error.operation === 'list_numbers' ? 'CHANNEL_NUMBER_NOT_IN_WABA' : 'CHANNEL_MISSING_SCOPE',
+    );
+  }
+
+  private async unsubscribe(
+    clientId: ClientId,
+    old: { readonly wabaId: string; readonly ciphertext: string },
+  ): Promise<void> {
+    try {
+      const token = this.deps.cipher.decrypt(clientId, old.ciphertext);
+      const result = await this.deps.provisioner.unsubscribeApp(old.wabaId, token);
+      if (result.ok) return;
+      this.deps.logger.warn(
+        { clientId, operation: result.error.operation, httpStatus: result.error.httpStatus },
+        'não foi possível desassinar o app da WABA depois de desconectar',
+      );
+    } catch {
+      this.deps.logger.warn(
+        { clientId },
+        'não foi possível desassinar o app da WABA depois de desconectar',
+      );
+    }
+    this.count('disconnect', 'unsubscribe_failed');
+  }
+
+  private afterCommit(actor: UserIdentity, events: readonly PendingAudit[]): void {
+    for (const event of events) {
+      this.deps.logger.info(
+        {
+          event: 'audit',
+          action: event.action,
+          clientId: actor.clientId,
+          actorUserId: actor.userId,
+        },
+        'audit',
+      );
+    }
+  }
+
+  private count(
+    action: 'connect' | 'replace_token' | 'embedded_signup' | 'disconnect',
+    result: MetricResult | 'unsubscribe_failed',
+  ): void {
+    try {
+      this.deps.metrics?.countChannelConnection(action, result);
+    } catch {
+      // Métrica é acessório.
+    }
+  }
+}
+
+function channelError(code: ChannelErrorCode): ValidationError {
+  return new ValidationError(CHANNEL_ERRORS[code], { code });
+}
+
+function channelConflict(): ConflictError {
+  return new ConflictError(CHANNEL_ERRORS.CHANNEL_NUMBER_IN_USE, {
+    code: 'CHANNEL_NUMBER_IN_USE',
+  });
+}
+
+function resultOf(error: unknown): MetricResult {
+  if (error instanceof ValidationError && error.code in RESULT_BY_CODE) {
+    return RESULT_BY_CODE[error.code as ChannelErrorCode];
+  }
+  if (error instanceof ConflictError && error.code === 'CHANNEL_NUMBER_IN_USE') {
+    return 'number_in_use';
+  }
+  return 'graph_error';
+}

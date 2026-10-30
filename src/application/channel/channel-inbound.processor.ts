@@ -1,7 +1,19 @@
 import { ZodError } from 'zod';
-import { ClientId, type ClientRepository, type MessageRepository } from '../../domain/index.js';
+import {
+  type ChannelConnectionRepository,
+  ClientId,
+  type ClientRepository,
+  type MessageRepository,
+} from '../../domain/index.js';
+import type { Metrics } from '../../infrastructure/metrics/index.js';
 import type { ExternalServiceError } from '../../shared/errors/index.js';
-import { ForbiddenError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
+import {
+  CredentialDecryptionError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../../shared/errors/index.js';
+import type { SecretString } from '../../shared/types/index.js';
 import { messageRef } from '../../shared/utils/index.js';
 import { describeError } from './describe-error.js';
 import type {
@@ -11,6 +23,7 @@ import type {
 } from '../attendance/attendance.service.js';
 import { ATTENDANCE_FALLBACK_TEXT } from '../attendance/attendance.service.js';
 import type { BatchLimits, InboundMessage } from '../attendance/attendance.schemas.js';
+import type { ChannelCredentials } from '../ports/channel-credentials.js';
 import {
   type ChannelJob,
   type FlushJob,
@@ -56,6 +69,14 @@ export interface ChannelInboundProcessorDeps {
   readonly clients: Pick<ClientRepository, 'findById'>;
   readonly messages: Pick<MessageRepository, 'markSent' | 'findByExternalId' | 'findReplyTo'>;
   readonly sender: MessageSender;
+  /**
+   * Número, token e estado da credencial do cliente, lidos do banco pelo `clientId` do job a cada
+   * envio (spec 015). Nunca vêm do payload nem do job.
+   */
+  readonly credentials: ChannelCredentials;
+  /** Marca `TOKEN_INVALID` (condicional à `tokenVersion`) quando o envio é recusado com 190. */
+  readonly connections: Pick<ChannelConnectionRepository, 'markTokenInvalid'>;
+  readonly metrics?: Pick<Metrics, 'countChannelStateTransition'> | undefined;
   /** Agenda o `flush` do contato (e o próximo, quando sobra pendente). */
   readonly queue: Pick<InboundJobQueue, 'scheduleFlush'>;
   readonly batch: ChannelBatchSettings;
@@ -212,6 +233,12 @@ export class ChannelInboundProcessor {
     context: InboundJobContext,
   ): Promise<InboundJobOutcome> {
     const refs = refFields(job);
+    // Credencial recusada pela Meta (`TOKEN_INVALID`): nada a responder e nenhuma chamada ao LLM; as
+    // mensagens seguem pendentes e a próxima do contato, depois de reconectar, as responde juntas.
+    if (await this.isTokenInvalid(clientId)) {
+      this.logTokenInvalid(clientId, job);
+      return 'discarded';
+    }
     let response: PendingResponse;
     try {
       response = await this.deps.attendance.respondToPending(
@@ -346,20 +373,25 @@ export class ChannelInboundProcessor {
   ): Promise<{ kind: 'sent'; channelMessageId: string } | { kind: 'discarded' }> {
     const target = await this.resolvePhoneNumber(clientId, job);
     if (target.kind === 'suspended') return { kind: 'discarded' };
+    if (target.kind === 'token_invalid') {
+      this.logTokenInvalid(clientId, job);
+      return { kind: 'discarded' };
+    }
     if (target.kind === 'none') {
       this.deps.logger.error(
         { clientId, ...refFields(job) },
-        'cliente sem número do canal; mensagem não enviada',
+        'cliente sem número ou sem credencial do canal; mensagem não enviada',
       );
       return { kind: 'discarded' };
     }
     const sent = await this.deps.sender.sendText({
       phoneNumberId: target.phoneNumberId,
+      accessToken: target.token,
       to: job.contactRef,
       text,
     });
     if (sent.ok) return { kind: 'sent', channelMessageId: sent.value.channelMessageId };
-    throw this.classifySendFailure(clientId, job, sent.error);
+    throw await this.classifySendFailure(clientId, job, sent.error, target.tokenVersion);
   }
 
   /** Cliente suspenso não recebe nada do canal: nem resposta, nem aviso, nem texto padrão. */
@@ -371,17 +403,24 @@ export class ChannelInboundProcessor {
   }
 
   /**
-   * O que o envio precisa saber do cliente, lido do banco pelo `clientId` do job: o número do canal,
-   * ou que não há número, ou que o cliente está suspenso (nada se envia). Cliente removido e número
-   * trocado desde o enfileiramento lançam `NonRetryableJobError`.
+   * O que o envio precisa do cliente, lido do banco pelo `clientId` do job: número, token e versão
+   * (spec 015), ou que não há credencial, ou que o cliente está suspenso (nada se envia) ou com o
+   * token recusado. Cliente removido, número trocado desde o enfileiramento e texto cifrado que não
+   * decifra lançam `NonRetryableJobError`.
    */
   private async resolvePhoneNumber(
     clientId: ClientId,
     job: ChannelJob,
   ): Promise<
-    | { readonly kind: 'number'; readonly phoneNumberId: string }
+    | {
+        readonly kind: 'number';
+        readonly phoneNumberId: string;
+        readonly token: SecretString;
+        readonly tokenVersion: number | 'legacy';
+      }
     | { readonly kind: 'none' }
     | { readonly kind: 'suspended' }
+    | { readonly kind: 'token_invalid' }
   > {
     try {
       const client = await this.deps.clients.findById(clientId);
@@ -391,17 +430,22 @@ export class ChannelInboundProcessor {
       }
       const current = client.whatsappPhoneNumberId;
       if (current !== null && current !== job.phoneNumberId) {
-        // O número do cliente mudou desde que a mensagem entrou (ou o job foi adulterado): quem
-        // recebeu a mensagem não é mais o número deste cliente. Nada é enviado. Sem números em log.
-        this.deps.logger.error(
-          { clientId, ...refFields(job), jobKind: job.kind },
-          'o número do cliente mudou desde o enfileiramento; mensagem descartada sem envio',
-        );
-        throw new NonRetryableJobError('Número do cliente diferente do número do job', {
-          context: { clientId, ...refFields(job) },
-        });
+        throw this.numberChanged(clientId, job);
       }
-      return current === null ? { kind: 'none' } : { kind: 'number', phoneNumberId: current };
+      if (current === null) return { kind: 'none' };
+      const credentials = await this.deps.credentials.forClient(clientId);
+      if (credentials.kind === 'token_invalid') return { kind: 'token_invalid' };
+      if (credentials.kind === 'none') return { kind: 'none' };
+      // O número pode ter mudado entre as duas leituras: o par token/número tem de ser o do job.
+      if (credentials.phoneNumberId !== job.phoneNumberId) {
+        throw this.numberChanged(clientId, job);
+      }
+      return {
+        kind: 'number',
+        phoneNumberId: credentials.phoneNumberId,
+        token: credentials.token,
+        tokenVersion: credentials.tokenVersion,
+      };
     } catch (error) {
       if (error instanceof NotFoundError) {
         // Cliente removido depois de enfileirar: não há por onde responder.
@@ -410,16 +454,87 @@ export class ChannelInboundProcessor {
           context: { clientId, ...refFields(job) },
         });
       }
+      if (error instanceof CredentialDecryptionError) {
+        // Falha nossa (chave ausente, texto adulterado ou de outro cliente): sem retentativa, sem
+        // texto cifrado em log (o erro só carrega `reason`) e sem marcar o token como inválido.
+        this.deps.logger.error(
+          { clientId, ...refFields(job), reason: error.reason },
+          'credencial do canal não pôde ser decifrada; mensagem não enviada',
+        );
+        throw new NonRetryableJobError('Credencial do canal não pôde ser decifrada', {
+          context: { clientId, ...refFields(job), reason: error.reason },
+        });
+      }
       throw error;
     }
   }
 
-  private classifySendFailure(
+  private numberChanged(clientId: ClientId, job: ChannelJob): NonRetryableJobError {
+    // O número do cliente mudou desde que a mensagem entrou (ou o job foi adulterado): quem recebeu
+    // a mensagem não é mais o número deste cliente. Nada é enviado. Sem números em log.
+    this.deps.logger.error(
+      { clientId, ...refFields(job), jobKind: job.kind },
+      'o número do cliente mudou desde o enfileiramento; mensagem descartada sem envio',
+    );
+    return new NonRetryableJobError('Número do cliente diferente do número do job', {
+      context: { clientId, ...refFields(job) },
+    });
+  }
+
+  /** A credencial do cliente está `TOKEN_INVALID`? Qualquer falha de leitura vale como "não". */
+  private async isTokenInvalid(clientId: ClientId): Promise<boolean> {
+    try {
+      return (await this.deps.credentials.forClient(clientId)).kind === 'token_invalid';
+    } catch {
+      return false;
+    }
+  }
+
+  private logTokenInvalid(clientId: ClientId, job: ChannelJob): void {
+    this.deps.logger.warn(
+      { clientId, ...refFields(job), jobKind: job.kind },
+      'credencial do canal recusada pela Meta (TOKEN_INVALID); nada é enviado e o job é descartado',
+    );
+  }
+
+  /** Erro 190 (token inválido) com conexão própria: marca `TOKEN_INVALID`, condicional à versão. */
+  private async markTokenInvalid(
+    clientId: ClientId,
+    tokenVersion: number | 'legacy',
+  ): Promise<void> {
+    if (tokenVersion === 'legacy') return;
+    try {
+      const marked = await this.deps.connections.markTokenInvalid(
+        clientId,
+        tokenVersion,
+        this.now(),
+      );
+      if (marked) {
+        this.deps.logger.warn({ clientId }, 'conexão do canal marcada como TOKEN_INVALID');
+        try {
+          this.deps.metrics?.countChannelStateTransition('token_invalid');
+        } catch {
+          // Métrica é acessório.
+        }
+      }
+    } catch (error) {
+      this.deps.logger.error(
+        { clientId, ...describeError(error) },
+        'não foi possível marcar a conexão como TOKEN_INVALID',
+      );
+    }
+  }
+
+  private async classifySendFailure(
     clientId: ClientId,
     job: ChannelJob,
     error: ExternalServiceError,
-  ): Error {
+    tokenVersion: number | 'legacy',
+  ): Promise<Error> {
     if (isRetryableSendError(error)) return error;
+    if (error instanceof MessageSendError && error.providerCode === TOKEN_INVALID_CODE) {
+      await this.markTokenInvalid(clientId, tokenVersion);
+    }
     this.deps.logger.error(
       {
         clientId,
@@ -483,15 +598,27 @@ export class ChannelInboundProcessor {
       const target = await this.resolvePhoneNumber(clientId, job);
       // Suspenso: já logado em `resolvePhoneNumber`; nem o texto padrão sai.
       if (target.kind === 'suspended') return;
+      if (target.kind === 'token_invalid') {
+        this.logTokenInvalid(clientId, job);
+        return;
+      }
       if (target.kind === 'none') {
         this.deps.logger.warn({ clientId, ...refs }, 'sem número do canal para o texto padrão');
         return;
       }
       const sent = await this.deps.sender.sendText({
         phoneNumberId: target.phoneNumberId,
+        accessToken: target.token,
         to: job.contactRef,
         text: ATTENDANCE_FALLBACK_TEXT,
       });
+      if (
+        !sent.ok &&
+        sent.error instanceof MessageSendError &&
+        sent.error.providerCode === TOKEN_INVALID_CODE
+      ) {
+        await this.markTokenInvalid(clientId, target.tokenVersion);
+      }
       if (sent.ok) {
         this.deps.logger.info({ clientId, ...refs }, 'texto padrão enviado ao contato');
       } else {
@@ -515,6 +642,9 @@ export class ChannelInboundProcessor {
 }
 
 /** Erro que repetir não resolve: cliente removido, entrada inválida (bug do enfileirador). O cliente suspenso (`ForbiddenError`) nem chega aqui: o job é descartado sem envio. */
+/** Código do Graph para token inválido ou expirado (OAuthException 190). */
+const TOKEN_INVALID_CODE = 190;
+
 function isPermanentAttendanceError(error: unknown): boolean {
   return (
     error instanceof NotFoundError || error instanceof ValidationError || error instanceof ZodError

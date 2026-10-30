@@ -22,6 +22,7 @@ import { FakeGraphApi, graphError } from '../../test-support/fake-graph-api.js';
 import { getClosedPort, withPort } from '../../test-support/closed-port.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
+import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
@@ -163,6 +164,7 @@ async function start(setup: Setup = {}): Promise<Harness> {
     hasPendingMessages: (clientId, contactRef) =>
       attendance.hasPendingMessages(clientId, contactRef),
   };
+  const stack = buildChannelCredentials(prisma, { legacyToken: ACCESS_TOKEN, metrics });
   const processor = new ChannelInboundProcessor({
     attendance: { ...attendance_, ...setup.wrapAttendance?.(attendance_) },
     queue: queue.queue,
@@ -170,10 +172,12 @@ async function start(setup: Setup = {}): Promise<Harness> {
     batch: { windowMs: 0, maxWaitMs: 0, maxMessages: 10, maxChars: 8_000 },
     clients,
     messages,
+    // Clientes de teste só têm número (sem conexão): são `LEGACY` e usam o token global.
+    credentials: stack.credentials,
+    connections: stack.connections,
     sender: new WhatsappCloudApiClient({
       baseUrl: graph.baseUrl,
       graphApiVersion: VERSION,
-      accessToken: ACCESS_TOKEN,
       timeoutMs: 300,
       metrics,
     }),

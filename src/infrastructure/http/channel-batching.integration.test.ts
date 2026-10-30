@@ -17,6 +17,7 @@ import { Result } from '../../shared/types/index.js';
 import { FakeGraphApi } from '../../test-support/fake-graph-api.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
+import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
@@ -135,14 +136,17 @@ async function start(
     metrics,
     options: { llmTimeoutMs: 5_000, inFlightTimeoutMs: 60_000 },
   });
+  const stack = buildChannelCredentials(prisma, { legacyToken: ACCESS_TOKEN, metrics });
   const processor = new ChannelInboundProcessor({
     attendance,
     clients,
     messages,
+    // Clientes de teste só têm número (sem conexão): são `LEGACY` e usam o token global.
+    credentials: stack.credentials,
+    connections: stack.connections,
     sender: new WhatsappCloudApiClient({
       baseUrl: graph.baseUrl,
       graphApiVersion: VERSION,
-      accessToken: ACCESS_TOKEN,
       timeoutMs: 1_000,
       metrics,
     }),

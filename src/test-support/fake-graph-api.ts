@@ -9,7 +9,29 @@ export interface GraphRequest {
   readonly headers: IncomingHttpHeaders;
   /** Corpo JSON interpretado (ou `undefined` se não era JSON). */
   readonly body: unknown;
+  /** Operação reconhecida (spec 015): `messages`, `debug_token`, `phone_numbers`, `subscribe`, `unsubscribe`. */
+  readonly operation: GraphOperation | undefined;
+  /** Parâmetros da query string (o `input_token` do `debug_token` vem aqui). */
+  readonly query: Readonly<Record<string, string>>;
 }
+
+export type GraphOperation =
+  'messages' | 'debug_token' | 'phone_numbers' | 'subscribe' | 'unsubscribe';
+
+/** Um token que o servidor falso conhece (spec 015). */
+export interface FakeToken {
+  readonly appId: string;
+  readonly scopes: readonly string[];
+  /** WABAs que o token enxerga (e que aparecem em `granular_scopes.target_ids`). */
+  readonly wabaIds: readonly string[];
+  readonly valid?: boolean;
+  /** Epoch em segundos; 0 ou ausente = não expira. */
+  readonly expiresAt?: number;
+  /** Se `false`, o `debug_token` não devolve `granular_scopes`. */
+  readonly granular?: boolean;
+}
+
+export const FULL_SCOPES = ['whatsapp_business_messaging', 'whatsapp_business_management'] as const;
 
 /** Como o servidor responde a um pedido. */
 export type GraphBehavior =
@@ -50,6 +72,13 @@ export class FakeGraphApi {
   private scripted: GraphBehavior[] = [];
   private fallback: GraphBehavior | undefined;
   private baseUrlValue = '';
+  private readonly tokens = new Map<string, FakeToken>();
+  private readonly wabas = new Map<string, string[]>();
+  private readonly operationScripts = new Map<GraphOperation, GraphBehavior[]>();
+  /** Token de app esperado no `debug_token` (`app_id|app_secret`); se definido, outro valor é recusado. */
+  expectedAppToken: string | undefined;
+  /** WABAs com o app assinado (`subscribed_apps`). */
+  readonly subscribed = new Set<string>();
   /** Bytes que o modo `flood` escreveu e se o cliente fechou a conexão antes do fim do teste. */
   floodBytesWritten = 0;
   floodClosedByClient = false;
@@ -72,6 +101,9 @@ export class FakeGraphApi {
         const raw = Buffer.concat(chunks).toString('utf8');
         const path = request.url ?? '';
         const match = /^\/([^/]+)\/([^/]+)\/messages$/.exec(path);
+        const url = new URL(path, 'http://fake.local');
+        const query = Object.fromEntries(url.searchParams.entries());
+        const operation = operationOf(request.method ?? '', url.pathname);
         let body: unknown;
         try {
           body = raw === '' ? undefined : (JSON.parse(raw) as unknown);
@@ -85,8 +117,15 @@ export class FakeGraphApi {
           phoneNumberId: match?.[2],
           headers: request.headers,
           body,
+          operation,
+          query,
         });
-        const behavior = this.scripted.shift() ?? this.fallback ?? this.success();
+        const behavior =
+          (operation === undefined ? undefined : this.operationScripts.get(operation)?.shift()) ??
+          this.scripted.shift() ??
+          this.fallback ??
+          this.channelBehavior(operation, url.pathname, request.headers.authorization, query) ??
+          this.success();
         if (behavior.kind === 'hang') return;
         if (behavior.kind === 'flood') {
           response.writeHead(behavior.status, { 'content-type': 'application/json' });
@@ -154,7 +193,106 @@ export class FakeGraphApi {
     this.fallback = behavior;
   }
 
+  /** Registra um token que o `debug_token` e as consultas com `Authorization: Bearer <token>` reconhecem. */
+  addToken(token: string, info: FakeToken): void {
+    this.tokens.set(token, info);
+  }
+
+  /** Números (`phone_number_id`) de uma WABA, devolvidos por `GET /{waba}/phone_numbers`. */
+  addWaba(wabaId: string, phoneNumberIds: readonly string[]): void {
+    this.wabas.set(wabaId, [...phoneNumberIds]);
+  }
+
+  /** Os próximos `count` pedidos da `operation` recebem `behavior` (antes de qualquer outro roteiro). */
+  failOperation(operation: GraphOperation, behavior: GraphBehavior, count = 1): void {
+    const list = this.operationScripts.get(operation) ?? [];
+    for (let i = 0; i < count; i += 1) list.push(behavior);
+    this.operationScripts.set(operation, list);
+  }
+
+  /** Pedidos de uma operação, na ordem. */
+  ofOperation(operation: GraphOperation): GraphRequest[] {
+    return this.requests.filter((request) => request.operation === operation);
+  }
+
+  /** O par (`Authorization`, número) de cada envio de mensagem, para provar o isolamento de token. */
+  sendPairs(): { authorization: string | undefined; phoneNumberId: string | undefined }[] {
+    return this.ofOperation('messages').map((request) => ({
+      authorization: request.headers.authorization,
+      phoneNumberId: request.phoneNumberId,
+    }));
+  }
+
+  /** Comportamento de administração do canal (spec 015); `undefined` = não é uma operação dela. */
+  private channelBehavior(
+    operation: GraphOperation | undefined,
+    pathname: string,
+    authorization: string | undefined,
+    query: Readonly<Record<string, string>>,
+  ): GraphBehavior | undefined {
+    const bearer = authorization?.replace(/^Bearer /, '');
+    // O corpo de erro ECOA o token de propósito: o cliente nunca pode repassá-lo.
+    const echo = `eco: ${authorization ?? ''} ${query.input_token ?? ''}`;
+    const fail = (status: number, code: number): GraphBehavior => ({
+      kind: 'respond',
+      status,
+      body: { error: { message: echo, type: 'OAuthException', code } },
+    });
+    if (operation === 'debug_token') {
+      if (this.expectedAppToken !== undefined && bearer !== this.expectedAppToken) {
+        return fail(400, 190);
+      }
+      const info = this.tokens.get(query.input_token ?? '');
+      if (info === undefined) {
+        return {
+          kind: 'respond',
+          status: 200,
+          body: { data: { is_valid: false, error: { code: 190 } } },
+        };
+      }
+      return {
+        kind: 'respond',
+        status: 200,
+        body: {
+          data: {
+            is_valid: info.valid ?? true,
+            app_id: info.appId,
+            scopes: info.scopes,
+            ...(info.granular === false
+              ? {}
+              : {
+                  granular_scopes: info.scopes.map((scope) => ({
+                    scope,
+                    target_ids: info.wabaIds,
+                  })),
+                }),
+            expires_at: info.expiresAt ?? 0,
+          },
+        },
+      };
+    }
+    if (operation === 'phone_numbers' || operation === 'subscribe' || operation === 'unsubscribe') {
+      const wabaId = pathname.split('/')[2] ?? '';
+      const info = this.tokens.get(bearer ?? '');
+      if (info === undefined || info.valid === false) return fail(401, 190);
+      if (!info.wabaIds.includes(wabaId)) return fail(400, 100);
+      if (operation === 'phone_numbers') {
+        const ids = this.wabas.get(wabaId) ?? [];
+        return { kind: 'respond', status: 200, body: { data: ids.map((id) => ({ id })) } };
+      }
+      if (operation === 'subscribe') this.subscribed.add(wabaId);
+      else this.subscribed.delete(wabaId);
+      return { kind: 'respond', status: 200, body: { success: true } };
+    }
+    return undefined;
+  }
+
   reset(): void {
+    this.tokens.clear();
+    this.wabas.clear();
+    this.operationScripts.clear();
+    this.subscribed.clear();
+    this.expectedAppToken = undefined;
     this.scripted = [];
     this.fallback = undefined;
     this.requests.length = 0;
@@ -176,4 +314,17 @@ export class FakeGraphApi {
       },
     };
   }
+}
+
+function operationOf(method: string, pathname: string): GraphOperation | undefined {
+  if (method === 'POST' && /^\/[^/]+\/[^/]+\/messages$/.test(pathname)) return 'messages';
+  if (method === 'GET' && /^\/[^/]+\/debug_token$/.test(pathname)) return 'debug_token';
+  if (method === 'GET' && /^\/[^/]+\/[^/]+\/phone_numbers$/.test(pathname)) {
+    return 'phone_numbers';
+  }
+  if (/^\/[^/]+\/[^/]+\/subscribed_apps$/.test(pathname)) {
+    if (method === 'POST') return 'subscribe';
+    if (method === 'DELETE') return 'unsubscribe';
+  }
+  return undefined;
 }
