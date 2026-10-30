@@ -74,4 +74,31 @@ describe('createLogger', () => {
       assert.equal((nested?.dados as Record<string, unknown>)[key], '[Redacted]', key);
     }
   });
+
+  it('credenciais do canal (spec 015): oauthCode, PIN e texto cifrado saem como [Redacted]; code genérico não', () => {
+    const capture = captureLogs();
+    capture.logger.info(
+      {
+        oauthCode: 'codigo-secreto-1',
+        registrationPin: '123456',
+        registrationPinCiphertext: 'v1.k.pin-cifrado',
+        tokenCiphertext: 'v1.k.token-cifrado',
+        aninhado: { oauthCode: 'codigo-secreto-2' },
+        code: 'CHANNEL_NUMBER_IN_USE',
+      },
+      'canal',
+    );
+    const raw = capture.raw();
+    for (const secret of [
+      'codigo-secreto-1',
+      'codigo-secreto-2',
+      '123456',
+      'pin-cifrado',
+      'token-cifrado',
+    ]) {
+      assert.ok(!raw.includes(secret), secret);
+    }
+    // `code` é o código de erro útil, que não deve ser mascarado.
+    assert.ok(raw.includes('CHANNEL_NUMBER_IN_USE'));
+  });
 });

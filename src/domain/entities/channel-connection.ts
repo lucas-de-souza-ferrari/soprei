@@ -17,6 +17,8 @@ export interface ChannelConnection {
   readonly clientId: ClientId;
   readonly wabaId: string;
   readonly tokenCiphertext: string;
+  /** PIN do registro do número (spec 015b), cifrado como o token; `null` na conexão manual. */
+  readonly registrationPinCiphertext: string | null;
   /** +1 a cada token gravado; a marca `TOKEN_INVALID` é condicional a ele. */
   readonly tokenVersion: number;
   readonly status: ChannelConnectionStatus;
@@ -30,6 +32,8 @@ export interface NewChannelConnection extends WithoutClientId {
   readonly wabaId: string;
   readonly tokenCiphertext: string;
   readonly tokenExpiresAt: Date | null;
+  /** Se informado, grava (ou troca) o PIN cifrado; ausente mantém o que já existe. */
+  readonly registrationPinCiphertext?: string | null;
 }
 
 export interface ChannelConnectionUpdate extends WithoutClientId {

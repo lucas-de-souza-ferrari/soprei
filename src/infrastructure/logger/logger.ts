@@ -27,7 +27,11 @@ const REDACTED_KEYS = [
   // Credenciais por cliente (spec 015): token cifrado, chaves de cifra, code do Embedded Signup.
   'tokenCiphertext',
   'clientSecret',
-  'code',
+  // `oauthCode` (não `code`, que mascararia códigos de erro úteis): code do Embedded Signup e o PIN
+  // de registro do número, sempre com estes nomes.
+  'oauthCode',
+  'registrationPin',
+  'registrationPinCiphertext',
   'CHANNEL_CREDENTIALS_KEYS',
 ] as const;
 

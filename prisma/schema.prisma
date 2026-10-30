@@ -208,16 +208,19 @@ enum ChannelConnectionStatus {
 /// fica CIFRADO (AES-256-GCM, AAD ligada ao clientId); nunca em claro no banco, em log, resposta nem
 /// métrica. O número continua só em `Client.whatsappPhoneNumberId`.
 model ChannelConnection {
-  id              String                  @id @default(uuid(7)) @db.Uuid
-  clientId        String                  @unique @map("client_id") @db.Uuid
-  wabaId          String                  @map("waba_id")
-  tokenCiphertext String                  @map("token_ciphertext")
-  tokenVersion    Int                     @default(1) @map("token_version")
-  status          ChannelConnectionStatus @default(CONNECTED)
-  tokenExpiresAt  DateTime?               @map("token_expires_at")
-  tokenInvalidAt  DateTime?               @map("token_invalid_at")
-  createdAt       DateTime                @default(now()) @map("created_at")
-  updatedAt       DateTime                @updatedAt @map("updated_at")
+  id                        String                  @id @default(uuid(7)) @db.Uuid
+  clientId                  String                  @unique @map("client_id") @db.Uuid
+  wabaId                    String                  @map("waba_id")
+  tokenCiphertext           String                  @map("token_ciphertext")
+  /// PIN de 6 dígitos do registro do número (Embedded Signup), CIFRADO como o token; nunca em claro,
+  /// em log, resposta ou métrica. Nulo quando a conexão veio do PUT manual.
+  registrationPinCiphertext String?                 @map("registration_pin_ciphertext")
+  tokenVersion              Int                     @default(1) @map("token_version")
+  status                    ChannelConnectionStatus @default(CONNECTED)
+  tokenExpiresAt            DateTime?               @map("token_expires_at")
+  tokenInvalidAt            DateTime?               @map("token_invalid_at")
+  createdAt                 DateTime                @default(now()) @map("created_at")
+  updatedAt                 DateTime                @updatedAt @map("updated_at")
 
   client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
 

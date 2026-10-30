@@ -106,6 +106,7 @@ export function toChannelConnection(row: ChannelConnectionRow): ChannelConnectio
     clientId: ClientId.parse(row.clientId),
     wabaId: row.wabaId,
     tokenCiphertext: row.tokenCiphertext,
+    registrationPinCiphertext: row.registrationPinCiphertext,
     tokenVersion: row.tokenVersion,
     status: row.status,
     tokenExpiresAt: row.tokenExpiresAt,

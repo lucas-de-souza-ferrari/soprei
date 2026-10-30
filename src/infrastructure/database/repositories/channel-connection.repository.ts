@@ -5,6 +5,7 @@ import type {
   ClientId,
   NewChannelConnection,
 } from '../../../domain/index.js';
+import { DatabaseError } from '../../../shared/errors/index.js';
 import type { ChannelConnection as ChannelConnectionRow } from '../../../generated/prisma/client.js';
 import type { TenantScopedDb } from '../extensions/tenant-scope.js';
 import { toChannelConnection } from './mappers.js';
@@ -23,6 +24,7 @@ function connectionOps(
           wabaId: data.wabaId,
           tokenCiphertext: data.tokenCiphertext,
           tokenExpiresAt: data.tokenExpiresAt ?? null,
+          registrationPinCiphertext: data.registrationPinCiphertext ?? null,
         },
       }),
     updateMany: (where, data) =>
@@ -81,6 +83,7 @@ export class PrismaChannelConnectionRepository
             wabaId: data.wabaId,
             tokenCiphertext: data.tokenCiphertext,
             tokenExpiresAt: data.tokenExpiresAt,
+            registrationPinCiphertext: data.registrationPinCiphertext ?? null,
           },
         });
         return { connection: toChannelConnection(row), replaced: false };
@@ -91,13 +94,22 @@ export class PrismaChannelConnectionRepository
           wabaId: data.wabaId,
           tokenCiphertext: data.tokenCiphertext,
           tokenExpiresAt: data.tokenExpiresAt,
+          ...(data.registrationPinCiphertext === undefined
+            ? {}
+            : { registrationPinCiphertext: data.registrationPinCiphertext }),
           tokenVersion: { increment: 1 },
           status: 'CONNECTED',
           tokenInvalidAt: null,
         },
       });
       const row = await this.db.channelConnection.findFirst({ where: { clientId } });
-      if (row === null) throw new Error('conexão sumiu durante a gravação');
+      // Só acontece se a conexão foi removida entre o update e a leitura (a transação do canal
+      // serializa por `lockClient`, então é falha de infraestrutura, não de entrada).
+      if (row === null) {
+        throw new DatabaseError('Conexão do canal sumiu durante a gravação', {
+          context: { entity: 'ChannelConnection' },
+        });
+      }
       return { connection: toChannelConnection(row), replaced: true };
     });
   }
