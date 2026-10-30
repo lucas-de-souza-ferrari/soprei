@@ -2,13 +2,13 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs.
 
-**Última atualização:** 2026-10-30, por Claude Code (Sonnet 5.5), spec 008 (RBAC) implementada na branch `spec/008-rbac`, aguardando o `reviewer`.
+**Última atualização:** 2026-10-30, por Claude Code (Sonnet 5.5), spec 008 (RBAC) mergeada e marcada concluída.
 
 ## Onde estamos
 
-- **Concluídas e mergeadas:** specs 001 a 005, 007 e 010 a 014 (ver "Roadmap" em `docs/context.md`); a 008 está implementada e **não** mergeada. O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta e com token permanente de usuário do sistema; o atendimento ainda responde com o `LlmProvider` `mock`.
-- **Branch em andamento:** `spec/008-rbac` (um PR, único dono: o implementer; commits na ordem da decisão 10 da spec). Precisa de push do humano e da revisão do `reviewer` (de preferência outro agente/modelo) antes do merge. A spec continua `aprovada` (o dono marca `concluída` depois do CI verde e do merge).
-- **Verde na última verificação (008):** `pnpm typecheck`, `lint`, `format:check`, 964 testes unitários e 308 de integração, `rm -rf dist && pnpm build` e smoke do compilado, em Node 22.23.2 e 24.18.0 (local). Suítes novas e alteradas repetidas 5 vezes em cada Node, sem falha. O CI ainda não rodou.
+- **Concluídas e mergeadas:** specs 001 a 005, 007, 008 e 010 a 014 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta e com token permanente de usuário do sistema; o atendimento ainda responde com o `LlmProvider` `mock`.
+- **Branch em andamento:** `docs/spec-008-concluded` (só docs: marca a 008 como concluída); precisa de push e PR do humano. A 008 passou pelo `reviewer` (sem bloqueadores; ajustes aplicados em `ff31650`..`e16cbcc`) e foi mergeada.
+- **Verde na última verificação (008):** `pnpm typecheck`, `lint`, `format:check`, 967 testes unitários e 309 de integração, `rm -rf dist && pnpm build` e smoke do compilado, em Node 22.23.2 e 24.18.0 (local). Suítes novas e alteradas repetidas 5 vezes em cada Node, sem falha. CI verde segundo o dono.
 - **Estabilidade da 014:** suítes novas e alteradas repetidas de 4 a 5 vezes em cada Node, sem falha (`anthropic-llm.provider.test.ts`, `anthropic-attendance.test.ts`, `attendance-llm.service.test.ts`, config, métricas, `attendance.integration.test.ts`).
 
 ## Próximo passo sugerido
