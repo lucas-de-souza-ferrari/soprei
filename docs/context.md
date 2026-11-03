@@ -131,7 +131,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 **Próximas**
 
-- [Spec 017 — login e consulta de conversas no painel do cliente](specs/017-painel-cliente.md): **rascunho**, preparado após o dono pedir a próxima spec em 2026-11-03. Escopo proposto: login, sessão em memória e leitura paginada; aguarda aprovação, sobretudo da experiência de novo login ao recarregar. Não é decisão aprovada nem autorização para implementar.
+- [Spec 017 — conta da pessoa e empresas](specs/017-contas-e-empresas.md): **rascunho em revisão**. O dono decidiu em 2026-11-03: cadastro/login só por e-mail e senha, empresas dentro da conta e criação de empresas pela própria pessoa, como `OWNER`. Substitui a proposta anterior de login com slug e painel de conversas. Identidade global, vínculos, migração de e-mails repetidos, comprovação de titularidade e sessão precisam de desenho e aprovação; painel de conversas fica para uma fatia posterior.
 
 - Pendências da spec 008 (revisão): imutabilidade da auditoria só por convenção do repositório (considerar gatilho ou `REVOKE` na spec de retenção/LGPD, que também decide o expurgo); a migration `20261030120000_rbac_audit` usa `ALTER TYPE ... ADD VALUE`, que exige PostgreSQL >= 12.
 
@@ -176,6 +176,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 - **Spec 008 (RBAC): implementada, aguardando revisão e merge.** Já existem: papéis `OWNER`, `ADMIN`, `AGENT`, `VIEWER` com mapa fixo papel -> permissão (`src/domain/permissions.ts`), hook `requirePermission` (401, 403 para `PlatformAdmin`, 404 de `:clientId` alheio antes de 403), `GET`/`POST /admin/clients/:clientId/users`, `PATCH .../users/:userId`, `POST .../users/:userId/password`, `GET .../audit-events`, `POST /auth/password`, hierarquia no service, regra do último `OWNER` com bloqueio da linha do cliente, auditoria na mesma transação (`AuditEvent`, FKs compostas), revogação das sessões do alvo depois do commit e teto de 32 na fila do hasher scrypt.
 
 ## 7. Histórico de decisões
+
+- 2026-11-03: o dono substituiu o login de tenant com `clientSlug` por conta da pessoa com e-mail/senha e acesso às empresas após entrar. Confirmou que a própria pessoa poderá criar empresas e será dona delas. A 017 deve ser reescrita para essa fundação antes do painel; o desenho técnico e a migração ainda não estão aprovados.
 
 - 2026-10-30: o dono aprovou a spec 016: workspace pnpm com `backend/` e `frontend/`, primeira entrega do frontend como site de apresentação, identidade do Soprei fornecida em SVG e referências Beautiful UI, beUI e ObsidianUI. Implementação na branch `spec/016-frontend-base`; hospedagem permanece fora do escopo.
 
