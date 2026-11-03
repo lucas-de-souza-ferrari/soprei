@@ -9,6 +9,8 @@ import { Input } from './components/motion/input';
 import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
+import { isCompleteVerificationCode } from './verification-code';
+import { VerificationField } from './verification-field';
 
 const companySchema = z.object({
   clientId: z.uuid(),
@@ -41,7 +43,7 @@ class ApiError extends Error {
   }
 }
 
-async function api(path: string, body?: unknown): Promise<unknown> {
+async function api(path: string, body?: unknown, unauthorized?: string): Promise<unknown> {
   const response = await fetch(`/api${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     credentials: 'same-origin',
@@ -53,7 +55,7 @@ async function api(path: string, body?: unknown): Promise<unknown> {
     throw new ApiError(
       response.status,
       response.status === 401
-        ? 'Entre novamente ou confira suas credenciais.'
+        ? (unauthorized ?? 'Entre novamente ou confira suas credenciais.')
         : response.status === 403
           ? 'Confirme seu e-mail ou confira seu acesso.'
           : response.status === 429
@@ -102,13 +104,13 @@ export function AccountApp() {
   const [confirmation, setConfirmation] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const [token, setToken] = useState('');
+  const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(true);
   const [booting, setBooting] = useState(true);
   const [notice, setNotice] = useState<Notice>(null);
   const [invalid, setInvalid] = useState<{
-    field: 'password' | 'confirmation';
+    field: 'password' | 'confirmation' | 'verification';
     text: string;
   } | null>(null);
   const generation = useRef(0);
@@ -177,7 +179,7 @@ export function AccountApp() {
           setName('');
           setEmail('');
           setPassword('');
-          setToken('');
+          setCode('');
           setBusy(false);
           navigate('login');
         }
@@ -223,12 +225,20 @@ export function AccountApp() {
       await api('/auth/register', { email, password });
       if (stamp === generation.current) {
         navigate('verify');
-        setNotice({ tone: 'info', text: 'Confira seu e-mail e cole o código abaixo.' });
       }
     } else if (page === 'verify') {
-      await api('/auth/verify-email', { email, password, token });
+      setInvalid(null);
+      if (!isCompleteVerificationCode(code)) {
+        setInvalid({ field: 'verification', text: 'Digite os 6 dígitos do código' });
+        return;
+      }
+      await api(
+        '/auth/verify-email',
+        { email, password, code },
+        'Confirmação inválida ou expirada. Se errou várias vezes, peça um novo código.',
+      );
       if (stamp === generation.current) {
-        setToken('');
+        setCode('');
         setPassword('');
         navigate('login');
         setNotice({ tone: 'success', text: 'E-mail confirmado. Você já pode entrar.' });
@@ -254,7 +264,7 @@ export function AccountApp() {
         setName('');
         setEmail('');
         setPassword('');
-        setToken('');
+        setCode('');
         navigate('login');
       })
       .catch(() => {
@@ -342,14 +352,19 @@ export function AccountApp() {
         </>
       )}
       {page === 'verify' && (
-        <Input
-          id="verification"
-          label="Código recebido por e-mail"
-          autoComplete="one-time-code"
-          value={token}
-          onChange={setToken}
-          required
-        />
+        <>
+          <p className="-mb-1 px-1 text-sm text-muted-foreground">
+            Confira seu e-mail e digite o código de 6 dígitos.
+          </p>
+          <VerificationField
+            value={code}
+            onChange={(value) => {
+              setCode(value);
+              if (invalid?.field === 'verification') setInvalid(null);
+            }}
+            error={invalid?.field === 'verification' ? invalid.text : undefined}
+          />
+        </>
       )}
       <Button type="submit" size="lg" disabled={busy} className="mt-2 w-full">
         {busy ? (

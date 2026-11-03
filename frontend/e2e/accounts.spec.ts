@@ -10,6 +10,7 @@ for (const theme of ['light', 'dark'] as const) {
     let verified = false;
     let logged = false;
     let registrations = 0;
+    const verifyBodies: unknown[] = [];
     let selectedClientId: string | null = null;
     const email = 'pessoa@example.test';
     const accountId = randomUUID();
@@ -36,8 +37,10 @@ for (const theme of ['light', 'dark'] as const) {
         status = 202;
         json = { message: 'Confira o e-mail.' };
         expect(Object.keys(body as object).sort()).toEqual(['email', 'password']);
-      } else if (path === '/auth/verify-email') verified = true;
-      else if (path === '/auth/login') {
+      } else if (path === '/auth/verify-email') {
+        verifyBodies.push(body);
+        verified = true;
+      } else if (path === '/auth/login') {
         logged = verified;
         currentEmail = (body as { email: string }).email;
         status = logged ? 204 : 403;
@@ -85,8 +88,24 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByLabel('Senha', { exact: true }).fill('Senha1');
     await page.getByLabel('Confirmar senha').fill('Senha1');
     await page.getByRole('button', { name: 'Criar conta', exact: true }).click();
-    await page.getByLabel('Código recebido por e-mail').fill('codigo-ficticio');
+    const codeField = page.getByLabel('Código recebido por e-mail');
+    await expect(codeField).toHaveAttribute('inputmode', 'numeric');
+    await expect(codeField).toHaveAttribute('autocomplete', 'one-time-code');
+    // Letras são descartadas; com menos de 6 dígitos nada é enviado.
+    await codeField.fill('abc12');
+    await expect(codeField).toHaveValue('12');
     await page.getByRole('button', { name: 'Confirmar e-mail', exact: true }).click();
+    await expect(page.getByText('Digite os 6 dígitos do código')).toBeVisible();
+    expect(verifyBodies).toHaveLength(0);
+    // Colar com separadores normaliza para 6 dígitos.
+    await codeField.fill('123 456');
+    await expect(codeField).toHaveValue('123456');
+    await codeField.fill('123-456');
+    await expect(codeField).toHaveValue('123456');
+    await codeField.fill('123456');
+    await page.getByRole('button', { name: 'Confirmar e-mail', exact: true }).click();
+    await expect.poll(() => verifyBodies.length).toBe(1);
+    expect(verifyBodies[0]).toEqual({ email, password: 'Senha1', code: '123456' });
     await page.getByLabel('Senha', { exact: true }).fill('Senha1');
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     await expect(page.getByText('Você ainda não tem empresas.', { exact: false })).toBeVisible();
