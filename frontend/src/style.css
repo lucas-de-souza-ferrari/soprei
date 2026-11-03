@@ -43,6 +43,20 @@
   background: white;
   font: inherit;
 }
+.password-field {
+  position: relative;
+}
+.account-card .password-field input {
+  padding-right: 88px;
+}
+.password-field button {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #0065d0;
+  font-size: 13px;
+}
 .account-card input:focus-visible,
 .account-card button:focus-visible {
   outline: 3px solid #0078f4;

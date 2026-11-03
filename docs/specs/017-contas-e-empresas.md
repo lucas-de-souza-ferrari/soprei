@@ -15,6 +15,7 @@ Esta mudança substitui o rascunho anterior da 017 (login com `clientSlug` e con
 ### Experiência decidida pelo dono
 
 1. “Criar conta” pede somente e-mail e senha. Nenhuma empresa, slug, documento ou telefone é exigido nessa etapa.
+   A tela pede confirmação da senha e oferece controles para mostrar e ocultar os dois campos. Por decisão do dono em 2026-11-03, a senha do cadastro público tem mínimo de 6 caracteres, uma letra maiúscula e um número, após normalização NFKC; confirmação divergente impede o envio. A política legada de 12 caracteres não muda.
 2. Login pede somente e-mail e senha, mesmo que a pessoa participe de várias empresas.
 3. A área autenticada lista exclusivamente as empresas às quais a conta tem acesso. Sem empresas, oferece “Criar empresa”.
 4. A própria pessoa pode criar empresas e será `OWNER` de cada uma. Nome e dados da empresa são informados depois do cadastro da conta; identificadores técnicos são gerados pelo servidor e não são credenciais de login.

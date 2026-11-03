@@ -28,6 +28,16 @@ export const newPasswordSchema = passwordBase().pipe(
   z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
 );
 
+/** Cadastro público: mínimo de seis caracteres, uma maiúscula Unicode e um dígito. */
+export const accountPasswordSchema = passwordBase().pipe(
+  z
+    .string()
+    .min(6)
+    .max(PASSWORD_MAX_LENGTH)
+    .regex(/\p{Lu}/u)
+    .regex(/[0-9]/),
+);
+
 /**
  * Senha apresentada no login: mesma normalização e teto, mas sem o mínimo (o mínimo é regra de
  * criação; um 400 aqui separaria "senha curta" de "senha errada" sem ganho algum).

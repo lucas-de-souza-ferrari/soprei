@@ -5,7 +5,7 @@ import type { AuthService } from '../../application/auth/auth.service.js';
 import {
   emailSchema,
   loginPasswordSchema,
-  newPasswordSchema,
+  accountPasswordSchema,
 } from '../../application/auth/credentials.js';
 import {
   ForbiddenError,
@@ -35,7 +35,7 @@ export const accountController: FastifyPluginCallback<{
   const cookie = (value: string, clear = false): string =>
     `${ACCOUNT_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${clear ? 0 : 30 * 86400}${secure ? '; Secure' : ''}`;
   const credentials = z.object({ email: emailSchema, password: loginPasswordSchema }).strict();
-  const registration = z.object({ email: emailSchema, password: newPasswordSchema }).strict();
+  const registration = z.object({ email: emailSchema, password: accountPasswordSchema }).strict();
   const verification = credentials.extend({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
   app.addHook('onRequest', (request, reply, next) => {
     void reply.header('cache-control', 'no-store');

@@ -5,6 +5,7 @@ test('cadastro, confirmação, sessão após reload, empresas e saída', async (
   const pending = { list: undefined as Promise<void> | undefined };
   let verified = false;
   let logged = false;
+  let registrations = 0;
   let selectedClientId: string | null = null;
   const email = 'pessoa@example.test';
   const accountId = randomUUID();
@@ -27,6 +28,7 @@ test('cadastro, confirmação, sessão após reload, empresas e saída', async (
           }
         : {};
     } else if (path === '/auth/register') {
+      registrations++;
       status = 202;
       json = { message: 'Confira o e-mail.' };
       expect(Object.keys(body as object).sort()).toEqual(['email', 'password']);
@@ -59,11 +61,27 @@ test('cadastro, confirmação, sessão após reload, empresas e saída', async (
   await page.goto('/criar-conta');
   await expect(page.getByRole('button', { name: 'Criar conta', exact: true })).toBeEnabled();
   await page.getByLabel('E-mail', { exact: true }).fill(email);
-  await page.getByLabel('Senha', { exact: true }).fill('senha-ficticia-longa');
+  await page.getByLabel('Senha', { exact: true }).fill('Senha1');
+  await page.getByLabel('Confirmar senha').fill('Senha2');
+  await page.getByRole('button', { name: 'Mostrar senha', exact: true }).click();
+  await expect(page.getByLabel('Senha', { exact: true })).toHaveAttribute('type', 'text');
+  await page.getByRole('button', { name: 'Ocultar senha', exact: true }).click();
+  await page.getByRole('button', { name: 'Mostrar confirmação de senha' }).click();
+  await expect(page.getByLabel('Confirmar senha')).toHaveAttribute('type', 'text');
+  await page.getByRole('button', { name: 'Ocultar confirmação de senha' }).click();
+  await page.getByRole('button', { name: 'Criar conta', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('As senhas não coincidem');
+  await page.getByLabel('Senha', { exact: true }).fill('senha1');
+  await page.getByLabel('Confirmar senha').fill('senha1');
+  await page.getByRole('button', { name: 'Criar conta', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('uma letra maiúscula e um número');
+  expect(registrations).toBe(0);
+  await page.getByLabel('Senha', { exact: true }).fill('Senha1');
+  await page.getByLabel('Confirmar senha').fill('Senha1');
   await page.getByRole('button', { name: 'Criar conta', exact: true }).click();
   await page.getByLabel('Código recebido por e-mail').fill('codigo-ficticio');
   await page.getByRole('button', { name: 'Confirmar e-mail', exact: true }).click();
-  await page.getByLabel('Senha', { exact: true }).fill('senha-ficticia-longa');
+  await page.getByLabel('Senha', { exact: true }).fill('Senha1');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText('Você ainda não tem empresas.', { exact: false })).toBeVisible();
   await page.getByLabel('Nome da empresa').fill('Minha primeira empresa');

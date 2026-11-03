@@ -133,6 +133,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 - [Spec 017 — conta da pessoa e empresas](specs/017-contas-e-empresas.md): **aprovada, em implementação**. O dono decidiu em 2026-11-03: cadastro/login só por e-mail e senha, empresas dentro da conta e criação pela própria pessoa como `OWNER`; autorizou implementar e escolheu sessão persistente com cookie HttpOnly e envio real de confirmação pelo Gmail. Migração preserva ids de vínculo e para em colisões de e-mail, sem fusão automática. Painel de conversas fica para uma fatia posterior. Configuração e teste Gmail real são do dono; revisão de segurança é obrigatória antes do merge.
 
+- Cadastro público: o dono pediu senha com mínimo de seis caracteres, uma letra maiúscula e um número, confirmação na tela e controles de visibilidade. A política de senha legada permanece separada.
+
 - Pendências da spec 008 (revisão): imutabilidade da auditoria só por convenção do repositório (considerar gatilho ou `REVOKE` na spec de retenção/LGPD, que também decide o expurgo); a migration `20261030120000_rbac_audit` usa `ALTER TYPE ... ADD VALUE`, que exige PostgreSQL >= 12.
 
 - Pendências da spec 007 (revisão): teto do tamanho da fila de espera do hasher (`scrypt-password-hasher.ts`) e limpeza periódica de sessões expiradas no conjunto `usess` do Redis; incluir o IP na chave do bloqueio por conta se virar problema.

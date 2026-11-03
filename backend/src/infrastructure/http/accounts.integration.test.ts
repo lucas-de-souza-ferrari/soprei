@@ -63,7 +63,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     accounts: { service, origin: 'http://localhost:5174', secure: false },
   });
   const emails = [0, 1].map(() => `accounts-${randomUUID()}@example.test`);
-  const password = `secret-${randomUUID()}`;
+  const password = `Secret1-${randomUUID()}`;
   const headers = { origin: 'http://localhost:5174', 'x-soprei-client': 'web' };
   const post = (url: string, payload: object, cookie?: string) =>
     app.inject({
@@ -75,12 +75,14 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
   try {
     const cookieValues: string[] = [];
     for (const email of emails) {
+      assert.equal((await post('/auth/register', { email, password: 'senha1' })).statusCode, 400);
       assert.equal((await post('/auth/register', { email, password })).statusCode, 202);
+      assert.equal((await post('/auth/register', { email, password: 'Abcde1' })).statusCode, 202);
       assert.equal((await post('/auth/login', { email, password })).statusCode, 403);
       const token = mail.get(email);
       assert.ok(token);
       assert.equal(
-        (await post('/auth/register', { email, password: 'senha-diferente-invalida' })).statusCode,
+        (await post('/auth/register', { email, password: 'Senha2-diferente' })).statusCode,
         202,
       );
       assert.equal(mail.get(email), token);

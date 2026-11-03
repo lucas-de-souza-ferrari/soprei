@@ -64,6 +64,9 @@ export function AccountApp() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
   const [token, setToken] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(true);
@@ -72,6 +75,9 @@ export function AccountApp() {
   const navigate = (next: typeof page) => {
     setPage(next);
     setMessage('');
+    setConfirmation('');
+    setShowPassword(false);
+    setShowConfirmation(false);
     history.replaceState(
       null,
       '',
@@ -146,6 +152,21 @@ export function AccountApp() {
   const submit = async () => {
     const stamp = generation.current;
     if (page === 'register') {
+      const normalized = password.normalize('NFKC');
+      if (
+        normalized.length < 6 ||
+        normalized.length > 128 ||
+        !/\p{Lu}/u.test(normalized) ||
+        !/[0-9]/.test(normalized) ||
+        normalized.includes('\u0000')
+      ) {
+        setMessage('Use pelo menos 6 caracteres, incluindo uma letra maiúscula e um número.');
+        return;
+      }
+      if (password !== confirmation) {
+        setMessage('As senhas não coincidem. Confira e tente novamente.');
+        return;
+      }
       await api('/auth/register', { email, password });
       if (stamp === generation.current) {
         navigate('verify');
@@ -283,17 +304,53 @@ export function AccountApp() {
                 maxLength={254}
               />
               <label htmlFor="password">Senha</label>
-              <input
-                id="password"
-                type="password"
-                autoComplete={page === 'register' ? 'new-password' : 'current-password'}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                minLength={page === 'register' ? 12 : 1}
-                maxLength={128}
-              />
-              {page === 'register' && <small>Use uma senha com pelo menos 12 caracteres.</small>}
+              <div className="password-field">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete={page === 'register' ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  minLength={1}
+                  maxLength={128}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                >
+                  {showPassword ? 'Ocultar' : 'Mostrar'}
+                </button>
+              </div>
+              {page === 'register' && (
+                <>
+                  <small>Mínimo de 6 caracteres, com uma letra maiúscula e um número.</small>
+                  <label htmlFor="confirmation">Confirmar senha</label>
+                  <div className="password-field">
+                    <input
+                      id="confirmation"
+                      type={showConfirmation ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={confirmation}
+                      onChange={(event) => setConfirmation(event.target.value)}
+                      required
+                      maxLength={128}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmation(!showConfirmation)}
+                      aria-label={
+                        showConfirmation
+                          ? 'Ocultar confirmação de senha'
+                          : 'Mostrar confirmação de senha'
+                      }
+                    >
+                      {showConfirmation ? 'Ocultar' : 'Mostrar'}
+                    </button>
+                  </div>
+                </>
+              )}
               {page === 'verify' && (
                 <>
                   <label htmlFor="verification">Código recebido por e-mail</label>
