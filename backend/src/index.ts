@@ -220,7 +220,7 @@ async function main(): Promise<void> {
               sessions: new RedisAccountSessionStore(authRedis.client, config.AUTH_REDIS_PREFIX),
               loginLocks: auth.sessions,
               loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
-              // Só id e resultado: nunca e-mail, código nem credenciais do Gmail.
+              // Só id e resultado: nunca e-mail, código nem credenciais SMTP.
               onVerificationMail: (result, accountId) => {
                 metrics.countVerificationEmail(result);
                 if (result === 'failed') {
@@ -229,10 +229,7 @@ async function main(): Promise<void> {
                   logger.info({ accountId, result }, 'confirmação de e-mail enviada');
                 }
               },
-              mailer: new GmailVerificationMailer(
-                config.GMAIL_USER ?? '',
-                config.GMAIL_APP_PASSWORD ?? '',
-              ),
+              mailer: new SmtpVerificationMailer(smtpMailerOptions(config)),
             }),
             origin: config.APP_ORIGIN ?? '',
             secure: cookieIsSecure(config.NODE_ENV, config.APP_ORIGIN ?? ''),
@@ -297,4 +294,5 @@ import { AccountService } from './application/auth/account.service.js';
 import { deriveLoginLockSecret } from './application/auth/auth.service.js';
 import { PrismaAccountRepository } from './infrastructure/database/index.js';
 import { RedisAccountSessionStore } from './infrastructure/auth/redis-account-session-store.js';
-import { GmailVerificationMailer } from './infrastructure/external-apis/gmail/gmail-verification-mailer.js';
+import { smtpMailerOptions } from './infrastructure/config/email.js';
+import { SmtpVerificationMailer } from './infrastructure/external-apis/email/smtp-verification-mailer.js';

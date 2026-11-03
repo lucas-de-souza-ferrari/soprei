@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { parseCredentialKeys } from '../security/aes-gcm-credential-cipher.js';
+import { isValidSmtpHost } from './email.js';
 import { parseTrustProxy, type TrustProxySetting } from './trust-proxy.js';
 
 /** Mínimo do `JWT_SECRET` (spec 007): 32 caracteres, ou seja, 256 bits para o HS256. */
@@ -54,8 +55,22 @@ export const envSchema = z
     PORT: z.coerce.number().int().min(0).max(65535).default(3000),
     ACCOUNTS_ENABLED: booleanLiteral(false),
     APP_ORIGIN: optionalSecret,
-    GMAIL_USER: optionalSecret,
-    GMAIL_APP_PASSWORD: optionalSecret,
+    // SMTP genérico (spec 019). Host, porta e remetente são obrigatórios só com ACCOUNTS_ENABLED=true.
+    EMAIL_PROVIDER_HOST: optionalSecret.refine(
+      (value) => value === undefined || isValidSmtpHost(value),
+      'deve ser hostname ou IP, sem esquema, caminho, porta, espaço nem @',
+    ),
+    EMAIL_PROVIDER_PORT: z.preprocess(
+      emptyAsUndefined,
+      z.coerce.number().int().min(1).max(65535).optional(),
+    ),
+    EMAIL_PROVIDER_SECURE: z.preprocess(emptyAsUndefined, booleanLiteral(false)),
+    EMAIL_PROVIDER_FROM: optionalSecret.refine(
+      (value) => value === undefined || z.email().safeParse(value).success,
+      'e-mail inválido',
+    ),
+    EMAIL_PROVIDER_USER: optionalSecret,
+    EMAIL_PROVIDER_PSWD: optionalSecret,
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
@@ -182,16 +197,26 @@ export const envSchema = z
   })
   .superRefine((env, ctx) => {
     if (env.ACCOUNTS_ENABLED) {
-      for (const key of ['APP_ORIGIN', 'GMAIL_USER', 'GMAIL_APP_PASSWORD'] as const) {
-        if (!env[key])
+      for (const key of [
+        'APP_ORIGIN',
+        'EMAIL_PROVIDER_HOST',
+        'EMAIL_PROVIDER_PORT',
+        'EMAIL_PROVIDER_FROM',
+      ] as const) {
+        if (env[key] === undefined)
           ctx.addIssue({
             code: 'custom',
             path: [key],
             message: 'obrigatória com ACCOUNTS_ENABLED=true',
           });
       }
-      if (env.GMAIL_USER && !z.email().safeParse(env.GMAIL_USER).success)
-        ctx.addIssue({ code: 'custom', path: ['GMAIL_USER'], message: 'e-mail inválido' });
+      if (Boolean(env.EMAIL_PROVIDER_USER) !== Boolean(env.EMAIL_PROVIDER_PSWD))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['EMAIL_PROVIDER_USER'],
+          message:
+            'EMAIL_PROVIDER_USER e EMAIL_PROVIDER_PSWD devem vir juntas ou ficar ambas vazias',
+        });
       if (env.APP_ORIGIN) {
         try {
           const origin = new URL(env.APP_ORIGIN);
