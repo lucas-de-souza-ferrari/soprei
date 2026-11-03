@@ -344,6 +344,8 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       const begin = Date.now();
       await send(h, number, contact, `${SECRET_TEXT} primeira`);
       await waitFor(async () => (await userCount(client, contact)) === 1, 'primeira aceita');
+      // O flush é agendado depois de gravar a mensagem: espera aparecer em vez de assumir.
+      await waitFor(async () => (await raw.getDelayed()).length > 0, 'flush agendado');
       const [flush] = await raw.getDelayed();
       assert.ok(flush !== undefined, 'há um flush esperando');
       assert.equal(flush.name, 'flush');
