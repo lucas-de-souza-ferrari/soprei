@@ -1,6 +1,6 @@
 # 019 — Envio de e-mail por SMTP genérico
 
-- **Status:** aprovada (2026-11-03, dono: "Aprovo tudo", com as 8 recomendações)
+- **Status:** concluída e mergeada (2026-11-03; CI verde em Node 22 e LTS); aprovada (2026-11-03, dono: "Aprovo tudo", com as 8 recomendações)
 - **Branch:** `spec/019-smtp-generico`
 - **Depende de:** 017 (contas e e-mail de confirmação). Passa pelo `reviewer` antes do merge (segredos, transporte e config de produção).
 
