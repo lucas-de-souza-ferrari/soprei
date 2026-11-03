@@ -18,6 +18,11 @@ const REDACTED_KEYS = [
   'currentPassword',
   'JWT_SECRET',
   'email',
+  'GMAIL_USER',
+  'GMAIL_APP_PASSWORD',
+  'verificationHash',
+  'verificationToken',
+  'set-cookie',
   // Canal WhatsApp (spec 011): segredo do app, token de verificação do webhook e token de envio.
   'appSecret',
   'verifyToken',
@@ -46,6 +51,7 @@ export const REDACT_PATHS: readonly string[] = [
   'req.headers.cookie',
   'headers.authorization',
   'headers.cookie',
+  'res.headers["set-cookie"]',
 ];
 
 /** Loggers (filhos do Fastify) que já carregam `requestId` nos bindings: o mixin não repete. */

@@ -5,6 +5,14 @@ import { isUuid } from '../../shared/utils/index.js';
 /** Identificador de um `User` (de tenant). Só nasce de `UserId.parse`, que valida. */
 export type UserId = Brand<string, 'UserId'>;
 
+export type AccountId = Brand<string, 'AccountId'>;
+export const AccountId = {
+  parse(value: string): AccountId {
+    if (!isUuid(value)) throw new ValidationError('Identificador de conta inválido');
+    return value.toLowerCase() as AccountId;
+  },
+} as const;
+
 export const UserId = {
   parse(value: string): UserId {
     if (!isUuid(value)) throw new ValidationError('Identificador de usuário inválido');

@@ -82,7 +82,7 @@ export class PrismaUserRepository
     return this.run('updatePassword', async () => {
       if (!isUuid(id)) throw notFound();
       const { count } = await this.db.user.updateMany({
-        where: { id, clientId },
+        where: { id, clientId, accountId: null },
         data: { passwordHash },
       });
       if (count === 0) throw notFound();

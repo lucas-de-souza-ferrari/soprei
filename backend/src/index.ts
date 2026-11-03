@@ -211,6 +211,25 @@ async function main(): Promise<void> {
   }
 
   const app = buildServer({
+    ...(config.ACCOUNTS_ENABLED
+      ? {
+          accounts: {
+            service: new AccountService({
+              accounts: new PrismaAccountRepository(prisma),
+              passwords: auth.hasher,
+              sessions: new RedisAccountSessionStore(authRedis.client, config.AUTH_REDIS_PREFIX),
+              loginLocks: auth.sessions,
+              loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
+              mailer: new GmailVerificationMailer(
+                config.GMAIL_USER ?? '',
+                config.GMAIL_APP_PASSWORD ?? '',
+              ),
+            }),
+            origin: config.APP_ORIGIN ?? '',
+            secure: config.NODE_ENV === 'production',
+          },
+        }
+      : {}),
     logger,
     metrics,
     metricsToken: config.METRICS_TOKEN,
@@ -264,3 +283,8 @@ async function main(): Promise<void> {
 }
 
 void main();
+import { AccountService } from './application/auth/account.service.js';
+import { deriveLoginLockSecret } from './application/auth/auth.service.js';
+import { PrismaAccountRepository } from './infrastructure/database/index.js';
+import { RedisAccountSessionStore } from './infrastructure/auth/redis-account-session-store.js';
+import { GmailVerificationMailer } from './infrastructure/external-apis/gmail/gmail-verification-mailer.js';

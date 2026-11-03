@@ -137,6 +137,8 @@ model User {
   status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
+  accountId    String?    @map("account_id") @db.Uuid
+  account      Account?   @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
   client        Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
   auditAsActor  AuditEvent[] @relation("AuditActor")
@@ -145,8 +147,25 @@ model User {
   // `[id, clientId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
   @@unique([id, clientId])
   @@unique([clientId, email])
+  @@unique([clientId, accountId])
   @@index([clientId, createdAt, id])
   @@map("users")
+}
+
+/// Identidade global da pessoa. O User existente passa a representar sua participação no tenant.
+model Account {
+  id                     String     @id @default(uuid(7)) @db.Uuid
+  email                  String     @unique
+  passwordHash           String     @map("password_hash")
+  status                 UserStatus @default(ACTIVE)
+  emailVerifiedAt        DateTime?  @map("email_verified_at") @db.Timestamptz(6)
+  verificationHash       String?    @map("verification_hash")
+  verificationExpiresAt  DateTime?  @map("verification_expires_at") @db.Timestamptz(6)
+  createdAt              DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  memberships            User[]
+
+  @@map("accounts")
 }
 
 enum AuditAction {

@@ -44,7 +44,7 @@ export type {
 } from './entities/user.js';
 export type { PlatformAdminRepository } from './repositories/platform-admin.repository.js';
 export type { UserRepository } from './repositories/user.repository.js';
-export { PlatformAdminId, UserId } from './value-objects/user-id.js';
+export { AccountId, PlatformAdminId, UserId } from './value-objects/user-id.js';
 export { AUDIT_ACTIONS } from './entities/audit-event.js';
 export type { AuditAction, AuditEvent, NewAuditEvent } from './entities/audit-event.js';
 export { canManageRole, hasPermission, PERMISSIONS, ROLE_PERMISSIONS } from './permissions.js';
@@ -58,3 +58,8 @@ export type {
   NewChannelConnection,
 } from './entities/channel-connection.js';
 export type { ChannelConnectionRepository } from './repositories/channel-connection.repository.js';
+export type {
+  Account,
+  AccountMembership,
+  AccountRepository,
+} from './repositories/account.repository.js';

@@ -29,6 +29,7 @@ export type AuthConfig = Pick<
   | 'AUTH_LOGIN_MAX_FAILURES'
   | 'AUTH_LOGIN_LOCK_SECONDS'
   | 'AUTH_REDIS_PREFIX'
+  | 'ACCOUNTS_ENABLED'
 >;
 
 export interface AuthComponents {
@@ -58,7 +59,7 @@ export function createAuthComponents(params: {
   const sessions = new RedisSessionStore({
     client: authRedis.client,
     logger,
-    prefix: config.AUTH_REDIS_PREFIX,
+    prefix: `${config.AUTH_REDIS_PREFIX}${config.ACCOUNTS_ENABLED ? 'v2:' : ''}`,
     idleTtlSeconds: config.AUTH_REFRESH_TTL_SECONDS,
     maxSeconds: config.AUTH_SESSION_MAX_SECONDS,
     accessTtlSeconds: config.AUTH_ACCESS_TTL_SECONDS,
@@ -73,7 +74,7 @@ export function createAuthComponents(params: {
     tokens: new JoseAccessTokenService({
       secret: config.JWT_SECRET,
       issuer: config.JWT_ISSUER,
-      audience: config.JWT_AUDIENCE,
+      audience: `${config.JWT_AUDIENCE}${config.ACCOUNTS_ENABLED ? ':v2' : ''}`,
       ttlSeconds: config.AUTH_ACCESS_TTL_SECONDS,
       clockToleranceSeconds: config.AUTH_CLOCK_TOLERANCE_SECONDS,
     }),

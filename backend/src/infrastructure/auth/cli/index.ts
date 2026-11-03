@@ -59,6 +59,17 @@ function readFirstLine(): Promise<string> {
 
 async function main(): Promise<number> {
   const config = loadConfig();
+  const args = process.argv.slice(2);
+  if (
+    config.ACCOUNTS_ENABLED &&
+    (args[0] === 'create-user' ||
+      (args[0] === 'reset-password' && !args.includes('--platform-admin')))
+  ) {
+    process.stderr.write(
+      'contas globais: criação e senha não são gerenciadas por empresa; use o cadastro da conta\n',
+    );
+    return 1;
+  }
   // O logger fica mudo: o comando imprime só o id (nada de e-mail, senha ou hash em saída).
   const logger = createLogger({ NODE_ENV: config.NODE_ENV, LOG_LEVEL: 'silent' });
   const database = createDatabase(config, logger);

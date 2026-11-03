@@ -1,4 +1,7 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, LogController } from 'fastify';
+import type { AccountService } from '../../application/auth/account.service.js';
+import { accountController, accountCookie } from '../../presentation/auth/account.controller.js';
+import { ForbiddenError } from '../../shared/errors/index.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
@@ -47,6 +50,7 @@ export interface WhatsappRoutesParams {
 }
 
 export interface BuildServerParams {
+  readonly accounts?: { service: AccountService; origin: string; secure: boolean };
   readonly logger: FastifyBaseLogger;
   readonly readiness: ReadinessChecks;
   /**
@@ -100,6 +104,7 @@ export function buildServer({
   metricsToken,
   rateLimit,
   trustProxy = false,
+  accounts,
 }: BuildServerParams): FastifyInstance {
   const app = Fastify({
     loggerInstance: logger,
@@ -127,6 +132,38 @@ export function buildServer({
   if (rateLimit !== undefined) registerRateLimit(app, rateLimit, metrics);
   app.setErrorHandler(errorHandler);
   app.setNotFoundHandler(notFoundHandler);
+  if (accounts !== undefined) {
+    app.addHook('onRequest', async (request, reply) => {
+      const path = request.routeOptions.url ?? '';
+      if (path.startsWith('/admin/') || path === '/auth/me')
+        void reply.header('cache-control', 'no-store');
+      if (
+        (path.endsWith('/users') && request.method === 'POST') ||
+        path.endsWith('/users/:userId/password') ||
+        path === '/auth/password'
+      ) {
+        throw new ForbiddenError('Gestão de senha e criação de conta são globais');
+      }
+      if (
+        request.headers.authorization === undefined &&
+        request.headers.cookie !== undefined &&
+        (path.startsWith('/admin/') || path === '/auth/me')
+      ) {
+        request.auth = await accounts.service.tenantIdentity(accountCookie(request.headers.cookie));
+      }
+      if (
+        request.auth !== null &&
+        !['GET', 'HEAD'].includes(request.method) &&
+        (request.headers.origin !== accounts.origin || request.headers['x-soprei-client'] !== 'web')
+      ) {
+        throw new ForbiddenError('Origem inválida');
+      }
+    });
+    void app.register(accountController, {
+      ...accounts,
+      ...(auth === undefined ? {} : { legacyAuth: auth }),
+    });
+  }
 
   void app.register(healthController, { readiness });
   if (metrics !== undefined && metricsToken !== undefined && metricsToken !== '') {
@@ -137,6 +174,7 @@ export function buildServer({
       prefix: '/auth',
       auth,
       metrics,
+      browserAccounts: accounts !== undefined,
       ...(userAdmin === undefined ? {} : { userAdmin }),
     });
   }

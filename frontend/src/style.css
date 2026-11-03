@@ -1,6 +1,129 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 @import 'tailwindcss';
 
+.account-shell {
+  min-height: 100vh;
+  padding: 40px 20px;
+  background: radial-gradient(ellipse at top right, #dfeeff, transparent 55%), #f9faf8;
+}
+.account-brand {
+  display: block;
+  width: 140px;
+  margin: 0 auto 45px;
+}
+.account-card {
+  width: min(100%, 620px);
+  margin: auto;
+  padding: 42px;
+  background: white;
+  border: 1px solid #e2e8ee;
+  border-radius: 18px;
+  box-shadow: 0 20px 70px #254a6c0b;
+}
+.account-card h1 {
+  font-size: 36px;
+  line-height: 1.2;
+  margin: 20px 0;
+}
+.account-card form {
+  display: grid;
+  gap: 10px;
+  margin: 24px 0;
+}
+.account-card label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 8px;
+}
+.account-card input {
+  border: 1px solid #c7d2dd;
+  border-radius: 7px;
+  padding: 12px;
+  width: 100%;
+  background: white;
+  font: inherit;
+}
+.account-card input:focus-visible,
+.account-card button:focus-visible {
+  outline: 3px solid #0078f4;
+  outline-offset: 3px;
+}
+.account-card button {
+  cursor: pointer;
+}
+.account-card button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.account-card .button {
+  border: 0;
+  margin-top: 12px;
+}
+.account-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: #0065d0;
+  font-size: 13px;
+}
+.account-message {
+  background: #edf5ff;
+  padding: 14px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.account-person {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  align-items: center;
+  margin-bottom: 24px;
+  overflow-wrap: anywhere;
+}
+.account-person button,
+.company-list button {
+  color: #0065d0;
+  font-size: 13px;
+  padding: 8px;
+}
+.account-empty {
+  padding: 24px 0;
+  color: #687788;
+}
+.company-list {
+  padding: 0;
+  margin: 24px 0;
+  list-style: none;
+}
+.company-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 18px 0;
+  border-bottom: 1px solid #e2e8ee;
+}
+.company-list small {
+  display: block;
+  color: #697585;
+  font-size: 11px;
+  padding-top: 5px;
+}
+.account-footnote {
+  text-align: center;
+  color: #687788;
+  font-size: 12px;
+  margin-top: 30px;
+}
+@media (max-width: 550px) {
+  .account-card {
+    padding: 25px;
+  }
+  .account-card h1 {
+    font-size: 30px;
+  }
+}
+
 :root {
   font-family: 'DM Sans', sans-serif;
   color: #172332;

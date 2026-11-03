@@ -52,6 +52,10 @@ export const envSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     HOST: z.string().min(1).default('0.0.0.0'),
     PORT: z.coerce.number().int().min(0).max(65535).default(3000),
+    ACCOUNTS_ENABLED: booleanLiteral(false),
+    APP_ORIGIN: optionalSecret,
+    GMAIL_USER: optionalSecret,
+    GMAIL_APP_PASSWORD: optionalSecret,
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
@@ -177,6 +181,35 @@ export const envSchema = z
       }),
   })
   .superRefine((env, ctx) => {
+    if (env.ACCOUNTS_ENABLED) {
+      for (const key of ['APP_ORIGIN', 'GMAIL_USER', 'GMAIL_APP_PASSWORD'] as const) {
+        if (!env[key])
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: 'obrigatória com ACCOUNTS_ENABLED=true',
+          });
+      }
+      if (env.GMAIL_USER && !z.email().safeParse(env.GMAIL_USER).success)
+        ctx.addIssue({ code: 'custom', path: ['GMAIL_USER'], message: 'e-mail inválido' });
+      if (env.APP_ORIGIN) {
+        try {
+          const origin = new URL(env.APP_ORIGIN);
+          if (
+            !['http:', 'https:'].includes(origin.protocol) ||
+            origin.origin !== env.APP_ORIGIN ||
+            (env.NODE_ENV === 'production' && origin.protocol !== 'https:')
+          )
+            throw new Error('origin');
+        } catch {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['APP_ORIGIN'],
+            message: 'origem HTTP(S) exata, HTTPS em produção',
+          });
+        }
+      }
+    }
     // `true` confia em toda a cadeia de X-Forwarded-For: o cliente escolhe o IP e escapa do limite.
     if (env.NODE_ENV === 'production' && env.TRUST_PROXY === true) {
       ctx.addIssue({

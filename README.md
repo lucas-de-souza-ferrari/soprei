@@ -9,4 +9,6 @@ Com Node 22 ou superior e pnpm instalado, execute `pnpm install` na raiz. Para c
 - `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check` e `pnpm test`: verificações dos dois pacotes.
 - `pnpm test:integration`: integração do backend, que exige PostgreSQL e Redis locais configurados conforme `AGENTS.md`.
 
-O site é estático e não depende do backend para funcionar. A publicação e a hospedagem serão definidas separadamente.
+A página de apresentação é estática. A publicação e a hospedagem serão definidas separadamente.
+
+O cadastro/login e a área de empresas da spec 017 dependem do backend. Configure `ACCOUNTS_ENABLED=true`, `APP_ORIGIN` com a origem exata do Vite, e as credenciais Gmail em `backend/.env`. Copie `frontend/.env.example` para `frontend/.env` se o backend estiver em outra porta. Migre o banco somente após conferir colisões de e-mails legados; não una contas automaticamente. O cadastro pede e-mail/senha; copie o código recebido por e-mail na tela de confirmação. Para contas migradas, use o reenvio com e-mail e senha anteriores. Sem credenciais Gmail configuradas, mantenha o modo novo desligado; testes nunca exigem conta real.

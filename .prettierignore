@@ -3,6 +3,8 @@ dist
 pnpm-lock.yaml
 src/generated
 backend/src/generated
+**/test-results/
+**/playwright-report/
 docs
 .claude
 CLAUDE.md

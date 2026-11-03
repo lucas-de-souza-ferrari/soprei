@@ -1,5 +1,7 @@
 # Soprei
 
+**Contas globais (spec 017):** `ACCOUNTS_ENABLED=true` ativa cadastro/login e-mail/senha e cookie HttpOnly; exige `APP_ORIGIN`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`. O agente nunca envia e-mail real nem imprime credenciais; testes usam mailer falso. A migration para se houver e-mails legados repetidos: o dono resolve titularidade antes de aplicar no desenvolvimento. `Account` é global; `User` preserva o vínculo e os ids de auditoria. Com o modo novo, criação/reset de senha por tenant é recusada; a CLI legada não gerencia senha global. Sessões Bearer anteriores são invalidadas por versão de audience/namespace, e cada uso de cookie relê o vínculo selecionado. Confirmar e-mail precede login e criação de empresas.
+
 **Organização do workspace (spec 016):** o backend e seus arquivos de configuração, Prisma e exemplos de ambiente ficam em `backend/`; o site fica em `frontend/`. Os caminhos `src/` e `prisma/` mencionados neste documento são relativos a `backend/`. Os comandos `pnpm` da tabela são executados na raiz e encaminhados ao backend; `pnpm dev:frontend` inicia o site, e `pnpm build`, `typecheck`, `lint`, `test` e `format:check` incluem o frontend. Crie `backend/.env` e `backend/.env.test` a partir dos respectivos exemplos; ao atualizar uma instalação antiga, mova seus arquivos locais para essa pasta sem versioná-los. O comando manual de migrations de teste deve ser executado dentro de `backend/`.
 
 Sistema de atendimento via IA. Contexto completo, decisões e roadmap em [docs/context.md](docs/context.md) — leia antes de propor arquitetura.

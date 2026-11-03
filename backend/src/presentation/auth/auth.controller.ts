@@ -22,6 +22,7 @@ import {
 } from './auth.validators.js';
 
 export interface AuthControllerOptions {
+  readonly browserAccounts?: boolean;
   readonly auth: AuthService;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection'> | undefined;
   /** Troca da própria senha (spec 008). Sem isto `POST /auth/password` não existe. */
@@ -73,7 +74,7 @@ function refreshError(failure: RefreshFailure): Error {
  */
 export const authController: FastifyPluginCallback<AuthControllerOptions> = (
   app,
-  { auth, metrics, userAdmin },
+  { auth, metrics, userAdmin, browserAccounts = false },
   done,
 ) => {
   const authenticate = authenticateHook({ auth, metrics });
@@ -81,12 +82,13 @@ export const authController: FastifyPluginCallback<AuthControllerOptions> = (
   const refreshConfig = rateLimitProfile('refresh');
   const adminConfig = rateLimitProfile('admin');
 
-  app.post('/login', { config: loginConfig }, async (request, reply) => {
-    const body = loginBodySchema.parse(request.body);
-    const result = await auth.login(body);
-    if (!result.ok) throw loginError(result.error);
-    return sendTokens(reply, result.value);
-  });
+  if (!browserAccounts)
+    app.post('/login', { config: loginConfig }, async (request, reply) => {
+      const body = loginBodySchema.parse(request.body);
+      const result = await auth.login(body);
+      if (!result.ok) throw loginError(result.error);
+      return sendTokens(reply, result.value);
+    });
 
   app.post('/platform/login', { config: loginConfig }, async (request, reply) => {
     const body = platformLoginBodySchema.parse(request.body);
@@ -102,12 +104,13 @@ export const authController: FastifyPluginCallback<AuthControllerOptions> = (
     return sendTokens(reply, result.value);
   });
 
-  app.post('/logout', { config: refreshConfig }, async (request, reply) => {
-    const { refreshToken } = refreshBodySchema.parse(request.body);
-    const result = await auth.logout(refreshToken);
-    if (!result.ok) throw new ServiceUnavailableError('Serviço de autenticação indisponível');
-    return reply.status(204).send();
-  });
+  if (!browserAccounts)
+    app.post('/logout', { config: refreshConfig }, async (request, reply) => {
+      const { refreshToken } = refreshBodySchema.parse(request.body);
+      const result = await auth.logout(refreshToken);
+      if (!result.ok) throw new ServiceUnavailableError('Serviço de autenticação indisponível');
+      return reply.status(204).send();
+    });
 
   app.post(
     '/logout-all',

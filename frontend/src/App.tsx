@@ -11,11 +11,12 @@ export function App() {
           <img src="/soprei-logo.svg" alt="Soprei" />
         </a>
         <nav aria-label="Navegação principal">
+          <a href="/entrar">Entrar</a>
           <a href="#como-funciona">Como funciona</a>
           <a href="#possibilidades">O que é possível</a>
         </nav>
-        <a className="nav-cta" href="#como-funciona">
-          Conheça o Soprei <Arrow />
+        <a className="nav-cta" href="/entrar">
+          Entrar no Soprei <Arrow />
         </a>
       </header>
       <main id="conteudo">

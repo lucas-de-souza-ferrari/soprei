@@ -20,6 +20,7 @@ export const MODEL_SCOPES = {
   AuditEvent: 'tenant',
   ChannelConnection: 'tenant',
   PlatformAdmin: 'global',
+  Account: 'global',
 } as const satisfies Record<Prisma.ModelName, ModelScope>;
 
 /** Operações de model que carregam um `where` que pode (e precisa) conter `clientId`. */

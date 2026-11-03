@@ -67,6 +67,12 @@ export function authenticateHook({
   };
 
   return async (request, reply) => {
+    // Preenchida apenas pelo hook de sessão server-side, após reler conta e vínculo no banco.
+    if (request.auth !== null) {
+      setUserId(subjectIdOf(request.auth));
+      if (request.auth.kind === 'user') setClientId(request.auth.clientId);
+      return;
+    }
     const header = request.headers.authorization;
     if (header === undefined) return reject(request, reply, 'missing');
     const token = BEARER.exec(header)?.[1];
