@@ -257,3 +257,26 @@ describe('account_verification_sends_total', () => {
     assert.match(body, /account_verification_sends_total\{result="failed"\} 2/);
   });
 });
+
+describe('account_verification_attempts_total', () => {
+  it('conta tentativas de confirmação só por resultado fixo (sem id, e-mail, IP nem código)', async () => {
+    const metrics = createMetrics();
+    metrics.countVerificationAttempt('verified');
+    metrics.countVerificationAttempt('wrong');
+    metrics.countVerificationAttempt('wrong');
+    metrics.countVerificationAttempt('exhausted');
+    metrics.countVerificationAttempt('unavailable');
+    const body = await metrics.render();
+    assert.ok(body.includes('account_verification_attempts_total{result="verified"} 1'));
+    assert.ok(body.includes('account_verification_attempts_total{result="wrong"} 2'));
+    assert.ok(body.includes('account_verification_attempts_total{result="exhausted"} 1'));
+    assert.ok(body.includes('account_verification_attempts_total{result="unavailable"} 1'));
+    const lines = body
+      .split(String.fromCharCode(10))
+      .filter((line) => line.startsWith('account_verification_attempts_total{'));
+    assert.equal(lines.length, 4);
+    for (const line of lines) {
+      assert.match(line, /^account_verification_attempts_total\{result="[a-z]+"\} [0-9]+$/);
+    }
+  });
+});

@@ -9,6 +9,7 @@ import {
 import { ServiceUnavailableError } from '../../../shared/errors/index.js';
 import { captureLogs } from '../../../test-support/log-capture.js';
 
+const NL = String.fromCharCode(10);
 const BASE: SmtpMailerOptions = {
   host: 'mail.example.test',
   port: 587,
@@ -17,7 +18,7 @@ const BASE: SmtpMailerOptions = {
   from: 'noreply@example.test',
 };
 
-test('envia confirmação com remetente "Soprei" e código em linha separada', async () => {
+test('envia o código de 6 dígitos em linha própria, com 15 minutos e sem o código no assunto', async () => {
   const sent: SendMailOptions[] = [];
   const mailer = new SmtpVerificationMailer(BASE, {
     sendMail: (options) => {
@@ -25,15 +26,25 @@ test('envia confirmação com remetente "Soprei" e código em linha separada', a
       return Promise.resolve({});
     },
   });
-  await mailer.sendVerification('recipient@example.test', 'secret-code');
+  await mailer.sendVerification('recipient@example.test', '482913');
   assert.equal(sent.length, 1);
   const message = sent[0];
   assert.ok(message);
   assert.deepEqual(message.from, { name: 'Soprei', address: 'noreply@example.test' });
   assert.equal(message.to, 'recipient@example.test');
-  assert.equal(message.subject, 'Confirme sua conta no Soprei');
+  assert.equal(message.subject, 'Seu código de confirmação do Soprei');
+  assert.ok(!(message.subject ?? '').includes('482913'));
   assert.ok(typeof message.text === 'string');
-  assert.ok(message.text.includes(String.fromCharCode(10, 10) + 'secret-code'));
+  // Texto simples: sem HTML, o código sozinho em uma linha (6 dígitos contínuos).
+  assert.equal(message.html, undefined);
+  assert.deepEqual(message.text.split(NL), [
+    'Seu código de confirmação é:',
+    '',
+    '482913',
+    '',
+    'Ele vale por 15 minutos. Se você não pediu este cadastro, ignore esta mensagem.',
+  ]);
+  assert.ok(message.text.split(NL).includes('482913'));
 });
 
 test('auth só vai ao transporte com usuário e senha', () => {
@@ -65,11 +76,11 @@ test('falha de envio: erro fixo, sem cause e sem host, usuário, senha, destinat
         ),
     },
   );
-  await assert.rejects(mailer.sendVerification('recipient@example.test', 'code'), (error) => {
+  await assert.rejects(mailer.sendVerification('recipient@example.test', '482913'), (error) => {
     assert.ok(error instanceof ServiceUnavailableError);
     assert.equal(error.cause, undefined);
     const dump = JSON.stringify({ message: error.message, context: error.context });
-    for (const secret of [...secrets, 'recipient', '535', 'resposta']) {
+    for (const secret of [...secrets, 'recipient', '535', 'resposta', '482913']) {
       assert.ok(!dump.includes(secret), secret);
       assert.ok(!error.message.includes(secret), secret);
     }
