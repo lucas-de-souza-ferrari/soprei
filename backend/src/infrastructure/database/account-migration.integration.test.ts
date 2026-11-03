@@ -34,6 +34,12 @@ test('preflight da migration recusa colisão de e-mail sem escolher senha ou uni
     );
     await assert.rejects(client.query(guard), /ACCOUNT_EMAIL_COLLISIONS/);
     await client.query('ROLLBACK');
+    // Diferença só de caixa também é colisão (a conta global normaliza para minúsculas).
+    await client.query('BEGIN');
+    await client.query('CREATE TEMP TABLE users (email text)');
+    await client.query("INSERT INTO users VALUES ('Misto@Example.test'), ('misto@example.TEST')");
+    await assert.rejects(client.query(guard), /ACCOUNT_EMAIL_COLLISIONS/);
+    await client.query('ROLLBACK');
     await client.query('BEGIN');
     await client.query('CREATE TEMP TABLE users (email text)');
     await client.query("INSERT INTO users VALUES ('unico@example.test')");
@@ -55,7 +61,7 @@ test('preflight da migration recusa colisão de e-mail sem escolher senha ou uni
       'CREATE TABLE audit_events (actor_user_id uuid, client_id uuid, FOREIGN KEY (actor_user_id, client_id) REFERENCES users(id, client_id))',
     );
     await client.query(
-      "INSERT INTO users VALUES ($1, $2, 'legado@example.test', 'legacy-hash-preserved', 'ACTIVE', now(), now())",
+      "INSERT INTO users VALUES ($1, $2, 'Legado@Example.test', 'legacy-hash-preserved', 'ACTIVE', now(), now())",
       [legacyId, legacyClientId],
     );
     await client.query('INSERT INTO audit_events VALUES ($1, $2)', [legacyId, legacyClientId]);
@@ -70,6 +76,11 @@ test('preflight da migration recusa colisão de e-mail sem escolher senha ou uni
       [disabledId],
     );
     assert.deepEqual(disabled.rows, [{ account_status: 'ACTIVE', member_status: 'DISABLED' }]);
+    const lowered = await client.query<{ email: string }>(
+      'SELECT email FROM accounts WHERE id = $1',
+      [legacyId],
+    );
+    assert.deepEqual(lowered.rows, [{ email: 'legado@example.test' }]);
     const migrated = await client.query<{
       user_id: string;
       account_id: string;
