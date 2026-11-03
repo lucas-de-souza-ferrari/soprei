@@ -94,3 +94,46 @@ for (const [name, selector] of [
 test('os dois temas declaram os mesmos tokens', () => {
   assert.deepEqual(Object.keys(tokens('.dark')).sort(), Object.keys(tokens(':root')).sort());
 });
+
+/** Cor `top` com opacidade `alpha` sobre `bottom` (como `bg-primary/5` sobre o cartão). */
+function over(top: string, alpha: number, bottom: string): string {
+  const a = parseInt(top.slice(1), 16);
+  const b = parseInt(bottom.slice(1), 16);
+  const mix = (shift: number) =>
+    Math.round(((a >> shift) & 255) * alpha + ((b >> shift) & 255) * (1 - alpha));
+  return `#${[16, 8, 0].map((s) => mix(s).toString(16).padStart(2, '0')).join('')}`;
+}
+
+// Tailwind 4 (emerald-700/500 e emerald-400/500, valores sRGB equivalentes), usados pelo Alert de sucesso.
+const emerald = {
+  claro: { text: '#007a55', bg: '#00bc7d' },
+  escuro: { text: '#00d492', bg: '#00bc7d' },
+};
+
+for (const [name, selector] of [
+  ['claro', ':root'],
+  ['escuro', '.dark'],
+] as const) {
+  const theme = tokens(selector);
+  const card = theme['card'] as string;
+
+  test(`tema ${name}: borda de foco e de erro do campo (3:1 contra o cartão e o fundo)`, () => {
+    for (const bg of [card, theme['background'] as string])
+      for (const key of ['ring', 'destructive', 'input']) {
+        const ratio = contrast(theme[key] as string, bg);
+        assert.ok(ratio >= 3, `${key} sobre ${bg} no tema ${name}: ${ratio.toFixed(2)}:1`);
+      }
+  });
+
+  test(`tema ${name}: Alerts (erro, info, sucesso) com as opacidades usadas têm 4,5:1`, () => {
+    const cases: [string, string, string][] = [
+      ['erro', theme['destructive'] as string, over(theme['destructive'] as string, 0.05, card)],
+      ['info', theme['primary'] as string, over(theme['primary'] as string, 0.05, card)],
+      ['sucesso', emerald[name].text, over(emerald[name].bg, 0.05, card)],
+    ];
+    for (const [label, fg, bg] of cases) {
+      const ratio = contrast(fg, bg);
+      assert.ok(ratio >= 4.5, `alerta ${label} no tema ${name}: ${ratio.toFixed(2)}:1`);
+    }
+  });
+}

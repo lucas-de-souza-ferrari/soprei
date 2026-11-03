@@ -129,3 +129,43 @@ for (const reduced of [true, false]) {
     expect(calls).toBe(reduced ? 0 : 1);
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`campos: borda muda ao focar e no erro, e o erro é anunciado uma vez (tema ${theme})`, async ({
+    page,
+  }) => {
+    await blockApi(page);
+    await page.addInitScript((value) => localStorage.setItem('soprei-theme', value), theme);
+    await page.goto('/criar-conta');
+    await expect(page.getByRole('button', { name: 'Criar conta', exact: true })).toBeEnabled();
+    const border = (id: string) =>
+      page.locator(`#${id}`).evaluate((input) => {
+        const field = input.parentElement as HTMLElement;
+        return getComputedStyle(field).borderTopColor;
+      });
+    const token = (name: string) =>
+      page.evaluate((n) => {
+        const probe = document.createElement('i');
+        probe.style.color = `var(--${n})`;
+        document.body.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      }, name);
+    const idle = await border('password');
+    expect(idle).toBe(await token('input'));
+    await page.locator('#password').focus();
+    await expect.poll(() => border('password')).toBe(await token('ring'));
+    await page.getByLabel('Senha', { exact: true }).fill('senha1');
+    await page.getByLabel('Confirmar senha').fill('senha1');
+    await page.getByLabel('E-mail', { exact: true }).fill('a@example.test');
+    await page.getByRole('button', { name: 'Criar conta', exact: true }).click();
+    await expect.poll(() => border('password')).toBe(await token('destructive'));
+    const alerts = page.getByRole('alert');
+    await expect(alerts).toHaveCount(1);
+    await expect(alerts).toContainText('uma letra maiúscula e um número');
+    const describedBy = await page.locator('#password').getAttribute('aria-describedby');
+    expect(await page.locator(`[id="${describedBy}"]`).textContent()).toContain('maiúscula');
+    await expect(page.locator('#password')).toHaveAttribute('aria-invalid', 'true');
+  });
+}

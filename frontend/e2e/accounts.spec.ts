@@ -74,10 +74,12 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByLabel('Confirmar senha')).toHaveAttribute('type', 'text');
     await page.getByRole('button', { name: 'Ocultar confirmação de senha' }).click();
     await page.getByRole('button', { name: 'Criar conta', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveCount(1);
     await expect(page.getByRole('alert')).toContainText('As senhas não coincidem');
     await page.getByLabel('Senha', { exact: true }).fill('senha1');
     await page.getByLabel('Confirmar senha').fill('senha1');
     await page.getByRole('button', { name: 'Criar conta', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveCount(1);
     await expect(page.getByRole('alert')).toContainText('uma letra maiúscula e um número');
     expect(registrations).toBe(0);
     await page.getByLabel('Senha', { exact: true }).fill('Senha1');
