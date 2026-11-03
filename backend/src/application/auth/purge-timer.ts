@@ -33,12 +33,14 @@ export interface PurgeTimer {
  * não rejeita); mesmo assim a rejeição seria engolida aqui.
  */
 export function startPurgeTimer(options: {
+  /** Só com contas globais ligadas (`ACCOUNTS_ENABLED=true`); desligado não agenda nada. */
+  enabled: boolean;
   run: () => Promise<unknown>;
   intervalMinutes: number;
   firstRunDelayMs?: number;
   scheduler?: PurgeScheduler;
 }): PurgeTimer | undefined {
-  if (options.intervalMinutes <= 0) return undefined;
+  if (!options.enabled || options.intervalMinutes <= 0) return undefined;
   const scheduler = options.scheduler ?? nodeScheduler;
   let active: Promise<void> | undefined;
   let stopped = false;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Redis } from 'ioredis';
 import { AttendanceService } from '../../../application/attendance/attendance.service.js';
+import type { AccountService } from '../../../application/auth/account.service.js';
 import { ClientService } from '../../../application/clients/client.service.js';
 import { Result } from '../../../shared/types/index.js';
 import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
@@ -123,6 +124,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       },
       auth: testAuth.service,
       userAdmin: testAuth.userAdmin,
+      // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
+      accounts: {
+        service: { drain: () => Promise.resolve() } as unknown as AccountService,
+        origin: 'http://localhost:5174',
+        secure: false,
+      },
       admin: {
         clients: new ClientService(clients),
         channel: {
@@ -187,6 +194,8 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/auth/logout-all',
       '/auth/me',
       '/auth/password',
+      '/auth/password-reset/request',
+      '/auth/password-reset/confirm',
       '/webhooks/whatsapp',
     ]) {
       assert.ok(
@@ -258,6 +267,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           '/auth/logout-all': 'admin',
           '/auth/me': 'admin',
           '/auth/password': 'login',
+          '/auth/register': 'login',
+          '/auth/resend-verification': 'login',
+          '/auth/verify-email': 'login',
+          '/auth/session': 'admin',
+          '/auth/password-reset/request': 'login',
+          '/auth/password-reset/confirm': 'login',
         };
         assert.equal(route.config.rateLimitProfile, expected[route.url], `${label} perfil`);
       } else {

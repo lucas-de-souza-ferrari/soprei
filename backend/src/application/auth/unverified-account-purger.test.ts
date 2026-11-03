@@ -116,6 +116,7 @@ test('timer: unref, primeira execução curta, intervalo configurado e nada agen
   const none = fakeScheduler();
   assert.equal(
     startPurgeTimer({
+      enabled: true,
       run: () => Promise.resolve(),
       intervalMinutes: 0,
       scheduler: none.scheduler,
@@ -123,10 +124,23 @@ test('timer: unref, primeira execução curta, intervalo configurado e nada agen
     undefined,
   );
   assert.equal(none.handles.length, 0);
+  // Sem contas globais (ACCOUNTS_ENABLED=false) nada é agendado, mesmo com intervalo positivo.
+  const disabled = fakeScheduler();
+  assert.equal(
+    startPurgeTimer({
+      enabled: false,
+      run: () => Promise.resolve(),
+      intervalMinutes: 60,
+      scheduler: disabled.scheduler,
+    }),
+    undefined,
+  );
+  assert.equal(disabled.handles.length, 0);
 
   const { scheduler, handles } = fakeScheduler();
   let runs = 0;
   const timer = startPurgeTimer({
+    enabled: true,
     run: () => {
       runs += 1;
       return Promise.resolve();
@@ -154,6 +168,7 @@ test('timer: um tique durante uma execução em curso é pulado e stop() espera 
   let started = 0;
   let finished = 0;
   const timer = startPurgeTimer({
+    enabled: true,
     run: () => {
       started += 1;
       return new Promise<void>((resolve) => {
@@ -190,6 +205,7 @@ test('timer: um tique durante uma execução em curso é pulado e stop() espera 
 test('timer: com os timers reais do Node os dois ficam sem referência (não seguram o processo)', async () => {
   const created: NodeJS.Timeout[] = [];
   const timer = startPurgeTimer({
+    enabled: true,
     run: () => Promise.resolve(),
     intervalMinutes: 1,
     scheduler: {

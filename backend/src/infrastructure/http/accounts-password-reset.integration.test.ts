@@ -5,9 +5,11 @@ import { AccountService } from '../../application/auth/account.service.js';
 import type { AccountSessionStore } from '../../application/ports/account-session.js';
 import { ServiceUnavailableError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
+import { getClosedPort, withPort } from '../../test-support/closed-port.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
+import { createRateLimitRedis } from '../cache/rate-limit-redis.js';
 import { createRedis } from '../cache/redis.client.js';
 import { createDatabase, PrismaAccountRepository } from '../database/index.js';
 import { createAuthRedis } from '../auth/auth-redis.js';
@@ -327,5 +329,64 @@ test('recuperação de senha de ponta a ponta: sessões revogadas, uniformidade,
     await redis.close();
     await main.close();
     await db.close();
+  }
+});
+
+test('limiter fora do ar (Redis): as duas rotas de recuperação respondem 503 sem chegar ao serviço (fail-closed)', async () => {
+  const logs = captureLogs();
+  const closed = withPort(config.REDIS_URL, await getClosedPort());
+  const limiter = createRateLimitRedis(
+    { REDIS_URL: closed, RATE_LIMIT_REDIS_TIMEOUT_MS: 250 },
+    logs.logger,
+  );
+  const calls: string[] = [];
+  const service = {
+    drain: () => Promise.resolve(),
+    requestPasswordReset: () => {
+      calls.push('request');
+      return Promise.resolve();
+    },
+    confirmPasswordReset: () => {
+      calls.push('confirm');
+      return Promise.resolve();
+    },
+  } as unknown as AccountService;
+  const app = buildServer({
+    logger: logs.logger,
+    readiness: {
+      database: () => Promise.resolve(Result.ok(undefined)),
+      redis: () => Promise.resolve(Result.ok(undefined)),
+    },
+    accounts: { service, origin, secure: false },
+    rateLimit: {
+      redis: limiter.client,
+      profiles: {
+        public: { max: 100, windowSeconds: 60 },
+        admin: { max: 100, windowSeconds: 60 },
+        webhook: { max: 100, windowSeconds: 60 },
+        login: { max: 100, windowSeconds: 60 },
+        refresh: { max: 100, windowSeconds: 60 },
+      },
+    },
+  });
+  try {
+    const request = await app.inject({
+      method: 'POST',
+      url: '/auth/password-reset/request',
+      payload: { email: 'pessoa@example.test' },
+      headers,
+    });
+    const confirm = await app.inject({
+      method: 'POST',
+      url: '/auth/password-reset/confirm',
+      payload: { email: 'pessoa@example.test', code: '123456', newPassword: 'Senha1-nova' },
+      headers,
+    });
+    assert.equal(request.statusCode, 503);
+    assert.equal(confirm.statusCode, 503);
+    assert.deepEqual(calls, []);
+  } finally {
+    await app.close();
+    await limiter.close();
   }
 });

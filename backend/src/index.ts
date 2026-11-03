@@ -295,27 +295,26 @@ async function main(): Promise<void> {
     },
   });
 
-  if (config.ACCOUNTS_ENABLED) {
-    // Expurgo de contas nunca confirmadas (spec 021): timer no processo, `unref`, desligável com 0.
-    const purger = new UnverifiedAccountPurger({
-      repository: new PrismaUnverifiedAccountPurgeRepository(prisma),
-      retentionDays: config.ACCOUNT_UNVERIFIED_RETENTION_DAYS,
-      // Só contagens: nunca e-mail nem id de conta.
-      onRun: ({ result, purged, batches }) => {
-        metrics.countAccountPurgeRun(result);
-        metrics.countAccountsPurged(purged);
-        if (result === 'error') {
-          logger.error({ purged, batches }, 'falha no expurgo de contas não confirmadas');
-        } else if (purged > 0) {
-          logger.info({ purged, batches }, 'contas não confirmadas expurgadas');
-        }
-      },
-    });
-    infrastructure.accountPurge = startPurgeTimer({
-      run: () => purger.runOnce(),
-      intervalMinutes: config.ACCOUNT_PURGE_INTERVAL_MINUTES,
-    });
-  }
+  // Expurgo de contas nunca confirmadas (spec 021): timer no processo, `unref`, desligável com 0.
+  const purger = new UnverifiedAccountPurger({
+    repository: new PrismaUnverifiedAccountPurgeRepository(prisma),
+    retentionDays: config.ACCOUNT_UNVERIFIED_RETENTION_DAYS,
+    // Só contagens: nunca e-mail nem id de conta.
+    onRun: ({ result, purged, batches }) => {
+      metrics.countAccountPurgeRun(result);
+      metrics.countAccountsPurged(purged);
+      if (result === 'error') {
+        logger.error({ purged, batches }, 'falha no expurgo de contas não confirmadas');
+      } else if (purged > 0) {
+        logger.info({ purged, batches }, 'contas não confirmadas expurgadas');
+      }
+    },
+  });
+  infrastructure.accountPurge = startPurgeTimer({
+    enabled: config.ACCOUNTS_ENABLED,
+    run: () => purger.runOnce(),
+    intervalMinutes: config.ACCOUNT_PURGE_INTERVAL_MINUTES,
+  });
 
   const stop = (signal: string): void => {
     app.log.info({ signal }, 'encerrando servidor');
