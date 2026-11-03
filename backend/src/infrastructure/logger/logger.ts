@@ -21,6 +21,7 @@ const REDACTED_KEYS = [
   'EMAIL_PROVIDER_USER',
   'EMAIL_PROVIDER_PSWD',
   'verificationHash',
+  'resetHash',
   'verificationToken',
   'set-cookie',
   // Canal WhatsApp (spec 011): segredo do app, token de verificação do webhook e token de envio.

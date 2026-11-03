@@ -62,9 +62,14 @@ export type {
   Account,
   AccountMembership,
   AccountRepository,
+  ResetFailureOutcome,
+  UnverifiedAccountPurgeRepository,
   VerifyOutcome,
 } from './repositories/account.repository.js';
 export {
+  RESET_DAILY_FAILURE_CAP,
+  RESET_FAILURE_WINDOW_MS,
+  RESET_MAX_ATTEMPTS,
   VERIFICATION_DAILY_FAILURE_CAP,
   VERIFICATION_FAILURE_WINDOW_MS,
   VERIFICATION_MAX_ATTEMPTS,

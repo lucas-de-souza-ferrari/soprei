@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
   AccountId,
+  RESET_DAILY_FAILURE_CAP,
+  RESET_FAILURE_WINDOW_MS,
+  RESET_MAX_ATTEMPTS,
   VERIFICATION_DAILY_FAILURE_CAP,
   VERIFICATION_FAILURE_WINDOW_MS,
   VERIFICATION_MAX_ATTEMPTS,
   type Account,
   type AccountMembership,
   type AccountRepository,
+  type ResetFailureOutcome,
   type VerifyOutcome,
 } from '../domain/index.js';
 
@@ -22,6 +26,11 @@ export interface MemoryAccountRow {
   verificationAttempts: number;
   verificationFailuresDay: number;
   verificationFailuresSince: Date | null;
+  resetHash: string | null;
+  resetExpiresAt: Date | null;
+  resetAttempts: number;
+  resetFailuresDay: number;
+  resetFailuresSince: Date | null;
 }
 
 /**
@@ -81,6 +90,11 @@ export class InMemoryAccountRepository implements AccountRepository {
       verificationAttempts: 0,
       verificationFailuresDay: 0,
       verificationFailuresSince: null,
+      resetHash: null,
+      resetExpiresAt: null,
+      resetAttempts: 0,
+      resetFailuresDay: 0,
+      resetFailuresSince: null,
     };
   }
 
@@ -213,6 +227,110 @@ export class InMemoryAccountRepository implements AccountRepository {
       return Promise.resolve('exhausted');
     }
     return Promise.resolve('wrong');
+  }
+
+  private static resetCap(row: MemoryAccountRow, now: Date): boolean {
+    const windowStart = now.getTime() - RESET_FAILURE_WINDOW_MS;
+    return (
+      row.resetFailuresSince !== null &&
+      row.resetFailuresSince.getTime() > windowStart &&
+      row.resetFailuresDay >= RESET_DAILY_FAILURE_CAP
+    );
+  }
+
+  /** Conta apta a recuperar a senha: confirmada e ativa (o mesmo predicado das instruções SQL). */
+  private static eligible(row: MemoryAccountRow): boolean {
+    return row.status === 'ACTIVE' && row.emailVerifiedAt !== null;
+  }
+
+  issueResetCode(
+    email: string,
+    hash: string,
+    expiresAt: Date,
+    retryBefore: Date,
+    now: Date,
+  ): Promise<string | null> {
+    const row = this.byEmail(email);
+    if (
+      row === undefined ||
+      !InMemoryAccountRepository.eligible(row) ||
+      (row.resetExpiresAt !== null && row.resetExpiresAt.getTime() > retryBefore.getTime()) ||
+      InMemoryAccountRepository.resetCap(row, now)
+    ) {
+      return Promise.resolve(null);
+    }
+    row.resetHash = hash;
+    row.resetExpiresAt = expiresAt;
+    row.resetAttempts = 0;
+    return Promise.resolve(row.id);
+  }
+
+  hasValidResetCode(email: string, hash: string, now: Date): Promise<boolean> {
+    const row = this.byEmail(email);
+    return Promise.resolve(
+      row !== undefined &&
+        InMemoryAccountRepository.eligible(row) &&
+        row.resetHash === hash &&
+        row.resetExpiresAt !== null &&
+        row.resetExpiresAt.getTime() > now.getTime() &&
+        row.resetAttempts < RESET_MAX_ATTEMPTS,
+    );
+  }
+
+  recordResetFailure(email: string, now: Date): Promise<ResetFailureOutcome> {
+    const row = this.byEmail(email);
+    if (
+      row === undefined ||
+      !InMemoryAccountRepository.eligible(row) ||
+      row.resetHash === null ||
+      row.resetExpiresAt === null ||
+      row.resetExpiresAt.getTime() <= now.getTime()
+    ) {
+      return Promise.resolve('unavailable');
+    }
+    const windowStart = now.getTime() - RESET_FAILURE_WINDOW_MS;
+    const fresh =
+      row.resetFailuresSince === null || row.resetFailuresSince.getTime() <= windowStart;
+    const day = fresh ? 1 : row.resetFailuresDay + 1;
+    row.resetAttempts += 1;
+    row.resetFailuresDay = day;
+    if (fresh) row.resetFailuresSince = now;
+    if (row.resetAttempts >= RESET_MAX_ATTEMPTS || day >= RESET_DAILY_FAILURE_CAP) {
+      row.resetHash = null;
+      return Promise.resolve('exhausted');
+    }
+    return Promise.resolve('wrong');
+  }
+
+  resetPassword(email: string, hash: string, passwordHash: string, now: Date): Promise<boolean> {
+    const row = this.byEmail(email);
+    if (
+      row === undefined ||
+      !InMemoryAccountRepository.eligible(row) ||
+      row.resetHash !== hash ||
+      row.resetExpiresAt === null ||
+      row.resetExpiresAt.getTime() <= now.getTime() ||
+      row.resetAttempts >= RESET_MAX_ATTEMPTS
+    ) {
+      return Promise.resolve(false);
+    }
+    row.passwordHash = passwordHash;
+    row.resetHash = null;
+    row.resetExpiresAt = null;
+    row.resetAttempts = 0;
+    row.resetFailuresDay = 0;
+    row.resetFailuresSince = null;
+    return Promise.resolve(true);
+  }
+
+  clearResetCode(id: string, hash: string): Promise<void> {
+    const row = this.rows.get(id);
+    if (row !== undefined && row.resetHash === hash) {
+      row.resetHash = null;
+      row.resetExpiresAt = null;
+      row.resetAttempts = 0;
+    }
+    return Promise.resolve();
   }
 
   listMemberships(): Promise<readonly AccountMembership[]> {

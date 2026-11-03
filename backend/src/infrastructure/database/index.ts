@@ -38,3 +38,4 @@ export type { TenantModelOps, TenantWhere } from './repositories/tenant.reposito
 export { extendWithTenantScope, MODEL_SCOPES } from './extensions/tenant-scope.js';
 export type { ModelScope, TenantScopedDb, TenantScopedPrisma } from './extensions/tenant-scope.js';
 export { PrismaAccountRepository } from './repositories/account.repository.js';
+export { PrismaUnverifiedAccountPurgeRepository } from './repositories/unverified-account-purge.repository.js';

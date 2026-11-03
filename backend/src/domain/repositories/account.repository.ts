@@ -24,6 +24,18 @@ export const VERIFICATION_MAX_ATTEMPTS = 5;
 export const VERIFICATION_DAILY_FAILURE_CAP = 25;
 export const VERIFICATION_FAILURE_WINDOW_MS = 24 * 60 * 60_000;
 
+/** Erros seguidos que matam o código de recuperação vigente (spec 021). */
+export const RESET_MAX_ATTEMPTS = 5;
+/** Erros acumulados na janela de 24 h, por conta, que bloqueiam código de recuperação novo. */
+export const RESET_DAILY_FAILURE_CAP = 10;
+export const RESET_FAILURE_WINDOW_MS = 24 * 60 * 60_000;
+
+/**
+ * Resultado de um erro registrado contra o código de recuperação. `unavailable`: não há código
+ * vigente (ausente, vencido, esgotado, conta inexistente, não confirmada ou desativada).
+ */
+export type ResetFailureOutcome = 'wrong' | 'exhausted' | 'unavailable';
+
 /**
  * Resultado de uma tentativa de confirmar o e-mail. Só métrica e log interno: a resposta ao
  * cliente é uma só. `unavailable`: sem código vigente (ausente, vencido, esgotado, conta já
@@ -73,7 +85,43 @@ export interface AccountRepository {
    * vencimento, de modo que o intervalo mínimo de reenvio continua valendo.
    */
   verify(id: string, hash: string, now: Date): Promise<VerifyOutcome>;
+  /**
+   * Grava um código de recuperação (já em HMAC) numa única instrução, casando por e-mail: só conta
+   * confirmada e ativa, fora do intervalo mínimo (`retryBefore`) e do teto diário de erros. Devolve
+   * o id só quando algo foi gravado; `null` é uniforme para todos os outros casos.
+   */
+  issueResetCode(
+    email: string,
+    hash: string,
+    expiresAt: Date,
+    retryBefore: Date,
+    now: Date,
+  ): Promise<string | null>;
+  /** Confere sem consumir: há código vigente igual a `hash` para essa conta? */
+  hasValidResetCode(email: string, hash: string, now: Date): Promise<boolean>;
+  /**
+   * Registra um erro contra o código vigente (atômico): o 5º erro do código ou o 10º do dia apaga o
+   * hash e mantém o vencimento.
+   */
+  recordResetFailure(email: string, now: Date): Promise<ResetFailureOutcome>;
+  /**
+   * Troca a senha e gasta o código na mesma instrução. `false` = o código não casava mais (outro
+   * pedido venceu, esgotou, venceu o prazo ou a conta não está apta).
+   */
+  resetPassword(email: string, hash: string, passwordHash: string, now: Date): Promise<boolean>;
+  /** Descarta o código que não chegou a sair (falha de envio), liberando novo pedido já. */
+  clearResetCode(id: string, hash: string): Promise<void>;
   listMemberships(accountId: string): Promise<readonly AccountMembership[]>;
   membership(accountId: string, clientId: ClientId): Promise<AccountMembership | null>;
   createCompany(accountId: string, name: string): Promise<AccountMembership>;
+}
+
+/** Expurgo de contas nunca confirmadas (spec 021). */
+export interface UnverifiedAccountPurgeRepository {
+  /**
+   * Apaga até `batchSize` contas **não confirmadas**, sem nenhum vínculo (`User`) e com
+   * `updated_at` anterior a `cutoff`. O predicado é repetido no DELETE sob lock, então conta
+   * confirmada ou com vínculo nunca é apagada. Devolve só a contagem.
+   */
+  purgeUnverified(cutoff: Date, batchSize: number): Promise<number>;
 }

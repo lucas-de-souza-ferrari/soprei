@@ -201,3 +201,11 @@ export async function runAccountRepositoryContract(
     assert.equal(await refresh(id, 'hash-7b', 2000), true);
   }
 }
+
+// O contrato da recuperação de senha (spec 021) mora em arquivo próprio e é exportado daqui, para os
+// dois repositórios importarem tudo do mesmo lugar.
+export {
+  runPasswordResetContract,
+  type ResetContractHarness,
+  type ResetState,
+} from './account-reset-contract.js';

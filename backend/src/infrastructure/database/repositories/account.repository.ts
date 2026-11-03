@@ -5,7 +5,11 @@ import {
   UserId,
   type AccountRepository,
   type AccountMembership,
+  type ResetFailureOutcome,
   type VerifyOutcome,
+  RESET_DAILY_FAILURE_CAP,
+  RESET_FAILURE_WINDOW_MS,
+  RESET_MAX_ATTEMPTS,
   VERIFICATION_DAILY_FAILURE_CAP,
   VERIFICATION_FAILURE_WINDOW_MS,
   VERIFICATION_MAX_ATTEMPTS,
@@ -179,6 +183,129 @@ export class PrismaAccountRepository implements AccountRepository {
       if (row === undefined) return 'unavailable';
       return row.dead ? 'exhausted' : 'wrong';
     });
+  }
+  async issueResetCode(
+    email: string,
+    hash: string,
+    expiresAt: Date,
+    retryBefore: Date,
+    now: Date,
+  ): Promise<string | null> {
+    const windowStart = new Date(now.getTime() - RESET_FAILURE_WINDOW_MS);
+    // Um único UPDATE casando por e-mail: o mesmo trabalho de banco para e-mail inexistente,
+    // não confirmado, desativado ou barrado pelo intervalo e pelo teto diário (sem linha, não envia).
+    const rows = await withRepositoryErrors(
+      'Account.issueResetCode',
+      () =>
+        this.db.$queryRaw<{ id: string }[]>`
+        UPDATE accounts
+        SET reset_hash = ${hash},
+            reset_expires_at = ${expiresAt}::timestamptz,
+            reset_attempts = 0,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE email = ${email}
+          AND email_verified_at IS NOT NULL
+          AND status = 'ACTIVE'
+          AND (reset_expires_at IS NULL OR reset_expires_at <= ${retryBefore}::timestamptz)
+          AND (reset_failures_since IS NULL
+               OR reset_failures_since <= ${windowStart}::timestamptz
+               OR reset_failures_day < ${RESET_DAILY_FAILURE_CAP}::int)
+        RETURNING id`,
+    );
+    return rows[0]?.id ?? null;
+  }
+  async hasValidResetCode(email: string, hash: string, now: Date): Promise<boolean> {
+    const rows = await withRepositoryErrors(
+      'Account.hasValidResetCode',
+      () =>
+        this.db.$queryRaw<{ id: string }[]>`
+        SELECT id FROM accounts
+        WHERE email = ${email}
+          AND reset_hash = ${hash}
+          AND reset_expires_at > ${now}::timestamptz
+          AND reset_attempts < ${RESET_MAX_ATTEMPTS}::int
+          AND status = 'ACTIVE'
+          AND email_verified_at IS NOT NULL`,
+    );
+    return rows.length === 1;
+  }
+  async recordResetFailure(email: string, now: Date): Promise<ResetFailureOutcome> {
+    const windowStart = new Date(now.getTime() - RESET_FAILURE_WINDOW_MS);
+    // O Postgres serializa os UPDATEs da mesma linha; quem mata o código (5º erro da vez ou 10º do
+    // dia) apaga o hash na mesma instrução, então nenhum UPDATE seguinte o casa nem incrementa. O
+    // vencimento fica: o intervalo mínimo entre pedidos continua contando desde o envio.
+    const rows = await withRepositoryErrors(
+      'Account.recordResetFailure',
+      () =>
+        this.db.$queryRaw<{ dead: boolean }[]>`
+        UPDATE accounts
+        SET reset_attempts = reset_attempts + 1,
+            reset_failures_day = CASE
+              WHEN reset_failures_since IS NULL
+                OR reset_failures_since <= ${windowStart}::timestamptz THEN 1
+              ELSE reset_failures_day + 1 END,
+            reset_failures_since = CASE
+              WHEN reset_failures_since IS NULL
+                OR reset_failures_since <= ${windowStart}::timestamptz
+                THEN ${now}::timestamptz
+              ELSE reset_failures_since END,
+            reset_hash = CASE
+              WHEN reset_attempts + 1 >= ${RESET_MAX_ATTEMPTS}::int
+                OR (CASE
+                      WHEN reset_failures_since IS NULL
+                        OR reset_failures_since <= ${windowStart}::timestamptz THEN 1
+                      ELSE reset_failures_day + 1 END)
+                   >= ${RESET_DAILY_FAILURE_CAP}::int
+              THEN NULL ELSE reset_hash END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE email = ${email}
+          AND reset_hash IS NOT NULL
+          AND reset_expires_at > ${now}::timestamptz
+          AND email_verified_at IS NOT NULL
+          AND status = 'ACTIVE'
+        RETURNING (reset_hash IS NULL) AS dead`,
+    );
+    const row = rows[0];
+    if (row === undefined) return 'unavailable';
+    return row.dead ? 'exhausted' : 'wrong';
+  }
+  async resetPassword(
+    email: string,
+    hash: string,
+    passwordHash: string,
+    now: Date,
+  ): Promise<boolean> {
+    // Troca de senha e morte do código são a mesma instrução: dois pedidos com o código certo, só
+    // um casa o `reset_hash`; o outro encontra NULL.
+    const rows = await withRepositoryErrors(
+      'Account.resetPassword',
+      () =>
+        this.db.$queryRaw<{ id: string }[]>`
+        UPDATE accounts
+        SET password_hash = ${passwordHash},
+            reset_hash = NULL,
+            reset_expires_at = NULL,
+            reset_attempts = 0,
+            reset_failures_day = 0,
+            reset_failures_since = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE email = ${email}
+          AND reset_hash = ${hash}
+          AND reset_expires_at > ${now}::timestamptz
+          AND reset_attempts < ${RESET_MAX_ATTEMPTS}::int
+          AND status = 'ACTIVE'
+          AND email_verified_at IS NOT NULL
+        RETURNING id`,
+    );
+    return rows.length === 1;
+  }
+  async clearResetCode(id: string, hash: string): Promise<void> {
+    await withRepositoryErrors('Account.clearResetCode', () =>
+      this.db.account.updateMany({
+        where: { id, resetHash: hash },
+        data: { resetHash: null, resetExpiresAt: null, resetAttempts: 0 },
+      }),
+    );
   }
   async listMemberships(accountId: string): Promise<readonly AccountMembership[]> {
     // Resolve apenas raízes de tenant acessíveis. Cada leitura do vínculo continua escopada.

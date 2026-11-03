@@ -164,6 +164,12 @@ model Account {
   verificationAttempts      Int        @default(0) @map("verification_attempts") @db.SmallInt
   verificationFailuresDay   Int        @default(0) @map("verification_failures_day") @db.SmallInt
   verificationFailuresSince DateTime?  @map("verification_failures_since") @db.Timestamptz(6)
+  /// Código de recuperação de senha (HMAC, spec 021); nunca em log, resposta nem métrica.
+  resetHash                 String?    @map("reset_hash")
+  resetExpiresAt            DateTime?  @map("reset_expires_at") @db.Timestamptz(6)
+  resetAttempts             Int        @default(0) @map("reset_attempts") @db.SmallInt
+  resetFailuresDay          Int        @default(0) @map("reset_failures_day") @db.SmallInt
+  resetFailuresSince        DateTime?  @map("reset_failures_since") @db.Timestamptz(6)
   createdAt                 DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
   memberships               User[]
