@@ -131,6 +131,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 **Próximas**
 
+- [Spec 017 — login e consulta de conversas no painel do cliente](specs/017-painel-cliente.md): **rascunho**, preparado após o dono pedir a próxima spec em 2026-11-03. Escopo proposto: login, sessão em memória e leitura paginada; aguarda aprovação, sobretudo da experiência de novo login ao recarregar. Não é decisão aprovada nem autorização para implementar.
+
 - Pendências da spec 008 (revisão): imutabilidade da auditoria só por convenção do repositório (considerar gatilho ou `REVOKE` na spec de retenção/LGPD, que também decide o expurgo); a migration `20261030120000_rbac_audit` usa `ALTER TYPE ... ADD VALUE`, que exige PostgreSQL >= 12.
 
 - Pendências da spec 007 (revisão): teto do tamanho da fila de espera do hasher (`scrypt-password-hasher.ts`) e limpeza periódica de sessões expiradas no conjunto `usess` do Redis; incluir o IP na chave do bloqueio por conta se virar problema.
