@@ -1,6 +1,6 @@
 # Passagem de turno entre agentes
 
-> 2026-10-30, Codex: rascunho da spec 016 na branch `spec/016-frontend-base`. O dono escolheu site de apresentação como primeira fatia, pediu `backend/` e `frontend/` e forneceu logo e ícone em `docs/brand/`. Conteúdo, chamada, stack, workspace e identidade visual complementar aguardam definição. Nenhum código foi alterado nem validação executada. Próximo passo: incorporar as decisões, ajustar e submeter a spec à aprovação.
+> 2026-11-03, Codex: spec 016 implementada na branch `spec/016-frontend-base`, aprovada pelo dono no chat. Backend movido sem alteração de código/migrations; site React/Vite/Tailwind em `frontend/`, marca fornecida e composição inspirada nas três referências. Ambiente local passa a `backend/.env` e `backend/.env.test`. Unitários do backend: 994 verdes em Node 22.23.2 e 24.18.0; integração: 339 verdes em ambos. Typecheck, lint e formatação verdes em ambos. Frontend: 2 testes repetidos 5 vezes em cada Node; build e smoke do compilado verdes nos dois. Sem publicação (fora do escopo). Próximo passo: revisão em sessão separada, push/PR pelo dono, CI em checkout limpo e verificação de migrations e teclado/responsividade em navegador (limites descritos na spec). Para abrir o site: `pnpm dev:frontend`. Documentação histórica abaixo conserva referências da 015.
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs.
 

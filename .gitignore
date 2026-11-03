@@ -151,3 +151,4 @@ vite.config.ts.timestamp-*
 
 # Prisma Client gerado (pnpm db:generate)
 src/generated/
+backend/src/generated/

@@ -2,6 +2,7 @@ node_modules
 dist
 pnpm-lock.yaml
 src/generated
+backend/src/generated
 docs
 .claude
 CLAUDE.md

@@ -175,6 +175,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 ## 7. Histórico de decisões
 
+- 2026-10-30: o dono aprovou a spec 016: workspace pnpm com `backend/` e `frontend/`, primeira entrega do frontend como site de apresentação, identidade do Soprei fornecida em SVG e referências Beautiful UI, beUI e ObsidianUI. Implementação na branch `spec/016-frontend-base`; hospedagem permanece fora do escopo.
+
 - Stack Node 22+ + TypeScript + Fastify + Prisma + Pino definida pelo dono do projeto.
 - 2026-10-27: o dono aprovou mudar o processo para specs sob demanda, fatia vertical cedo e `reviewer` obrigatório em specs de segurança. Motivo: as specs 002 e 003, escritas antes do código, precisaram ser reescritas, e a base completa (JWT, RBAC, cache, tempo real) estava sendo construída antes de existir produto.
 - O protótipo `customer-service` usava TypeORM; o Soprei usa Prisma. As regras de arquitetura do protótipo (isolamento por cliente, webhook rápido, LLM trocável) foram mantidas.
