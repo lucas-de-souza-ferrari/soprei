@@ -1,6 +1,6 @@
 # 018 — Frontend com componentes beUI e modo escuro
 
-- **Status:** rascunho (pedido pelo dono em 2026-11-03: usar os componentes de https://beui.dev/components/motion e ter modo escuro; aguarda aprovação do escopo)
+- **Status:** aprovada (2026-11-03, como proposta: site e telas de conta, View Transition do tema ligado; pedido do dono: usar os componentes de https://beui.dev/components/motion e ter modo escuro)
 - **Branch:** `spec/018-frontend-beui`
 - **Depende de:** 016 (site) e 017 (contas e empresas)
 
