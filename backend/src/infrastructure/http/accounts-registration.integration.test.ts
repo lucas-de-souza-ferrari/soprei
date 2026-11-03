@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
-import { captureLogs } from '../../test-support/log-capture.js';
+import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { Result } from '../../shared/types/index.js';
 import { createDatabase, PrismaAccountRepository } from '../database/index.js';
@@ -250,7 +250,7 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
       attackerCode,
       'SMTP segredo',
     ]) {
-      assert.ok(!logs.raw().includes(value));
+      assert.ok(!logContains(logs.raw(), value));
     }
   } finally {
     await app.close();

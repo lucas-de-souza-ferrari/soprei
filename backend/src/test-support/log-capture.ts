@@ -34,3 +34,13 @@ export function captureLogs(level: Config['LOG_LEVEL'] = 'trace'): LogCapture {
         .map((line) => JSON.parse(line) as LogLine),
   };
 }
+
+/**
+ * `raw` contém o valor? Código de 6 dígitos só conta como vazamento quando não está colado a
+ * outros dígitos ou letras hexadecimais (timestamps, durações e UUIDs de requestId podem conter
+ * a mesma sequência por acaso); os demais valores são comparados como texto.
+ */
+export function logContains(raw: string, value: string): boolean {
+  if (!/^\d{6}$/.test(value)) return raw.includes(value);
+  return new RegExp(`(?<![0-9a-fA-F])${value}(?![0-9a-fA-F])`).test(raw);
+}

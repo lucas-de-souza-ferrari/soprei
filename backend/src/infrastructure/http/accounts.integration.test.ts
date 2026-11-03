@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
 import { ClientService } from '../../application/clients/client.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
-import { captureLogs } from '../../test-support/log-capture.js';
+import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import {
@@ -357,7 +357,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
       'Empresa secreta A',
       'SMTP segredo',
     ])
-      assert.ok(!logs.raw().includes(value));
+      assert.ok(!logContains(logs.raw(), value));
   } finally {
     await app.close();
     await tenants.cleanup();

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
-import { captureLogs } from '../../test-support/log-capture.js';
+import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { Result } from '../../shared/types/index.js';
 import { createDatabase, PrismaAccountRepository } from '../database/index.js';
@@ -174,7 +174,7 @@ test('confirmação por código de 6 dígitos: erros, esgotamento, reenvio, mét
       email,
       password,
     ]) {
-      assert.ok(!raw.includes(secret), 'segredo no log');
+      assert.ok(!logContains(raw, secret), 'segredo no log');
     }
   } finally {
     await app.close();
