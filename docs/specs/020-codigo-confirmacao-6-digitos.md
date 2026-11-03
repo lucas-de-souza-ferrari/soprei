@@ -1,6 +1,6 @@
 # 020 — Código de confirmação de e-mail com 6 dígitos
 
-- **Status:** rascunho (aguardando aprovação do dono)
+- **Status:** aprovada (2026-11-03, dono: "Aprovo tudo", com as 8 recomendações, incluindo o teto diário de 25 erros por conta)
 - **Branch:** `spec/020-codigo-confirmacao-6-digitos`
 - **Depende de:** 017 (contas e confirmação de e-mail), 019 (envio por SMTP genérico)
 - **Segurança:** mexe em autenticação e em endpoint público; passa pelo `reviewer` antes do merge.
