@@ -1,6 +1,6 @@
 # 017 — Conta da pessoa e empresas dentro da conta
 
-- **Status:** rascunho — requisitos de produto decididos; desenho e migração aguardam aprovação
+- **Status:** aprovada pelo dono em 2026-11-03; em implementação
 - **Branch:** `spec/017-contas-e-empresas`
 - **Depende de:** 007, 008 e 016; preserva o isolamento das specs 010, 011 e 015
 
@@ -21,7 +21,7 @@ Esta mudança substitui o rascunho anterior da 017 (login com `clientSlug` e con
 5. A pessoa seleciona a empresa em que quer trabalhar. Pode ser `OWNER` em A e `VIEWER` em B; empresa pode ter várias pessoas. Conversas, canal, auditoria e permissões permanecem separados por empresa.
 6. Frontend segue a identidade da 016; cadastro, login, lista/criação/seleção de empresas, saída e erros são a experiência alvo. O detalhamento pode ser dividido nas fatias descritas em “Decisões”.
 
-### Desenho proposto (aguarda aprovação)
+### Desenho adotado após autorização de implementação
 
 - Separar **conta global** (e-mail normalizado único, hash scrypt e estado) de **participação em empresa** (`accountId`, `clientId`, papel e estado do vínculo). Preferir evoluir o `User` atual para vínculo, preservando seus ids e as FKs compostas da auditoria. Conta global terá repositório restrito à identidade; consultas de negócio continuam exigindo `ClientId`.
 - Conta desativada perde acesso a todas as empresas; vínculo desativado perde acesso apenas à respectiva empresa. Empresa suspensa segue as regras existentes. `PlatformAdmin` continua identidade separada, nunca concedida pelo cadastro público.
@@ -30,7 +30,7 @@ Esta mudança substitui o rascunho anterior da 017 (login com `clientSlug` e con
 - Recomenda-se separar sessão da conta, sem privilégios de tenant, da credencial da empresa selecionada. O servidor valida vínculo ativo para selecionar/renovar; conhecer um `clientId` não concede acesso. Revogação precisa impedir uso de credenciais antigas conforme contrato final.
 - Troca de empresa limpa caches e ignora respostas tardias. Senhas, tokens, códigos, contatos e conteúdo de conversas não entram em logs ou métricas.
 
-### Contratos a detalhar antes da aprovação
+### Contratos (detalhados ao final desta spec)
 
 `POST /auth/login` passa a receber `{ email, password }`, sem `clientSlug`. Ainda precisam ser definidos endpoints/schemas de cadastro, confirmação de titularidade, identidade global, listagem/criação/seleção de empresas, renovação/logout e gestão de vínculos. Nenhum contrato implícito autoriza implementação.
 
@@ -38,16 +38,18 @@ O desenho final deve especificar armazenamento/transporte da sessão no navegado
 
 ## Critérios de aceite
 
-- [ ] Cadastro e login usam apenas e-mail/senha; conta sem vínculo entra e recebe lista vazia, sem privilégios de tenant.
-- [ ] E-mail normalizado é único entre contas, inclusive em cadastros concorrentes; hash/política de senha continuam atrás das portas existentes e segredos não aparecem em logs ou métricas.
-- [ ] Criação de empresa e vínculo `OWNER` é atômica. Uma conta cria e seleciona duas empresas; falha desfaz ambos os registros.
-- [ ] Papéis de A e B são independentes. Conta sem vínculo com C não lista, seleciona ou acessa dados de C, mesmo conhecendo ids.
-- [ ] Sessão sem tenant é recusada pelas rotas de negócio; conta/vínculo desativado, empresa suspensa e credenciais anteriores são tratados conforme os contratos aprovados.
-- [ ] Administrador de A não altera senha/estado global ou vínculo de B da mesma conta. Último `OWNER`, hierarquia e auditoria continuam protegidos sob concorrência.
-- [ ] Testes de navegador cobrem cadastro, login, conta sem empresa, criação, seleção/troca, logout, respostas tardias e teclado em telas estreitas/largas; dados de A não aparecem ao trocar para B.
-- [ ] Migração preserva ids/relações da auditoria e dados de negócio; teste cobre e-mails únicos, colisões e vínculos desativados, sem fusão automática ou escolha arbitrária de senha.
-- [ ] Sessões antigas são recusadas de forma controlada; CLI, exemplos de ambiente, documentação e testes refletem os novos contratos.
-- [ ] Os contratos finais de titularidade, antiabuso, renovação/revogação e falhas têm testes automatizados. Validação completa passa nas duas versões de Node exigidas e a revisão independente é registrada.
+- [x] Cadastro e login usam apenas e-mail/senha; conta sem vínculo entra e recebe lista vazia, sem privilégios de tenant.
+- [x] E-mail normalizado é único entre contas, inclusive em cadastros concorrentes; hash/política de senha continuam atrás das portas existentes e segredos não aparecem em logs ou métricas.
+- [x] Criação de empresa e vínculo `OWNER` é atômica. Uma conta cria e seleciona duas empresas; falha desfaz ambos os registros.
+- [x] Papéis de A e B são independentes. Conta sem vínculo com C não lista, seleciona ou acessa dados de C, mesmo conhecendo ids.
+- [x] Sessão sem tenant é recusada pelas rotas de negócio; conta/vínculo desativado, empresa suspensa e credenciais anteriores são tratados conforme os contratos aprovados.
+- [x] Administrador de A não altera senha/estado global ou vínculo de B da mesma conta. Último `OWNER`, hierarquia e auditoria continuam protegidos sob concorrência.
+- [x] Testes de navegador cobrem cadastro, login, conta sem empresa, criação, seleção/troca, logout, respostas tardias e teclado em telas estreitas/largas; dados de A não aparecem ao trocar para B.
+- [x] Migração preserva ids/relações da auditoria e dados de negócio; teste cobre e-mails únicos, colisões e vínculos desativados, sem fusão automática ou escolha arbitrária de senha.
+- [x] Sessões antigas são recusadas de forma controlada; CLI, exemplos de ambiente, documentação e testes refletem os novos contratos.
+- [x] Os contratos finais de titularidade, antiabuso, renovação/revogação e falhas têm testes automatizados. Validação completa passa nas duas versões de Node exigidas.
+
+- [ ] Revisão independente de segurança registrada antes do merge.
 
 ## Casos de borda e erros
 
@@ -73,7 +75,7 @@ Testes com duas contas e três empresas cobrem adulteração de ids, seleção d
 
 **Decidido pelo dono em 2026-11-03:** cadastro/login apenas por e-mail e senha; empresas dentro da conta; pessoa pode criar empresas e será dona delas.
 
-**Pendentes antes de aprovação/implementação:**
+**Propostas iniciais, substituídas pelo detalhamento aprovado abaixo:**
 
 1. **Identidade/vínculos:** recomenda-se conta global nova e `User` evoluindo para vínculo, preservando ids da auditoria. Alternativa: model novo para vínculo e migração de todas as FKs. Detalhar schema após escolha.
 2. **Titularidade/cadastro público:** recomenda-se confirmar e-mail antes de criar empresa ou receber vínculo, com código de uso único, prazo e limites. Provedor de e-mail ainda não escolhido. Alternativa de desenvolvimento: confirmação operacional pelo dono, sem abertura pública. Não associar contas legadas por e-mail não comprovado.
@@ -81,4 +83,30 @@ Testes com duas contas e três empresas cobrem adulteração de ids, seleção d
 4. **Sessão:** escolher persistência por cookie HttpOnly e sessão server-side (com CSRF, origem e concorrência detalhados) ou tokens em memória e novo login ao recarregar. Decisão ainda aberta; nenhuma nova dependência está aprovada.
 5. **Divisão:** a mudança atravessa identidade, sessão, gestão de usuários e frontend. Recomenda-se detalhar primeiro fundação/migração na 017 e reservar as telas/onboarding completo à próxima fatia se não couber em um PR revisável. Não publicar estado intermediário inseguro.
 
-Esta versão registra a mudança de direção; contratos e limites devem ser completados e aprovados antes de código de produção.
+### Detalhamento aprovado para implementação (2026-11-03)
+
+O dono autorizou implementar e escolheu sessão persistente com cookie HttpOnly e envio real pelo Gmail. As recomendações de conta global, preservação dos ids de vínculo e bloqueio de colisões na migration são adotadas. Sem fusão automática e sem aplicação no banco de desenvolvimento pelo agente.
+
+- Conta global em `Account`; `User.accountId` liga o vínculo preservado. A migration aborta caso existam e-mails repetidos; registros únicos mantêm seu hash e exigem confirmação de e-mail. As colunas legadas de credenciais ficam preservadas nesta migration aditiva, mas não autenticam contas globais.
+- Cookie `soprei_session`: segredo aleatório de 256 bits, HttpOnly, SameSite Strict, Path `/`, Secure em produção; o Redis guarda chave derivada por SHA-256 e sessão sem segredos. Inatividade 7 dias e teto absoluto 30 dias, validade conferida pelo Redis. Login sempre emite segredo novo, e logout o revoga. Não há refresh token no navegador.
+- `APP_ORIGIN` fixa a origem do frontend. Mutações exigem `Origin` exatamente igual e header `X-Soprei-Client: web`; sem CORS aberto, sem credenciais em URL. GETs autenticados não alteram permissões. Todas as respostas de identidade usam `no-store`.
+- `POST /auth/register` `{email,password}`: 202 genérico, conta existente nunca troca senha nem recebe novo vínculo. `POST /auth/resend-verification` exige as mesmas credenciais; `POST /auth/verify-email` exige `{email,password,token}` e consome confirmação de uso único. Token de 256 bits tem apenas hash no banco e validade de 30 minutos; reenvio invalida o anterior. Falha do SMTP não confirma conta e pode ser recuperada pelo reenvio autenticado.
+- `POST /auth/login` `{email,password}`: cookie e 204 após confirmação. `GET /auth/session`: identidade global e empresa selecionada; `POST /auth/logout`: revoga e limpa cookie. Listagem/criação/seleção: `GET/POST /account/companies`, `POST /account/companies/:clientId/select`. Criação recebe apenas `{name}` (1–200 caracteres); id/slug gerados pelo servidor, vínculo `OWNER` e auditoria na mesma transação.
+- Cookie sem seleção não concede identidade de tenant. A cada consulta privada, conta e vínculo selecionado são relidos do banco antes de preencher `UserIdentity`; empresa suspensa/removida ou vínculo desativado impede o acesso. Seleção é compartilhada entre abas; URLs com o tenant anterior recebem a recusa existente.
+- Rotas públicas de cadastro/login/confirmação usam perfil `login` (fail-closed), e demais rotas de conta perfil `admin`. Credenciais têm também bloqueio por e-mail com HMAC e limites existentes da 007. Gestão por empresa não redefine senha global; criação/reset legado por empresa fica indisponível neste fluxo até existir convite aprovado.
+- Gmail SMTP TLS em `smtp.gmail.com:465`, com `GMAIL_USER` e `GMAIL_APP_PASSWORD` somente no ambiente do servidor. `nodemailer` é a dependência de envio (sem logs SMTP); testes usam transporte falso/local e nunca chamam Gmail real. Referências: [Google — senha de app](https://support.google.com/accounts/answer/185833), [Nodemailer — Gmail](https://nodemailer.com/usage/using-gmail/). O dono configura a verificação em duas etapas e senha de app, quando disponível para sua conta.
+- `ACCOUNTS_ENABLED` liga os contratos novos; requer origem e credenciais Gmail explícitas. Sem configuração o modo novo não sobe, em vez de fingir envio de e-mail. Exemplos e instruções devem refletir essa configuração. Frontend usa proxy `/api` para mesma origem; sem tokens em armazenamento persistente.
+
+## Registro da implementação
+
+- Conta global `Account` e vínculo `User.accountId`, preservando os ids e FKs da auditoria. Migration aplicada somente em `soprei_test`; nunca no banco de desenvolvimento. Preflight testado com tabelas temporárias e rollback, sem criar/remover banco nem role.
+- Cookie opaco dura no máximo 30 dias no navegador. O Redis limita a 7 dias de inatividade e 30 dias absolutos; só login/logout emitem/limpam cookie, para uma consulta atrasada não sobrescrever credenciais posteriores. Chaves de sessão global usam hash do segredo, sob namespace próprio; login de conta usa contador HMAC sem e-mail em chave/log. Essa é a nova exceção global às chaves por tenant.
+- Papéis e estado do vínculo são relidos a cada requisição de negócio. Gestão de usuário por empresa conserva papéis/auditoria, mas não cria contas nem altera senha global. CLI legada recusa criação/reset de tenant no modo novo; reset de operador da plataforma permanece separado.
+- Limite inicial de 20 empresas por conta, serializado por bloqueio da conta na transação, contando também vínculos de empresas removidas/suspensas. Não há limite por plano ou cobrança nesta fatia.
+- Gmail via `nodemailer` e tipos de desenvolvimento; Zod no frontend valida respostas; Playwright verifica desktop/mobile com API falsa local. Navegação usa URLs e History API nativos: não foi adicionada biblioteca de roteamento para essas poucas telas. As dependências novas aceitam Node >=20 e preservam a faixa >=22 do projeto.
+- Fluxo de confirmação exige e-mail, senha e token de uso único; reenvio exige as credenciais. Tokens não aparecem em links ou logs. Testes de envio injetam transporte falso, e nenhum e-mail real foi enviado pelo agente.
+- Testes de integração cobrem cookie, confirmação/reuso/expiração, duplicata sem trocar senha, falha de e-mail com recuperação, empresas/papéis independentes, perda de acesso e revogação; logs capturados. Testes de navegador cobrem cadastro/login, recarga, empresas, teclado e resposta atrasada após logout.
+- A LTS mais recente confirmada em 2026-11-03 é a [Node 26](https://nodejs.org/en/about/previous-releases); validação final usa Node 22.23.2 e 26.13.0. O executável da 26 foi baixado separadamente do site oficial e teve SHA-256 conferido; a versão instalada/selecionada do usuário não foi trocada.
+- Correção aditiva da migração: um vínculo legado desativado continua desativado na empresa; a conta global permanece ativa e precisa confirmar e-mail. A correção só atua no backfill intocado, preservando alterações globais posteriores. A migration inicial aplicada não foi reescrita.
+- `Cache-Control: no-store` cobre as rotas de conta e as rotas privadas no modo novo. Logout por refresh do operador da plataforma continua separado do logout por cookie e usa perfil de rate limit `refresh` (fail-closed).
+- As suítes completas passaram em Node 22.23.2 e 26.13.0: 998 testes unitários de backend, 2 de frontend e 341 de integração. As suítes novas e de navegador passaram em cinco repetições em cada versão; a correção aditiva da migração também passou em cinco repetições em ambos. Typecheck, lint, format:check, build e smoke do compilado verdes. A limpeza recursiva de build foi bloqueada pela revisão automática: compilação fresca foi verificada em diretórios novos sob `backend/dist/`, preservando os anteriores. Configuração e teste de envio real Gmail são do dono. Revisão de segurança ainda pendente em sessão separada.
