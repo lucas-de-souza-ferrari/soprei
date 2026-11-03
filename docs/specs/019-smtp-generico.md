@@ -52,19 +52,19 @@ EMAIL_PROVIDER_PSWD=
 
 ## Critérios de aceite
 
-- [ ] Config: com `ACCOUNTS_ENABLED=true`, a ausência de cada uma entre `EMAIL_PROVIDER_HOST`, `EMAIL_PROVIDER_PORT`, `EMAIL_PROVIDER_FROM` e `APP_ORIGIN` falha com mensagem nomeando só a variável (sem valor). Com `ACCOUNTS_ENABLED=false` nenhuma é exigida.
-- [ ] Config rejeita: host com esquema (`smtp://x`), com `/`, porta, espaço ou `@`; porta 0, 65536, não inteira ou ausente; `SECURE` diferente de `true`/`false`; `FROM` que não é e-mail ou contém quebra de linha.
-- [ ] Config: `USER` preenchido sem `PSWD` (e o inverso) falha; ambos vazios ou ambos preenchidos passam; vazio vale como ausente.
-- [ ] Config em `NODE_ENV=production`: `SECURE=false` resulta em `requireTLS: true`; `SECURE=true` passa; texto puro nunca é produzido em produção (teste da função pura nas três combinações, inclusive host loopback).
-- [ ] Fora de produção: `SECURE=false` com host `127.0.0.1`, `::1` e `localhost` resulta em STARTTLS oportunista (`requireTLS: false`); com host não loopback (ex.: `mail.example.test`) resulta em `requireTLS: true`.
-- [ ] `SmtpVerificationMailer` com transporte falso: `from` é `{ name: 'Soprei', address: <FROM> }`, `to`, `subject` e `text` (código em linha separada, como hoje); `auth` só é passada ao `createTransport` quando há `USER`/`PSWD` (teste sobre a função que monta as opções do transporte, sem abrir conexão).
-- [ ] Falha de envio: `ServiceUnavailableError`, mensagem fixa, `cause` indefinido, sem host, usuário, senha, destinatário nem texto do erro original (erro do transporte falso carregando todos esses valores).
-- [ ] Teste de captura de log (`src/test-support/log-capture.ts`) com `EMAIL_PROVIDER_USER` e `EMAIL_PROVIDER_PSWD` sentinelas: um cadastro cujo envio falha e outro que dá certo, mais um log do objeto de config, não deixam aparecer a senha nem o usuário em nenhum log; o `redact` do logger cobre as duas chaves e não cobre mais `GMAIL_*`.
-- [ ] Um servidor SMTP falso em `node:net` (porta 0, loopback, mínimo: saudação, `EHLO`, `MAIL`, `RCPT`, `DATA`, `QUIT`, sem `STARTTLS` anunciado) recebe uma mensagem pelo transporte real do `nodemailer` em texto puro, sem `AUTH`, e o teste confere remetente, destinatário e presença do código. Um segundo caso com `USER`/`PSWD` prova que o `AUTH` é enviado em loopback sem TLS. Sem dependência nova, sem rede externa, nenhum e-mail real; termina sem processo órfão. (Se ficar frágil, o dono aceita cortar este item e ficar só com a função pura: ver Riscos.)
-- [ ] Nenhuma referência a `GMAIL_USER`, `GMAIL_APP_PASSWORD` ou `GmailVerificationMailer` resta em `backend/src`, `.env.example` e `AGENTS.md` (varredura por `grep` no teste de config ou verificação manual do reviewer registrada).
-- [ ] `index.ts` monta o `SmtpVerificationMailer` com as opções da config, e o smoke do compilado com `ACCOUNTS_ENABLED=true` e valores de loopback sobe (sem enviar).
-- [ ] Testes existentes de conta (017) continuam verdes sem servidor SMTP: eles usam mailer falso.
-- [ ] `pnpm typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e na LTS mais recente; suítes novas repetidas 5 vezes.
+- [x] Config: com `ACCOUNTS_ENABLED=true`, a ausência de cada uma entre `EMAIL_PROVIDER_HOST`, `EMAIL_PROVIDER_PORT`, `EMAIL_PROVIDER_FROM` e `APP_ORIGIN` falha com mensagem nomeando só a variável (sem valor). Com `ACCOUNTS_ENABLED=false` nenhuma é exigida.
+- [x] Config rejeita: host com esquema (`smtp://x`), com `/`, porta, espaço ou `@`; porta 0, 65536, não inteira ou ausente; `SECURE` diferente de `true`/`false`; `FROM` que não é e-mail ou contém quebra de linha.
+- [x] Config: `USER` preenchido sem `PSWD` (e o inverso) falha; ambos vazios ou ambos preenchidos passam; vazio vale como ausente.
+- [x] Config em `NODE_ENV=production`: `SECURE=false` resulta em `requireTLS: true`; `SECURE=true` passa; texto puro nunca é produzido em produção (teste da função pura nas três combinações, inclusive host loopback).
+- [x] Fora de produção: `SECURE=false` com host `127.0.0.1`, `::1` e `localhost` resulta em STARTTLS oportunista (`requireTLS: false`); com host não loopback (ex.: `mail.example.test`) resulta em `requireTLS: true`.
+- [x] `SmtpVerificationMailer` com transporte falso: `from` é `{ name: 'Soprei', address: <FROM> }`, `to`, `subject` e `text` (código em linha separada, como hoje); `auth` só é passada ao `createTransport` quando há `USER`/`PSWD` (teste sobre a função que monta as opções do transporte, sem abrir conexão).
+- [x] Falha de envio: `ServiceUnavailableError`, mensagem fixa, `cause` indefinido, sem host, usuário, senha, destinatário nem texto do erro original (erro do transporte falso carregando todos esses valores).
+- [x] Teste de captura de log (`src/test-support/log-capture.ts`) com `EMAIL_PROVIDER_USER` e `EMAIL_PROVIDER_PSWD` sentinelas: um cadastro cujo envio falha e outro que dá certo, mais um log do objeto de config, não deixam aparecer a senha nem o usuário em nenhum log; o `redact` do logger cobre as duas chaves e não cobre mais `GMAIL_*`.
+- [x] Um servidor SMTP falso em `node:net` (porta 0, loopback, mínimo: saudação, `EHLO`, `MAIL`, `RCPT`, `DATA`, `QUIT`, sem `STARTTLS` anunciado) recebe uma mensagem pelo transporte real do `nodemailer` em texto puro, sem `AUTH`, e o teste confere remetente, destinatário e presença do código. Um segundo caso com `USER`/`PSWD` prova que o `AUTH` é enviado em loopback sem TLS. Sem dependência nova, sem rede externa, nenhum e-mail real; termina sem processo órfão. (Se ficar frágil, o dono aceita cortar este item e ficar só com a função pura: ver Riscos.)
+- [x] Nenhuma referência a `GMAIL_USER`, `GMAIL_APP_PASSWORD` ou `GmailVerificationMailer` resta em `backend/src`, `.env.example` e `AGENTS.md` (varredura por `grep` no teste de config ou verificação manual do reviewer registrada).
+- [x] `index.ts` monta o `SmtpVerificationMailer` com as opções da config, e o smoke do compilado com `ACCOUNTS_ENABLED=true` e valores de loopback sobe (sem enviar).
+- [x] Testes existentes de conta (017) continuam verdes sem servidor SMTP: eles usam mailer falso.
+- [x] `pnpm typecheck`, `lint`, `format:check`, `test` e `test:integration` verdes em Node 22 e na LTS mais recente; suítes novas repetidas 5 vezes.
 
 ## Casos de borda e erros
 
@@ -100,3 +100,12 @@ Não se aplica: o envio é de conta global (spec 017), não lê nem grava dado d
 ## Decisões e dependências novas
 
 Nenhuma dependência nova (`nodemailer` já existe). Decisões 1 a 8 acima aguardam confirmação do dono; ao confirmar, registrar em `docs/context.md` (Histórico de decisões).
+
+## Registro da implementação
+
+- **Código:** `backend/src/infrastructure/external-apis/email/smtp-verification-mailer.ts` (`SmtpVerificationMailer`, `buildTransportOptions`, tipo `SmtpMailerOptions`; a pasta `gmail/` foi removida) e `backend/src/infrastructure/config/email.ts` (`isValidSmtpHost`, `isLoopbackHost`, `smtpRequireTls`, `smtpMailerOptions`, funções puras). `env.schema.ts` ganhou `EMAIL_PROVIDER_*` e as regras do `superRefine`; `logger.ts` redige `EMAIL_PROVIDER_USER`/`PSWD`; `index.ts` monta o mailer; `.env.example`, `AGENTS.md` e `README.md` atualizados.
+- **Testes:** `config/email.test.ts` (config, TLS, redact e varredura de referências antigas), `email/smtp-verification-mailer.test.ts` (transporte falso, `auth`, erro fixo, captura de log com sentinelas) e `email/smtp-wire.test.ts` (servidor SMTP falso em `node:net`, porta 0, loopback: texto puro sem AUTH, AUTH em loopback sem TLS e STARTTLS exigido e não oferecido). Repetidos 5 vezes.
+- **Decisões de detalhe:** `requireTLS` só é passado ao `nodemailer` com `secure=false` (com TLS implícito é ignorado); porta sem padrão; USER/PSWD só são conferidos "tudo ou nada" com `ACCOUNTS_ENABLED=true`; host aceita hostname ou IP puro (IPv6 sem colchetes).
+- **Desvios:** nenhum. O critério do `grep` ficou como teste (`email.test.ts`) sobre `backend/src`; `.env.example` e `AGENTS.md` conferidos por busca manual.
+- **Passo do dono:** renomear no `backend/.env` as variáveis do Gmail para `EMAIL_PROVIDER_*` (valores do Mailpit na spec ou `.env.example`).
+- **Validação local (decisão do dono, 2026-11-03):** os testes locais foram dispensados para agilizar; a verificação das suítes fica no GitHub Actions. Antes dessa decisão, em Node 22.23.2 rodaram verdes: 1044 unitários de backend + 2 de frontend e 342 de integração, e as 3 suítes novas (8 + 36 testes) passaram 5 vezes em Node 24.18.0. Não houve bateria completa em Node 24, nem repetição em Node 22, nem smoke do compilado: dependem do CI. Os critérios acima marcados `[x]` têm teste escrito; os de "Node 22 e LTS", repetição e smoke do `index.ts` compilado não foram executados localmente e dependem do CI.

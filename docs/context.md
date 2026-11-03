@@ -180,6 +180,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 ## 7. Histórico de decisões
 
+- 2026-11-03: o dono aprovou a spec 019 (SMTP genérico por `EMAIL_PROVIDER_*`, sem retrocompatibilidade com `GMAIL_*`, TLS exigido em produção e texto puro só em loopback fora dela, remetente `Soprei <FROM>`, Mailpit no desenvolvimento).
+
 - 2026-11-03: o dono autorizou implementar a 017 e escolheu permanência da sessão após recarregar (cookie HttpOnly) e confirmação real de e-mail pelo Gmail. A implementação usa SMTP TLS com senha de app configurada pelo dono; não envia e-mail real nos testes. Contas e vínculos são separados, e a migração preserva ids e recusa colisões sem resolução explícita.
 
 - 2026-11-03: o dono substituiu o login de tenant com `clientSlug` por conta da pessoa com e-mail/senha e acesso às empresas após entrar. Confirmou que a própria pessoa poderá criar empresas e será dona delas. A 017 deve ser reescrita para essa fundação antes do painel; o desenho técnico e a migração ainda não estão aprovados.
