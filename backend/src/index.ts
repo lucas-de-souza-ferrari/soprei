@@ -229,6 +229,15 @@ async function main(): Promise<void> {
                   logger.info({ accountId, result }, 'confirmação de e-mail enviada');
                 }
               },
+              // Só id e resultado: nunca código, hash, e-mail nem senha.
+              onVerificationAttempt: (result, accountId) => {
+                metrics.countVerificationAttempt(result);
+                if (result === 'exhausted') {
+                  logger.warn({ accountId, result }, 'código de confirmação esgotado');
+                } else if (result === 'verified') {
+                  logger.info({ accountId, result }, 'e-mail confirmado');
+                }
+              },
               mailer: new SmtpVerificationMailer(smtpMailerOptions(config)),
             }),
             origin: config.APP_ORIGIN ?? '',

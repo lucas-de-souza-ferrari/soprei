@@ -1,5 +1,11 @@
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { AccountId, ClientId, type Account, type AccountRepository } from '../../domain/index.js';
+import { createHmac, randomUUID } from 'node:crypto';
+import {
+  AccountId,
+  ClientId,
+  type Account,
+  type AccountRepository,
+  type VerifyOutcome,
+} from '../../domain/index.js';
 import {
   ForbiddenError,
   NotFoundError,
@@ -12,11 +18,15 @@ import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { AccountSessionStore, VerificationMailer } from '../ports/account-session.js';
 import type { UserIdentity } from './identity.js';
 import { normalizeEmail } from './credentials.js';
+import {
+  deriveVerificationKey,
+  generateVerificationCode,
+  verificationDigest,
+  type RandomInt,
+} from './verification-code.js';
 
-const VERIFICATION_TTL_MS = 30 * 60_000;
+const VERIFICATION_TTL_MS = 15 * 60_000;
 const VERIFICATION_MIN_INTERVAL_MS = 60_000;
-
-const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 export class AccountService {
   constructor(
@@ -31,10 +41,18 @@ export class AccountService {
       >;
       loginSecret: string | Buffer;
       now?: () => Date;
+      /** Fonte do código de 6 dígitos (padrão: `crypto.randomInt`); os testes injetam valores. */
+      randomInt?: RandomInt;
       /** Resultado do envio em segundo plano; só id e resultado, nunca e-mail nem código. */
       onVerificationMail?: (result: 'sent' | 'failed', accountId: string) => void;
+      /** Resultado de cada tentativa de confirmar; só id e resultado, nunca código, hash nem e-mail. */
+      onVerificationAttempt?: (result: VerifyOutcome, accountId: string) => void;
     },
-  ) {}
+  ) {
+    this.verificationKey = deriveVerificationKey(deps.loginSecret);
+  }
+
+  private readonly verificationKey: Buffer;
 
   /** Envios de confirmação em segundo plano ainda não concluídos (esperados no desligamento). */
   private readonly pending = new Set<Promise<void>>();
@@ -50,17 +68,18 @@ export class AccountService {
     email = normalizeEmail(email);
     // O hash é pago em qualquer caso, antes de olhar o banco.
     const hash = await this.deps.passwords.hash(password);
-    const token = randomBytes(32).toString('base64url');
+    const code = generateVerificationCode(this.deps.randomInt);
     const now = this.now();
     const id = await this.deps.accounts.registerUnverified({
       id: randomUUID(),
       email,
       passwordHash: hash,
-      verificationHash: digest(token),
+      verificationHash: this.digest(email, code),
       expiresAt: new Date(now.getTime() + VERIFICATION_TTL_MS),
       retryBefore: this.retryBefore(now),
+      now,
     });
-    if (id !== null) this.deliver(id, email, token);
+    if (id !== null) this.deliver(id, email, code);
   }
 
   /** Espera os envios pendentes (desligamento); nunca rejeita. */
@@ -77,6 +96,10 @@ export class AccountService {
     }
   }
 
+  private digest(email: string, code: string): string {
+    return verificationDigest(this.verificationKey, email, code);
+  }
+
   private now(): Date {
     return this.deps.now?.() ?? new Date();
   }
@@ -86,15 +109,17 @@ export class AccountService {
     return new Date(now.getTime() + VERIFICATION_TTL_MS - VERIFICATION_MIN_INTERVAL_MS);
   }
 
-  private deliver(accountId: string, email: string, token: string): void {
+  private deliver(accountId: string, email: string, code: string): void {
     const task: Promise<void> = (async () => {
       let result: 'sent' | 'failed' = 'sent';
       try {
-        await this.deps.mailer.sendVerification(email, token);
+        await this.deps.mailer.sendVerification(email, code);
       } catch {
         result = 'failed';
         // O código não saiu: libera um novo envio já (melhor esforço).
-        await this.deps.accounts.clearVerification(accountId, digest(token)).catch(() => undefined);
+        await this.deps.accounts
+          .clearVerification(accountId, this.digest(email, code))
+          .catch(() => undefined);
       }
       try {
         this.deps.onVerificationMail?.(result, accountId);
@@ -128,29 +153,47 @@ export class AccountService {
   async resend(email: string, password: string): Promise<void> {
     const account = await this.credentials(email, password);
     if (account.emailVerifiedAt !== null) return;
-    const token = randomBytes(32).toString('base64url');
+    const code = generateVerificationCode(this.deps.randomInt);
     const now = this.now();
     const stored = await this.deps.accounts.refreshVerification(
       account.id,
-      digest(token),
+      this.digest(account.email, code),
       new Date(now.getTime() + VERIFICATION_TTL_MS),
       this.retryBefore(now),
+      now,
     );
-    // Intervalo mínimo desde o último envio: pedido antecipado responde igual e não envia.
+    // Intervalo mínimo desde o último envio e teto diário de erros: pedido barrado responde igual
+    // e não envia.
     if (!stored) return;
     try {
-      await this.deps.mailer.sendVerification(account.email, token);
+      await this.deps.mailer.sendVerification(account.email, code);
     } catch {
-      await this.deps.accounts.clearVerification(account.id, digest(token)).catch(() => undefined);
+      await this.deps.accounts
+        .clearVerification(account.id, this.digest(account.email, code))
+        .catch(() => undefined);
       throw new ServiceUnavailableError('Não foi possível enviar a confirmação');
     }
   }
 
-  async verify(email: string, password: string, token: string): Promise<void> {
+  /**
+   * Confirma o e-mail com o código de 6 dígitos (a validação do formato é do controller, antes
+   * daqui). Só senha correta e conta ativa chegam à comparação; senha errada segue no bloqueio por
+   * conta e nunca conta como erro do código. Código errado, vencido, esgotado ou inexistente e conta
+   * já confirmada respondem a mesma 401; o resultado detalhado vai só ao observador.
+   */
+  async verify(email: string, password: string, code: string): Promise<void> {
     const account = await this.credentials(email, password);
-    if (!(await this.deps.accounts.verify(account.id, digest(token), this.now()))) {
-      throw new UnauthorizedError('Confirmação inválida ou expirada');
+    const outcome = await this.deps.accounts.verify(
+      account.id,
+      this.digest(account.email, code),
+      this.now(),
+    );
+    try {
+      this.deps.onVerificationAttempt?.(outcome, account.id);
+    } catch {
+      // Observabilidade nunca derruba o processo.
     }
+    if (outcome !== 'verified') throw new UnauthorizedError('Confirmação inválida ou expirada');
   }
 
   async login(email: string, password: string): Promise<string> {

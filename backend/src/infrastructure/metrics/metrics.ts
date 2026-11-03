@@ -107,6 +107,8 @@ export type AuthTokenRejectionReason =
 export type AuthLogoutScope = 'session' | 'all';
 /** Envio do código de confirmação de e-mail em segundo plano (spec 017). */
 export type VerificationEmailResult = 'sent' | 'failed';
+/** Tentativa de confirmar o e-mail com o código de 6 dígitos (spec 020). Conjunto fixo. */
+export type VerificationAttemptResult = 'verified' | 'wrong' | 'exhausted' | 'unavailable';
 
 export interface DbQuerySample {
   readonly model: string;
@@ -165,6 +167,8 @@ export interface Metrics {
   countAuthLogout(scope: AuthLogoutScope): void;
   /** Um envio de confirmação de e-mail terminou (spec 017). Sem id, e-mail nem código em label. */
   countVerificationEmail(result: VerificationEmailResult): void;
+  /** Uma tentativa de confirmar o e-mail terminou (spec 020). Sem id, e-mail, IP nem código. */
+  countVerificationAttempt(result: VerificationAttemptResult): void;
   /** O hook `requirePermission` negou uma permissão (spec 008). `permission` é do conjunto fixo, nunca id. */
   countAuthzDenial(permission: Permission): void;
   /** Uma operação de gestão de usuários foi confirmada (spec 008). `action` é o `AuditAction`. */
@@ -357,6 +361,13 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const verificationAttempts = new Counter({
+    name: 'account_verification_attempts_total',
+    help: 'Tentativas de confirmar o e-mail por resultado (verified, wrong, exhausted, unavailable)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
   const verificationEmails = new Counter({
     name: 'account_verification_sends_total',
     help: 'Envios do código de confirmação da conta por resultado (sent, failed)',
@@ -467,6 +478,9 @@ export function createMetrics(): Metrics {
     },
     countVerificationEmail(result) {
       verificationEmails.inc({ result });
+    },
+    countVerificationAttempt(result) {
+      verificationAttempts.inc({ result });
     },
     countAuthzDenial(permission) {
       authzDenials.inc({ permission });

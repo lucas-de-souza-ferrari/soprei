@@ -13,5 +13,6 @@ export interface AccountSessionStore {
 }
 
 export interface VerificationMailer {
-  sendVerification(email: string, token: string): Promise<void>;
+  /** Envia o código de 6 dígitos em texto simples; nunca o loga nem o põe no assunto. */
+  sendVerification(email: string, code: string): Promise<void>;
 }

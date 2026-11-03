@@ -12,7 +12,20 @@ import {
   ServiceUnavailableError,
   UnauthorizedError,
 } from '../../shared/errors/index.js';
+import { VERIFICATION_CODE_PATTERN } from '../../application/auth/verification-code.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
+
+/**
+ * Corpo de `POST /auth/verify-email` (spec 020): o código são exatamente 6 dígitos. Formato inválido
+ * é 400 antes de qualquer consulta e nunca conta como tentativa.
+ */
+export const verificationSchema = z
+  .object({
+    email: emailSchema,
+    password: loginPasswordSchema,
+    code: z.string().regex(VERIFICATION_CODE_PATTERN),
+  })
+  .strict();
 
 export const ACCOUNT_COOKIE = 'soprei_session';
 export function accountCookie(header: string | undefined): string {
@@ -45,7 +58,6 @@ export const accountController: FastifyPluginCallback<{
     `${ACCOUNT_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${clear ? 0 : 30 * 86400}${secure ? '; Secure' : ''}`;
   const credentials = z.object({ email: emailSchema, password: loginPasswordSchema }).strict();
   const registration = z.object({ email: emailSchema, password: accountPasswordSchema }).strict();
-  const verification = credentials.extend({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
   app.addHook('onRequest', (request, reply, next) => {
     void reply.header('cache-control', 'no-store');
     if (
@@ -73,8 +85,8 @@ export const accountController: FastifyPluginCallback<{
     return reply.status(202).send({ message: 'Confira seu e-mail.' });
   });
   app.post('/auth/verify-email', login, async (request, reply) => {
-    const body = verification.parse(request.body);
-    await service.verify(body.email, body.password, body.token);
+    const body = verificationSchema.parse(request.body);
+    await service.verify(body.email, body.password, body.code);
     return reply.status(204).send();
   });
   app.post('/auth/login', login, async (request, reply) => {

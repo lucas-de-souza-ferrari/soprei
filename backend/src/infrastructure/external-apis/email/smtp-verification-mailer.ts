@@ -42,17 +42,19 @@ export class SmtpVerificationMailer implements VerificationMailer {
     this.transport = transport ?? nodemailer.createTransport(buildTransportOptions(options));
   }
 
-  async sendVerification(email: string, token: string): Promise<void> {
+  async sendVerification(email: string, code: string): Promise<void> {
     try {
       await this.transport.sendMail({
         from: { name: 'Soprei', address: this.from },
         to: email,
-        subject: 'Confirme sua conta no Soprei',
+        subject: 'Seu código de confirmação do Soprei',
         text: [
-          'Para confirmar sua conta, copie este código na tela de confirmação do Soprei:',
-          token,
-          'Ele expira em 30 minutos. Se você não solicitou o cadastro, ignore esta mensagem.',
-        ].join(String.fromCharCode(10, 10)),
+          'Seu código de confirmação é:',
+          '',
+          code,
+          '',
+          'Ele vale por 15 minutos. Se você não pediu este cadastro, ignore esta mensagem.',
+        ].join('\n'),
       });
     } catch {
       throw new ServiceUnavailableError(

@@ -154,16 +154,19 @@ model User {
 
 /// Identidade global da pessoa. O User existente passa a representar sua participação no tenant.
 model Account {
-  id                     String     @id @default(uuid(7)) @db.Uuid
-  email                  String     @unique
-  passwordHash           String     @map("password_hash")
-  status                 UserStatus @default(ACTIVE)
-  emailVerifiedAt        DateTime?  @map("email_verified_at") @db.Timestamptz(6)
-  verificationHash       String?    @map("verification_hash")
-  verificationExpiresAt  DateTime?  @map("verification_expires_at") @db.Timestamptz(6)
-  createdAt              DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  memberships            User[]
+  id                        String     @id @default(uuid(7)) @db.Uuid
+  email                     String     @unique
+  passwordHash              String     @map("password_hash")
+  status                    UserStatus @default(ACTIVE)
+  emailVerifiedAt           DateTime?  @map("email_verified_at") @db.Timestamptz(6)
+  verificationHash          String?    @map("verification_hash")
+  verificationExpiresAt     DateTime?  @map("verification_expires_at") @db.Timestamptz(6)
+  verificationAttempts      Int        @default(0) @map("verification_attempts") @db.SmallInt
+  verificationFailuresDay   Int        @default(0) @map("verification_failures_day") @db.SmallInt
+  verificationFailuresSince DateTime?  @map("verification_failures_since") @db.Timestamptz(6)
+  createdAt                 DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  memberships               User[]
 
   @@map("accounts")
 }
