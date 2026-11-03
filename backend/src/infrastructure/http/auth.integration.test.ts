@@ -760,7 +760,8 @@ describe('privacidade e métricas de ponta a ponta', () => {
       for (const secret of [email, client.id, client.slug, '192.0.2.77', tokens.accessToken]) {
         assert.ok(!body.includes(secret));
       }
-      assert.doesNotMatch(body, /clientId|userId|email|\bip=/i);
+      // "email" só vale como nome de label: a métrica account_password_reset_emails_total (021) o tem no nome.
+      assert.doesNotMatch(body, /clientId|userId|\{[^}]*email|\bip=/i);
     });
   });
 });
