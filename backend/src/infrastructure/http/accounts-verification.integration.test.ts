@@ -77,8 +77,11 @@ test('confirmação por código de 6 dígitos: erros, esgotamento, reenvio, mét
   const password = `Dono1-${randomUUID()}`;
   const verify = (code: unknown) => post('/auth/verify-email', { email, password, code });
   const row = () => db.prisma.account.findUnique({ where: { email } });
-  const errorOf = (response: Awaited<ReturnType<typeof verify>>) =>
-    response.json<{ error: { code: string; message: string } }>().error;
+  // O requestId muda a cada resposta: compara só o que precisa ser uniforme.
+  const errorOf = (response: Awaited<ReturnType<typeof verify>>) => {
+    const { code, message } = response.json<{ error: { code: string; message: string } }>().error;
+    return { code, message };
+  };
   try {
     assert.equal((await post('/auth/register', { email, password })).statusCode, 202);
     await service.drain();
