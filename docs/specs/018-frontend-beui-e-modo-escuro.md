@@ -91,3 +91,16 @@ Não se aplica (só interface; nenhum dado ou rota muda).
 - **Testes:** unitários do frontend 18 (`theme/contrast.test.ts`: pares de tokens nos dois temas, 4,5:1 para texto e 3:1 para borda de campo e foco; `theme/theme.test.tsx`: valor inválido, `localStorage` indisponível, sistema, aplicação da classe, script do `index.html`; `App.test.tsx`). Navegador (Playwright, desktop e celular): 24 (fluxos de conta e saída não confirmada nos dois temas; tema escuro salvo aplicado antes de a aplicação carregar, sistema e mudança do sistema, valor inválido, teclado no controle, `localStorage` bloqueado, abas por teclado, View Transition com e sem movimento reduzido). O script de testes do frontend passou a incluir `src/**/*.test.ts`.
 - **Validação (Node 24.18.0 e 22.23.2):** typecheck, lint e format:check verdes; 1002 unitários de backend + 18 de frontend; 342 de integração; `pnpm build` e smoke do compilado (recusa ambiente inválido, saída 1). Unitários do frontend repetidos 5 vezes em Node 24; e2e 5 vezes em Node 24 e 4 em Node 22 (24/24 em todas). Verificação visual (capturas no scratchpad, fora do git) em desktop e celular, claro e escuro, de `/`, `/entrar`, erro de cadastro e lista de empresas: legível nos dois temas.
 - **Observação:** o bundle do site passou de 500 kB (`motion`), com aviso do Vite; divisão de código fica para spec própria.
+
+### Correções da revisão (acessibilidade)
+
+- **Foco e erro de campo:** o override `border-input` em `classNames.field` vencia a borda de foco e de erro. Removido; no `input.tsx` a borda ociosa passou a `border-input` (3:1), o foco a `border-ring ring-1 ring-ring` e o erro a `border-destructive ring-1 ring-destructive` (sólidos, sem alfa baixo). Teste de contraste estendido (`ring`, `destructive` e `input` com 3:1 contra cartão e fundo, e Alerts de erro, info e sucesso com 4,5:1 usando as opacidades reais, nos dois temas) e e2e por tema que mede a cor computada da borda ociosa, focada e em erro.
+- **Erro de campo anunciado uma vez:** as validações de senha e de confirmação passaram para a mensagem do próprio `Input` (`role="alert"` e `aria-describedby`), sem Alert duplicado; os e2e conferem um único alerta e o `aria-describedby`.
+- **Pequenos:** o `Loader` dentro do botão de envio fica `aria-hidden` (o texto "Aguarde…" lê uma vez); rótulos do Tabs traduzidos ("Rolar abas para a esquerda/direita", adaptação registrada no NOTICE).
+
+### Pendências (não feitas, sugestões da revisão)
+
+- Código não usado nos componentes copiados (variantes do `Loader`, `ActionSwap*`, `ButtonLink` etc.).
+- CSP para o site (hoje o script do `<head>` e o `<style>` da View Transition são inline).
+- Ouvir o evento `storage` para sincronizar o tema entre abas.
+- Divisão de código do bundle (acima de 500 kB).

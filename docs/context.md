@@ -131,7 +131,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 **Próximas**
 
-- [Spec 018 — frontend com beUI e modo escuro](specs/018-frontend-beui-e-modo-escuro.md): **implementada** na branch `spec/018-frontend-beui`, aguardando revisão e merge pelo dono.
+- [Spec 018 — frontend com beUI e modo escuro](specs/018-frontend-beui-e-modo-escuro.md): **implementada** na branch `spec/018-frontend-beui`, revisada (pode ir para merge), com correções de acessibilidade de foco e erro de campo aplicadas. Pendências: código não usado dos componentes copiados, CSP, evento `storage` do tema e divisão de código do bundle.
 - [Spec 017 — conta da pessoa e empresas](specs/017-contas-e-empresas.md): **aprovada, em implementação**. O dono decidiu em 2026-11-03: cadastro/login só por e-mail e senha, empresas dentro da conta e criação pela própria pessoa como `OWNER`; autorizou implementar e escolheu sessão persistente com cookie HttpOnly e envio real de confirmação pelo Gmail. Migração preserva ids de vínculo e para em colisões de e-mail, sem fusão automática. Painel de conversas fica para uma fatia posterior. Configuração e teste Gmail real são do dono; revisão de segurança é obrigatória antes do merge.
 
 - Cadastro público: o dono pediu senha com mínimo de seis caracteres, uma letra maiúscula e um número, confirmação na tela e controles de visibilidade. A política de senha legada permanece separada.

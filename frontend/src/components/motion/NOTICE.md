@@ -60,3 +60,5 @@ projeto (aspas simples, 100 colunas). Nenhum arquivo usa `next/*`. Os arquivos d
 
 Os tokens de cor (`bg-primary`, `text-foreground`, `border-border`...) e o modo escuro vêm de
 `frontend/src/style.css`, com a paleta derivada da identidade do Soprei.
+
+Adaptações posteriores (revisão da spec 018): `input.tsx` usa `border-input`, `border-ring ring-1 ring-ring` e `border-destructive ring-1 ring-destructive` (borda ociosa, de foco e de erro com contraste mínimo de 3:1); `tabs.tsx` tem os rótulos das setas em português ("Rolar abas para a esquerda/direita").
