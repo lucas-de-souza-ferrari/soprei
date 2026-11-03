@@ -1,6 +1,6 @@
 # 021 — Recuperação de senha e expurgo de contas não confirmadas
 
-- **Status:** aprovada (2026-11-03, dono: "Aprovo tudo", com as 12 recomendações; **a decisão 5 foi revertida pelo dono no mesmo dia**: a política de senha do cadastro público é mantida, ver decisão 5)
+- **Status:** concluída e mergeada (2026-11-03; CI verde em Node 22 e LTS); aprovada (2026-11-03, dono: "Aprovo tudo", com as 12 recomendações; **a decisão 5 foi revertida pelo dono no mesmo dia**: a política de senha do cadastro público é mantida, ver decisão 5)
 - **Branch:** `spec/021-recuperacao-de-senha`
 - **Depende de:** 017 (contas globais), 019 (SMTP genérico), 020 (código de 6 dígitos com HMAC, limite de tentativas e teto diário)
 - **Segurança:** mexe em autenticação, em endpoints públicos e em sessões; passa pelo `reviewer` antes do merge (de preferência outro agente/modelo).

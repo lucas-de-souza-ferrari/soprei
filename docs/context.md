@@ -134,11 +134,12 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 14. 018 — Frontend com beUI e modo escuro ([spec](specs/018-frontend-beui-e-modo-escuro.md)): **concluída e mergeada** (CI verde em Node 22 e LTS). Pendências: código não usado dos componentes copiados, CSP, evento `storage` do tema e divisão de código do bundle.
 15. 019 — E-mail por SMTP genérico ([spec](specs/019-smtp-generico.md)): **concluída e mergeada**. `EMAIL_PROVIDER_*`, TLS exigido em produção, `GMAIL_*` removido.
 16. 020 — Código de confirmação de e-mail com 6 dígitos ([spec](specs/020-codigo-confirmacao-6-digitos.md)): **concluída e mergeada**. HMAC, 5 erros por código, teto de 25 erros por conta em 24 h, validade de 15 min, campo `code`.
-17. 021 — Recuperação de senha e expurgo de contas não confirmadas ([spec](specs/021-recuperacao-de-senha.md)): **implementada, aguardando CI, revisão (`reviewer`) e merge**. Código de 6 dígitos por e-mail com HMAC de finalidade própria, 5 erros por código e teto de 10 por conta em 24 h; revogação de todas as sessões por geração no Redis; aviso de senha alterada; expurgo em segundo plano das contas não confirmadas e sem vínculo (padrão 7 dias).
+17. 021 — Recuperação de senha e expurgo de contas não confirmadas ([spec](specs/021-recuperacao-de-senha.md)): **concluída e mergeada** (CI verde em Node 22 e LTS). Código de 6 dígitos por e-mail com HMAC de finalidade própria, 5 erros por código e teto de 10 por conta em 24 h; revogação de todas as sessões por geração no Redis; aviso de senha alterada; expurgo em segundo plano das contas não confirmadas e sem vínculo (padrão 7 dias).
 
 **Próximas**
 
-- **Depois da 021:** painel de conversas no site; retenção e LGPD (antes de clientes reais); tempo real (009) e cache (006) sob demanda.
+- **Spec 022 — renome do domínio** ([spec](specs/022-renome-do-dominio.md)): **aprovada** (2026-11-03). `Client` -> `Company`, `User` (vínculo) -> `Membership`, `Account` fica; banco, API, sessões, fila, logs, site e documentação. Refatoração pura, com gate de restos e revisão de segurança; implementa com a `main` limpa.
+- **Depois:** conectar o WhatsApp pelo site e painel mínimo de conversas (objetivo do dono: ter algo para mostrar); convites e equipe; tempo real (009); retenção, LGPD e hospedagem (antes de clientes reais); resiliência do canal; cache (006) sob demanda.
 
 - Cadastro público: o dono pediu senha com mínimo de seis caracteres, uma letra maiúscula e um número, confirmação na tela e controles de visibilidade. A política de senha legada permanece separada.
 
