@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { ServiceUnavailableError } from '../../shared/errors/index.js';
+import type { AccountSessionStore } from '../../application/ports/account-session.js';
 import { Result } from '../../shared/types/index.js';
 import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
@@ -40,10 +42,20 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
   const mail = new Map<string, string>();
   let mailFails = false;
   const store = new RedisAccountSessionStore(redis.client, prefix);
+  let sessionsDown = false;
+  const sessions: AccountSessionStore = {
+    create: (id) => store.create(id),
+    select: (secret, clientId) => store.select(secret, clientId),
+    revoke: (secret) => store.revoke(secret),
+    read: (secret) =>
+      sessionsDown
+        ? Promise.reject(new ServiceUnavailableError('Sessão indisponível'))
+        : store.read(secret),
+  };
   const service = new AccountService({
     accounts: repo,
     passwords,
-    sessions: store,
+    sessions,
     loginLocks: auth.sessions,
     loginSecret: config.JWT_SECRET,
     mailer: {
@@ -218,6 +230,23 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     });
     assert.equal(privateCacheCheck.headers['cache-control'], 'no-store');
     assert.equal(session.json<{ selectedClientId: string }>().selectedClientId, company.clientId);
+    // Mutações com cookie sem Origin/cabeçalho do app são recusadas (CSRF), também em rota de tenant.
+    for (const request of [
+      { method: 'POST', url: '/account/companies', payload: { name: 'sem origem' } },
+      {
+        method: 'PATCH',
+        url: `/admin/clients/${company.clientId}/users/${randomUUID()}`,
+        payload: { role: 'VIEWER' },
+      },
+    ] as const) {
+      assert.equal((await app.inject({ ...request, headers: { cookie: a } })).statusCode, 403);
+    }
+    // Redis das sessões fora: fail-closed (503), nunca aceita o cookie sem poder conferir.
+    sessionsDown = true;
+    for (const url of ['/auth/session', `/admin/clients/${company.clientId}/users`]) {
+      assert.equal((await app.inject({ url, headers: { cookie: a } })).statusCode, 503);
+    }
+    sessionsDown = false;
     assert.equal(session.headers['set-cookie'], undefined);
     await db.prisma.user.updateMany({
       where: { clientId: company.clientId },

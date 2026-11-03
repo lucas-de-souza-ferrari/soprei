@@ -189,19 +189,24 @@ export function AccountApp() {
     }
   };
   const logout = () => {
+    // Invalida respostas atrasadas; a tela só sai da conta depois que o servidor confirma.
     const stamp = ++generation.current;
-    setSession(null);
-    setCompanies([]);
-    setName('');
-    setEmail('');
-    setPassword('');
-    setToken('');
-    navigate('login');
     setBusy(true);
+    setMessage('');
     void api('/auth/logout', {})
+      .then(() => {
+        if (stamp !== generation.current) return;
+        setSession(null);
+        setCompanies([]);
+        setName('');
+        setEmail('');
+        setPassword('');
+        setToken('');
+        navigate('login');
+      })
       .catch(() => {
         if (stamp === generation.current)
-          setMessage('Saída local realizada; não foi possível confirmar a revogação no servidor.');
+          setMessage('Saída não confirmada: você continua conectado. Tente sair novamente.');
       })
       .finally(() => {
         if (stamp === generation.current) setBusy(false);

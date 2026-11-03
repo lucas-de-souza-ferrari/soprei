@@ -127,3 +127,38 @@ test('cadastro, confirmação, sessão após reload, empresas e saída', async (
   await expect(page.getByText('Minha primeira empresa')).not.toBeVisible();
   await expect(page.getByLabel('Nome da empresa')).toHaveValue('');
 });
+
+test('saída não confirmada pelo servidor mantém a sessão e permite tentar de novo', async ({
+  page,
+}) => {
+  let logoutAttempts = 0;
+  let logged = true;
+  await page.route('https://**/*', (route) => route.abort());
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname.replace('/api', '');
+    if (path === '/auth/logout') {
+      logoutAttempts++;
+      if (logoutAttempts === 1) {
+        await route.fulfill({ status: 503, json: {} });
+        return;
+      }
+      logged = false;
+      await route.fulfill({ status: 204 });
+    } else if (!logged) await route.fulfill({ status: 401, json: {} });
+    else if (path === '/auth/session')
+      await route.fulfill({
+        status: 200,
+        json: { id: randomUUID(), email: 'fixa@example.test', selectedClientId: null },
+      });
+    else await route.fulfill({ status: 200, json: { items: [] } });
+  });
+  await page.goto('/painel/empresas');
+  await expect(page.getByText('fixa@example.test')).toBeVisible();
+  await page.getByRole('button', { name: 'Sair', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Saída não confirmada');
+  await expect(page.getByText('fixa@example.test')).toBeVisible();
+  await page.getByRole('button', { name: 'Sair', exact: true }).click();
+  await expect(page.getByLabel('E-mail', { exact: true })).toBeVisible();
+  await expect(page.getByText('fixa@example.test')).not.toBeVisible();
+  expect(logoutAttempts).toBe(2);
+});

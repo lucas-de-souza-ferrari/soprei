@@ -26,6 +26,15 @@ export function accountCookie(header: string | undefined): string {
   return secret;
 }
 
+/**
+ * `Secure` em produção ou sempre que a origem do frontend é HTTPS (staging, túnel). O prefixo
+ * `__Host-` não foi adotado: exigiria `Secure` também em HTTP local (Safari e proxies de
+ * desenvolvimento recusam), então fica como pendência de produção.
+ */
+export function cookieIsSecure(nodeEnv: string, appOrigin: string): boolean {
+  return nodeEnv === 'production' || appOrigin.toLowerCase().startsWith('https:');
+}
+
 export const accountController: FastifyPluginCallback<{
   service: AccountService;
   legacyAuth?: Pick<AuthService, 'logout'>;
@@ -86,13 +95,15 @@ export const accountController: FastifyPluginCallback<{
     }
     if (request.headers.origin !== origin || request.headers['x-soprei-client'] !== 'web')
       throw new ForbiddenError('Origem inválida');
-    void reply.header('set-cookie', cookie('', true));
+    // O cookie só é limpo depois da revogação: se o Redis falhar, a resposta é 503 e o cookie
+    // continua, para a pessoa tentar sair de novo (nunca finge uma saída que não aconteceu).
     try {
       await service.logout(accountCookie(request.headers.cookie));
     } catch (error) {
+      // Cookie ausente ou malformado: não há sessão a revogar; limpar é seguro.
       if (!(error instanceof UnauthorizedError)) throw error;
     }
-    return reply.status(204).send();
+    return reply.header('set-cookie', cookie('', true)).status(204).send();
   });
   // Leituras não reemitem cookies: uma resposta tardia não sobrescreve login/logout posterior.
   // O cookie tem o teto absoluto; o Redis aplica a inatividade de 7 dias.

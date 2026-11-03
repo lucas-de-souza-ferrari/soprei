@@ -235,7 +235,7 @@ async function main(): Promise<void> {
               ),
             }),
             origin: config.APP_ORIGIN ?? '',
-            secure: config.NODE_ENV === 'production',
+            secure: cookieIsSecure(config.NODE_ENV, config.APP_ORIGIN ?? ''),
           },
         }
       : {}),
@@ -292,6 +292,7 @@ async function main(): Promise<void> {
 }
 
 void main();
+import { cookieIsSecure } from './presentation/auth/account.controller.js';
 import { AccountService } from './application/auth/account.service.js';
 import { deriveLoginLockSecret } from './application/auth/auth.service.js';
 import { PrismaAccountRepository } from './infrastructure/database/index.js';
