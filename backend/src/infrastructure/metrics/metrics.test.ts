@@ -245,3 +245,15 @@ describe('createMetrics', () => {
     assert.doesNotMatch(body, /clientId|userId|actorUserId|email/i);
   });
 });
+
+describe('account_verification_sends_total', () => {
+  it('conta envios de confirmação só por resultado (sem id nem e-mail)', async () => {
+    const metrics = createMetrics();
+    metrics.countVerificationEmail('sent');
+    metrics.countVerificationEmail('failed');
+    metrics.countVerificationEmail('failed');
+    const body = await metrics.render();
+    assert.match(body, /account_verification_sends_total\{result="sent"\} 1/);
+    assert.match(body, /account_verification_sends_total\{result="failed"\} 2/);
+  });
+});

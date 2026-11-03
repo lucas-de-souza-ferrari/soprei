@@ -8,6 +8,7 @@ export type {
   AuthLoginKind,
   AuthLoginResult,
   AuthLogoutScope,
+  VerificationEmailResult,
   AuthRefreshResult,
   AuthTokenRejectionReason,
   ChannelConnectionAction,

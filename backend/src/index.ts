@@ -220,6 +220,15 @@ async function main(): Promise<void> {
               sessions: new RedisAccountSessionStore(authRedis.client, config.AUTH_REDIS_PREFIX),
               loginLocks: auth.sessions,
               loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
+              // Só id e resultado: nunca e-mail, código nem credenciais do Gmail.
+              onVerificationMail: (result, accountId) => {
+                metrics.countVerificationEmail(result);
+                if (result === 'failed') {
+                  logger.warn({ accountId, result }, 'falha ao enviar confirmação de e-mail');
+                } else {
+                  logger.info({ accountId, result }, 'confirmação de e-mail enviada');
+                }
+              },
               mailer: new GmailVerificationMailer(
                 config.GMAIL_USER ?? '',
                 config.GMAIL_APP_PASSWORD ?? '',

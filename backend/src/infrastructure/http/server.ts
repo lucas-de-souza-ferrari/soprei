@@ -159,6 +159,10 @@ export function buildServer({
         throw new ForbiddenError('Origem inválida');
       }
     });
+    // Envios de confirmação em segundo plano não se perdem em silêncio no desligamento.
+    app.addHook('onClose', async () => {
+      await accounts.service.drain();
+    });
     void app.register(accountController, {
       ...accounts,
       ...(auth === undefined ? {} : { legacyAuth: auth }),

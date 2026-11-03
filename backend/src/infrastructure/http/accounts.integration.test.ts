@@ -79,12 +79,14 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
       assert.equal((await post('/auth/register', { email, password })).statusCode, 202);
       assert.equal((await post('/auth/register', { email, password: 'Abcde1' })).statusCode, 202);
       assert.equal((await post('/auth/login', { email, password })).statusCode, 403);
+      await service.drain();
       const token = mail.get(email);
       assert.ok(token);
       assert.equal(
         (await post('/auth/register', { email, password: 'Senha2-diferente' })).statusCode,
         202,
       );
+      await service.drain();
       assert.equal(mail.get(email), token);
       assert.equal((await post('/auth/verify-email', { email, password, token })).statusCode, 204);
       assert.equal((await post('/auth/verify-email', { email, password, token })).statusCode, 401);
@@ -298,7 +300,10 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     emails.push(recoverEmail);
     mailFails = true;
     // Falhas externas são sanitizadas pelo mailer de produção. Aqui a porta rejeita sem corpo SMTP.
-    assert.equal((await post('/auth/register', { email: recoverEmail, password })).statusCode, 503);
+    // Falha de SMTP não vira 503 no cadastro (não revela existência); o envio é em segundo plano.
+    assert.equal((await post('/auth/register', { email: recoverEmail, password })).statusCode, 202);
+    await service.drain();
+    assert.equal(mail.has(recoverEmail), false);
     assert.equal((await repo.findByEmail(recoverEmail))?.emailVerifiedAt, null);
     mailFails = false;
     assert.equal(

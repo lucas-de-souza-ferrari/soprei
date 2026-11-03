@@ -32,6 +32,63 @@ export class PrismaAccountRepository implements AccountRepository {
       return { ...row, id: AccountId.parse(row.id) };
     });
   }
+  registerUnverified(input: {
+    id: string;
+    email: string;
+    passwordHash: string;
+    verificationHash: string;
+    expiresAt: Date;
+    retryBefore: Date;
+  }): Promise<string | null> {
+    return withRepositoryErrors('Account.register', async () => {
+      // Um único INSERT ... ON CONFLICT: sem janela entre ler e gravar, e o mesmo custo de banco
+      // para e-mail novo, não confirmado ou já confirmado. A substituição só ocorre na linha
+      // ainda sem confirmação e depois do intervalo mínimo desde o último envio (o envio é
+      // `verification_expires_at` menos a validade de 30 min).
+      const rows = await this.db.$queryRaw<{ id: string }[]>`
+        INSERT INTO accounts (id, email, password_hash, verification_hash, verification_expires_at)
+        VALUES (${input.id}::uuid, ${input.email}, ${input.passwordHash}, ${input.verificationHash},
+                ${input.expiresAt}::timestamptz)
+        ON CONFLICT (email) DO UPDATE SET
+          password_hash = EXCLUDED.password_hash,
+          verification_hash = EXCLUDED.verification_hash,
+          verification_expires_at = EXCLUDED.verification_expires_at,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE accounts.email_verified_at IS NULL
+          AND accounts.status = 'ACTIVE'
+          AND (accounts.verification_expires_at IS NULL
+               OR accounts.verification_expires_at <= ${input.retryBefore}::timestamptz)
+        RETURNING id`;
+      return rows[0]?.id ?? null;
+    });
+  }
+  async refreshVerification(
+    id: string,
+    hash: string,
+    expiresAt: Date,
+    retryBefore: Date,
+  ): Promise<boolean> {
+    const { count } = await withRepositoryErrors('Account.refreshVerification', () =>
+      this.db.account.updateMany({
+        where: {
+          id,
+          emailVerifiedAt: null,
+          status: 'ACTIVE',
+          OR: [{ verificationExpiresAt: null }, { verificationExpiresAt: { lte: retryBefore } }],
+        },
+        data: { verificationHash: hash, verificationExpiresAt: expiresAt },
+      }),
+    );
+    return count === 1;
+  }
+  async clearVerification(id: string, hash: string): Promise<void> {
+    await withRepositoryErrors('Account.clearVerification', () =>
+      this.db.account.updateMany({
+        where: { id, verificationHash: hash, emailVerifiedAt: null },
+        data: { verificationHash: null, verificationExpiresAt: null },
+      }),
+    );
+  }
   async setVerification(id: string, hash: string, expiresAt: Date): Promise<void> {
     await withRepositoryErrors('Account.verification', () =>
       this.db.account.update({

@@ -105,6 +105,8 @@ export type AuthRefreshResult = 'ok' | 'invalid' | 'reuse' | 'unavailable';
 export type AuthTokenRejectionReason =
   'missing' | 'malformed' | 'invalid' | 'expired' | 'revoked' | 'unavailable';
 export type AuthLogoutScope = 'session' | 'all';
+/** Envio do código de confirmação de e-mail em segundo plano (spec 017). */
+export type VerificationEmailResult = 'sent' | 'failed';
 
 export interface DbQuerySample {
   readonly model: string;
@@ -161,6 +163,8 @@ export interface Metrics {
   /** O `authenticate` recusou um access token; `reason` é a categoria (nunca vai à resposta). */
   countAuthTokenRejection(reason: AuthTokenRejectionReason): void;
   countAuthLogout(scope: AuthLogoutScope): void;
+  /** Um envio de confirmação de e-mail terminou (spec 017). Sem id, e-mail nem código em label. */
+  countVerificationEmail(result: VerificationEmailResult): void;
   /** O hook `requirePermission` negou uma permissão (spec 008). `permission` é do conjunto fixo, nunca id. */
   countAuthzDenial(permission: Permission): void;
   /** Uma operação de gestão de usuários foi confirmada (spec 008). `action` é o `AuditAction`. */
@@ -353,6 +357,13 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const verificationEmails = new Counter({
+    name: 'account_verification_sends_total',
+    help: 'Envios do código de confirmação da conta por resultado (sent, failed)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
   const authzDenials = new Counter({
     name: 'authz_denials_total',
     help: 'Negações de permissão pelo hook requirePermission, por permissão (conjunto fixo)',
@@ -453,6 +464,9 @@ export function createMetrics(): Metrics {
     },
     countAuthLogout(scope) {
       authLogouts.inc({ scope });
+    },
+    countVerificationEmail(result) {
+      verificationEmails.inc({ result });
     },
     countAuthzDenial(permission) {
       authzDenials.inc({ permission });

@@ -1,7 +1,6 @@
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { AccountId, ClientId, type Account, type AccountRepository } from '../../domain/index.js';
 import {
-  ConflictError,
   ForbiddenError,
   NotFoundError,
   RateLimitError,
@@ -13,6 +12,9 @@ import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { AccountSessionStore, VerificationMailer } from '../ports/account-session.js';
 import type { UserIdentity } from './identity.js';
 import { normalizeEmail } from './credentials.js';
+
+const VERIFICATION_TTL_MS = 30 * 60_000;
+const VERIFICATION_MIN_INTERVAL_MS = 60_000;
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
@@ -29,22 +31,80 @@ export class AccountService {
       >;
       loginSecret: string | Buffer;
       now?: () => Date;
+      /** Resultado do envio em segundo plano; só id e resultado, nunca e-mail nem código. */
+      onVerificationMail?: (result: 'sent' | 'failed', accountId: string) => void;
     },
   ) {}
 
+  /** Envios de confirmação em segundo plano ainda não concluídos (esperados no desligamento). */
+  private readonly pending = new Set<Promise<void>>();
+
+  /**
+   * Cadastro público. Responde igual para e-mail novo, não confirmado e já confirmado, e o envio
+   * do código roda depois, em segundo plano (nem o tempo nem uma falha de SMTP revelam se o
+   * e-mail existe). Conta ainda não confirmada: quem se cadastra de novo (o dono real do e-mail)
+   * substitui a senha e recebe um código novo, que invalida o anterior; sem o código enviado ao
+   * e-mail ninguém confirma nem entra. Conta confirmada nunca muda.
+   */
   async register(email: string, password: string): Promise<void> {
     email = normalizeEmail(email);
-    // Paga o hash também para conta existente; não revela cadastro nem substitui senha.
+    // O hash é pago em qualquer caso, antes de olhar o banco.
     const hash = await this.deps.passwords.hash(password);
-    if (await this.deps.accounts.findByEmail(email)) return;
-    let account: Account;
+    const token = randomBytes(32).toString('base64url');
+    const now = this.now();
+    const id = await this.deps.accounts.registerUnverified({
+      id: randomUUID(),
+      email,
+      passwordHash: hash,
+      verificationHash: digest(token),
+      expiresAt: new Date(now.getTime() + VERIFICATION_TTL_MS),
+      retryBefore: this.retryBefore(now),
+    });
+    if (id !== null) this.deliver(id, email, token);
+  }
+
+  /** Espera os envios pendentes (desligamento); nunca rejeita. */
+  async drain(timeoutMs = 10_000): Promise<void> {
+    if (this.pending.size === 0) return;
+    let timer: NodeJS.Timeout | undefined;
+    const limit = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    });
     try {
-      account = await this.deps.accounts.create(email, hash);
-    } catch (error) {
-      if (error instanceof ConflictError) return;
-      throw error;
+      await Promise.race([Promise.allSettled([...this.pending]).then(() => undefined), limit]);
+    } finally {
+      clearTimeout(timer);
     }
-    await this.sendVerification(account);
+  }
+
+  private now(): Date {
+    return this.deps.now?.() ?? new Date();
+  }
+
+  /** Só se pode reenviar/substituir se o último envio foi há pelo menos o intervalo mínimo. */
+  private retryBefore(now: Date): Date {
+    return new Date(now.getTime() + VERIFICATION_TTL_MS - VERIFICATION_MIN_INTERVAL_MS);
+  }
+
+  private deliver(accountId: string, email: string, token: string): void {
+    const task: Promise<void> = (async () => {
+      let result: 'sent' | 'failed' = 'sent';
+      try {
+        await this.deps.mailer.sendVerification(email, token);
+      } catch {
+        result = 'failed';
+        // O código não saiu: libera um novo envio já (melhor esforço).
+        await this.deps.accounts.clearVerification(accountId, digest(token)).catch(() => undefined);
+      }
+      try {
+        this.deps.onVerificationMail?.(result, accountId);
+      } catch {
+        // Observabilidade nunca derruba o processo.
+      }
+    })().finally(() => {
+      this.pending.delete(task);
+    });
+    this.pending.add(task);
   }
 
   private async credentials(email: string, password: string): Promise<Account> {
@@ -67,29 +127,28 @@ export class AccountService {
 
   async resend(email: string, password: string): Promise<void> {
     const account = await this.credentials(email, password);
-    if (account.emailVerifiedAt === null) await this.sendVerification(account);
-  }
-
-  private async sendVerification(account: Account): Promise<void> {
+    if (account.emailVerifiedAt !== null) return;
     const token = randomBytes(32).toString('base64url');
-    const now = this.deps.now?.() ?? new Date();
-    await this.deps.accounts.setVerification(
+    const now = this.now();
+    const stored = await this.deps.accounts.refreshVerification(
       account.id,
       digest(token),
-      new Date(now.getTime() + 30 * 60_000),
+      new Date(now.getTime() + VERIFICATION_TTL_MS),
+      this.retryBefore(now),
     );
+    // Intervalo mínimo desde o último envio: pedido antecipado responde igual e não envia.
+    if (!stored) return;
     try {
       await this.deps.mailer.sendVerification(account.email, token);
     } catch {
+      await this.deps.accounts.clearVerification(account.id, digest(token)).catch(() => undefined);
       throw new ServiceUnavailableError('Não foi possível enviar a confirmação');
     }
   }
 
   async verify(email: string, password: string, token: string): Promise<void> {
     const account = await this.credentials(email, password);
-    if (
-      !(await this.deps.accounts.verify(account.id, digest(token), this.deps.now?.() ?? new Date()))
-    ) {
+    if (!(await this.deps.accounts.verify(account.id, digest(token), this.now()))) {
       throw new UnauthorizedError('Confirmação inválida ou expirada');
     }
   }
