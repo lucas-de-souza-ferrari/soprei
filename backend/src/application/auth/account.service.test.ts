@@ -5,7 +5,8 @@ import type { VerifyOutcome } from '../../domain/index.js';
 import { RateLimitError, UnauthorizedError } from '../../shared/errors/index.js';
 import { InMemoryAccountRepository } from '../../test-support/in-memory-account.repository.js';
 import { FakePasswordHasher, InMemorySessionStore } from '../../test-support/in-memory-auth.js';
-import type { AccountSessionStore, VerificationMailer } from '../ports/account-session.js';
+import type { AccountMailer, AccountSessionStore } from '../ports/account-session.js';
+import { noResetMail } from '../../test-support/no-reset-mail.js';
 import { AccountService } from './account.service.js';
 import { deriveVerificationKey, verificationDigest, type RandomInt } from './verification-code.js';
 
@@ -21,6 +22,7 @@ const sessions: AccountSessionStore = {
   read: () => Promise.resolve(null),
   select: () => Promise.resolve(),
   revoke: () => Promise.resolve(),
+  revokeAll: () => Promise.resolve(),
 };
 
 function harness(
@@ -31,7 +33,8 @@ function harness(
   const store = new InMemorySessionStore({ now: () => new Date(time.now) });
   const mails: { email: string; code: string }[] = [];
   const outcomes: VerifyOutcome[] = [];
-  const mailer: VerificationMailer = {
+  const mailer: AccountMailer = {
+    ...noResetMail,
     sendVerification: (email, code) => {
       if (time.mailFails) return Promise.reject(new Error('SMTP segredo que não pode vazar'));
       mails.push({ email, code });

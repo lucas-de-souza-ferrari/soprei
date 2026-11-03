@@ -71,6 +71,9 @@ export const envSchema = z
     ),
     EMAIL_PROVIDER_USER: optionalSecret,
     EMAIL_PROVIDER_PSWD: optionalSecret,
+    // Expurgo de contas nunca confirmadas (spec 021): retenção em dias e intervalo da varredura (0 desliga).
+    ACCOUNT_UNVERIFIED_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+    ACCOUNT_PURGE_INTERVAL_MINUTES: z.coerce.number().int().min(0).max(1440).default(60),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),

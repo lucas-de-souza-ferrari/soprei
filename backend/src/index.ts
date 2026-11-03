@@ -238,6 +238,30 @@ async function main(): Promise<void> {
                   logger.info({ accountId, result }, 'e-mail confirmado');
                 }
               },
+              // Recuperação de senha (spec 021): só resultados e ids, nunca e-mail, código nem senha.
+              onPasswordResetRequest: (result) => {
+                metrics.countPasswordResetRequest(result);
+              },
+              onPasswordReset: (result, accountId) => {
+                metrics.countPasswordResetAttempt(result);
+                if (result === 'reset') {
+                  logger.info({ accountId, result }, 'senha redefinida');
+                } else if (result === 'exhausted' || result === 'revoke_failed') {
+                  logger.warn({ accountId, result }, 'redefinição de senha recusada');
+                }
+              },
+              onPasswordResetMail: (kind, result, accountId) => {
+                metrics.countPasswordResetEmail(kind, result);
+                if (result === 'failed') {
+                  logger.warn({ accountId, kind, result }, 'falha ao enviar e-mail da recuperação');
+                }
+              },
+              onWarning: (event, accountId) => {
+                logger.warn(
+                  { accountId, event },
+                  'bloqueio de login não zerado depois da redefinição',
+                );
+              },
               mailer: new SmtpVerificationMailer(smtpMailerOptions(config)),
             }),
             origin: config.APP_ORIGIN ?? '',
@@ -271,6 +295,28 @@ async function main(): Promise<void> {
     },
   });
 
+  if (config.ACCOUNTS_ENABLED) {
+    // Expurgo de contas nunca confirmadas (spec 021): timer no processo, `unref`, desligável com 0.
+    const purger = new UnverifiedAccountPurger({
+      repository: new PrismaUnverifiedAccountPurgeRepository(prisma),
+      retentionDays: config.ACCOUNT_UNVERIFIED_RETENTION_DAYS,
+      // Só contagens: nunca e-mail nem id de conta.
+      onRun: ({ result, purged, batches }) => {
+        metrics.countAccountPurgeRun(result);
+        metrics.countAccountsPurged(purged);
+        if (result === 'error') {
+          logger.error({ purged, batches }, 'falha no expurgo de contas não confirmadas');
+        } else if (purged > 0) {
+          logger.info({ purged, batches }, 'contas não confirmadas expurgadas');
+        }
+      },
+    });
+    infrastructure.accountPurge = startPurgeTimer({
+      run: () => purger.runOnce(),
+      intervalMinutes: config.ACCOUNT_PURGE_INTERVAL_MINUTES,
+    });
+  }
+
   const stop = (signal: string): void => {
     app.log.info({ signal }, 'encerrando servidor');
     shutdown(app, infrastructure, app.log).then(
@@ -301,7 +347,12 @@ void main();
 import { cookieIsSecure } from './presentation/auth/account.controller.js';
 import { AccountService } from './application/auth/account.service.js';
 import { deriveLoginLockSecret } from './application/auth/auth.service.js';
-import { PrismaAccountRepository } from './infrastructure/database/index.js';
+import {
+  PrismaAccountRepository,
+  PrismaUnverifiedAccountPurgeRepository,
+} from './infrastructure/database/index.js';
+import { startPurgeTimer } from './application/auth/purge-timer.js';
+import { UnverifiedAccountPurger } from './application/auth/unverified-account-purger.js';
 import { RedisAccountSessionStore } from './infrastructure/auth/redis-account-session-store.js';
 import { smtpMailerOptions } from './infrastructure/config/email.js';
 import { SmtpVerificationMailer } from './infrastructure/external-apis/email/smtp-verification-mailer.js';

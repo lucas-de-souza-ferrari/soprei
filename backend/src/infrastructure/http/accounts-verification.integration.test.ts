@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
+import { noResetMail } from '../../test-support/no-reset-mail.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { Result } from '../../shared/types/index.js';
 import { createDatabase, PrismaAccountRepository } from '../database/index.js';
@@ -54,6 +55,7 @@ test('confirmação por código de 6 dígitos: erros, esgotamento, reenvio, mét
       logs.logger.info({ accountId, result }, 'tentativa de confirmação');
     },
     mailer: {
+      ...noResetMail,
       sendVerification: (email, code) => {
         mail.set(email, code);
         return Promise.resolve();

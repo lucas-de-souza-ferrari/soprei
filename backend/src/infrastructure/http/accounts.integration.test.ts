@@ -8,6 +8,7 @@ import { AccountService } from '../../application/auth/account.service.js';
 import { ClientService } from '../../application/clients/client.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
+import { noResetMail } from '../../test-support/no-reset-mail.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import {
@@ -47,6 +48,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     create: (id) => store.create(id),
     select: (secret, clientId) => store.select(secret, clientId),
     revoke: (secret) => store.revoke(secret),
+    revokeAll: (id) => store.revokeAll(id),
     read: (secret) =>
       sessionsDown
         ? Promise.reject(new ServiceUnavailableError('Sessão indisponível'))
@@ -59,6 +61,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     loginLocks: auth.sessions,
     loginSecret: config.JWT_SECRET,
     mailer: {
+      ...noResetMail,
       sendVerification: (email, code) => {
         if (mailFails) return Promise.reject(new Error('SMTP segredo que não pode vazar'));
         mail.set(email, code);

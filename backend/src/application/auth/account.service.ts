@@ -4,6 +4,7 @@ import {
   ClientId,
   type Account,
   type AccountRepository,
+  type ResetFailureOutcome,
   type VerifyOutcome,
 } from '../../domain/index.js';
 import {
@@ -15,9 +16,10 @@ import {
 } from '../../shared/errors/index.js';
 import type { SessionStore } from '../ports/session-store.js';
 import type { PasswordHasher } from '../ports/password-hasher.js';
-import type { AccountSessionStore, VerificationMailer } from '../ports/account-session.js';
+import type { AccountMailer, AccountSessionStore } from '../ports/account-session.js';
 import type { UserIdentity } from './identity.js';
 import { normalizeEmail } from './credentials.js';
+import { deriveResetKey, resetDigest } from './reset-code.js';
 import {
   deriveVerificationKey,
   generateVerificationCode,
@@ -27,6 +29,14 @@ import {
 
 const VERIFICATION_TTL_MS = 15 * 60_000;
 const VERIFICATION_MIN_INTERVAL_MS = 60_000;
+/** Código de recuperação de senha (spec 021): mesma validade e intervalo do de confirmação. */
+const RESET_TTL_MS = 15 * 60_000;
+const RESET_MIN_INTERVAL_MS = 60_000;
+
+/** Resposta uniforme de qualquer falha do código de recuperação (a razão vai só ao observador). */
+const RESET_INVALID_MESSAGE = 'Código inválido ou expirado';
+
+export type PasswordResetResult = ResetFailureOutcome | 'reset' | 'revoke_failed';
 
 export class AccountService {
   constructor(
@@ -34,7 +44,7 @@ export class AccountService {
       accounts: AccountRepository;
       passwords: PasswordHasher;
       sessions: AccountSessionStore;
-      mailer: VerificationMailer;
+      mailer: AccountMailer;
       loginLocks: Pick<
         SessionStore,
         'loginLockState' | 'recordLoginFailure' | 'resetLoginFailures'
@@ -47,12 +57,26 @@ export class AccountService {
       onVerificationMail?: (result: 'sent' | 'failed', accountId: string) => void;
       /** Resultado de cada tentativa de confirmar; só id e resultado, nunca código, hash nem e-mail. */
       onVerificationAttempt?: (result: VerifyOutcome, accountId: string) => void;
+      /** Pedido de código de recuperação: gravou ("issued") ou foi ignorado; nunca e-mail nem código. */
+      onPasswordResetRequest?: (result: 'issued' | 'ignored') => void;
+      /** Resultado de cada tentativa de redefinir; `accountId` só quando já se conhece a conta. */
+      onPasswordReset?: (result: PasswordResetResult, accountId?: string) => void;
+      /** Resultado do e-mail da recuperação em segundo plano (código ou aviso); só id e resultado. */
+      onPasswordResetMail?: (
+        kind: 'code' | 'notice',
+        result: 'sent' | 'failed',
+        accountId: string,
+      ) => void;
+      /** Aviso operacional que não derruba a operação (só id da conta, nunca e-mail). */
+      onWarning?: (event: 'login_lock_reset_failed', accountId: string) => void;
     },
   ) {
     this.verificationKey = deriveVerificationKey(deps.loginSecret);
+    this.resetKey = deriveResetKey(deps.loginSecret);
   }
 
   private readonly verificationKey: Buffer;
+  private readonly resetKey: Buffer;
 
   /** Envios de confirmação em segundo plano ainda não concluídos (esperados no desligamento). */
   private readonly pending = new Set<Promise<void>>();
@@ -104,6 +128,116 @@ export class AccountService {
     return this.deps.now?.() ?? new Date();
   }
 
+  private resetHash(email: string, code: string): string {
+    return resetDigest(this.resetKey, email, code);
+  }
+
+  /** Registra uma tarefa em segundo plano (esperada no desligamento); nunca rejeita. */
+  private background(work: () => Promise<void>): void {
+    const task: Promise<void> = work()
+      .catch(() => undefined)
+      .finally(() => {
+        this.pending.delete(task);
+      });
+    this.pending.add(task);
+  }
+
+  private observe(call: () => void): void {
+    try {
+      call();
+    } catch {
+      // Observabilidade nunca derruba o processo.
+    }
+  }
+
+  /**
+   * Pedido de código de recuperação (spec 021). Responde igual para qualquer e-mail: o trabalho de
+   * banco é o mesmo (um UPDATE condicional) e o envio roda em segundo plano. Só conta confirmada e
+   * ativa, fora do intervalo de 60 s e do teto diário de erros, grava código e recebe e-mail.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    email = normalizeEmail(email);
+    const code = generateVerificationCode(this.deps.randomInt);
+    const now = this.now();
+    const hash = this.resetHash(email, code);
+    const id = await this.deps.accounts.issueResetCode(
+      email,
+      hash,
+      new Date(now.getTime() + RESET_TTL_MS),
+      new Date(now.getTime() + RESET_TTL_MS - RESET_MIN_INTERVAL_MS),
+      now,
+    );
+    this.observe(() => this.deps.onPasswordResetRequest?.(id === null ? 'ignored' : 'issued'));
+    if (id === null) return;
+    this.background(async () => {
+      let result: 'sent' | 'failed' = 'sent';
+      try {
+        await this.deps.mailer.sendPasswordReset(email, code);
+      } catch {
+        result = 'failed';
+        // O código não saiu: libera um novo pedido já (melhor esforço).
+        await this.deps.accounts.clearResetCode(id, hash).catch(() => undefined);
+      }
+      this.observe(() => this.deps.onPasswordResetMail?.('code', result, id));
+    });
+  }
+
+  private resetFailure(result: PasswordResetResult, accountId?: string): UnauthorizedError {
+    this.observe(() => this.deps.onPasswordReset?.(result, accountId));
+    return new UnauthorizedError(RESET_INVALID_MESSAGE);
+  }
+
+  /**
+   * Redefine a senha com o código de 6 dígitos (spec 021; o formato e a política da senha são do
+   * controller, antes daqui). O hash da senha só é pago depois de o código ser conferido (leitura
+   * sem consumir); a troca e a morte do código são uma só instrução. As sessões da conta são
+   * revogadas antes e depois do commit. Sem login automático. Toda falha do código é a mesma 401.
+   */
+  async confirmPasswordReset(email: string, code: string, newPassword: string): Promise<void> {
+    email = normalizeEmail(email);
+    const hash = this.resetHash(email, code);
+    const reject = async (accountId?: string): Promise<never> => {
+      const outcome = await this.deps.accounts.recordResetFailure(email, this.now());
+      throw this.resetFailure(outcome, accountId);
+    };
+    if (!(await this.deps.accounts.hasValidResetCode(email, hash, this.now()))) return reject();
+    const passwordHash = await this.deps.passwords.hash(newPassword);
+    const account = await this.deps.accounts.findByEmail(email);
+    if (account === null) return reject();
+    // Revogação antes do commit: se falhar, nada foi gravado e o código segue válido.
+    try {
+      await this.deps.sessions.revokeAll(account.id);
+    } catch (error) {
+      this.observe(() => this.deps.onPasswordReset?.('revoke_failed', account.id));
+      throw error;
+    }
+    const changed = await this.deps.accounts.resetPassword(email, hash, passwordHash, this.now());
+    if (!changed) return reject(account.id);
+    this.observe(() => this.deps.onPasswordReset?.('reset', account.id));
+    // Revogação depois do commit: fecha a janela de uma sessão criada com a senha antiga entre a
+    // revogação prévia e a troca. Falha = 503 com a senha já trocada e o código gasto.
+    try {
+      await this.deps.sessions.revokeAll(account.id);
+    } catch (error) {
+      this.observe(() => this.deps.onPasswordReset?.('revoke_failed', account.id));
+      throw error;
+    }
+    try {
+      await this.deps.loginLocks.resetLoginFailures(this.lockKey(email));
+    } catch {
+      this.observe(() => this.deps.onWarning?.('login_lock_reset_failed', account.id));
+    }
+    this.background(async () => {
+      let result: 'sent' | 'failed' = 'sent';
+      try {
+        await this.deps.mailer.sendPasswordChanged(email);
+      } catch {
+        result = 'failed';
+      }
+      this.observe(() => this.deps.onPasswordResetMail?.('notice', result, account.id));
+    });
+  }
+
   /** Só se pode reenviar/substituir se o último envio foi há pelo menos o intervalo mínimo. */
   private retryBefore(now: Date): Date {
     return new Date(now.getTime() + VERIFICATION_TTL_MS - VERIFICATION_MIN_INTERVAL_MS);
@@ -132,11 +266,14 @@ export class AccountService {
     this.pending.add(task);
   }
 
+  /** Chave do bloqueio de login por conta (HMAC do e-mail; vale também para contas inexistentes). */
+  private lockKey(email: string): string {
+    return createHmac('sha256', this.deps.loginSecret).update(`account:${email}`).digest('hex');
+  }
+
   private async credentials(email: string, password: string): Promise<Account> {
     email = normalizeEmail(email);
-    const key = createHmac('sha256', this.deps.loginSecret)
-      .update(`account:${email}`)
-      .digest('hex');
+    const key = this.lockKey(email);
     const state = await this.deps.loginLocks.loginLockState(key);
     if (state.locked) throw new RateLimitError(state.retryAfterSeconds);
     const account = await this.deps.accounts.findByEmail(email);

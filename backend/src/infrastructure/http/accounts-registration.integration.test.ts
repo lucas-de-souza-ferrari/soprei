@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
+import { noResetMail } from '../../test-support/no-reset-mail.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { Result } from '../../shared/types/index.js';
 import { createDatabase, PrismaAccountRepository } from '../database/index.js';
@@ -46,6 +47,7 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
     now: () => new Date(clock),
     onVerificationMail: (result) => results.push(result),
     mailer: {
+      ...noResetMail,
       sendVerification: (email, code) => {
         if (mailFails) return Promise.reject(new Error('SMTP segredo que não pode vazar'));
         mail.set(email, code);

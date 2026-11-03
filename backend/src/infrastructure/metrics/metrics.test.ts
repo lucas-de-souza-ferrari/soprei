@@ -242,7 +242,8 @@ describe('createMetrics', () => {
     assert.match(body, /authz_denials_total{permission="conversation:simulate"} 1/);
     assert.match(body, /user_admin_actions_total{action="USER_CREATED"} 1/);
     assert.match(body, /user_admin_actions_total{action="USER_ROLE_CHANGED"} 1/);
-    assert.doesNotMatch(body, /clientId|userId|actorUserId|email/i);
+    // Só nomes de label importam (a métrica account_password_reset_emails_total, spec 021, tem "emails" no nome).
+    assert.doesNotMatch(body, /{[^}]*(clientId|userId|actorUserId|email)/i);
   });
 });
 
@@ -277,6 +278,43 @@ describe('account_verification_attempts_total', () => {
     assert.equal(lines.length, 4);
     for (const line of lines) {
       assert.match(line, /^account_verification_attempts_total\{result="[a-z]+"\} [0-9]+$/);
+    }
+  });
+});
+
+describe('métricas da recuperação de senha e do expurgo (spec 021)', () => {
+  it('conta só por labels fixos, sem id, e-mail, IP nem código', async () => {
+    const metrics = createMetrics();
+    metrics.countPasswordResetRequest('issued');
+    metrics.countPasswordResetRequest('ignored');
+    metrics.countPasswordResetRequest('ignored');
+    for (const result of ['reset', 'wrong', 'exhausted', 'unavailable', 'revoke_failed'] as const) {
+      metrics.countPasswordResetAttempt(result);
+    }
+    metrics.countPasswordResetEmail('code', 'sent');
+    metrics.countPasswordResetEmail('code', 'failed');
+    metrics.countPasswordResetEmail('notice', 'sent');
+    metrics.countAccountsPurged(0);
+    metrics.countAccountsPurged(3);
+    metrics.countAccountPurgeRun('ok');
+    metrics.countAccountPurgeRun('error');
+    const body = await metrics.render();
+    assert.ok(body.includes('account_password_reset_requests_total{result="issued"} 1'));
+    assert.ok(body.includes('account_password_reset_requests_total{result="ignored"} 2'));
+    for (const result of ['reset', 'wrong', 'exhausted', 'unavailable', 'revoke_failed']) {
+      assert.ok(body.includes(`account_password_reset_attempts_total{result="${result}"} 1`));
+    }
+    assert.ok(body.includes('account_password_reset_emails_total{kind="code",result="sent"} 1'));
+    assert.ok(body.includes('account_password_reset_emails_total{kind="code",result="failed"} 1'));
+    assert.ok(body.includes('account_password_reset_emails_total{kind="notice",result="sent"} 1'));
+    assert.ok(body.includes('account_purged_total 3'));
+    assert.ok(body.includes('account_purge_runs_total{result="ok"} 1'));
+    assert.ok(body.includes('account_purge_runs_total{result="error"} 1'));
+    const labelled = body
+      .split(String.fromCharCode(10))
+      .filter((line) => /^account_(password_reset|purge)/.test(line) && line.includes('{'));
+    for (const line of labelled) {
+      assert.match(line, /^[a-z_]+\{(result|kind)="[a-z_]+"(,result="[a-z_]+")?\} [0-9]+$/);
     }
   });
 });

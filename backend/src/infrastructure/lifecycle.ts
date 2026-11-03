@@ -14,6 +14,8 @@ export interface Infrastructure {
   readonly authRedis?: AuthRedisHandle | undefined;
   /** Fila de entrada do canal e seu worker (spec 011); ausente com `WHATSAPP_ENABLED=false`. */
   readonly inboundQueue?: Pick<InboundQueueHandle, 'close'> | undefined;
+  /** Timer do expurgo de contas não confirmadas (spec 021); ausente sem contas ou com intervalo 0. */
+  accountPurge?: { stop(): Promise<void> } | undefined;
 }
 
 /**
@@ -45,9 +47,17 @@ export async function verifyInfrastructure(
  * ativo ainda usa o banco e o Redis. Um recurso que falha ao fechar não impede os outros.
  */
 export async function closeInfrastructure(
-  { database, redis, rateLimitRedis, authRedis, inboundQueue }: Infrastructure,
+  { database, redis, rateLimitRedis, authRedis, inboundQueue, accountPurge }: Infrastructure,
   logger: FastifyBaseLogger,
 ): Promise<void> {
+  // O expurgo usa o banco: para o timer e espera a execução ativa antes de fechar o pool.
+  if (accountPurge !== undefined) {
+    try {
+      await accountPurge.stop();
+    } catch {
+      logger.error('falha ao encerrar o expurgo de contas');
+    }
+  }
   if (inboundQueue !== undefined) {
     try {
       await inboundQueue.close();

@@ -27,6 +27,22 @@ export const verificationSchema = z
   })
   .strict();
 
+/** Corpo de `POST /auth/password-reset/request` (spec 021): só o e-mail. */
+export const passwordResetRequestSchema = z.object({ email: emailSchema }).strict();
+
+/**
+ * Corpo de `POST /auth/password-reset/confirm` (spec 021): o código são exatamente 6 dígitos e a
+ * senha nova segue a política do cadastro público (o mesmo schema, para não divergir). Formato
+ * inválido é 400 antes de qualquer consulta e nunca conta como tentativa.
+ */
+export const passwordResetConfirmSchema = z
+  .object({
+    email: emailSchema,
+    code: z.string().regex(VERIFICATION_CODE_PATTERN),
+    newPassword: accountPasswordSchema,
+  })
+  .strict();
+
 export const ACCOUNT_COOKIE = 'soprei_session';
 export function accountCookie(header: string | undefined): string {
   const matches = (header ?? '')
@@ -87,6 +103,20 @@ export const accountController: FastifyPluginCallback<{
   app.post('/auth/verify-email', login, async (request, reply) => {
     const body = verificationSchema.parse(request.body);
     await service.verify(body.email, body.password, body.code);
+    return reply.status(204).send();
+  });
+  app.post('/auth/password-reset/request', login, async (request, reply) => {
+    const body = passwordResetRequestSchema.parse(request.body);
+    await service.requestPasswordReset(body.email);
+    // Sempre a mesma resposta: o site nunca revela se existe conta para o e-mail.
+    return reply.status(202).send({
+      message: 'Se existir uma conta, enviamos um código para o e-mail informado.',
+    });
+  });
+  app.post('/auth/password-reset/confirm', login, async (request, reply) => {
+    const body = passwordResetConfirmSchema.parse(request.body);
+    await service.confirmPasswordReset(body.email, body.code, body.newPassword);
+    // Sem cookie e sem login automático: a pessoa entra com a senha nova.
     return reply.status(204).send();
   });
   app.post('/auth/login', login, async (request, reply) => {

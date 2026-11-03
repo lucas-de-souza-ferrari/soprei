@@ -110,6 +110,15 @@ export type VerificationEmailResult = 'sent' | 'failed';
 /** Tentativa de confirmar o e-mail com o código de 6 dígitos (spec 020). Conjunto fixo. */
 export type VerificationAttemptResult = 'verified' | 'wrong' | 'exhausted' | 'unavailable';
 
+/** Pedido de código de recuperação de senha (spec 021): gravou código ou foi ignorado. */
+export type PasswordResetRequestResult = 'issued' | 'ignored';
+/** Tentativa de redefinir a senha (spec 021). Conjunto fixo. */
+export type PasswordResetAttemptResult =
+  'reset' | 'wrong' | 'exhausted' | 'unavailable' | 'revoke_failed';
+export type PasswordResetEmailKind = 'code' | 'notice';
+/** Execução do expurgo de contas não confirmadas (spec 021). */
+export type AccountPurgeRunResult = 'ok' | 'error';
+
 export interface DbQuerySample {
   readonly model: string;
   readonly operation: string;
@@ -169,6 +178,16 @@ export interface Metrics {
   countVerificationEmail(result: VerificationEmailResult): void;
   /** Uma tentativa de confirmar o e-mail terminou (spec 020). Sem id, e-mail, IP nem código. */
   countVerificationAttempt(result: VerificationAttemptResult): void;
+  /** Um pedido de código de recuperação terminou (spec 021). Sem id, e-mail, IP nem código. */
+  countPasswordResetRequest(result: PasswordResetRequestResult): void;
+  /** Uma tentativa de redefinir a senha terminou (spec 021). Conjunto fixo, sem id nem e-mail. */
+  countPasswordResetAttempt(result: PasswordResetAttemptResult): void;
+  /** Um e-mail da recuperação (código ou aviso) foi enviado ou falhou (spec 021). */
+  countPasswordResetEmail(kind: PasswordResetEmailKind, result: VerificationEmailResult): void;
+  /** Contas não confirmadas apagadas por uma execução do expurgo (spec 021). */
+  countAccountsPurged(count: number): void;
+  /** Uma execução do expurgo terminou (spec 021). */
+  countAccountPurgeRun(result: AccountPurgeRunResult): void;
   /** O hook `requirePermission` negou uma permissão (spec 008). `permission` é do conjunto fixo, nunca id. */
   countAuthzDenial(permission: Permission): void;
   /** Uma operação de gestão de usuários foi confirmada (spec 008). `action` é o `AuditAction`. */
@@ -375,6 +394,36 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const passwordResetRequests = new Counter({
+    name: 'account_password_reset_requests_total',
+    help: 'Pedidos de código de recuperação de senha por resultado (issued, ignored)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const passwordResetAttempts = new Counter({
+    name: 'account_password_reset_attempts_total',
+    help: 'Tentativas de redefinir a senha por resultado (reset, wrong, exhausted, unavailable, revoke_failed)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const passwordResetEmails = new Counter({
+    name: 'account_password_reset_emails_total',
+    help: 'E-mails da recuperação de senha por tipo (code, notice) e resultado (sent, failed)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const accountsPurged = new Counter({
+    name: 'account_purged_total',
+    help: 'Contas não confirmadas apagadas pelo expurgo',
+    registers: [registry],
+  });
+  const accountPurgeRuns = new Counter({
+    name: 'account_purge_runs_total',
+    help: 'Execuções do expurgo de contas não confirmadas por resultado (ok, error)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
   const authzDenials = new Counter({
     name: 'authz_denials_total',
     help: 'Negações de permissão pelo hook requirePermission, por permissão (conjunto fixo)',
@@ -481,6 +530,21 @@ export function createMetrics(): Metrics {
     },
     countVerificationAttempt(result) {
       verificationAttempts.inc({ result });
+    },
+    countPasswordResetRequest(result) {
+      passwordResetRequests.inc({ result });
+    },
+    countPasswordResetAttempt(result) {
+      passwordResetAttempts.inc({ result });
+    },
+    countPasswordResetEmail(kind, result) {
+      passwordResetEmails.inc({ kind, result });
+    },
+    countAccountsPurged(count) {
+      if (count > 0) accountsPurged.inc(count);
+    },
+    countAccountPurgeRun(result) {
+      accountPurgeRuns.inc({ result });
     },
     countAuthzDenial(permission) {
       authzDenials.inc({ permission });

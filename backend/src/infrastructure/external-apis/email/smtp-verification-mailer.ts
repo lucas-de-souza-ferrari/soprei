@@ -1,5 +1,8 @@
 import nodemailer, { type SendMailOptions } from 'nodemailer';
-import type { VerificationMailer } from '../../../application/ports/account-session.js';
+import type {
+  PasswordResetMailer,
+  VerificationMailer,
+} from '../../../application/ports/account-session.js';
 import { ServiceUnavailableError } from '../../../shared/errors/index.js';
 
 /** Opções já validadas pela config (spec 019); a decisão de `requireTLS` vem de `config/email.ts`. */
@@ -33,7 +36,7 @@ export function buildTransportOptions(options: SmtpMailerOptions): Record<string
   };
 }
 
-export class SmtpVerificationMailer implements VerificationMailer {
+export class SmtpVerificationMailer implements VerificationMailer, PasswordResetMailer {
   private readonly transport: MailTransport;
   private readonly from: string;
 
@@ -42,24 +45,63 @@ export class SmtpVerificationMailer implements VerificationMailer {
     this.transport = transport ?? nodemailer.createTransport(buildTransportOptions(options));
   }
 
-  async sendVerification(email: string, code: string): Promise<void> {
+  /** Envia texto simples; qualquer falha vira erro fixo, sem eco do destinatário, texto ou código. */
+  private async send(
+    email: string,
+    subject: string,
+    lines: readonly string[],
+    failure: string,
+  ): Promise<void> {
     try {
       await this.transport.sendMail({
         from: { name: 'Soprei', address: this.from },
         to: email,
-        subject: 'Seu código de confirmação do Soprei',
-        text: [
-          'Seu código de confirmação é:',
-          '',
-          code,
-          '',
-          'Ele vale por 15 minutos. Se você não pediu este cadastro, ignore esta mensagem.',
-        ].join('\n'),
+        subject,
+        text: lines.join('\n'),
       });
     } catch {
-      throw new ServiceUnavailableError(
-        'Não foi possível enviar a confirmação. Tente reenviar mais tarde.',
-      );
+      throw new ServiceUnavailableError(failure);
     }
+  }
+
+  sendVerification(email: string, code: string): Promise<void> {
+    return this.send(
+      email,
+      'Seu código de confirmação do Soprei',
+      [
+        'Seu código de confirmação é:',
+        '',
+        code,
+        '',
+        'Ele vale por 15 minutos. Se você não pediu este cadastro, ignore esta mensagem.',
+      ],
+      'Não foi possível enviar a confirmação. Tente reenviar mais tarde.',
+    );
+  }
+
+  sendPasswordReset(email: string, code: string): Promise<void> {
+    return this.send(
+      email,
+      'Seu código para redefinir a senha do Soprei',
+      [
+        'Seu código para redefinir a senha é:',
+        '',
+        code,
+        '',
+        'Ele vale por 15 minutos. Se você não pediu isso, ignore esta mensagem; sua senha continua a mesma.',
+      ],
+      'Não foi possível enviar o código de recuperação.',
+    );
+  }
+
+  sendPasswordChanged(email: string): Promise<void> {
+    return this.send(
+      email,
+      'Sua senha do Soprei foi alterada',
+      [
+        'A senha da sua conta foi alterada e todas as sessões abertas foram encerradas. Se foi você, não precisa fazer nada. Se não foi, redefina a senha de novo e confira o acesso ao seu e-mail.',
+      ],
+      'Não foi possível enviar o aviso de senha alterada.',
+    );
   }
 }
