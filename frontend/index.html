@@ -7,7 +7,27 @@
       name="description"
       content="Soprei: atendimento com inteligência artificial pelo WhatsApp."
     />
+    <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/logo-icon.svg" />
+    <script>
+      // Aplica o tema salvo (ou o do sistema) antes da primeira pintura, sem piscar.
+      // Mesma regra de src/theme/theme.ts; a chave é a única coisa que o site guarda no navegador.
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem('soprei-theme');
+        } catch (e) {}
+        var dark = saved === 'dark';
+        if (saved !== 'dark' && saved !== 'light') {
+          try {
+            dark = !!window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+          } catch (e) {}
+        }
+        var root = document.documentElement;
+        if (dark) root.classList.add('dark');
+        root.style.colorScheme = dark ? 'dark' : 'light';
+      })();
+    </script>
     <title>Soprei — atendimento com mais presença</title>
   </head>
   <body>

@@ -1,3 +1,7 @@
+import { Logo } from './components/logo';
+import { ButtonLink } from './components/motion/button';
+import { ThemeToggle } from './components/motion/theme-toggle';
+
 const Arrow = () => <span aria-hidden="true">↗</span>;
 
 export function App() {
@@ -8,16 +12,24 @@ export function App() {
       </a>
       <header className="header wrap">
         <a className="brand" href="#inicio" aria-label="Soprei, início">
-          <img src="/soprei-logo.svg" alt="Soprei" />
+          <Logo alt="Soprei" />
         </a>
         <nav aria-label="Navegação principal">
           <a href="/entrar">Entrar</a>
           <a href="#como-funciona">Como funciona</a>
           <a href="#possibilidades">O que é possível</a>
         </nav>
-        <a className="nav-cta" href="/entrar">
-          Entrar no Soprei <Arrow />
-        </a>
+        <div className="header-actions">
+          <ThemeToggle />
+          <ButtonLink
+            href="/entrar"
+            variant="outline"
+            size="lg"
+            className="gap-4 font-bold max-sm:h-10 max-sm:px-4 max-sm:text-xs"
+          >
+            Entrar no Soprei <Arrow />
+          </ButtonLink>
+        </div>
       </header>
       <main id="conteudo">
         <section className="hero wrap" id="inicio">
@@ -34,9 +46,13 @@ export function App() {
               O Soprei une inteligência artificial e WhatsApp para que cada conversa receba a
               atenção que merece.
             </p>
-            <a className="button primary" href="#como-funciona">
+            <ButtonLink
+              href="#como-funciona"
+              size="lg"
+              className="hero-cta gap-8 rounded-xl font-bold"
+            >
               Descubra como funciona <Arrow />
-            </a>
+            </ButtonLink>
             <div className="hero-note">
               <span>✳</span> Tecnologia para estar mais perto.
             </div>
@@ -202,13 +218,13 @@ export function App() {
           <h2>
             Vamos mais <em>perto.</em>
           </h2>
-          <a className="button primary" href="#inicio">
+          <ButtonLink href="#inicio" size="lg" className="mt-8 gap-8 rounded-xl font-bold">
             Voltar ao início <span>↑</span>
-          </a>
+          </ButtonLink>
         </section>
       </main>
       <footer className="footer wrap">
-        <img src="/soprei-logo.svg" alt="Soprei" />
+        <Logo alt="Soprei" />
         <span>Inteligência para conversas que importam.</span>
         <a href="#inicio">Voltar ao topo ↑</a>
       </footer>

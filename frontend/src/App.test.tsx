@@ -3,9 +3,17 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { App } from './App';
+import { ThemeProvider } from './theme/theme-provider';
+
+const render = () =>
+  renderToStaticMarkup(
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>,
+  );
 
 test('apresenta o produto e liga a navegação às seções existentes', () => {
-  const html = renderToStaticMarkup(<App />);
+  const html = render();
   assert.match(html, /Uma conversa/);
   assert.match(html, /EXEMPLO ILUSTRATIVO/);
   for (const id of ['inicio', 'conteudo', 'como-funciona', 'possibilidades']) {
@@ -16,10 +24,12 @@ test('apresenta o produto e liga a navegação às seções existentes', () => {
 });
 
 test('mantém navegação acessível e respeita movimento reduzido', () => {
-  const html = renderToStaticMarkup(<App />);
+  const html = render();
   assert.match(html, /aria-label="Navegação principal"/);
   assert.match(html, /Pular para o conteúdo/);
   assert.match(html, /alt="Soprei"/);
+  assert.match(html, /aria-label="Tema: Sistema\. Mudar para Claro"/);
+  assert.match(html, /src="\/soprei-logo-dark\.svg"/);
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /scroll-behavior:\s*auto/);
