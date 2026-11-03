@@ -180,6 +180,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 ## 7. Histórico de decisões
 
+- 2026-11-03: o dono decidiu **dispensar os testes locais** para agilizar o desenvolvimento: `pnpm test` e `pnpm test:integration` passam a ser executados só no GitHub Actions (Node 22 e LTS mais recente); localmente ficam `typecheck`, `lint` e `format:check`. Os testes continuam sendo escritos e valendo como critério de aceite; o humano informa o resultado do CI depois do push, e spec só é dada como pronta com o CI verde. Efeito: regressões só aparecem depois do push, então o reviewer segue lendo o diff com atenção em specs de segurança.
 - 2026-11-03: o dono aprovou a spec 019 (SMTP genérico por `EMAIL_PROVIDER_*`, sem retrocompatibilidade com `GMAIL_*`, TLS exigido em produção e texto puro só em loopback fora dela, remetente `Soprei <FROM>`, Mailpit no desenvolvimento).
 
 - 2026-11-03: o dono autorizou implementar a 017 e escolheu permanência da sessão após recarregar (cookie HttpOnly) e confirmação real de e-mail pelo Gmail. A implementação usa SMTP TLS com senha de app configurada pelo dono; não envia e-mail real nos testes. Contas e vínculos são separados, e a migração preserva ids e recusa colisões sem resolução explícita.

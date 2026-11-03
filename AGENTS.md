@@ -41,7 +41,7 @@ O projeto é tocado por mais de um agente, em sessões separadas e em máquinas 
 4. **Ao terminar uma sessão:** deixe a árvore limpa, com commits pequenos e descritivos; atualize `docs/handoff.md` (branch, o que está verde, o que falta, decisões ainda sem spec, armadilhas, próximo passo); e avise o humano para dar push. O agente não dá push na `main`, não faz merge, não usa `git push --force`.
 5. **Decisões e mudança de rumo:** registre em `docs/context.md` (seção "Histórico de decisões") ou na spec, nunca só no chat. O que o humano decidiu é decisão; o que um agente sugeriu e o humano não confirmou não é.
 6. **Segredos e ambiente:** `.env` e `.env.test` não vão para o git e não são impressos nem colados em chat; cada máquina cria os seus (ver "Ambiente local"). O que um agente não pode fazer sozinho (criar roles ou bancos, mexer em Redis alheio, push) vale para todos.
-7. **Validação é a mesma para todos:** `pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm test:integration`, em Node 22 e na LTS mais recente (o CI roda as duas). Nunca desative regra nem pule teste para passar.
+7. **Validação (decisão do dono, 2026-11-03):** os testes (`pnpm test`, `pnpm test:integration`) **não são executados localmente**; quem os executa é o GitHub Actions, em Node 22 e na LTS mais recente. O agente continua **escrevendo** os testes que a spec exige e roda localmente só as checagens rápidas e estáticas (`pnpm typecheck`, `pnpm lint`, `pnpm format:check`, e `pnpm build` se necessário). Depois do push o humano informa o resultado do CI; spec só está pronta com o CI verde nas duas versões do Node. Nunca desative regra nem pule teste para passar.
 8. **Sem ferramenta de subagente:** siga o roteiro de `docs/agents/` na mão, em sessões separadas (uma para implementar, outra para revisar), e cole o resultado da revisão no PR ou em `docs/handoff.md`.
 
 ## Comandos
@@ -63,7 +63,7 @@ Gerenciador de pacotes: **pnpm**. Primeiro uso: `pnpm install`, `pnpm db:generat
 | `pnpm db:migrate:deploy`            | `prisma migrate deploy` (aplica migrations pendentes; é o que o CI roda)                                                                                   |
 | `pnpm auth:cli`                     | Comando local do dono (spec 007): `create-platform-admin`, `create-user`, `reset-password`; senha pedida sem eco, nunca por argumento (ver "Autenticação") |
 
-Antes de dar uma spec como pronta: `pnpm typecheck && pnpm lint && pnpm test && pnpm test:integration`. O CI roda esses quatro (mais `db:generate` e `db:migrate:deploy`) em Node 22 e na LTS mais recente, com Postgres e Redis como services do job.
+Antes de dar uma spec como pronta, localmente: `pnpm typecheck && pnpm lint && pnpm format:check`; os testes (`pnpm test` e `pnpm test:integration`) são verificados só no CI (decisão do dono, 2026-11-03; o humano informa o resultado). Os scripts de teste continuam valendo para quem quiser rodá-los. O CI roda esses quatro (mais `db:generate` e `db:migrate:deploy`) em Node 22 e na LTS mais recente, com Postgres e Redis como services do job.
 
 ### Ambiente local (sem Docker)
 
