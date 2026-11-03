@@ -63,9 +63,6 @@ async function api(path: string, body?: unknown): Promise<unknown> {
   return response.status === 204 ? undefined : response.json();
 }
 
-// O campo recebe a cor de borda de controle (contraste de 3:1) em vez da borda decorativa.
-const fieldClasses = { field: 'border-input' };
-
 function PasswordToggle({
   shown,
   onToggle,
@@ -110,7 +107,10 @@ export function AccountApp() {
   const [busy, setBusy] = useState(true);
   const [booting, setBooting] = useState(true);
   const [notice, setNotice] = useState<Notice>(null);
-  const [invalid, setInvalid] = useState<'password' | 'confirmation' | null>(null);
+  const [invalid, setInvalid] = useState<{
+    field: 'password' | 'confirmation';
+    text: string;
+  } | null>(null);
   const generation = useRef(0);
   const navigate = (next: Page) => {
     setPage(next);
@@ -198,6 +198,7 @@ export function AccountApp() {
   const submit = async () => {
     const stamp = generation.current;
     if (page === 'register') {
+      setInvalid(null);
       const normalized = password.normalize('NFKC');
       if (
         normalized.length < 6 ||
@@ -206,17 +207,15 @@ export function AccountApp() {
         !/[0-9]/.test(normalized) ||
         normalized.includes('\u0000')
       ) {
-        setInvalid('password');
-        setNotice({
-          tone: 'error',
+        setInvalid({
+          field: 'password',
           text: 'Use pelo menos 6 caracteres, incluindo uma letra maiúscula e um número.',
         });
         return;
       }
       if (password !== confirmation) {
-        setInvalid('confirmation');
-        setNotice({
-          tone: 'error',
+        setInvalid({
+          field: 'confirmation',
           text: 'As senhas não coincidem. Confira e tente novamente.',
         });
         return;
@@ -289,7 +288,6 @@ export function AccountApp() {
         onChange={setEmail}
         required
         maxLength={254}
-        classNames={fieldClasses}
       />
       <Input
         id="password"
@@ -299,13 +297,12 @@ export function AccountApp() {
         value={password}
         onChange={(value) => {
           setPassword(value);
-          if (invalid === 'password') setInvalid(null);
+          if (invalid?.field === 'password') setInvalid(null);
         }}
         required
         minLength={1}
         maxLength={128}
-        error={invalid === 'password' || undefined}
-        classNames={fieldClasses}
+        error={invalid?.field === 'password' ? invalid.text : undefined}
         rightIcon={
           <PasswordToggle
             shown={showPassword}
@@ -328,12 +325,11 @@ export function AccountApp() {
             value={confirmation}
             onChange={(value) => {
               setConfirmation(value);
-              if (invalid === 'confirmation') setInvalid(null);
+              if (invalid?.field === 'confirmation') setInvalid(null);
             }}
             required
             maxLength={128}
-            error={invalid === 'confirmation' || undefined}
-            classNames={fieldClasses}
+            error={invalid?.field === 'confirmation' ? invalid.text : undefined}
             rightIcon={
               <PasswordToggle
                 shown={showConfirmation}
@@ -353,13 +349,14 @@ export function AccountApp() {
           value={token}
           onChange={setToken}
           required
-          classNames={fieldClasses}
         />
       )}
       <Button type="submit" size="lg" disabled={busy} className="mt-2 w-full">
         {busy ? (
           <>
-            <Loader variant="spinner" size={16} label="Aguarde" className="text-current" />
+            <span aria-hidden="true">
+              <Loader variant="spinner" size={16} label="Aguarde" className="text-current" />
+            </span>
             Aguarde…
           </>
         ) : (
@@ -472,17 +469,18 @@ export function AccountApp() {
                     onChange={setName}
                     required
                     maxLength={200}
-                    classNames={fieldClasses}
                   />
                   <Button type="submit" size="lg" disabled={busy} className="w-full">
                     {busy ? (
                       <>
-                        <Loader
-                          variant="spinner"
-                          size={16}
-                          label="Aguarde"
-                          className="text-current"
-                        />
+                        <span aria-hidden="true">
+                          <Loader
+                            variant="spinner"
+                            size={16}
+                            label="Aguarde"
+                            className="text-current"
+                          />
+                        </span>
                         Aguarde…
                       </>
                     ) : (

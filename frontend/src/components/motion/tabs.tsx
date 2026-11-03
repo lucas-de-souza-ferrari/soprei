@@ -480,7 +480,7 @@ export function TabsList({
       {edges.overflow && (
         <button
           type="button"
-          aria-label="Scroll tabs left"
+          aria-label="Rolar abas para a esquerda"
           aria-controls={viewportId}
           disabled={!edges.left}
           onClick={() => scroll(-1)}
@@ -534,7 +534,7 @@ export function TabsList({
       {edges.overflow && (
         <button
           type="button"
-          aria-label="Scroll tabs right"
+          aria-label="Rolar abas para a direita"
           aria-controls={viewportId}
           disabled={!edges.right}
           onClick={() => scroll(1)}
