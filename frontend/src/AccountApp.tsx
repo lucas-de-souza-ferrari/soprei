@@ -9,6 +9,17 @@ import { Input } from './components/motion/input';
 import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
+import {
+  isNeutralResetRequestError,
+  pageForPath,
+  pathForPage,
+  passwordProblem,
+  PASSWORD_HINT,
+  RESET_INVALID_CODE_MESSAGE,
+  RESET_NEUTRAL_MESSAGE,
+  RESET_SUCCESS_MESSAGE,
+  type AccountPage,
+} from './account-flow';
 import { isCompleteVerificationCode } from './verification-code';
 import { VerificationField } from './verification-field';
 
@@ -26,7 +37,7 @@ const sessionSchema = z.object({
 });
 type Company = z.infer<typeof companySchema>;
 type Session = z.infer<typeof sessionSchema>;
-type Page = 'login' | 'register' | 'verify' | 'companies';
+type Page = AccountPage;
 type Notice = { tone: 'error' | 'info' | 'success'; text: string } | null;
 const roles = {
   OWNER: 'Proprietário',
@@ -90,13 +101,7 @@ function PasswordToggle({
 }
 
 export function AccountApp() {
-  const [page, setPage] = useState<Page>(
-    location.pathname === '/criar-conta'
-      ? 'register'
-      : location.pathname === '/confirmar-email'
-        ? 'verify'
-        : 'login',
-  );
+  const [page, setPage] = useState<Page>(pageForPath(location.pathname));
   const [session, setSession] = useState<Session | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [email, setEmail] = useState('');
@@ -121,17 +126,7 @@ export function AccountApp() {
     setConfirmation('');
     setShowPassword(false);
     setShowConfirmation(false);
-    history.replaceState(
-      null,
-      '',
-      next === 'companies'
-        ? '/painel/empresas'
-        : next === 'register'
-          ? '/criar-conta'
-          : next === 'verify'
-            ? '/confirmar-email'
-            : '/entrar',
-    );
+    history.replaceState(null, '', pathForPage(next));
   };
 
   const load = async (stamp: number) => {
@@ -201,18 +196,9 @@ export function AccountApp() {
     const stamp = generation.current;
     if (page === 'register') {
       setInvalid(null);
-      const normalized = password.normalize('NFKC');
-      if (
-        normalized.length < 6 ||
-        normalized.length > 128 ||
-        !/\p{Lu}/u.test(normalized) ||
-        !/[0-9]/.test(normalized) ||
-        normalized.includes('\u0000')
-      ) {
-        setInvalid({
-          field: 'password',
-          text: 'Use pelo menos 6 caracteres, incluindo uma letra maiúscula e um número.',
-        });
+      const problem = passwordProblem(password);
+      if (problem !== null) {
+        setInvalid({ field: 'password', text: problem });
         return;
       }
       if (password !== confirmation) {
@@ -225,6 +211,44 @@ export function AccountApp() {
       await api('/auth/register', { email, password });
       if (stamp === generation.current) {
         navigate('verify');
+      }
+    } else if (page === 'forgot') {
+      // Resposta sempre neutra: o site nunca revela se existe conta para o e-mail. Só o limite de
+      // tentativas (429) e a falha do servidor ou da rede são informados.
+      try {
+        await api('/auth/password-reset/request', { email });
+      } catch (error) {
+        if (!(error instanceof ApiError && isNeutralResetRequestError(error.status))) throw error;
+      }
+      if (stamp === generation.current) setNotice({ tone: 'info', text: RESET_NEUTRAL_MESSAGE });
+    } else if (page === 'reset') {
+      setInvalid(null);
+      if (!isCompleteVerificationCode(code)) {
+        setInvalid({ field: 'verification', text: 'Digite os 6 dígitos do código' });
+        return;
+      }
+      const problem = passwordProblem(password);
+      if (problem !== null) {
+        setInvalid({ field: 'password', text: problem });
+        return;
+      }
+      if (password !== confirmation) {
+        setInvalid({
+          field: 'confirmation',
+          text: 'As senhas não coincidem. Confira e tente novamente.',
+        });
+        return;
+      }
+      await api(
+        '/auth/password-reset/confirm',
+        { email, code, newPassword: password },
+        RESET_INVALID_CODE_MESSAGE,
+      );
+      if (stamp === generation.current) {
+        setCode('');
+        setPassword('');
+        navigate('login');
+        setNotice({ tone: 'success', text: RESET_SUCCESS_MESSAGE });
       }
     } else if (page === 'verify') {
       setInvalid(null);
@@ -280,7 +304,26 @@ export function AccountApp() {
   };
 
   const submitLabel =
-    page === 'register' ? 'Criar conta' : page === 'verify' ? 'Confirmar e-mail' : 'Entrar';
+    page === 'register'
+      ? 'Criar conta'
+      : page === 'verify'
+        ? 'Confirmar e-mail'
+        : page === 'forgot'
+          ? 'Enviar código'
+          : page === 'reset'
+            ? 'Redefinir senha'
+            : 'Entrar';
+  const choosingPassword = page === 'register' || page === 'reset';
+  const codeField = (
+    <VerificationField
+      value={code}
+      onChange={(value) => {
+        setCode(value);
+        if (invalid?.field === 'verification') setInvalid(null);
+      }}
+      error={invalid?.field === 'verification' ? invalid.text : undefined}
+    />
+  );
   const form = (
     <form
       className="grid gap-4"
@@ -299,37 +342,38 @@ export function AccountApp() {
         required
         maxLength={254}
       />
-      <Input
-        id="password"
-        label="Senha"
-        type={showPassword ? 'text' : 'password'}
-        autoComplete={page === 'register' ? 'new-password' : 'current-password'}
-        value={password}
-        onChange={(value) => {
-          setPassword(value);
-          if (invalid?.field === 'password') setInvalid(null);
-        }}
-        required
-        minLength={1}
-        maxLength={128}
-        error={invalid?.field === 'password' ? invalid.text : undefined}
-        rightIcon={
-          <PasswordToggle
-            shown={showPassword}
-            onToggle={() => setShowPassword(!showPassword)}
-            showLabel="Mostrar senha"
-            hideLabel="Ocultar senha"
-          />
-        }
-      />
-      {page === 'register' && (
+      {page === 'reset' && codeField}
+      {page !== 'forgot' && (
+        <Input
+          id="password"
+          label={page === 'reset' ? 'Nova senha' : 'Senha'}
+          type={showPassword ? 'text' : 'password'}
+          autoComplete={choosingPassword ? 'new-password' : 'current-password'}
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            if (invalid?.field === 'password') setInvalid(null);
+          }}
+          required
+          minLength={1}
+          maxLength={128}
+          error={invalid?.field === 'password' ? invalid.text : undefined}
+          rightIcon={
+            <PasswordToggle
+              shown={showPassword}
+              onToggle={() => setShowPassword(!showPassword)}
+              showLabel="Mostrar senha"
+              hideLabel="Ocultar senha"
+            />
+          }
+        />
+      )}
+      {choosingPassword && (
         <>
-          <p className="-mt-2 px-1 text-xs text-muted-foreground">
-            Mínimo de 6 caracteres, com uma letra maiúscula e um número.
-          </p>
+          <p className="-mt-2 px-1 text-xs text-muted-foreground">{PASSWORD_HINT}</p>
           <Input
             id="confirmation"
-            label="Confirmar senha"
+            label={page === 'reset' ? 'Confirmar nova senha' : 'Confirmar senha'}
             type={showConfirmation ? 'text' : 'password'}
             autoComplete="new-password"
             value={confirmation}
@@ -356,14 +400,7 @@ export function AccountApp() {
           <p className="-mb-1 px-1 text-sm text-muted-foreground">
             Confira seu e-mail e digite o código de 6 dígitos.
           </p>
-          <VerificationField
-            value={code}
-            onChange={(value) => {
-              setCode(value);
-              if (invalid?.field === 'verification') setInvalid(null);
-            }}
-            error={invalid?.field === 'verification' ? invalid.text : undefined}
-          />
+          {codeField}
         </>
       )}
       <Button type="submit" size="lg" disabled={busy} className="mt-2 w-full">
@@ -403,7 +440,11 @@ export function AccountApp() {
                   ? 'Vamos começar.'
                   : page === 'verify'
                     ? 'Confirme seu e-mail.'
-                    : 'Que bom ter você aqui.'}
+                    : page === 'forgot'
+                      ? 'Recupere seu acesso.'
+                      : page === 'reset'
+                        ? 'Crie uma nova senha.'
+                        : 'Que bom ter você aqui.'}
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-5 px-8 max-sm:px-5">
@@ -506,7 +547,7 @@ export function AccountApp() {
               </>
             ) : (
               <>
-                {page === 'verify' ? (
+                {page === 'verify' || page === 'forgot' || page === 'reset' ? (
                   form
                 ) : (
                   <Tabs
@@ -533,7 +574,7 @@ export function AccountApp() {
                   </Tabs>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  {page !== 'verify' && (
+                  {(page === 'login' || page === 'register') && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -541,6 +582,46 @@ export function AccountApp() {
                       onClick={() => navigate('verify')}
                     >
                       Confirmar e-mail
+                    </Button>
+                  )}
+                  {page === 'login' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => navigate('forgot')}
+                    >
+                      Esqueci minha senha
+                    </Button>
+                  )}
+                  {page === 'forgot' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => navigate('reset')}
+                    >
+                      Já tenho um código
+                    </Button>
+                  )}
+                  {page === 'reset' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => navigate('forgot')}
+                    >
+                      Pedir novo código
+                    </Button>
+                  )}
+                  {(page === 'forgot' || page === 'reset') && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => navigate('login')}
+                    >
+                      Voltar para entrar
                     </Button>
                   )}
                   {page === 'verify' && (

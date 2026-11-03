@@ -195,3 +195,90 @@ for (const theme of ['light', 'dark'] as const) {
     expect(logoutAttempts).toBe(2);
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`recuperação de senha: pedido neutro, código, nova senha e volta ao login (tema ${theme})`, async ({
+    page,
+  }) => {
+    await page.addInitScript((value) => localStorage.setItem('soprei-theme', value), theme);
+    const requests: unknown[] = [];
+    const confirms: unknown[] = [];
+    let requestStatus = 202;
+    await page.route('https://**/*', (route) => route.abort());
+    await page.route('**/api/**', async (route) => {
+      const path = new URL(route.request().url()).pathname.replace('/api', '');
+      const body: unknown = route.request().postDataJSON();
+      if (path === '/auth/password-reset/request') {
+        requests.push(body);
+        await route.fulfill({ status: requestStatus, json: { message: 'x' } });
+      } else if (path === '/auth/password-reset/confirm') {
+        confirms.push(body);
+        if (confirms.length === 1) await route.fulfill({ status: 401, json: { error: {} } });
+        else await route.fulfill({ status: 204 });
+      } else await route.fulfill({ status: 401, json: {} });
+    });
+    await page.goto('/entrar');
+    await page.getByRole('button', { name: 'Esqueci minha senha', exact: true }).click();
+    await expect(page).toHaveURL(/\/recuperar-senha$/);
+    await page.getByLabel('E-mail', { exact: true }).fill('pessoa@example.test');
+    // Mesmo um 4xx (que não seja 429) mostra a mensagem neutra.
+    requestStatus = 404;
+    await page.getByRole('button', { name: 'Enviar código', exact: true }).click();
+    const neutral = 'Se existir uma conta, enviamos um código para o e-mail informado.';
+    await expect(page.getByRole('status')).toContainText(neutral);
+    requestStatus = 429;
+    await page.getByRole('button', { name: 'Enviar código', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('Muitas tentativas');
+    requestStatus = 202;
+    await page.getByRole('button', { name: 'Enviar código', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText(neutral);
+    expect(requests).toEqual([
+      { email: 'pessoa@example.test' },
+      { email: 'pessoa@example.test' },
+      { email: 'pessoa@example.test' },
+    ]);
+    await page.getByRole('button', { name: 'Já tenho um código', exact: true }).click();
+    await expect(page).toHaveURL(/\/redefinir-senha$/);
+    const codeField = page.getByLabel('Código recebido por e-mail');
+    await codeField.fill('123 45');
+    await expect(codeField).toHaveValue('12345');
+    // Entrada inválida nunca chama a API.
+    await page.getByLabel('Nova senha', { exact: true }).fill('Senha1');
+    await page.getByLabel('Confirmar nova senha').fill('Senha1');
+    await page.getByRole('button', { name: 'Redefinir senha', exact: true }).click();
+    await expect(page.getByText('Digite os 6 dígitos do código')).toBeVisible();
+    await codeField.fill('123-456');
+    await expect(codeField).toHaveValue('123456');
+    await page.getByLabel('Nova senha', { exact: true }).fill('curta');
+    await page.getByLabel('Confirmar nova senha').fill('curta');
+    await page.getByRole('button', { name: 'Redefinir senha', exact: true }).click();
+    await expect(page.getByText('Use pelo menos 6 caracteres')).toBeVisible();
+    await page.getByLabel('Nova senha', { exact: true }).fill('Senha1');
+    await page.getByLabel('Confirmar nova senha').fill('Senha2');
+    await page.getByRole('button', { name: 'Redefinir senha', exact: true }).click();
+    await expect(page.getByText('As senhas não coincidem')).toBeVisible();
+    expect(confirms).toHaveLength(0);
+    await page.getByRole('button', { name: 'Mostrar senha', exact: true }).click();
+    await expect(page.getByLabel('Nova senha', { exact: true })).toHaveAttribute('type', 'text');
+    await page.getByLabel('Confirmar nova senha').fill('Senha1');
+    // Primeira tentativa: código recusado pelo servidor.
+    await page.getByRole('button', { name: 'Redefinir senha', exact: true }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Código inválido ou expirado' }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Redefinir senha', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText(
+      'Senha redefinida. Entre com a nova senha.',
+    );
+    expect(confirms).toEqual([
+      { email: 'pessoa@example.test', code: '123456', newPassword: 'Senha1' },
+      { email: 'pessoa@example.test', code: '123456', newPassword: 'Senha1' },
+    ]);
+    // Sem login automático: volta à entrada com a senha vazia.
+    await expect(page).toHaveURL(/\/entrar$/);
+    await expect(page.getByLabel('Senha', { exact: true })).toHaveValue('');
+    expect(
+      await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]),
+    ).toEqual(['soprei-theme']);
+  });
+}
