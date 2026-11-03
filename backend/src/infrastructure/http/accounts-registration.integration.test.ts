@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
@@ -46,9 +46,9 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
     now: () => new Date(clock),
     onVerificationMail: (result) => results.push(result),
     mailer: {
-      sendVerification: (email, token) => {
+      sendVerification: (email, code) => {
         if (mailFails) return Promise.reject(new Error('SMTP segredo que não pode vazar'));
-        mail.set(email, token);
+        mail.set(email, code);
         sent.push(email);
         return Promise.resolve();
       },
@@ -77,13 +77,13 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
     const attackerCode = mail.get(victim);
     assert.ok(attackerCode);
     // Sem o código, o atacante não confirma; e a conta não entra antes de confirmar.
-    const guess = randomBytes(32).toString('base64url');
+    const guess = attackerCode === '000001' ? '000002' : '000001';
     assert.equal(
       (
         await post('/auth/verify-email', {
           email: victim,
           password: attackerPassword,
-          token: guess,
+          code: guess,
         })
       ).statusCode,
       401,
@@ -115,13 +115,13 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
     assert.notEqual(ownerCode, attackerCode);
     assert.equal(sent.filter((e) => e === victim).length, 2);
     // A senha do atacante não vale mais, nem o código antigo com a senha nova.
-    for (const [password, token] of [
+    for (const [password, code] of [
       [attackerPassword, attackerCode],
       [attackerPassword, ownerCode],
       [ownerPassword, attackerCode],
     ] as const) {
       assert.equal(
-        (await post('/auth/verify-email', { email: victim, password, token })).statusCode,
+        (await post('/auth/verify-email', { email: victim, password, code })).statusCode,
         401,
       );
     }
@@ -134,7 +134,7 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
         await post('/auth/verify-email', {
           email: victim,
           password: ownerPassword,
-          token: ownerCode,
+          code: ownerCode,
         })
       ).statusCode,
       204,
@@ -179,7 +179,7 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
     await post('/auth/verify-email', {
       email: confirmedEmail,
       password: ownerPassword,
-      token: mail.get(confirmedEmail) ?? '',
+      code: mail.get(confirmedEmail) ?? '',
     });
     const confirmed = await shape(confirmedEmail, ownerPassword);
     assert.equal(fresh.status, 202);
@@ -212,7 +212,7 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
         await post('/auth/verify-email', {
           email: resendEmail,
           password: ownerPassword,
-          token: first,
+          code: first,
         })
       ).statusCode,
       401,

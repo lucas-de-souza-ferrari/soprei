@@ -59,9 +59,9 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     loginLocks: auth.sessions,
     loginSecret: config.JWT_SECRET,
     mailer: {
-      sendVerification: (email, token) => {
+      sendVerification: (email, code) => {
         if (mailFails) return Promise.reject(new Error('SMTP segredo que não pode vazar'));
-        mail.set(email, token);
+        mail.set(email, code);
         return Promise.resolve();
       },
     },
@@ -92,16 +92,16 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
       assert.equal((await post('/auth/register', { email, password: 'Abcde1' })).statusCode, 202);
       assert.equal((await post('/auth/login', { email, password })).statusCode, 403);
       await service.drain();
-      const token = mail.get(email);
-      assert.ok(token);
+      const code = mail.get(email);
+      assert.match(code ?? '', /^[0-9]{6}$/);
       assert.equal(
         (await post('/auth/register', { email, password: 'Senha2-diferente' })).statusCode,
         202,
       );
       await service.drain();
-      assert.equal(mail.get(email), token);
-      assert.equal((await post('/auth/verify-email', { email, password, token })).statusCode, 204);
-      assert.equal((await post('/auth/verify-email', { email, password, token })).statusCode, 401);
+      assert.equal(mail.get(email), code);
+      assert.equal((await post('/auth/verify-email', { email, password, code })).statusCode, 204);
+      assert.equal((await post('/auth/verify-email', { email, password, code })).statusCode, 401);
       const login = await post('/auth/login', { email, password });
       assert.equal(login.statusCode, 204);
       const setCookie = String(login.headers['set-cookie']);
@@ -345,7 +345,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     assert.ok(recovery);
     await repo.setVerification(recovery.id, 'expired-hash', new Date(0));
     assert.equal(
-      (await post('/auth/verify-email', { email: recoverEmail, password, token: recoverToken }))
+      (await post('/auth/verify-email', { email: recoverEmail, password, code: recoverToken }))
         .statusCode,
       401,
     );
