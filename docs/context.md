@@ -135,6 +135,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 - Cadastro público: o dono pediu senha com mínimo de seis caracteres, uma letra maiúscula e um número, confirmação na tela e controles de visibilidade. A política de senha legada permanece separada.
 
+- Pendências da spec 017 (revisão de segurança, 2026-11-03): recuperação de senha de conta confirmada e expurgo de contas não confirmadas (spec seguinte; até lá, cadastro repetido de conta não confirmada substitui a senha e reenvia o código, no máximo a cada 60 s); senha de 6 caracteres é risco aceito pelo dono, a rever com lista de senhas comuns recusadas no cadastro e contador de falhas por IP + e-mail (hoje ~480 tentativas/dia por e-mail); prefixo `__Host-` do cookie; sugestões S-2, S-4, S-5, S-7 e S-8 do reviewer ainda não tratadas.
 - Pendências da spec 008 (revisão): imutabilidade da auditoria só por convenção do repositório (considerar gatilho ou `REVOKE` na spec de retenção/LGPD, que também decide o expurgo); a migration `20261030120000_rbac_audit` usa `ALTER TYPE ... ADD VALUE`, que exige PostgreSQL >= 12.
 
 - Pendências da spec 007 (revisão): teto do tamanho da fila de espera do hasher (`scrypt-password-hasher.ts`) e limpeza periódica de sessões expiradas no conjunto `usess` do Redis; incluir o IP na chave do bloqueio por conta se virar problema.
