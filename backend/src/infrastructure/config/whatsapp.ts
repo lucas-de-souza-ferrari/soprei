@@ -13,6 +13,10 @@ export interface WhatsappChannelConfig {
   readonly apiBaseUrl: string;
   readonly graphApiVersion: string;
   readonly sendTimeoutMs: number;
+  /** `config_id` público do Embedded Signup (spec 023); ausente = indisponível no site. */
+  readonly embeddedSignupConfigId: string | undefined;
+  /** Formulário avançado do site (spec 023); nunca em produção. */
+  readonly manualConnectEnabled: boolean;
 }
 
 export interface QueueSettings {
@@ -69,6 +73,8 @@ export function whatsappChannelConfig(config: Config): WhatsappChannelConfig | u
     apiBaseUrl: config.WHATSAPP_API_BASE_URL,
     graphApiVersion: config.WHATSAPP_GRAPH_API_VERSION,
     sendTimeoutMs: config.WHATSAPP_SEND_TIMEOUT_MS,
+    embeddedSignupConfigId: config.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID,
+    manualConnectEnabled: config.CHANNEL_MANUAL_CONNECT_ENABLED,
   };
 }
 

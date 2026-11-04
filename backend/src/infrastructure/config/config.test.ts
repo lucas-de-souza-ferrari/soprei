@@ -733,6 +733,63 @@ describe('parseConfig', () => {
     });
   });
 
+  describe('conectar pelo site (spec 023)', () => {
+    const ENABLED = {
+      ...VALID_ENV,
+      WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
+      WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
+      WHATSAPP_APP_ID: '123456789012345',
+      CHANNEL_CREDENTIALS_KEYS: `k1:${'A'.repeat(43)}`,
+      CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: 'k1',
+      WHATSAPP_ENABLED: 'true',
+      TRUST_PROXY: 'false',
+    };
+
+    it('os padrões: sem config_id e formulário manual desligado', () => {
+      const result = parseConfig(ENABLED);
+      assert.ok(result.ok);
+      assert.equal(result.value.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID, undefined);
+      assert.equal(result.value.CHANNEL_MANUAL_CONNECT_ENABLED, false);
+      const empty = parseConfig({ ...ENABLED, WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: '' });
+      assert.ok(empty.ok);
+      assert.equal(empty.value.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID, undefined);
+    });
+
+    it('WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: só dígitos (1 a 32) e exige o canal ligado', () => {
+      const ok = parseConfig({ ...ENABLED, WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: '987654321' });
+      assert.ok(ok.ok);
+      assert.equal(ok.value.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID, '987654321');
+      for (const invalid of ['abc', '12 3', '1'.repeat(33), '-1']) {
+        const result = parseConfig({ ...ENABLED, WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: invalid });
+        assert.equal(result.ok, false, invalid);
+        assert.match(result.error.message, /WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID/);
+      }
+      const off = parseConfig({ ...VALID_ENV, WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: '123' });
+      assert.equal(off.ok, false);
+      assert.match(off.error.message, /WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID/);
+    });
+
+    it('CHANNEL_MANUAL_CONNECT_ENABLED: literais true/false; true é recusado em produção', () => {
+      const on = parseConfig({ ...ENABLED, CHANNEL_MANUAL_CONNECT_ENABLED: 'true' });
+      assert.ok(on.ok);
+      assert.equal(on.value.CHANNEL_MANUAL_CONNECT_ENABLED, true);
+      for (const invalid of ['1', 'yes', 'TRUE']) {
+        assert.equal(
+          parseConfig({ ...ENABLED, CHANNEL_MANUAL_CONNECT_ENABLED: invalid }).ok,
+          false,
+          invalid,
+        );
+      }
+      const production = parseConfig({
+        ...ENABLED,
+        NODE_ENV: 'production',
+        CHANNEL_MANUAL_CONNECT_ENABLED: 'true',
+      });
+      assert.equal(production.ok, false);
+      assert.match(production.error.message, /CHANNEL_MANUAL_CONNECT_ENABLED/);
+    });
+  });
+
   describe('agrupamento de mensagens do canal (spec 013)', () => {
     const ENABLED = {
       ...VALID_ENV,

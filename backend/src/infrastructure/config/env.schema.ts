@@ -164,6 +164,11 @@ export const envSchema = z
     // Chaves de cifra das credenciais por empresa (spec 015): `keyId:<32 bytes base64url>,...`.
     CHANNEL_CREDENTIALS_KEYS: optionalSecret,
     CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
+    // Embedded Signup (spec 023): `config_id` público da configuração de login da Meta. Opcional; sem ele o
+    // Embedded Signup fica indisponível no site (o resto do canal segue). Exige o canal ligado.
+    WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
+    // Formulário avançado do site (spec 023): conectar com token digitado. Só desenvolvimento e demonstração.
+    CHANNEL_MANUAL_CONNECT_ENABLED: z.preprocess(emptyAsUndefined, booleanLiteral(false)),
     WHATSAPP_API_BASE_URL: z.preprocess(
       emptyAsUndefined,
       z.url().default('https://graph.facebook.com'),
@@ -333,6 +338,8 @@ function refineWhatsapp(
     readonly WHATSAPP_VERIFY_TOKEN: string | undefined;
     readonly WHATSAPP_ACCESS_TOKEN: string | undefined;
     readonly WHATSAPP_APP_ID?: string | undefined;
+    readonly WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID?: string | undefined;
+    readonly CHANNEL_MANUAL_CONNECT_ENABLED?: boolean;
     readonly CHANNEL_CREDENTIALS_KEYS?: string | undefined;
     readonly CHANNEL_CREDENTIALS_ACTIVE_KEY_ID?: string | undefined;
     readonly WHATSAPP_API_BASE_URL: string;
@@ -357,6 +364,29 @@ function refineWhatsapp(
       path: ['WHATSAPP_API_BASE_URL'],
       message: 'precisa ser https:// em produção (o token de envio iria em texto claro)',
     });
+  }
+  if (env.NODE_ENV === 'production' && env.CHANNEL_MANUAL_CONNECT_ENABLED === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['CHANNEL_MANUAL_CONNECT_ENABLED'],
+      message: 'não pode ser "true" em produção (o token da Meta seria digitado no navegador)',
+    });
+  }
+  if (env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID !== undefined) {
+    if (!/^[0-9]{1,32}$/.test(env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID'],
+        message: 'deve ter de 1 a 32 dígitos',
+      });
+    }
+    if (!env.WHATSAPP_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID'],
+        message: 'exige WHATSAPP_ENABLED=true',
+      });
+    }
   }
   if (!env.WHATSAPP_ENABLED) return;
 
