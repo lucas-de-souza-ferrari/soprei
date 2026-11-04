@@ -70,7 +70,7 @@ interface CallParams {
   readonly operation: ProvisionOperation;
   readonly method: 'GET' | 'POST' | 'DELETE';
   readonly path: string;
-  /** Valor de `Authorization: Bearer`; ausente na troca do `code` (autentica por company_id/secret). */
+  /** Valor de `Authorization: Bearer`; ausente na troca do `code` (autentica por client_id/secret). */
   readonly bearer?: string;
   readonly query?: Readonly<Record<string, string>>;
   /** Corpo JSON (só o `/register`). */
@@ -95,7 +95,7 @@ export class WhatsappGraphAdminClient implements ChannelProvisioner {
   }
 
   /**
-   * `GET /oauth/access_token` com `company_id`, `client_secret` e `code` (como a documentação do
+   * `GET /oauth/access_token` com `client_id`, `client_secret` e `code` (como a documentação do
    * Embedded Signup descreve). Esses três vão na query string, que **nunca** é logada; o token
    * devolvido só existe como `SecretString`.
    */
@@ -105,7 +105,7 @@ export class WhatsappGraphAdminClient implements ChannelProvisioner {
       method: 'GET',
       path: 'oauth/access_token',
       query: {
-        company_id: this.options.appId,
+        client_id: this.options.appId,
         client_secret: this.options.appSecret,
         code: code.reveal(),
       },

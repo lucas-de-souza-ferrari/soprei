@@ -259,7 +259,7 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
         ['oauth_token', 'debug_token', 'phone_numbers', 'subscribe', 'register'],
       );
       const [exchange] = graph.ofOperation('oauth_token');
-      assert.equal(exchange?.query.company_id, APP_ID);
+      assert.equal(exchange?.query.client_id, APP_ID);
       assert.equal(exchange.query.client_secret, APP_SECRET);
       assert.equal(exchange.query.code, code);
       const [register] = graph.ofOperation('register');

@@ -149,14 +149,14 @@ describe('WhatsappGraphAdminClient', () => {
     assert.equal(result.error.retryable, false);
   });
 
-  it('troca do code: company_id, segredo e code na query (nunca em log), sem Authorization; code de uso único', async () => {
+  it('troca do code: client_id, segredo e code na query (nunca em log), sem Authorization; code de uso único', async () => {
     graph.addCode('code-valido-123', 'EAAG-token-trocado-secreto');
     const first = await client().exchangeCode(new SecretString('code-valido-123'));
     assert.ok(first.ok);
     assert.equal(first.value.reveal(), 'EAAG-token-trocado-secreto');
     const [request] = graph.requests;
     assert.equal(request?.operation, 'oauth_token');
-    assert.equal(request.query.company_id, APP_ID);
+    assert.equal(request.query.client_id, APP_ID);
     assert.equal(request.query.client_secret, APP_SECRET);
     assert.equal(request.headers.authorization, undefined);
     const second = await client().exchangeCode(new SecretString('code-valido-123'));

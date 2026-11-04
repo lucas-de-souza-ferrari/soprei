@@ -85,7 +85,7 @@ export class FakeGraphApi {
   expectedAppToken: string | undefined;
   /** `code` do Embedded Signup (spec 015b): uso único, expirável. */
   private readonly codes = new Map<string, { token: string; used: boolean; expired: boolean }>();
-  /** `company_id` e `client_secret` esperados na troca do `code`; se definido, outro valor é recusado. */
+  /** `client_id` e `client_secret` esperados na troca do `code`; se definido, outro valor é recusado. */
   expectedApp: { readonly id: string; readonly secret: string } | undefined;
   /** PIN com que cada número já está registrado (`null` = não registrado). */
   readonly registeredPins = new Map<string, string | null>();
@@ -270,7 +270,7 @@ export class FakeGraphApi {
     if (operation === 'oauth_token') {
       if (
         this.expectedApp !== undefined &&
-        (query.company_id !== this.expectedApp.id ||
+        (query.client_id !== this.expectedApp.id ||
           query.client_secret !== this.expectedApp.secret)
       ) {
         return fail(400, 101);
