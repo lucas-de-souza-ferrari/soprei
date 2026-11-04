@@ -87,7 +87,7 @@ function setup(overrides: Partial<InboundQueueOptions> = {}): Harness {
 
 const textJob = (overrides: Partial<Extract<InboundJob, { kind: 'text' }>> = {}): InboundJob => ({
   kind: 'text',
-  clientId: randomUUID(),
+  companyId: randomUUID(),
   phoneNumberId: '106540352242922',
   contactRef: CONTACT,
   text: SECRET_TEXT,
@@ -136,12 +136,12 @@ function recordingHandler(
 }
 
 describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
-  it('enfileira, o worker processa no contexto do requestId e do clientId do job, e conta completed', async () => {
+  it('enfileira, o worker processa no contexto do requestId e do companyId do job, e conta completed', async () => {
     const { handle, metrics, logs } = setup();
-    const seen: { requestId?: string; clientId?: string }[] = [];
+    const seen: { requestId?: string; companyId?: string }[] = [];
     const { handler, calls } = recordingHandler(() => {
       const context = getContext();
-      seen.push({ requestId: context?.requestId, clientId: context?.clientId });
+      seen.push({ requestId: context?.requestId, companyId: context?.companyId });
       logs.logger.info('dentro do handler');
       return 'done';
     });
@@ -154,10 +154,10 @@ describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
 
     assert.deepEqual(calls[0]?.job, job);
     assert.equal(calls[0].context.finalAttempt, false);
-    assert.deepEqual(seen, [{ requestId: job.requestId, clientId: job.clientId }]);
+    assert.deepEqual(seen, [{ requestId: job.requestId, companyId: job.companyId }]);
     const line = logs.lines().find((entry) => entry.msg === 'dentro do handler');
     assert.equal(line?.requestId, job.requestId);
-    assert.equal(line.clientId, job.clientId);
+    assert.equal(line.companyId, job.companyId);
     await waitFor(async () => (await metricValue(metrics, 'completed')) === 1, 'métrica completed');
   });
 
@@ -181,7 +181,7 @@ describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
     assert.equal(stored.name, 'text');
   });
 
-  it('reentrega do mesmo evento (mesmo cliente e externalId) não gera segundo job; clientes diferentes não colidem', async () => {
+  it('reentrega do mesmo evento (mesma empresa e externalId) não gera segundo job; empresas diferentes não colidem', async () => {
     const { handle } = setup();
     const { handler, calls } = recordingHandler();
     const job = textJob();
@@ -195,10 +195,10 @@ describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
     handle.startWorker(handler);
     await waitFor(() => calls.length >= 2, 'dois jobs');
     await sleep(150);
-    assert.equal(calls.length, 2, 'um job por (cliente, externalId)');
+    assert.equal(calls.length, 2, 'um job por (empresa, externalId)');
     assert.deepEqual(
-      new Set(calls.map((call) => call.job.clientId)),
-      new Set([job.clientId, other.clientId]),
+      new Set(calls.map((call) => call.job.companyId)),
+      new Set([job.companyId, other.companyId]),
     );
   });
 
@@ -272,7 +272,7 @@ describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
     rawQueues.push(raw);
     await raw.add('text', {
       kind: 'text',
-      clientId: 'nao-e-uuid',
+      companyId: 'nao-e-uuid',
       text: SECRET_TEXT,
       contactRef: CONTACT,
     });
@@ -436,7 +436,7 @@ describe('fila de entrada: falhas que não passam (ou passam) pelo handler', () 
     assert.equal(line?.level, 50);
     assert.equal(line.jobKind, 'text');
     const raw2 = logs.raw();
-    for (const secret of [SECRET_TEXT, CONTACT, job.externalId, job.clientId, inboundJobId(job)]) {
+    for (const secret of [SECRET_TEXT, CONTACT, job.externalId, job.companyId, inboundJobId(job)]) {
       assert.ok(!raw2.includes(secret), `vazou em log: ${secret}`);
     }
   });
@@ -511,7 +511,7 @@ describe('fila de entrada: privacidade', () => {
 
 const flushJob = (overrides: Partial<FlushJob> = {}): FlushJob => ({
   kind: 'flush',
-  clientId: randomUUID(),
+  companyId: randomUUID(),
   phoneNumberId: '106540352242922',
   contactRef: CONTACT,
   requestId: `req-${randomUUID()}`,
@@ -528,7 +528,7 @@ describe('fila de entrada: agendamento do flush (spec 013)', () => {
     return raw;
   }
 
-  it('um flush por (cliente, contato): slide substitui o que ainda espera e reinicia a espera inteira', async () => {
+  it('um flush por (empresa, contato): slide substitui o que ainda espera e reinicia a espera inteira', async () => {
     const { handle, prefix } = setup();
     const raw = rawQueue(prefix);
     const job = flushJob();
@@ -548,13 +548,13 @@ describe('fila de entrada: agendamento do flush (spec 013)', () => {
       second.timestamp + second.delay >= first.timestamp + first.delay + 100,
       'a espera reiniciou',
     );
-    // O id inclui o clientId e não leva o telefone; o job não leva texto.
-    assert.ok(second.id?.includes(job.clientId));
+    // O id inclui o companyId e não leva o telefone; o job não leva texto.
+    assert.ok(second.id?.includes(job.companyId));
     assert.ok(!(second.id ?? '').includes(CONTACT));
     assert.ok(!(second.id ?? '').includes(':'));
     assert.equal(second.name, 'flush');
     assert.deepEqual(Object.keys(second.data as object).sort(), [
-      'clientId',
+      'companyId',
       'contactRef',
       'kind',
       'phoneNumberId',
@@ -580,15 +580,15 @@ describe('fila de entrada: agendamento do flush (spec 013)', () => {
     );
   });
 
-  it('o mesmo contactRef em dois clientes tem flush separado; dois contatos do mesmo cliente também', async () => {
+  it('o mesmo contactRef em duas empresas tem flush separado; dois contatos do mesma empresa também', async () => {
     const { handle, prefix } = setup();
     const raw = rawQueue(prefix);
-    const clientA = randomUUID();
-    const clientB = randomUUID();
+    const companyA = randomUUID();
+    const companyB = randomUUID();
     for (const job of [
-      flushJob({ clientId: clientA }),
-      flushJob({ clientId: clientB }),
-      flushJob({ clientId: clientA, contactRef: '5511000000001' }),
+      flushJob({ companyId: companyA }),
+      flushJob({ companyId: companyB }),
+      flushJob({ companyId: companyA, contactRef: '5511000000001' }),
     ]) {
       assert.ok((await handle.queue.scheduleFlush(job, { delayMs: 5_000, mode: 'slide' })).ok);
     }
@@ -596,7 +596,7 @@ describe('fila de entrada: agendamento do flush (spec 013)', () => {
     // Reagendar o de A não mexe nos outros.
     assert.ok(
       (
-        await handle.queue.scheduleFlush(flushJob({ clientId: clientA }), {
+        await handle.queue.scheduleFlush(flushJob({ companyId: companyA }), {
           delayMs: 5_000,
           mode: 'slide',
         })
@@ -605,7 +605,7 @@ describe('fila de entrada: agendamento do flush (spec 013)', () => {
     assert.equal((await raw.getDelayed()).length, 3);
   });
 
-  it('o flush roda depois do atraso com o requestId e o clientId no contexto; janela zero roda já', async () => {
+  it('o flush roda depois do atraso com o requestId e o companyId no contexto; janela zero roda já', async () => {
     const { handle } = setup();
     const { handler, calls } = recordingHandler();
     handle.startWorker(handler);

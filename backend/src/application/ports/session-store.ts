@@ -3,7 +3,7 @@
  * (spec 007). Implementação no Redis em `src/infrastructure/auth/`. **Toda falha da dependência
  * vira `ServiceUnavailableError`** (fail-closed): nada é aceito nem emitido sem o store.
  *
- * `scope` é o `ClientId` (usuários) ou `platform`; `subjectId` é o id do usuário ou do admin. O
+ * `scope` é o `CompanyId` (usuários) ou `platform`; `subjectId` é o id do usuário ou do admin. O
  * store só guarda o **hash** do segredo do refresh.
  */
 export type RotateOutcome =

@@ -24,11 +24,11 @@ after(async () => {
   await base.$disconnect();
 });
 
-const clientA = randomUUID();
-const clientB = randomUUID();
+const companyA = randomUUID();
+const companyB = randomUUID();
 
 describe('cobertura do registro de models (lê o schema gerado)', () => {
-  it('todo model do schema está classificado como a presença de clientId manda', () => {
+  it('todo model do schema está classificado como a presença de companyId manda', () => {
     assert.deepEqual(findScopeProblems(models, MODEL_SCOPES), []);
   });
 
@@ -37,21 +37,21 @@ describe('cobertura do registro de models (lê o schema gerado)', () => {
     assert.deepEqual(models.map((model) => model.name).sort(), Object.keys(MODEL_SCOPES).sort());
   });
 
-  it('Conversation e Message são de tenant (têm clientId) e Client é global (raiz do tenant)', () => {
+  it('Conversation e Message são de tenant (têm companyId) e Company é global (raiz do tenant)', () => {
     assert.equal(MODEL_SCOPES.Conversation, 'tenant');
     assert.equal(MODEL_SCOPES.Message, 'tenant');
     const message = models.find((model) => model.name === 'Message');
-    assert.ok(message?.fields.some((field) => field.name === 'clientId'));
-    assert.equal(MODEL_SCOPES.Client, 'global');
+    assert.ok(message?.fields.some((field) => field.name === 'companyId'));
+    assert.equal(MODEL_SCOPES.Company, 'global');
     const conversation = models.find((model) => model.name === 'Conversation');
-    assert.ok(conversation?.fields.some((field) => field.name === 'clientId'));
+    assert.ok(conversation?.fields.some((field) => field.name === 'companyId'));
   });
 
   const ticket: ModelInfo = {
     name: 'Ticket',
     fields: [
       { name: 'id', kind: 'scalar', type: 'String' },
-      { name: 'clientId', kind: 'scalar', type: 'String' },
+      { name: 'companyId', kind: 'scalar', type: 'String' },
     ],
   };
   const label: ModelInfo = {
@@ -59,19 +59,19 @@ describe('cobertura do registro de models (lê o schema gerado)', () => {
     fields: [{ name: 'id', kind: 'scalar', type: 'String' }],
   };
 
-  it('falha se um model com clientId não está no registro de tenant', () => {
+  it('falha se um model com companyId não está no registro de tenant', () => {
     const problems = findScopeProblems([...models, ticket], MODEL_SCOPES);
     assert.equal(problems.length, 1);
     assert.match(problems[0] ?? '', /Ticket/);
     assert.throws(() => createTenantScopeGuard([...models, ticket]), /Ticket/);
   });
 
-  it('falha se um model com clientId foi registrado como global', () => {
+  it('falha se um model com companyId foi registrado como global', () => {
     const scopes: Record<string, ModelScope> = { ...MODEL_SCOPES, Ticket: 'global' };
     assert.match(findScopeProblems([...models, ticket], scopes).join(), /Ticket.*tenant/);
   });
 
-  it('falha se um model sem clientId não está na lista de globais', () => {
+  it('falha se um model sem companyId não está na lista de globais', () => {
     assert.match(findScopeProblems([...models, label], MODEL_SCOPES).join(), /Label/);
     const asTenant: Record<string, ModelScope> = { ...MODEL_SCOPES, Label: 'tenant' };
     assert.match(findScopeProblems([...models, label], asTenant).join(), /Label.*global/);
@@ -104,7 +104,7 @@ describe('segunda barreira: regras da verificação', () => {
   }
 
   describe('model de tenant (Conversation)', () => {
-    it('rejeita consulta sem clientId no where', () => {
+    it('rejeita consulta sem companyId no where', () => {
       for (const operation of [
         'findMany',
         'findFirst',
@@ -123,71 +123,73 @@ describe('segunda barreira: regras da verificação', () => {
       }
     });
 
-    it('rejeita clientId que não é um valor definido (undefined, null, vazio, in, not, OR)', () => {
-      rejects('Conversation', 'findMany', { where: { clientId: undefined } });
-      rejects('Conversation', 'findMany', { where: { clientId: null } });
-      rejects('Conversation', 'findMany', { where: { clientId: '' } });
-      rejects('Conversation', 'findMany', { where: { clientId: { in: [clientA, clientB] } } });
-      rejects('Conversation', 'findMany', { where: { clientId: { not: clientA } } });
-      rejects('Conversation', 'findMany', { where: { clientId: { equals: undefined } } });
-      rejects('Conversation', 'findMany', { where: { OR: [{ clientId: clientA }] } });
-      rejects('Conversation', 'findMany', { where: { AND: [{ clientId: clientA }] } });
+    it('rejeita companyId que não é um valor definido (undefined, null, vazio, in, not, OR)', () => {
+      rejects('Conversation', 'findMany', { where: { companyId: undefined } });
+      rejects('Conversation', 'findMany', { where: { companyId: null } });
+      rejects('Conversation', 'findMany', { where: { companyId: '' } });
+      rejects('Conversation', 'findMany', { where: { companyId: { in: [companyA, companyB] } } });
+      rejects('Conversation', 'findMany', { where: { companyId: { not: companyA } } });
+      rejects('Conversation', 'findMany', { where: { companyId: { equals: undefined } } });
+      rejects('Conversation', 'findMany', { where: { OR: [{ companyId: companyA }] } });
+      rejects('Conversation', 'findMany', { where: { AND: [{ companyId: companyA }] } });
     });
 
-    it('aceita consulta com clientId no where (valor ou equals)', () => {
+    it('aceita consulta com companyId no where (valor ou equals)', () => {
       for (const operation of ['findMany', 'findFirst', 'count', 'updateMany', 'deleteMany']) {
-        run('Conversation', operation, { where: { clientId: clientA } });
-        run('Conversation', operation, { where: { clientId: { equals: clientA } } });
-        run('Conversation', operation, { where: { id: randomUUID(), clientId: clientA } });
+        run('Conversation', operation, { where: { companyId: companyA } });
+        run('Conversation', operation, { where: { companyId: { equals: companyA } } });
+        run('Conversation', operation, { where: { id: randomUUID(), companyId: companyA } });
       }
     });
 
-    it('proíbe findUnique, findUniqueOrThrow, update, delete e upsert, mesmo com clientId', () => {
+    it('proíbe findUnique, findUniqueOrThrow, update, delete e upsert, mesmo com companyId', () => {
       for (const operation of ['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert']) {
         rejects('Conversation', operation, { where: { id: randomUUID() } });
-        rejects('Conversation', operation, { where: { id: randomUUID(), clientId: clientA } });
+        rejects('Conversation', operation, { where: { id: randomUUID(), companyId: companyA } });
       }
     });
 
-    it('create e createMany exigem clientId em todos os registros', () => {
+    it('create e createMany exigem companyId em todos os registros', () => {
       rejects('Conversation', 'create', { data: {} });
-      rejects('Conversation', 'create', { data: { clientId: undefined } });
+      rejects('Conversation', 'create', { data: { companyId: undefined } });
       rejects('Conversation', 'create', {});
-      rejects('Conversation', 'createMany', { data: [{ clientId: clientA }, {}] });
+      rejects('Conversation', 'createMany', { data: [{ companyId: companyA }, {}] });
       rejects('Conversation', 'createMany', { data: [] });
       rejects('Conversation', 'createManyAndReturn', { data: {} });
-      run('Conversation', 'create', { data: { clientId: clientA } });
-      run('Conversation', 'createMany', { data: [{ clientId: clientA }, { clientId: clientB }] });
-      run('Conversation', 'createManyAndReturn', { data: { clientId: clientA } });
+      run('Conversation', 'create', { data: { companyId: companyA } });
+      run('Conversation', 'createMany', {
+        data: [{ companyId: companyA }, { companyId: companyB }],
+      });
+      run('Conversation', 'createManyAndReturn', { data: { companyId: companyA } });
     });
 
-    it('create não aceita o cliente por relacionamento', () => {
+    it('create não aceita a empresa por relacionamento', () => {
       rejects('Conversation', 'create', {
-        data: { clientId: clientA, client: { connect: { id: clientB } } },
+        data: { companyId: companyA, company: { connect: { id: companyB } } },
       });
-      rejects('Conversation', 'create', { data: { client: { connect: { id: clientB } } } });
+      rejects('Conversation', 'create', { data: { company: { connect: { id: companyB } } } });
     });
 
-    it('updateMany não pode trocar o cliente do registro', () => {
+    it('updateMany não pode trocar a empresa do registro', () => {
       rejects('Conversation', 'updateMany', {
-        where: { clientId: clientA },
-        data: { clientId: clientB },
+        where: { companyId: companyA },
+        data: { companyId: companyB },
       });
       rejects('Conversation', 'updateMany', {
-        where: { clientId: clientA },
-        data: { client: { connect: { id: clientB } } },
+        where: { companyId: companyA },
+        data: { company: { connect: { id: companyB } } },
       });
-      run('Conversation', 'updateMany', { where: { clientId: clientA }, data: {} });
+      run('Conversation', 'updateMany', { where: { companyId: companyA }, data: {} });
     });
 
     it('falha fechada: operação desconhecida não passa em model de tenant', () => {
-      rejects('Conversation', 'findRaw', { where: { clientId: clientA } });
-      rejects('Conversation', 'operacaoNova', { where: { clientId: clientA } });
+      rejects('Conversation', 'findRaw', { where: { companyId: companyA } });
+      rejects('Conversation', 'operacaoNova', { where: { companyId: companyA } });
     });
 
     it('a mensagem e o contexto dizem o model e a operação, sem valores dos argumentos', () => {
       try {
-        run('Conversation', 'findMany', { where: { clientId: undefined, id: 'valor-secreto' } });
+        run('Conversation', 'findMany', { where: { companyId: undefined, id: 'valor-secreto' } });
         assert.fail('deveria ter lançado');
       } catch (error) {
         assert.ok(error instanceof TenantScopeError);
@@ -201,45 +203,45 @@ describe('segunda barreira: regras da verificação', () => {
   describe('model de tenant (Message)', () => {
     const OPERATIONS_WITH_WHERE = ['findMany', 'findFirst', 'count', 'updateMany', 'deleteMany'];
 
-    it('consulta sem clientId no where lança TenantScopeError', () => {
+    it('consulta sem companyId no where lança TenantScopeError', () => {
       for (const operation of OPERATIONS_WITH_WHERE) {
         rejects('Message', operation, {});
         rejects('Message', operation, { where: {} });
         rejects('Message', operation, { where: { conversationId: randomUUID() } });
-        rejects('Message', operation, { where: { clientId: undefined, externalId: 'x' } });
+        rejects('Message', operation, { where: { companyId: undefined, externalId: 'x' } });
       }
     });
 
-    it('aceita as operações permitidas com clientId no where', () => {
+    it('aceita as operações permitidas com companyId no where', () => {
       for (const operation of OPERATIONS_WITH_WHERE) {
-        run('Message', operation, { where: { clientId: clientA, externalId: 'x' } });
+        run('Message', operation, { where: { companyId: companyA, externalId: 'x' } });
       }
       run('Message', 'findMany', {
-        where: { clientId: clientA, conversationId: randomUUID() },
+        where: { companyId: companyA, conversationId: randomUUID() },
         orderBy: [{ createdAt: 'desc' }],
         take: 5,
       });
     });
 
-    it('operações por chave única são proibidas, mesmo com clientId', () => {
+    it('operações por chave única são proibidas, mesmo com companyId', () => {
       for (const operation of ['findUnique', 'findUniqueOrThrow', 'update', 'delete', 'upsert']) {
         rejects('Message', operation, { where: { id: randomUUID() } });
-        rejects('Message', operation, { where: { id: randomUUID(), clientId: clientA } });
+        rejects('Message', operation, { where: { id: randomUUID(), companyId: companyA } });
       }
     });
 
-    it('criação exige clientId nos dados (e não aceita relação client)', () => {
+    it('criação exige companyId nos dados (e não aceita relação company)', () => {
       rejects('Message', 'create', { data: { content: 'x' } });
       rejects('Message', 'create', {
-        data: { content: 'x', client: { connect: { id: clientA } } },
+        data: { content: 'x', company: { connect: { id: companyA } } },
       });
-      rejects('Message', 'createMany', { data: [{ clientId: clientA }, { content: 'x' }] });
-      run('Message', 'create', { data: { clientId: clientA, content: 'x' } });
+      rejects('Message', 'createMany', { data: [{ companyId: companyA }, { content: 'x' }] });
+      run('Message', 'create', { data: { companyId: companyA, content: 'x' } });
     });
   });
 
-  describe('model global (Client)', () => {
-    it('não exige clientId e aceita operações por chave única', () => {
+  describe('model global (Company)', () => {
+    it('não exige companyId e aceita operações por chave única', () => {
       for (const operation of [
         'findUnique',
         'findMany',
@@ -248,28 +250,28 @@ describe('segunda barreira: regras da verificação', () => {
         'create',
         'count',
       ]) {
-        run('Client', operation, { where: { id: randomUUID() } });
+        run('Company', operation, { where: { id: randomUUID() } });
       }
     });
 
     it('não deixa atravessar para dados de tenant por include, select ou _count', () => {
-      rejects('Client', 'findMany', { include: { conversations: true } });
-      rejects('Client', 'findFirst', {
+      rejects('Company', 'findMany', { include: { conversations: true } });
+      rejects('Company', 'findFirst', {
         select: { id: true, conversations: { select: { id: true } } },
       });
-      rejects('Client', 'findUnique', { where: { id: clientA }, include: { _count: true } });
-      rejects('Client', 'findMany', {
+      rejects('Company', 'findUnique', { where: { id: companyA }, include: { _count: true } });
+      rejects('Company', 'findMany', {
         select: { _count: { select: { conversations: true } } },
       });
-      rejects('Client', 'create', { data: { name: 'x' }, include: { conversations: true } });
-      rejects('Client', 'findMany', { include: { messages: true } });
-      rejects('Client', 'findMany', { select: { _count: { select: { messages: true } } } });
+      rejects('Company', 'create', { data: { name: 'x' }, include: { conversations: true } });
+      rejects('Company', 'findMany', { include: { messages: true } });
+      rejects('Company', 'findMany', { select: { _count: { select: { messages: true } } } });
     });
 
     it('aceita select e include que não tocam dados de tenant', () => {
-      run('Client', 'findMany', { select: { id: true, name: true, conversations: false } });
-      run('Client', 'findMany', { include: { conversations: false } });
-      run('Client', 'findMany', { select: { _count: { select: { conversations: false } } } });
+      run('Company', 'findMany', { select: { id: true, name: true, conversations: false } });
+      run('Company', 'findMany', { include: { conversations: false } });
+      run('Company', 'findMany', { select: { _count: { select: { conversations: false } } } });
     });
   });
 
@@ -278,7 +280,7 @@ describe('segunda barreira: regras da verificação', () => {
   });
 });
 
-describe('extensão no client (sem banco)', () => {
+describe('extensão no client do Prisma (sem banco)', () => {
   it('rejeita antes de ir ao banco: conversation.findMany({}) lança TenantScopeError', async () => {
     const extended = extendWithTenantScope(base);
     await assert.rejects(

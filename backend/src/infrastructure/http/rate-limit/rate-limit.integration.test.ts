@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { ClientService } from '../../../application/clients/client.service.js';
+import { CompanyService } from '../../../application/companies/company.service.js';
 import { rateLimitProfile } from '../../../presentation/common/rate-limit.js';
 import { Result } from '../../../shared/types/index.js';
 import { getClosedPort, withPort } from '../../../test-support/closed-port.js';
 import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
 import { buildTestAuth } from '../../../test-support/in-memory-auth.js';
-import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../../test-support/in-memory-company.repository.js';
 import { captureLogs, type LogCapture } from '../../../test-support/log-capture.js';
 import { TestKeyspace } from '../../../test-support/test-keyspace.js';
 import { ToggleProxy } from '../../../test-support/toggle-proxy.js';
@@ -53,7 +53,7 @@ interface Harness {
   readonly handle: RateLimitRedisHandle;
   readonly keyspace: TestKeyspace;
   readonly prefix: string;
-  /** Access token de um `PlatformAdmin` (acesso a `/admin/clients`). */
+  /** Access token de um `PlatformAdmin` (acesso a `/admin/companies`). */
   readonly adminToken: string;
   /** Chaves do contador que existem agora neste teste (só as dele). */
   keys(): Promise<string[]>;
@@ -107,7 +107,7 @@ async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
     metrics,
     metricsToken: METRICS_TOKEN,
     auth: testAuth.service,
-    admin: { clients: new ClientService(new InMemoryClientRepository()) },
+    admin: { companies: new CompanyService(new InMemoryCompanyRepository()) },
     ...(options.trustProxy === undefined ? {} : { trustProxy: options.trustProxy }),
     rateLimit: {
       redis: handle.client,
@@ -245,7 +245,7 @@ describe('perfis e cotas', () => {
           'public',
         );
         assert.deepEqual(
-          statuses(await repeat(h, 4, '/admin/clients', { headers: auth })),
+          statuses(await repeat(h, 4, '/admin/companies', { headers: auth })),
           [200, 200, 429, 429],
           'admin',
         );
@@ -268,7 +268,7 @@ describe('perfis e cotas', () => {
         }),
       },
       async (h) => {
-        assert.deepEqual(statuses(await repeat(h, 3, '/admin/clients')), [401, 429, 429]);
+        assert.deepEqual(statuses(await repeat(h, 3, '/admin/companies')), [401, 429, 429]);
         assert.equal((await h.get('/test/webhook')).statusCode, 200);
         assert.equal((await h.get('/test/webhook')).statusCode, 429);
         assert.equal((await h.get('/test/sem-perfil')).statusCode, 200);
@@ -324,9 +324,12 @@ describe('perfis e cotas', () => {
     await withHarness(
       { profiles: profiles({ admin: { max: 3, windowSeconds: 60 } }) },
       async (h) => {
-        assert.deepEqual(statuses(await repeat(h, 5, '/admin/clients')), [401, 401, 401, 429, 429]);
+        assert.deepEqual(
+          statuses(await repeat(h, 5, '/admin/companies')),
+          [401, 401, 401, 429, 429],
+        );
         // Credencial certa, mas depois do limite: também 429 (a chave nem é conferida).
-        const withKey = await h.get('/admin/clients', {
+        const withKey = await h.get('/admin/companies', {
           headers: { authorization: `Bearer ${h.adminToken}` },
         });
         assert.equal(withKey.statusCode, 429);
@@ -419,7 +422,7 @@ describe('janela e TTL no Redis', () => {
         }),
       },
       async (h) => {
-        const urls = ['/test/sem-perfil', '/admin/clients', '/test/webhook'];
+        const urls = ['/test/sem-perfil', '/admin/companies', '/test/webhook'];
         const ips = ['203.0.113.10', '203.0.113.11', '2001:db8:1:2::9'];
         const requests: Promise<LightMyRequestResponse>[] = [];
         for (let round = 0; round < 15; round += 1) {
@@ -467,7 +470,7 @@ describe('Redis fora (fail-open)', () => {
       },
       async (h) => {
         const ip = '203.0.113.99';
-        const urls = ['/test/sem-perfil', '/admin/clients', '/test/webhook'];
+        const urls = ['/test/sem-perfil', '/admin/companies', '/test/webhook'];
         let sent = 0;
         // Duas voltas por perfil: com limite 1, a segunda seria 429 se o limiter estivesse ativo.
         for (let round = 0; round < 2; round += 1) {
@@ -574,7 +577,7 @@ describe('métricas e logs', () => {
       { profiles: profiles({ admin: { max: 1, windowSeconds: 60 } }) },
       async (h) => {
         const ip = '203.0.113.150';
-        await repeat(h, 3, '/admin/clients', { ip });
+        await repeat(h, 3, '/admin/companies', { ip });
         const response = await h.get('/metrics', {
           headers: { authorization: `Bearer ${METRICS_TOKEN}` },
         });
@@ -584,11 +587,11 @@ describe('métricas e logs', () => {
         assert.doesNotMatch(body, /rate_limit_rejected_total\{profile="webhook"\}/);
         assert.match(
           body,
-          /http_requests_total\{method="GET",route="\/admin\/clients",status_class="4xx"\} 3/,
+          /http_requests_total\{method="GET",route="\/admin\/companies",status_class="4xx"\} 3/,
         );
         assert.ok(!body.includes(ip));
         assert.ok(!body.includes(h.prefix));
-        assert.doesNotMatch(body, /\bip=|key=|clientId|userId/i);
+        assert.doesNotMatch(body, /\bip=|key=|companyId|membershipId/i);
 
         const limited = h.logs
           .lines()
@@ -596,7 +599,7 @@ describe('métricas e logs', () => {
         assert.equal(limited.length, 2);
         for (const line of limited) {
           assert.equal(line.level, 40, 'o 429 sai como warn');
-          assert.equal(line.route, '/admin/clients');
+          assert.equal(line.route, '/admin/companies');
         }
         // Nenhum IP em nenhuma linha de log gerada por esta spec.
         assert.ok(!h.logs.raw().includes(ip), 'IP apareceu em log');
@@ -636,7 +639,7 @@ describe('TRUST_PROXY', () => {
       const viaProxy = (forwarded: string): Promise<LightMyRequestResponse> =>
         h.get('/test/sem-perfil', { ip: PROXY_IP, headers: { 'x-forwarded-for': forwarded } });
 
-      // O proxy acrescenta o IP real (198.51.100.1) ao fim; o cliente forjou o começo.
+      // O proxy acrescenta o IP real (198.51.100.1) ao fim; a empresa forjou o começo.
       assert.equal((await viaProxy('9.9.9.9, 198.51.100.1')).statusCode, 200);
       // Outro valor forjado à esquerda, mesmo IP real: mesma chave, então recusado.
       assert.equal((await viaProxy('8.8.8.8, 7.7.7.7, 198.51.100.1')).statusCode, 429);
@@ -723,7 +726,7 @@ describe('TRUST_PROXY', () => {
     });
   });
 
-  it('true: confia em toda a cadeia (o cliente escolhe o IP; por isso só para ambiente fechado)', async () => {
+  it('true: confia em toda a cadeia (a empresa escolhe o IP; por isso só para ambiente fechado)', async () => {
     await withHarness({ trustProxy: true, profiles: profiles(quota1) }, async (h) => {
       const response = await h.get('/test/ip', {
         ip: PROXY_IP,

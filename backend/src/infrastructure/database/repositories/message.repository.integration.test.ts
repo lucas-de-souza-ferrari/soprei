@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
-import type { ClientId } from '../../../domain/index.js';
+import type { CompanyId } from '../../../domain/index.js';
 import {
-  type Client,
+  type Company,
   type Conversation,
   type Message,
   type NewMessage,
@@ -29,13 +29,13 @@ let database: Database;
 let tenants: TestTenants;
 let conversations: PrismaConversationRepository;
 let repo: PrismaMessageRepository;
-let clientA: Client;
-let clientB: Client;
+let companyA: Company;
+let companyB: Company;
 let conversationA: Conversation;
 let conversationB: Conversation;
 let idsA: string[];
 let idsB: string[];
-/** Mesmo `externalId` nos dois clientes: a unicidade é por cliente. */
+/** Mesmo `externalId` nas duas empresas: a unicidade é por empresa. */
 const SHARED_EXTERNAL_ID = `ext-${randomUUID()}`;
 let userA: Message;
 let replyA: Message;
@@ -47,32 +47,32 @@ before(async () => {
   tenants = new TestTenants(database.prisma);
   conversations = new PrismaConversationRepository(database.prisma);
   repo = new PrismaMessageRepository(database.prisma);
-  clientA = await tenants.createClient('msg-a');
-  clientB = await tenants.createClient('msg-b');
-  // Mesmo contactRef nos dois clientes: conversas distintas.
-  conversationA = await conversations.findOrCreateByContact(clientA.id, 'mesmo-contato');
-  conversationB = await conversations.findOrCreateByContact(clientB.id, 'mesmo-contato');
+  companyA = await tenants.createCompany('msg-a');
+  companyB = await tenants.createCompany('msg-b');
+  // Mesmo contactRef nas duas empresas: conversas distintas.
+  conversationA = await conversations.findOrCreateByContact(companyA.id, 'mesmo-contato');
+  conversationB = await conversations.findOrCreateByContact(companyB.id, 'mesmo-contato');
 
-  userA = await repo.create(clientA.id, {
+  userA = await repo.create(companyA.id, {
     conversationId: conversationA.id,
     role: 'USER',
     content: 'pergunta A',
     externalId: SHARED_EXTERNAL_ID,
   });
-  replyA = await repo.create(clientA.id, {
+  replyA = await repo.create(companyA.id, {
     conversationId: conversationA.id,
     role: 'ASSISTANT',
     content: 'resposta A',
     replyToId: userA.id,
     createdAt: new Date(userA.createdAt.getTime() + 1),
   });
-  userB = await repo.create(clientB.id, {
+  userB = await repo.create(companyB.id, {
     conversationId: conversationB.id,
     role: 'USER',
     content: 'pergunta B',
     externalId: SHARED_EXTERNAL_ID,
   });
-  replyB = await repo.create(clientB.id, {
+  replyB = await repo.create(companyB.id, {
     conversationId: conversationB.id,
     role: 'ASSISTANT',
     content: 'resposta B',
@@ -83,7 +83,7 @@ before(async () => {
   // Mais mensagens para paginar (criações em paralelo: empates de createdAt).
   const extraA = await Promise.all(
     Array.from({ length: 6 }, (_, i) =>
-      repo.create(clientA.id, {
+      repo.create(companyA.id, {
         conversationId: conversationA.id,
         role: 'USER',
         content: `extra A ${String(i)}`,
@@ -92,7 +92,7 @@ before(async () => {
   );
   const extraB = await Promise.all(
     Array.from({ length: 3 }, (_, i) =>
-      repo.create(clientB.id, {
+      repo.create(companyB.id, {
         conversationId: conversationB.id,
         role: 'USER',
         content: `extra B ${String(i)}`,
@@ -111,11 +111,11 @@ after(async () => {
   }
 });
 
-async function listAll(clientId: ClientId, conversationId: string, limit: number) {
+async function listAll(companyId: CompanyId, conversationId: string, limit: number) {
   const all: Message[] = [];
   let cursor: string | undefined;
   for (let pages = 0; pages < 50; pages++) {
-    const page = await repo.listByConversation(clientId, conversationId, {
+    const page = await repo.listByConversation(companyId, conversationId, {
       limit,
       ...(cursor === undefined ? {} : { cursor }),
     });
@@ -126,80 +126,80 @@ async function listAll(clientId: ClientId, conversationId: string, limit: number
   throw new Error('paginação não terminou');
 }
 
-describe('isolamento no repositório de Message (clientes A e B)', () => {
-  it('findById: o id de B com o ClientId de A é NotFoundError; com o de B, funciona', async () => {
-    await assert.rejects(repo.findById(clientA.id, userB.id), NotFoundError);
-    const found = await repo.findById(clientB.id, userB.id);
+describe('isolamento no repositório de Message (empresas A e B)', () => {
+  it('findById: o id de B com o CompanyId de A é NotFoundError; com o de B, funciona', async () => {
+    await assert.rejects(repo.findById(companyA.id, userB.id), NotFoundError);
+    const found = await repo.findById(companyB.id, userB.id);
     assert.equal(found.id, userB.id);
-    assert.equal(found.clientId, clientB.id);
+    assert.equal(found.companyId, companyB.id);
     assert.equal(found.content, 'pergunta B');
   });
 
   it('findById com id malformado é NotFoundError (não vai ao banco)', async () => {
-    await assert.rejects(repo.findById(clientA.id, 'nao-e-uuid'), NotFoundError);
+    await assert.rejects(repo.findById(companyA.id, 'nao-e-uuid'), NotFoundError);
   });
 
-  it('list e count: cada cliente enxerga só as suas mensagens', async () => {
-    assert.equal(await repo.count(clientA.id), idsA.length);
-    assert.equal(await repo.count(clientB.id), idsB.length);
-    const listedA = (await repo.list(clientA.id, { limit: 200 })).items;
+  it('list e count: cada empresa enxerga só as suas mensagens', async () => {
+    assert.equal(await repo.count(companyA.id), idsA.length);
+    assert.equal(await repo.count(companyB.id), idsB.length);
+    const listedA = (await repo.list(companyA.id, { limit: 200 })).items;
     assert.deepEqual(listedA.map((m) => m.id).sort(), [...idsA].sort());
-    assert.ok(listedA.every((m) => m.clientId === clientA.id));
+    assert.ok(listedA.every((m) => m.companyId === companyA.id));
     assert.ok(listedA.every((m) => !idsB.includes(m.id)));
   });
 
   it('findByExternalId: o mesmo externalId em A e B devolve a mensagem de cada um', async () => {
-    const foundA = await repo.findByExternalId(clientA.id, SHARED_EXTERNAL_ID);
-    const foundB = await repo.findByExternalId(clientB.id, SHARED_EXTERNAL_ID);
+    const foundA = await repo.findByExternalId(companyA.id, SHARED_EXTERNAL_ID);
+    const foundB = await repo.findByExternalId(companyB.id, SHARED_EXTERNAL_ID);
     assert.equal(foundA?.id, userA.id);
-    assert.equal(foundA.clientId, clientA.id);
+    assert.equal(foundA.companyId, companyA.id);
     assert.equal(foundB?.id, userB.id);
-    assert.equal(foundB.clientId, clientB.id);
-    assert.equal(await repo.findByExternalId(clientA.id, 'inexistente'), null);
+    assert.equal(foundB.companyId, companyB.id);
+    assert.equal(await repo.findByExternalId(companyA.id, 'inexistente'), null);
   });
 
   it('findByExternalId: externalId que só existe em B é null para A', async () => {
     const onlyB = `so-b-${randomUUID()}`;
-    await repo.create(clientB.id, {
+    await repo.create(companyB.id, {
       conversationId: conversationB.id,
       role: 'USER',
       content: 'só do B',
       externalId: onlyB,
     });
-    assert.equal(await repo.findByExternalId(clientA.id, onlyB), null);
-    assert.notEqual(await repo.findByExternalId(clientB.id, onlyB), null);
+    assert.equal(await repo.findByExternalId(companyA.id, onlyB), null);
+    assert.notEqual(await repo.findByExternalId(companyB.id, onlyB), null);
   });
 
-  it('findReplyTo: devolve a resposta do próprio cliente; o id de B com o ClientId de A é null', async () => {
-    assert.equal((await repo.findReplyTo(clientA.id, userA.id))?.id, replyA.id);
-    assert.equal((await repo.findReplyTo(clientB.id, userB.id))?.id, replyB.id);
-    assert.equal((await repo.findReplyTo(clientB.id, userB.id))?.isFallback, true);
-    assert.equal(await repo.findReplyTo(clientA.id, userB.id), null);
-    assert.equal(await repo.findReplyTo(clientB.id, userA.id), null);
-    assert.equal(await repo.findReplyTo(clientA.id, 'nao-e-uuid'), null);
+  it('findReplyTo: devolve a resposta da própria empresa; o id de B com o CompanyId de A é null', async () => {
+    assert.equal((await repo.findReplyTo(companyA.id, userA.id))?.id, replyA.id);
+    assert.equal((await repo.findReplyTo(companyB.id, userB.id))?.id, replyB.id);
+    assert.equal((await repo.findReplyTo(companyB.id, userB.id))?.isFallback, true);
+    assert.equal(await repo.findReplyTo(companyA.id, userB.id), null);
+    assert.equal(await repo.findReplyTo(companyB.id, userA.id), null);
+    assert.equal(await repo.findReplyTo(companyA.id, 'nao-e-uuid'), null);
     // Mensagem sem resposta.
-    assert.equal(await repo.findReplyTo(clientA.id, replyA.id), null);
+    assert.equal(await repo.findReplyTo(companyA.id, replyA.id), null);
   });
 
-  it('listRecent: só da conversa do próprio cliente, em ordem cronológica', async () => {
-    const recentA = await repo.listRecent(clientA.id, conversationA.id, 100);
+  it('listRecent: só da conversa da própria empresa, em ordem cronológica', async () => {
+    const recentA = await repo.listRecent(companyA.id, conversationA.id, 100);
     assert.deepEqual(recentA.map((m) => m.id).sort(), [...idsA].sort());
-    assert.ok(recentA.every((m) => m.clientId === clientA.id));
+    assert.ok(recentA.every((m) => m.companyId === companyA.id));
     for (let i = 1; i < recentA.length; i++) {
       assert.ok(
         (recentA[i - 1]?.createdAt.getTime() ?? 0) <= (recentA[i]?.createdAt.getTime() ?? 0),
       );
     }
-    // A conversa de B com o ClientId de A: nada.
-    assert.deepEqual(await repo.listRecent(clientA.id, conversationB.id, 100), []);
-    assert.deepEqual(await repo.listRecent(clientB.id, conversationA.id, 100), []);
-    assert.deepEqual(await repo.listRecent(clientA.id, 'nao-e-uuid', 10), []);
+    // A conversa de B com o CompanyId de A: nada.
+    assert.deepEqual(await repo.listRecent(companyA.id, conversationB.id, 100), []);
+    assert.deepEqual(await repo.listRecent(companyB.id, conversationA.id, 100), []);
+    assert.deepEqual(await repo.listRecent(companyA.id, 'nao-e-uuid', 10), []);
   });
 
   it('listRecent: devolve as N mais recentes (e a pergunta precede a resposta)', async () => {
-    const lastTwo = await repo.listRecent(clientA.id, conversationA.id, 2);
+    const lastTwo = await repo.listRecent(companyA.id, conversationA.id, 2);
     assert.equal(lastTwo.length, 2);
-    const all = await repo.listRecent(clientA.id, conversationA.id, 100);
+    const all = await repo.listRecent(companyA.id, conversationA.id, 100);
     assert.deepEqual(
       lastTwo.map((m) => m.id),
       all.slice(-2).map((m) => m.id),
@@ -207,19 +207,20 @@ describe('isolamento no repositório de Message (clientes A e B)', () => {
     const userIndex = all.findIndex((m) => m.id === userA.id);
     const replyIndex = all.findIndex((m) => m.id === replyA.id);
     assert.ok(userIndex < replyIndex, 'a pergunta vem antes da resposta');
-    assert.deepEqual(await repo.listRecent(clientA.id, conversationA.id, 0), []);
+    assert.deepEqual(await repo.listRecent(companyA.id, conversationA.id, 0), []);
   });
 
-  it('listByConversation: a conversa de B com o ClientId de A não devolve mensagens de B', async () => {
-    const page = await repo.listByConversation(clientA.id, conversationB.id);
+  it('listByConversation: a conversa de B com o CompanyId de A não devolve mensagens de B', async () => {
+    const page = await repo.listByConversation(companyA.id, conversationB.id);
     assert.deepEqual(page, { items: [], nextCursor: null });
-    await assert.rejects(repo.listByConversation(clientA.id, 'nao-e-uuid'), NotFoundError);
+    await assert.rejects(repo.listByConversation(companyA.id, 'nao-e-uuid'), NotFoundError);
   });
 
   it('listByConversation: pagina em ordem estável e igual em qualquer tamanho de página', async () => {
-    const byOne = await listAll(clientA.id, conversationA.id, 1);
-    const byThree = await listAll(clientA.id, conversationA.id, 3);
-    const all = (await repo.listByConversation(clientA.id, conversationA.id, { limit: 200 })).items;
+    const byOne = await listAll(companyA.id, conversationA.id, 1);
+    const byThree = await listAll(companyA.id, conversationA.id, 3);
+    const all = (await repo.listByConversation(companyA.id, conversationA.id, { limit: 200 }))
+      .items;
     assert.deepEqual(
       byOne.map((m) => m.id),
       all.map((m) => m.id),
@@ -230,72 +231,72 @@ describe('isolamento no repositório de Message (clientes A e B)', () => {
     );
     assert.equal(new Set(byOne.map((m) => m.id)).size, idsA.length);
     assert.ok(
-      byOne.every((m) => m.clientId === clientA.id && m.conversationId === conversationA.id),
+      byOne.every((m) => m.companyId === companyA.id && m.conversationId === conversationA.id),
     );
     await assert.rejects(
-      repo.listByConversation(clientA.id, conversationA.id, { cursor: 'lixo' }),
+      repo.listByConversation(companyA.id, conversationA.id, { cursor: 'lixo' }),
       ValidationError,
     );
   });
 
-  it('um cursor de A usado com o ClientId de B só devolve mensagens de B', async () => {
-    const first = await repo.listByConversation(clientA.id, conversationA.id, { limit: 1 });
+  it('um cursor de A usado com o CompanyId de B só devolve mensagens de B', async () => {
+    const first = await repo.listByConversation(companyA.id, conversationA.id, { limit: 1 });
     assert.ok(first.nextCursor !== null);
-    const other = await repo.listByConversation(clientB.id, conversationB.id, {
+    const other = await repo.listByConversation(companyB.id, conversationB.id, {
       cursor: first.nextCursor,
     });
     // As mensagens de B vêm depois do cursor de A: a lista não pode ser vazia (senão o teste seria vácuo).
     assert.ok(other.items.length > 0, 'a página de B tem itens');
-    assert.ok(other.items.every((m) => m.clientId === clientB.id));
+    assert.ok(other.items.every((m) => m.companyId === companyB.id));
     assert.ok(other.items.every((m) => m.conversationId === conversationB.id));
   });
 
-  it('update e delete com o ClientId de A não tocam a mensagem de B (NotFoundError)', async () => {
-    await assert.rejects(repo.update(clientA.id, userB.id, {}), NotFoundError);
-    await assert.rejects(repo.delete(clientA.id, userB.id), NotFoundError);
-    assert.equal((await repo.findById(clientB.id, userB.id)).content, 'pergunta B');
+  it('update e delete com o CompanyId de A não tocam a mensagem de B (NotFoundError)', async () => {
+    await assert.rejects(repo.update(companyA.id, userB.id, {}), NotFoundError);
+    await assert.rejects(repo.delete(companyA.id, userB.id), NotFoundError);
+    assert.equal((await repo.findById(companyB.id, userB.id)).content, 'pergunta B');
     // O dono "atualiza" (no-op: mensagens são imutáveis) e recebe a mesma mensagem.
-    assert.equal((await repo.update(clientB.id, userB.id, {})).content, 'pergunta B');
+    assert.equal((await repo.update(companyB.id, userB.id, {})).content, 'pergunta B');
   });
 });
 
 describe('create e integridade no banco (chave estrangeira composta)', () => {
-  it('grava no cliente do parâmetro mesmo com outro clientId injetado em runtime', async () => {
+  it('grava na empresa do parâmetro mesmo com outro companyId injetado em runtime', async () => {
     const hostile = {
       conversationId: conversationA.id,
       role: 'USER',
       content: 'hostil',
-      clientId: clientB.id,
+      companyId: companyB.id,
     } as unknown as NewMessage;
-    const created = await repo.create(clientA.id, hostile);
-    assert.equal(created.clientId, clientA.id);
-    await assert.rejects(repo.findById(clientB.id, created.id), NotFoundError);
-    await repo.delete(clientA.id, created.id);
+    const created = await repo.create(companyA.id, hostile);
+    assert.equal(created.companyId, companyA.id);
+    await assert.rejects(repo.findById(companyB.id, created.id), NotFoundError);
+    await repo.delete(companyA.id, created.id);
   });
 
-  it('mensagem do cliente A em conversa do cliente B é rejeitada pelo banco', async () => {
-    const before = await repo.count(clientA.id);
-    const beforeB = await repo.count(clientB.id);
+  it('mensagem da empresa A em conversa da empresa B é rejeitada pelo banco', async () => {
+    const before = await repo.count(companyA.id);
+    const beforeB = await repo.count(companyB.id);
     await assert.rejects(
-      repo.create(clientA.id, {
+      repo.create(companyA.id, {
         conversationId: conversationB.id,
         role: 'USER',
         content: 'não pode',
       }),
       (error: unknown) => error instanceof DatabaseError,
     );
-    assert.equal(await repo.count(clientA.id), before);
-    assert.equal(await repo.count(clientB.id), beforeB);
+    assert.equal(await repo.count(companyA.id), before);
+    assert.equal(await repo.count(companyB.id), beforeB);
   });
 
-  it('SQL cru: INSERT com client_id de A e conversation_id de B viola a chave estrangeira composta (23503)', async () => {
+  it('SQL cru: INSERT com company_id de A e conversation_id de B viola a chave estrangeira composta (23503)', async () => {
     await assert.rejects(
       database.prisma.$executeRaw`
-        INSERT INTO messages (id, client_id, conversation_id, role, content)
-        VALUES (${randomUUID()}::uuid, ${clientA.id}::uuid, ${conversationB.id}::uuid, 'USER'::message_role, 'cruzada')`,
+        INSERT INTO messages (id, company_id, conversation_id, role, content)
+        VALUES (${randomUUID()}::uuid, ${companyA.id}::uuid, ${conversationB.id}::uuid, 'USER'::message_role, 'cruzada')`,
       (error: unknown) => {
         assert.ok(error instanceof Error);
-        assert.match(error.message, /23503|foreign key|messages_conversation_id_client_id_fkey/i);
+        assert.match(error.message, /23503|foreign key|messages_conversation_id_company_id_fkey/i);
         return true;
       },
     );
@@ -307,20 +308,20 @@ describe('create e integridade no banco (chave estrangeira composta)', () => {
   it('SQL cru: resposta (reply_to_id) de A apontando para mensagem de B viola a chave estrangeira composta', async () => {
     await assert.rejects(
       database.prisma.$executeRaw`
-        INSERT INTO messages (id, client_id, conversation_id, role, content, reply_to_id)
-        VALUES (${randomUUID()}::uuid, ${clientA.id}::uuid, ${conversationA.id}::uuid,
+        INSERT INTO messages (id, company_id, conversation_id, role, content, reply_to_id)
+        VALUES (${randomUUID()}::uuid, ${companyA.id}::uuid, ${conversationA.id}::uuid,
                 'ASSISTANT'::message_role, 'resposta cruzada', ${userB.id}::uuid)`,
       (error: unknown) => {
         assert.ok(error instanceof Error);
-        assert.match(error.message, /23503|foreign key|messages_reply_to_id_client_id_fkey/i);
+        assert.match(error.message, /23503|foreign key|messages_reply_to_id_company_id_fkey/i);
         return true;
       },
     );
   });
 
-  it('via repositório: replyToId de outro cliente também é rejeitado (DatabaseError)', async () => {
+  it('via repositório: replyToId de outra empresa também é rejeitado (DatabaseError)', async () => {
     await assert.rejects(
-      repo.create(clientA.id, {
+      repo.create(companyA.id, {
         conversationId: conversationA.id,
         role: 'ASSISTANT',
         content: 'resposta cruzada',
@@ -333,24 +334,24 @@ describe('create e integridade no banco (chave estrangeira composta)', () => {
   it('SQL cru: as restrições de tamanho e de fallback também valem no banco', async () => {
     const insert = (role: string, content: string, isFallback: boolean) =>
       database.prisma.$executeRaw`
-        INSERT INTO messages (id, client_id, conversation_id, role, content, is_fallback)
-        VALUES (${randomUUID()}::uuid, ${clientA.id}::uuid, ${conversationA.id}::uuid,
+        INSERT INTO messages (id, company_id, conversation_id, role, content, is_fallback)
+        VALUES (${randomUUID()}::uuid, ${companyA.id}::uuid, ${conversationA.id}::uuid,
                 ${role}::message_role, ${content}, ${isFallback})`;
     await assert.rejects(insert('USER', '', false), /content_length_check|check/i);
     await assert.rejects(insert('USER', 'a'.repeat(4001), false), /content_length_check|check/i);
     await assert.rejects(insert('USER', 'fallback de usuário', true), /fallback_role_check|check/i);
   });
 
-  it('externalId repetido no mesmo cliente é ConflictError; em outro cliente é permitido', async () => {
+  it('externalId repetido no mesma empresa é ConflictError; em outra empresa é permitido', async () => {
     const externalId = `dup-${randomUUID()}`;
-    await repo.create(clientA.id, {
+    await repo.create(companyA.id, {
       conversationId: conversationA.id,
       role: 'USER',
       content: 'um',
       externalId,
     });
     await assert.rejects(
-      repo.create(clientA.id, {
+      repo.create(companyA.id, {
         conversationId: conversationA.id,
         role: 'USER',
         content: 'dois',
@@ -358,25 +359,25 @@ describe('create e integridade no banco (chave estrangeira composta)', () => {
       }),
       ConflictError,
     );
-    const inB = await repo.create(clientB.id, {
+    const inB = await repo.create(companyB.id, {
       conversationId: conversationB.id,
       role: 'USER',
-      content: 'em outro cliente',
+      content: 'em outra empresa',
       externalId,
     });
-    assert.equal(inB.clientId, clientB.id);
+    assert.equal(inB.companyId, companyB.id);
   });
 
   it('várias mensagens sem externalId convivem; uma mensagem do contato só aceita uma resposta', async () => {
     for (let i = 0; i < 3; i++) {
-      await repo.create(clientA.id, {
+      await repo.create(companyA.id, {
         conversationId: conversationA.id,
         role: 'USER',
         content: `sem externalId ${String(i)}`,
       });
     }
     await assert.rejects(
-      repo.create(clientA.id, {
+      repo.create(companyA.id, {
         conversationId: conversationA.id,
         role: 'ASSISTANT',
         content: 'segunda resposta',
@@ -390,7 +391,7 @@ describe('create e integridade no banco (chave estrangeira composta)', () => {
     const externalId = `race-${randomUUID()}`;
     const outcomes = await Promise.allSettled(
       Array.from({ length: 5 }, () =>
-        repo.create(clientA.id, {
+        repo.create(companyA.id, {
           conversationId: conversationA.id,
           role: 'USER',
           content: 'concorrente',
@@ -407,44 +408,44 @@ describe('create e integridade no banco (chave estrangeira composta)', () => {
 
 describe('forTransaction e segunda barreira', () => {
   it('rollback desfaz a criação; commit confirma e mantém o isolamento dentro da transação', async () => {
-    const before = await repo.count(clientA.id);
+    const before = await repo.count(companyA.id);
     const boom = new ValidationError('abortar');
     await assert.rejects(
       runInTransaction(database.prisma, async (tx) => {
         const inTx = repo.forTransaction(tx);
-        await inTx.create(clientA.id, {
+        await inTx.create(companyA.id, {
           conversationId: conversationA.id,
           role: 'USER',
           content: 'dentro da transação',
         });
-        assert.equal(await inTx.count(clientA.id), before + 1);
+        assert.equal(await inTx.count(companyA.id), before + 1);
         throw boom;
       }),
       (error: unknown) => error === boom,
     );
-    assert.equal(await repo.count(clientA.id), before);
+    assert.equal(await repo.count(companyA.id), before);
 
     // O externalId REAL da mensagem criada: o dono a enxerga dentro da transação; B, não.
     const externalId = `tx-${randomUUID()}`;
     const id = await runInTransaction(database.prisma, async (tx) => {
       const inTx = repo.forTransaction(tx);
-      const created = await inTx.create(clientA.id, {
+      const created = await inTx.create(companyA.id, {
         conversationId: conversationA.id,
         role: 'USER',
         content: 'confirmada',
         externalId,
       });
-      await assert.rejects(inTx.findById(clientB.id, created.id), NotFoundError);
-      assert.equal((await inTx.findByExternalId(clientA.id, externalId))?.id, created.id);
-      assert.equal(await inTx.findByExternalId(clientB.id, externalId), null);
+      await assert.rejects(inTx.findById(companyB.id, created.id), NotFoundError);
+      assert.equal((await inTx.findByExternalId(companyA.id, externalId))?.id, created.id);
+      assert.equal(await inTx.findByExternalId(companyB.id, externalId), null);
       return created.id;
     });
-    assert.equal((await repo.findById(clientA.id, id)).content, 'confirmada');
-    assert.equal((await repo.findByExternalId(clientA.id, externalId))?.id, id);
-    assert.equal(await repo.findByExternalId(clientB.id, externalId), null);
+    assert.equal((await repo.findById(companyA.id, id)).content, 'confirmada');
+    assert.equal((await repo.findByExternalId(companyA.id, externalId))?.id, id);
+    assert.equal(await repo.findByExternalId(companyB.id, externalId), null);
   });
 
-  it('o client estendido recusa operações de message sem clientId (TenantScopeError)', async () => {
+  it('o client estendido recusa operações de message sem companyId (TenantScopeError)', async () => {
     const isScopeError = (error: unknown): boolean => error instanceof TenantScopeError;
     await assert.rejects(database.prisma.message.findMany({}), isScopeError);
     await assert.rejects(
@@ -476,14 +477,14 @@ describe('markSent (spec 011): marca de envio da resposta do assistente', () => 
     sentAt: new Date('2026-10-27T12:00:00.000Z'),
   });
 
-  async function freshReply(client: Client, contact: string) {
-    const conversation = await conversations.findOrCreateByContact(client.id, contact);
-    const user = await repo.create(client.id, {
+  async function freshReply(company: Company, contact: string) {
+    const conversation = await conversations.findOrCreateByContact(company.id, contact);
+    const user = await repo.create(company.id, {
       conversationId: conversation.id,
       role: 'USER',
       content: 'pergunta',
     });
-    const reply = await repo.create(client.id, {
+    const reply = await repo.create(company.id, {
       conversationId: conversation.id,
       role: 'ASSISTANT',
       content: 'resposta',
@@ -493,43 +494,43 @@ describe('markSent (spec 011): marca de envio da resposta do assistente', () => 
     return { conversation, user, reply };
   }
 
-  it('marca a resposta do próprio cliente e é idempotente (a segunda marca não muda nada)', async () => {
-    const { reply } = await freshReply(clientA, 'sent-ok');
+  it('marca a resposta da própria empresa e é idempotente (a segunda marca não muda nada)', async () => {
+    const { reply } = await freshReply(companyA, 'sent-ok');
     assert.equal(reply.sentAt, null);
     assert.equal(reply.channelMessageId, null);
 
-    assert.equal(await repo.markSent(clientA.id, reply.id, markOf('wamid.primeiro')), true);
-    const marked = await repo.findById(clientA.id, reply.id);
+    assert.equal(await repo.markSent(companyA.id, reply.id, markOf('wamid.primeiro')), true);
+    const marked = await repo.findById(companyA.id, reply.id);
     assert.equal(marked.channelMessageId, 'wamid.primeiro');
     assert.equal(marked.sentAt?.toISOString(), '2026-10-27T12:00:00.000Z');
     assert.equal(marked.content, 'resposta');
 
     // Já marcada: não sobrescreve nem conta como alteração.
-    assert.equal(await repo.markSent(clientA.id, reply.id, markOf('wamid.segundo')), false);
-    assert.equal((await repo.findById(clientA.id, reply.id)).channelMessageId, 'wamid.primeiro');
+    assert.equal(await repo.markSent(companyA.id, reply.id, markOf('wamid.segundo')), false);
+    assert.equal((await repo.findById(companyA.id, reply.id)).channelMessageId, 'wamid.primeiro');
   });
 
-  it('isolamento: o ClientId de B não marca a resposta de A, e a de A fica intacta', async () => {
-    const { reply } = await freshReply(clientA, 'sent-iso');
-    assert.equal(await repo.markSent(clientB.id, reply.id, markOf('wamid.intruso')), false);
-    const untouched = await repo.findById(clientA.id, reply.id);
+  it('isolamento: o CompanyId de B não marca a resposta de A, e a de A fica intacta', async () => {
+    const { reply } = await freshReply(companyA, 'sent-iso');
+    assert.equal(await repo.markSent(companyB.id, reply.id, markOf('wamid.intruso')), false);
+    const untouched = await repo.findById(companyA.id, reply.id);
     assert.equal(untouched.sentAt, null);
     assert.equal(untouched.channelMessageId, null);
-    // E o inverso: marcar a resposta de B com o ClientId de A também não faz nada.
-    assert.equal(await repo.markSent(clientA.id, replyB.id, markOf('wamid.intruso')), false);
-    assert.equal((await repo.findById(clientB.id, replyB.id)).sentAt, null);
+    // E o inverso: marcar a resposta de B com o CompanyId de A também não faz nada.
+    assert.equal(await repo.markSent(companyA.id, replyB.id, markOf('wamid.intruso')), false);
+    assert.equal((await repo.findById(companyB.id, replyB.id)).sentAt, null);
   });
 
   it('só a resposta do assistente é marcada: mensagem do contato e id inexistente ou malformado, não', async () => {
-    const { user } = await freshReply(clientA, 'sent-role');
-    assert.equal(await repo.markSent(clientA.id, user.id, markOf('wamid.x')), false);
-    assert.equal((await repo.findById(clientA.id, user.id)).sentAt, null);
-    assert.equal(await repo.markSent(clientA.id, randomUUID(), markOf('wamid.x')), false);
-    assert.equal(await repo.markSent(clientA.id, 'nao-e-uuid', markOf('wamid.x')), false);
+    const { user } = await freshReply(companyA, 'sent-role');
+    assert.equal(await repo.markSent(companyA.id, user.id, markOf('wamid.x')), false);
+    assert.equal((await repo.findById(companyA.id, user.id)).sentAt, null);
+    assert.equal(await repo.markSent(companyA.id, randomUUID(), markOf('wamid.x')), false);
+    assert.equal(await repo.markSent(companyA.id, 'nao-e-uuid', markOf('wamid.x')), false);
   });
 
   it('SQL cru: o banco recusa marca de envio em mensagem do contato e id de canal fora do tamanho', async () => {
-    const { user, reply } = await freshReply(clientA, 'sent-check');
+    const { user, reply } = await freshReply(companyA, 'sent-check');
     await assert.rejects(
       database.prisma.$executeRaw`UPDATE messages SET sent_at = now() WHERE id = ${user.id}::uuid`,
       /sent_only_assistant_check|check/i,
@@ -546,7 +547,7 @@ describe('markSent (spec 011): marca de envio da resposta do assistente', () => 
     );
   });
 
-  it('a tenant-scope exige clientId no where do updateMany (TenantScopeError)', async () => {
+  it('a tenant-scope exige companyId no where do updateMany (TenantScopeError)', async () => {
     await assert.rejects(
       database.prisma.message.updateMany({
         where: { id: replyA.id },
@@ -559,12 +560,12 @@ describe('markSent (spec 011): marca de envio da resposta do assistente', () => 
 
 describe('listBefore (spec 011): histórico anterior a uma mensagem', () => {
   it('devolve as N anteriores em ordem cronológica, sem a âncora nem as posteriores', async () => {
-    const conversation = await conversations.findOrCreateByContact(clientA.id, 'before-order');
+    const conversation = await conversations.findOrCreateByContact(companyA.id, 'before-order');
     const base = Date.UTC(2026, 0, 1);
     const created: Message[] = [];
     for (let i = 0; i < 30; i += 1) {
       created.push(
-        await repo.create(clientA.id, {
+        await repo.create(companyA.id, {
           conversationId: conversation.id,
           role: i % 2 === 0 ? 'USER' : 'ASSISTANT',
           content: `m${String(i)}`,
@@ -574,13 +575,13 @@ describe('listBefore (spec 011): histórico anterior a uma mensagem', () => {
     }
     const anchor = created[5];
     assert.ok(anchor !== undefined);
-    const five = await repo.listBefore(clientA.id, conversation.id, anchor.id, 20);
+    const five = await repo.listBefore(companyA.id, conversation.id, anchor.id, 20);
     assert.deepEqual(
       five.map((message) => message.content),
       ['m0', 'm1', 'm2', 'm3', 'm4'],
     );
     // Limite menor que o disponível: as mais próximas da âncora, em ordem cronológica.
-    const lastThree = await repo.listBefore(clientA.id, conversation.id, anchor.id, 3);
+    const lastThree = await repo.listBefore(companyA.id, conversation.id, anchor.id, 3);
     assert.deepEqual(
       lastThree.map((message) => message.content),
       ['m2', 'm3', 'm4'],
@@ -589,23 +590,23 @@ describe('listBefore (spec 011): histórico anterior a uma mensagem', () => {
     // memória sobre `listRecent(limit + 1)`): o histórico continua completo.
     const tail = created[29];
     assert.ok(tail !== undefined);
-    const window = await repo.listBefore(clientA.id, conversation.id, tail.id, 20);
+    const window = await repo.listBefore(companyA.id, conversation.id, tail.id, 20);
     assert.equal(window.length, 20);
     assert.equal(window[0]?.content, 'm9');
     assert.equal(window[19]?.content, 'm28');
     // A primeira mensagem não tem anterior.
     const first = created[0];
     assert.ok(first !== undefined);
-    assert.deepEqual(await repo.listBefore(clientA.id, conversation.id, first.id, 20), []);
+    assert.deepEqual(await repo.listBefore(companyA.id, conversation.id, first.id, 20), []);
   });
 
   it('empate de createdAt desempata por id (a anterior na ordem da conversa)', async () => {
-    const conversation = await conversations.findOrCreateByContact(clientA.id, 'before-tie');
+    const conversation = await conversations.findOrCreateByContact(companyA.id, 'before-tie');
     const instant = new Date(Date.UTC(2026, 1, 1));
     const rows: Message[] = [];
     for (let i = 0; i < 4; i += 1) {
       rows.push(
-        await repo.create(clientA.id, {
+        await repo.create(companyA.id, {
           conversationId: conversation.id,
           role: 'USER',
           content: `t${String(i)}`,
@@ -616,42 +617,42 @@ describe('listBefore (spec 011): histórico anterior a uma mensagem', () => {
     const ordered = [...rows].sort((left, right) => (left.id < right.id ? -1 : 1));
     const third = ordered[2];
     assert.ok(third !== undefined);
-    const before = await repo.listBefore(clientA.id, conversation.id, third.id, 20);
+    const before = await repo.listBefore(companyA.id, conversation.id, third.id, 20);
     assert.deepEqual(
       before.map((message) => message.id),
       [ordered[0]?.id, ordered[1]?.id],
     );
   });
 
-  it('isolamento: o ClientId de B não enxerga o histórico de A, nem com a âncora e a conversa certas', async () => {
-    assert.deepEqual(await repo.listBefore(clientB.id, conversationA.id, replyA.id, 20), []);
-    // Âncora de um cliente com a conversa do outro: não existe nessa conversa.
-    assert.deepEqual(await repo.listBefore(clientA.id, conversationB.id, replyB.id, 20), []);
-    assert.deepEqual(await repo.listBefore(clientB.id, conversationB.id, replyA.id, 20), []);
-    // O caminho feliz continua devolvendo só o que é do cliente.
-    const own = await repo.listBefore(clientB.id, conversationB.id, replyB.id, 20);
+  it('isolamento: o CompanyId de B não enxerga o histórico de A, nem com a âncora e a conversa certas', async () => {
+    assert.deepEqual(await repo.listBefore(companyB.id, conversationA.id, replyA.id, 20), []);
+    // Âncora de uma empresa com a conversa do outro: não existe nessa conversa.
+    assert.deepEqual(await repo.listBefore(companyA.id, conversationB.id, replyB.id, 20), []);
+    assert.deepEqual(await repo.listBefore(companyB.id, conversationB.id, replyA.id, 20), []);
+    // O caminho feliz continua devolvendo só o que é da empresa.
+    const own = await repo.listBefore(companyB.id, conversationB.id, replyB.id, 20);
     assert.ok(own.length >= 1);
-    assert.ok(own.every((message) => message.clientId === clientB.id));
+    assert.ok(own.every((message) => message.companyId === companyB.id));
     assert.ok(own.some((message) => message.id === userB.id));
   });
 
   it('entradas inválidas devolvem lista vazia (limite, ids malformados)', async () => {
-    assert.deepEqual(await repo.listBefore(clientA.id, conversationA.id, replyA.id, 0), []);
-    assert.deepEqual(await repo.listBefore(clientA.id, 'x', replyA.id, 5), []);
-    assert.deepEqual(await repo.listBefore(clientA.id, conversationA.id, 'x', 5), []);
-    assert.deepEqual(await repo.listBefore(clientA.id, conversationA.id, randomUUID(), 5), []);
+    assert.deepEqual(await repo.listBefore(companyA.id, conversationA.id, replyA.id, 0), []);
+    assert.deepEqual(await repo.listBefore(companyA.id, 'x', replyA.id, 5), []);
+    assert.deepEqual(await repo.listBefore(companyA.id, conversationA.id, 'x', 5), []);
+    assert.deepEqual(await repo.listBefore(companyA.id, conversationA.id, randomUUID(), 5), []);
   });
 });
 
 describe('listPending e markAnswered (spec 013): mensagens do contato à espera de resposta', () => {
   /** Conversa nova com `count` mensagens do contato, em instantes distintos e crescentes. */
-  async function freshPending(client: Client, contact: string, count: number) {
-    const conversation = await conversations.findOrCreateByContact(client.id, contact);
+  async function freshPending(company: Company, contact: string, count: number) {
+    const conversation = await conversations.findOrCreateByContact(company.id, contact);
     const base = Date.UTC(2026, 2, 1);
     const users: Message[] = [];
     for (let i = 0; i < count; i += 1) {
       users.push(
-        await repo.create(client.id, {
+        await repo.create(company.id, {
           conversationId: conversation.id,
           role: 'USER',
           content: `pendente ${String(i)}`,
@@ -662,8 +663,8 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
     return { conversation, users };
   }
 
-  async function replyTo(client: Client, conversation: Conversation, last: Message) {
-    return repo.create(client.id, {
+  async function replyTo(company: Company, conversation: Conversation, last: Message) {
+    return repo.create(company.id, {
       conversationId: conversation.id,
       role: 'ASSISTANT',
       content: 'resposta do lote',
@@ -673,13 +674,13 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   }
 
   it('lista as pendentes da mais antiga para a mais nova, respeitando o limite', async () => {
-    const { conversation, users } = await freshPending(clientA, 'pend-order', 4);
-    const all = await repo.listPending(clientA.id, conversation.id, 10);
+    const { conversation, users } = await freshPending(companyA, 'pend-order', 4);
+    const all = await repo.listPending(companyA.id, conversation.id, 10);
     assert.deepEqual(
       all.map((message) => message.id),
       users.map((message) => message.id),
     );
-    const two = await repo.listPending(clientA.id, conversation.id, 2);
+    const two = await repo.listPending(companyA.id, conversation.id, 2);
     assert.deepEqual(
       two.map((message) => message.id),
       users.slice(0, 2).map((message) => message.id),
@@ -687,112 +688,112 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   });
 
   it('mensagem do assistente nunca é pendente', async () => {
-    const { conversation, users } = await freshPending(clientA, 'pend-role', 1);
+    const { conversation, users } = await freshPending(companyA, 'pend-role', 1);
     const first = users[0];
     assert.ok(first !== undefined);
-    await replyTo(clientA, conversation, first);
-    assert.deepEqual(await repo.listPending(clientA.id, conversation.id, 10), []);
+    await replyTo(companyA, conversation, first);
+    assert.deepEqual(await repo.listPending(companyA.id, conversation.id, 10), []);
   });
 
   it('respondida por replyToId (caminho do simulador e linhas antigas) não é pendente, sem answeredById', async () => {
-    const { conversation, users } = await freshPending(clientA, 'pend-reply-to', 3);
+    const { conversation, users } = await freshPending(companyA, 'pend-reply-to', 3);
     const middle = users[1];
     assert.ok(middle !== undefined);
-    await replyTo(clientA, conversation, middle);
-    const pending = await repo.listPending(clientA.id, conversation.id, 10);
+    await replyTo(companyA, conversation, middle);
+    const pending = await repo.listPending(companyA.id, conversation.id, 10);
     assert.deepEqual(
       pending.map((message) => message.id),
       [users[0]?.id, users[2]?.id],
     );
-    assert.equal((await repo.findById(clientA.id, middle.id)).answeredById, null);
+    assert.equal((await repo.findById(companyA.id, middle.id)).answeredById, null);
   });
 
   it('markAnswered marca o lote inteiro, a resposta tem replyToId = a última, e a segunda chamada não acha pendentes', async () => {
-    const { conversation, users } = await freshPending(clientA, 'pend-batch', 3);
+    const { conversation, users } = await freshPending(companyA, 'pend-batch', 3);
     const last = users[2];
     assert.ok(last !== undefined);
-    const reply = await replyTo(clientA, conversation, last);
+    const reply = await replyTo(companyA, conversation, last);
 
     const ids = users.map((message) => message.id);
-    assert.equal(await repo.markAnswered(clientA.id, ids, reply.id), 3);
+    assert.equal(await repo.markAnswered(companyA.id, ids, reply.id), 3);
     for (const user of users) {
-      assert.equal((await repo.findById(clientA.id, user.id)).answeredById, reply.id);
+      assert.equal((await repo.findById(companyA.id, user.id)).answeredById, reply.id);
     }
     assert.equal(reply.replyToId, last.id);
-    assert.deepEqual(await repo.listPending(clientA.id, conversation.id, 10), []);
+    assert.deepEqual(await repo.listPending(companyA.id, conversation.id, 10), []);
     // Idempotente: repetir não muda nada.
-    assert.equal(await repo.markAnswered(clientA.id, ids, reply.id), 0);
+    assert.equal(await repo.markAnswered(companyA.id, ids, reply.id), 0);
   });
 
   it('markAnswered não toca em mensagem já atendida por outra resposta nem em mensagem do assistente', async () => {
-    const { conversation, users } = await freshPending(clientA, 'pend-once', 2);
+    const { conversation, users } = await freshPending(companyA, 'pend-once', 2);
     const [first, second] = users;
     assert.ok(first !== undefined && second !== undefined);
-    const firstReply = await replyTo(clientA, conversation, first);
-    await repo.markAnswered(clientA.id, [first.id], firstReply.id);
-    const secondReply = await replyTo(clientA, conversation, second);
+    const firstReply = await replyTo(companyA, conversation, first);
+    await repo.markAnswered(companyA.id, [first.id], firstReply.id);
+    const secondReply = await replyTo(companyA, conversation, second);
     // A primeira já tem dono; só a segunda muda. O id da própria resposta (ASSISTANT) é ignorado.
     assert.equal(
-      await repo.markAnswered(clientA.id, [first.id, second.id, secondReply.id], secondReply.id),
+      await repo.markAnswered(companyA.id, [first.id, second.id, secondReply.id], secondReply.id),
       1,
     );
-    assert.equal((await repo.findById(clientA.id, first.id)).answeredById, firstReply.id);
-    assert.equal((await repo.findById(clientA.id, second.id)).answeredById, secondReply.id);
-    assert.equal((await repo.findById(clientA.id, secondReply.id)).answeredById, null);
+    assert.equal((await repo.findById(companyA.id, first.id)).answeredById, firstReply.id);
+    assert.equal((await repo.findById(companyA.id, second.id)).answeredById, secondReply.id);
+    assert.equal((await repo.findById(companyA.id, secondReply.id)).answeredById, null);
   });
 
   it('entradas inválidas não vão ao banco (limite, ids malformados, lista vazia)', async () => {
-    const { conversation } = await freshPending(clientA, 'pend-invalid', 1);
-    assert.deepEqual(await repo.listPending(clientA.id, conversation.id, 0), []);
-    assert.deepEqual(await repo.listPending(clientA.id, 'x', 5), []);
-    assert.equal(await repo.markAnswered(clientA.id, [], randomUUID()), 0);
-    assert.equal(await repo.markAnswered(clientA.id, ['x'], randomUUID()), 0);
-    assert.equal(await repo.markAnswered(clientA.id, [randomUUID()], 'x'), 0);
+    const { conversation } = await freshPending(companyA, 'pend-invalid', 1);
+    assert.deepEqual(await repo.listPending(companyA.id, conversation.id, 0), []);
+    assert.deepEqual(await repo.listPending(companyA.id, 'x', 5), []);
+    assert.equal(await repo.markAnswered(companyA.id, [], randomUUID()), 0);
+    assert.equal(await repo.markAnswered(companyA.id, ['x'], randomUUID()), 0);
+    assert.equal(await repo.markAnswered(companyA.id, [randomUUID()], 'x'), 0);
   });
 
-  it('isolamento: listPending só enxerga o cliente informado, mesmo com a conversa de outro cliente', async () => {
-    const a = await freshPending(clientA, 'pend-iso', 2);
-    const b = await freshPending(clientB, 'pend-iso', 3);
-    assert.equal((await repo.listPending(clientA.id, a.conversation.id, 10)).length, 2);
-    assert.equal((await repo.listPending(clientB.id, b.conversation.id, 10)).length, 3);
-    // O ClientId de A com a conversa de B (e o inverso) não devolve nada.
-    assert.deepEqual(await repo.listPending(clientA.id, b.conversation.id, 10), []);
-    assert.deepEqual(await repo.listPending(clientB.id, a.conversation.id, 10), []);
+  it('isolamento: listPending só enxerga a empresa informado, mesmo com a conversa de outra empresa', async () => {
+    const a = await freshPending(companyA, 'pend-iso', 2);
+    const b = await freshPending(companyB, 'pend-iso', 3);
+    assert.equal((await repo.listPending(companyA.id, a.conversation.id, 10)).length, 2);
+    assert.equal((await repo.listPending(companyB.id, b.conversation.id, 10)).length, 3);
+    // O CompanyId de A com a conversa de B (e o inverso) não devolve nada.
+    assert.deepEqual(await repo.listPending(companyA.id, b.conversation.id, 10), []);
+    assert.deepEqual(await repo.listPending(companyB.id, a.conversation.id, 10), []);
   });
 
-  it('isolamento: markAnswered com ids de outro cliente não altera nada', async () => {
-    const a = await freshPending(clientA, 'pend-mark-iso', 2);
-    const b = await freshPending(clientB, 'pend-mark-iso', 2);
+  it('isolamento: markAnswered com ids de outra empresa não altera nada', async () => {
+    const a = await freshPending(companyA, 'pend-mark-iso', 2);
+    const b = await freshPending(companyB, 'pend-mark-iso', 2);
     const lastB = b.users[1];
     assert.ok(lastB !== undefined);
-    const replyOfB = await replyTo(clientB, b.conversation, lastB);
+    const replyOfB = await replyTo(companyB, b.conversation, lastB);
     const lastA = a.users[1];
     assert.ok(lastA !== undefined);
-    const replyOfA = await replyTo(clientA, a.conversation, lastA);
+    const replyOfA = await replyTo(companyA, a.conversation, lastA);
 
-    // O ClientId de A com ids de mensagens de B: nada muda em B.
+    // O CompanyId de A com ids de mensagens de B: nada muda em B.
     const idsOfB = b.users.map((message) => message.id);
-    assert.equal(await repo.markAnswered(clientA.id, idsOfB, replyOfA.id), 0);
+    assert.equal(await repo.markAnswered(companyA.id, idsOfB, replyOfA.id), 0);
     for (const user of b.users) {
-      assert.equal((await repo.findById(clientB.id, user.id)).answeredById, null);
+      assert.equal((await repo.findById(companyB.id, user.id)).answeredById, null);
     }
     // Só a última de B foi respondida por replyToId (a resposta do lote de B): a primeira segue pendente.
-    assert.equal((await repo.listPending(clientB.id, b.conversation.id, 10)).length, 1);
+    assert.equal((await repo.listPending(companyB.id, b.conversation.id, 10)).length, 1);
 
-    // O ClientId de A com ids de A mas a resposta de B: o banco recusa (chave estrangeira composta)
+    // O CompanyId de A com ids de A mas a resposta de B: o banco recusa (chave estrangeira composta)
     // e nada fica marcado.
     const idsOfA = a.users.map((message) => message.id);
     await assert.rejects(
-      repo.markAnswered(clientA.id, idsOfA, replyOfB.id),
+      repo.markAnswered(companyA.id, idsOfA, replyOfB.id),
       (error: unknown) => error instanceof DatabaseError,
     );
-    assert.equal((await repo.listPending(clientA.id, a.conversation.id, 10)).length, 1);
+    assert.equal((await repo.listPending(companyA.id, a.conversation.id, 10)).length, 1);
     for (const user of a.users) {
-      assert.equal((await repo.findById(clientA.id, user.id)).answeredById, null);
+      assert.equal((await repo.findById(companyA.id, user.id)).answeredById, null);
     }
   });
 
-  it('a tenant-scope exige clientId no where do updateMany de answeredById (TenantScopeError)', async () => {
+  it('a tenant-scope exige companyId no where do updateMany de answeredById (TenantScopeError)', async () => {
     await assert.rejects(
       database.prisma.message.updateMany({
         where: { id: userA.id },
@@ -802,8 +803,8 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
     );
   });
 
-  it('SQL cru: answered_by_id apontando para mensagem de outro cliente viola a chave estrangeira composta (23503)', async () => {
-    const { users } = await freshPending(clientA, 'pend-fk', 1);
+  it('SQL cru: answered_by_id apontando para mensagem de outra empresa viola a chave estrangeira composta (23503)', async () => {
+    const { users } = await freshPending(companyA, 'pend-fk', 1);
     const user = users[0];
     assert.ok(user !== undefined);
     await assert.rejects(
@@ -811,40 +812,40 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
         UPDATE messages SET answered_by_id = ${replyB.id}::uuid WHERE id = ${user.id}::uuid`,
       (error: unknown) => {
         assert.ok(error instanceof Error);
-        assert.match(error.message, /23503|foreign key|messages_answered_by_id_client_id_fkey/i);
+        assert.match(error.message, /23503|foreign key|messages_answered_by_id_company_id_fkey/i);
         return true;
       },
     );
-    assert.equal((await repo.findById(clientA.id, user.id)).answeredById, null);
+    assert.equal((await repo.findById(companyA.id, user.id)).answeredById, null);
   });
 
   it('SQL cru: answered_by_id em mensagem do assistente viola o CHECK', async () => {
-    const { conversation, users } = await freshPending(clientA, 'pend-check', 1);
+    const { conversation, users } = await freshPending(companyA, 'pend-check', 1);
     const user = users[0];
     assert.ok(user !== undefined);
-    const reply = await replyTo(clientA, conversation, user);
+    const reply = await replyTo(companyA, conversation, user);
     await assert.rejects(
       database.prisma.$executeRaw`
         UPDATE messages SET answered_by_id = ${reply.id}::uuid WHERE id = ${reply.id}::uuid`,
-      /messages_answered_by_only_user_check|check/i,
+      /messages_answered_by_only_contact_check|check/i,
     );
-    // E o caminho válido (mensagem do contato, resposta do mesmo cliente) passa.
+    // E o caminho válido (mensagem do contato, resposta do mesma empresa) passa.
     await database.prisma.$executeRaw`
       UPDATE messages SET answered_by_id = ${reply.id}::uuid WHERE id = ${user.id}::uuid`;
-    assert.equal((await repo.findById(clientA.id, user.id)).answeredById, reply.id);
+    assert.equal((await repo.findById(companyA.id, user.id)).answeredById, reply.id);
   });
 
-  it('conversations.findByContact: devolve só a conversa do cliente e nunca cria', async () => {
-    const before = await conversations.count(clientA.id);
-    const missing = await conversations.findByContact(clientA.id, `inexistente-${randomUUID()}`);
+  it('conversations.findByContact: devolve só a conversa da empresa e nunca cria', async () => {
+    const before = await conversations.count(companyA.id);
+    const missing = await conversations.findByContact(companyA.id, `inexistente-${randomUUID()}`);
     assert.equal(missing, null);
-    assert.equal(await conversations.count(clientA.id), before, 'não cria conversa');
-    const found = await conversations.findByContact(clientA.id, 'mesmo-contato');
+    assert.equal(await conversations.count(companyA.id), before, 'não cria conversa');
+    const found = await conversations.findByContact(companyA.id, 'mesmo-contato');
     assert.equal(found?.id, conversationA.id);
-    const foundB = await conversations.findByContact(clientB.id, 'mesmo-contato');
+    const foundB = await conversations.findByContact(companyB.id, 'mesmo-contato');
     assert.equal(foundB?.id, conversationB.id);
     // Contato que só existe em A não aparece para B.
-    await conversations.findOrCreateByContact(clientA.id, 'so-do-a');
-    assert.equal(await conversations.findByContact(clientB.id, 'so-do-a'), null);
+    await conversations.findOrCreateByContact(companyA.id, 'so-do-a');
+    assert.equal(await conversations.findByContact(companyB.id, 'so-do-a'), null);
   });
 });

@@ -28,11 +28,11 @@ export const jobExternalIdSchema = z
   .max(EXTERNAL_ID_MAX_LENGTH);
 
 const identityFields = {
-  clientId: z.uuid(),
+  companyId: z.uuid(),
   /**
    * Número do negócio que recebeu a mensagem, gravado ao enfileirar. Defesa em profundidade: o envio
-   * usa SEMPRE o número lido do banco pelo `clientId`; este só serve para descartar o job se o número
-   * do cliente mudou (ou o job foi adulterado) entre enfileirar e processar.
+   * usa SEMPRE o número lido do banco pelo `companyId`; este só serve para descartar o job se o número
+   * da empresa mudou (ou o job foi adulterado) entre enfileirar e processar.
    */
   phoneNumberId: z.string().regex(WHATSAPP_PHONE_NUMBER_ID_PATTERN),
   contactRef: jobContactRefSchema,
@@ -47,7 +47,7 @@ const baseFields = {
 /**
  * Job da fila de entrada do canal. Guarda o texto do contato e o `contactRef` (dado pessoal) até
  * ser concluído e pelo período configurado. Campos desconhecidos são descartados na leitura (um job
- * adulterado nunca escolhe o número de envio: ele vem do banco, pelo `clientId`). O `clientId` foi resolvido no banco a partir do número
+ * adulterado nunca escolhe o número de envio: ele vem do banco, pelo `companyId`). O `companyId` foi resolvido no banco a partir do número
  * do canal; o worker nunca o deduz de outra coisa.
  */
 export const inboundJobSchema = z.discriminatedUnion('kind', [
@@ -67,7 +67,7 @@ export type InboundJob = z.infer<typeof inboundJobSchema>;
 
 /**
  * Job de resposta às mensagens pendentes de um contato (spec 013). **Não carrega texto**: o texto
- * vive no banco. Leva só o cliente, o número do negócio (para descartar o job se o número do cliente
+ * vive no banco. Leva só a empresa, o número do negócio (para descartar o job se o número da empresa
  * mudou), o contato e o `requestId`.
  */
 export const flushJobSchema = z.object({
@@ -86,23 +86,23 @@ export const channelJobSchema = z.discriminatedUnion('kind', [
 export type ChannelJob = z.infer<typeof channelJobSchema>;
 
 /**
- * Id determinístico do job: dedupe de reentregas do canal, por cliente (o mesmo `externalId` de
- * dois clientes nunca colide). Sem `:` (o BullMQ recusa) e nunca um inteiro puro: o prefixo é o
- * UUID do cliente e o `externalId` vai codificado.
+ * Id determinístico do job: dedupe de reentregas do canal, por empresa (o mesmo `externalId` de
+ * duas empresas nunca colide). Sem `:` (o BullMQ recusa) e nunca um inteiro puro: o prefixo é o
+ * UUID da empresa e o `externalId` vai codificado.
  */
-export function inboundJobId(job: Pick<InboundJob, 'clientId' | 'externalId'>): string {
-  return `${job.clientId}_${encodeURIComponent(job.externalId)}`;
+export function inboundJobId(job: Pick<InboundJob, 'companyId' | 'externalId'>): string {
+  return `${job.companyId}_${encodeURIComponent(job.externalId)}`;
 }
 
 /**
- * Identidade do `flush` de um contato: no máximo um por `(clientId, contactRef)`. Inclui o
- * `clientId` (o mesmo `contactRef` de dois clientes nunca colide) e um hash do `contactRef`, para o
+ * Identidade do `flush` de um contato: no máximo um por `(companyId, contactRef)`. Inclui o
+ * `companyId` (o mesmo `contactRef` de duas empresas nunca colide) e um hash do `contactRef`, para o
  * telefone não aparecer na chave do Redis. Sem `:`. Serve de id de deduplicação na fila (um
  * `jobId` fixo impediria a janela deslizante: ver o registro da spec 013).
  */
-export function flushKey(job: Pick<FlushJob, 'clientId' | 'contactRef'>): string {
+export function flushKey(job: Pick<FlushJob, 'companyId' | 'contactRef'>): string {
   const digest = createHash('sha256').update(job.contactRef).digest('hex').slice(0, 32);
-  return `flush_${job.clientId}_${digest}`;
+  return `flush_${job.companyId}_${digest}`;
 }
 
 /** Quando e como o `flush` de um contato roda (spec 013). */
@@ -140,7 +140,7 @@ export interface InboundJobContext {
   readonly finalAttempt: boolean;
 }
 
-/** `done`: processado (ou já estava); `discarded`: descartado de propósito (ex.: cliente sem número). */
+/** `done`: processado (ou já estava); `discarded`: descartado de propósito (ex.: empresa sem número). */
 export type InboundJobOutcome = 'done' | 'discarded';
 
 /** O que o worker executa para cada job (implementado por `ChannelInboundProcessor`). */
@@ -157,7 +157,7 @@ export type InboundJobHandler = (
 export type InboundJobFailureHandler = (job: ChannelJob) => Promise<void>;
 
 /**
- * Erro que não adianta retentar (token inválido, janela fechada, cliente removido...): a fila
+ * Erro que não adianta retentar (token inválido, janela fechada, empresa removida...): a fila
  * marca o job como falho de vez. O `context` nunca leva texto do contato nem destinatário.
  */
 export class NonRetryableJobError extends BaseError {

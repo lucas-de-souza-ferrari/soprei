@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../application/clients/client.service.js';
-import type { Client } from '../../domain/index.js';
+import { CompanyService } from '../../application/companies/company.service.js';
+import type { Company } from '../../domain/index.js';
 import { buildServer } from '../../infrastructure/http/server.js';
 import { createMetrics, type Metrics } from '../../infrastructure/metrics/index.js';
 import { ServiceUnavailableError } from '../../shared/errors/index.js';
@@ -27,8 +27,8 @@ interface Env {
   logs: LogCapture;
   metrics: Metrics;
   store: InMemorySessionStore;
-  client: Client;
-  other: Client;
+  company: Company;
+  other: Company;
 }
 
 async function setup(): Promise<Env> {
@@ -44,13 +44,13 @@ async function setup(): Promise<Env> {
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
     auth: auth.service,
-    userAdmin: auth.userAdmin,
-    admin: { clients: new ClientService(auth.clients) },
+    membershipAdmin: auth.membershipAdmin,
+    admin: { companies: new CompanyService(auth.companies) },
   });
   await app.ready();
-  const client = await auth.clients.create({ name: 'Cliente A', slug: 'cliente-a' });
-  const other = await auth.clients.create({ name: 'Cliente B', slug: 'cliente-b' });
-  return { app, auth, logs, metrics, store, client, other };
+  const company = await auth.companies.create({ name: 'Empresa A', slug: 'empresa-a' });
+  const other = await auth.companies.create({ name: 'Empresa B', slug: 'empresa-b' });
+  return { app, auth, logs, metrics, store, company, other };
 }
 
 describe('POST /auth/password (troca da própria senha), spec 008', () => {
@@ -71,11 +71,11 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
     });
   const me = (who: IssuedLogin) =>
     env.app.inject({ method: 'GET', url: '/auth/me', headers: bearer(who.accessToken) });
-  const loginAs = (client: Client, who: IssuedLogin, password: string) =>
-    env.auth.service.login({ clientSlug: client.slug, email: who.email, password });
+  const loginAs = (company: Company, who: IssuedLogin, password: string) =>
+    env.auth.service.login({ companySlug: company.slug, email: who.email, password });
 
   it('senha atual errada é 401 e conta no contador: depois do limite, 429 com Retry-After antes de gastar hash', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'AGENT' });
+    const who = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
     for (let i = 0; i < 3; i += 1) {
       const response = await change(who, {
         currentPassword: SECRET_WRONG,
@@ -95,13 +95,13 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
     assert.equal(env.auth.hasher.verifyCalls, verifyBefore);
     assert.equal(env.auth.hasher.hashCalls, hashBefore);
     // A senha não mudou.
-    assert.ok((await loginAs(env.client, who, TEST_PASSWORD)).ok);
+    assert.ok((await loginAs(env.company, who, TEST_PASSWORD)).ok);
   });
 
-  it('o contador é por pessoa: bloquear uma não bloqueia outra do mesmo cliente nem a do outro cliente', async () => {
-    const victim = await env.auth.userToken(env.client.id, { role: 'AGENT' });
-    const bystander = await env.auth.userToken(env.client.id, { role: 'AGENT' });
-    const alien = await env.auth.userToken(env.other.id, { role: 'AGENT' });
+  it('o contador é por pessoa: bloquear uma não bloqueia outra do mesma empresa nem a do outra empresa', async () => {
+    const victim = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
+    const bystander = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
+    const alien = await env.auth.membershipToken(env.other.id, { role: 'AGENT' });
     for (let i = 0; i < 3; i += 1) {
       await change(victim, { currentPassword: SECRET_WRONG, newPassword: NEW_PASSWORD });
     }
@@ -120,11 +120,11 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
   });
 
   it('a senha certa troca o hash, devolve 204 sem corpo e derruba TODAS as sessões da pessoa (access e refresh)', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'VIEWER' });
-    const second = await loginAs(env.client, who, TEST_PASSWORD);
+    const who = await env.auth.membershipToken(env.company.id, { role: 'VIEWER' });
+    const second = await loginAs(env.company, who, TEST_PASSWORD);
     assert.ok(second.ok);
-    const bystander = await env.auth.userToken(env.client.id, { role: 'AGENT' });
-    const alien = await env.auth.userToken(env.other.id, { role: 'OWNER' });
+    const bystander = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
+    const alien = await env.auth.membershipToken(env.other.id, { role: 'OWNER' });
 
     const response = await change(who, {
       currentPassword: TEST_PASSWORD,
@@ -156,22 +156,22 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
     assert.equal((await me(bystander)).statusCode, 200);
     assert.equal((await me(alien)).statusCode, 200);
 
-    assert.ok(!(await loginAs(env.client, who, TEST_PASSWORD)).ok);
-    assert.ok((await loginAs(env.client, who, NEW_PASSWORD)).ok);
+    assert.ok(!(await loginAs(env.company, who, TEST_PASSWORD)).ok);
+    assert.ok((await loginAs(env.company, who, NEW_PASSWORD)).ok);
   });
 
   it('senha nova igual à atual é aceita; o papel não é pré-requisito (VIEWER troca a sua)', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'VIEWER' });
+    const who = await env.auth.membershipToken(env.company.id, { role: 'VIEWER' });
     const response = await change(who, {
       currentPassword: TEST_PASSWORD,
       newPassword: TEST_PASSWORD,
     });
     assert.equal(response.statusCode, 204);
-    assert.ok((await loginAs(env.client, who, TEST_PASSWORD)).ok);
+    assert.ok((await loginAs(env.company, who, TEST_PASSWORD)).ok);
   });
 
-  it('grava USER_PASSWORD_CHANGED com ator = alvo, sem papéis; um acerto zera o contador', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'AGENT' });
+  it('grava MEMBERSHIP_PASSWORD_CHANGED com ator = alvo, sem papéis; um acerto zera o contador', async () => {
+    const who = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
     for (let i = 0; i < 2; i += 1) {
       await change(who, { currentPassword: SECRET_WRONG, newPassword: NEW_PASSWORD });
     }
@@ -181,14 +181,14 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
     );
     const [event] = env.auth.audit.events;
     assert.ok(event);
-    assert.equal(event.action, 'USER_PASSWORD_CHANGED');
-    assert.equal(event.actorUserId, who.userId);
-    assert.equal(event.targetUserId, who.userId);
-    assert.equal(event.clientId, env.client.id);
+    assert.equal(event.action, 'MEMBERSHIP_PASSWORD_CHANGED');
+    assert.equal(event.actorMembershipId, who.membershipId);
+    assert.equal(event.targetMembershipId, who.membershipId);
+    assert.equal(event.companyId, env.company.id);
     assert.equal(event.fromRole, null);
     assert.equal(event.toRole, null);
     // Contador zerado: depois do acerto, duas falhas novas ainda não bloqueiam.
-    const fresh = await loginAs(env.client, who, NEW_PASSWORD);
+    const fresh = await loginAs(env.company, who, NEW_PASSWORD);
     assert.ok(fresh.ok);
     const { accessToken } = fresh.value;
     for (let i = 0; i < 2; i += 1) {
@@ -204,7 +204,7 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
 
   it('sem token 401; PlatformAdmin 403; corpo inválido 400 sem ecoar a senha', async () => {
     const platform = await env.auth.platformToken();
-    const who = await env.auth.userToken(env.client.id, { role: 'AGENT' });
+    const who = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
     assert.equal(
       (await change(undefined, { currentPassword: TEST_PASSWORD, newPassword: NEW_PASSWORD }))
         .statusCode,
@@ -231,7 +231,7 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
   });
 
   it('Redis das sessões fora: 503 sem verificar a senha (a rota é autenticada, então o hook já falha fechado)', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'AGENT' });
+    const who = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
     env.store.failWith = new ServiceUnavailableError('redis fora');
     const before = env.auth.hasher.verifyCalls;
     const response = await change(who, {
@@ -243,7 +243,7 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
   });
 
   it('Redis fora DEPOIS do commit: 503, a senha nova e a auditoria ficam gravadas', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'AGENT' });
+    const who = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
     env.store.failRevokeAllWith = new ServiceUnavailableError('redis fora');
     const response = await change(who, {
       currentPassword: TEST_PASSWORD,
@@ -252,12 +252,12 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
     assert.equal(response.statusCode, 503);
     env.store.failRevokeAllWith = undefined;
     assert.equal(env.auth.audit.events.length, 1);
-    assert.ok((await loginAs(env.client, who, NEW_PASSWORD)).ok);
-    assert.ok(!(await loginAs(env.client, who, TEST_PASSWORD)).ok);
+    assert.ok((await loginAs(env.company, who, NEW_PASSWORD)).ok);
+    assert.ok(!(await loginAs(env.company, who, TEST_PASSWORD)).ok);
   });
 
   it('falha ao gravar a trilha desfaz a troca de senha', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'AGENT' });
+    const who = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
     env.auth.audit.failWith = new Error('falha de teste na trilha');
     const response = await change(who, {
       currentPassword: TEST_PASSWORD,
@@ -266,14 +266,14 @@ describe('POST /auth/password (troca da própria senha), spec 008', () => {
     assert.equal(response.statusCode, 500);
     env.auth.audit.failWith = undefined;
     assert.ok(
-      (await loginAs(env.client, who, TEST_PASSWORD)).ok,
+      (await loginAs(env.company, who, TEST_PASSWORD)).ok,
       'a senha antiga continua valendo',
     );
     assert.equal((await me(who)).statusCode, 200, 'e a sessão não foi revogada');
   });
 
   it('senha atual, senha nova, e-mail e tokens nunca aparecem em log, métrica nem corpo de erro', async () => {
-    const who = await env.auth.userToken(env.client.id, { role: 'AGENT' });
+    const who = await env.auth.membershipToken(env.company.id, { role: 'AGENT' });
     const errors = [
       await change(who, { currentPassword: SECRET_WRONG, newPassword: SECRET_NEW }),
       await change(who, { currentPassword: TEST_PASSWORD, newPassword: 'x' }),

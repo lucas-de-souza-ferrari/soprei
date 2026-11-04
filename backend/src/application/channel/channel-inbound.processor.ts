@@ -1,8 +1,8 @@
 import { ZodError } from 'zod';
 import {
   type ChannelConnectionRepository,
-  ClientId,
-  type ClientRepository,
+  CompanyId,
+  type CompanyRepository,
   type MessageRepository,
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
@@ -45,14 +45,14 @@ import type { ChannelLogger } from './channel-intake.service.js';
 
 /** O que o processador precisa do atendimento (o `AttendanceService` satisfaz). */
 export interface InboundAttendance {
-  acceptInboundMessage(clientId: ClientId, input: InboundMessage): Promise<AcceptedMessage>;
+  acceptInboundMessage(companyId: CompanyId, input: InboundMessage): Promise<AcceptedMessage>;
   respondToPending(
-    clientId: ClientId,
+    companyId: CompanyId,
     contactRef: string,
     limits: BatchLimits,
     options?: RespondToPendingOptions,
   ): Promise<PendingResponse>;
-  hasPendingMessages(clientId: ClientId, contactRef: string): Promise<boolean>;
+  hasPendingMessages(companyId: CompanyId, contactRef: string): Promise<boolean>;
 }
 
 /** Janela de espera e limites do lote (spec 013); vêm da config do canal. */
@@ -65,12 +65,12 @@ export interface ChannelBatchSettings extends BatchLimits {
 
 export interface ChannelInboundProcessorDeps {
   readonly attendance: InboundAttendance;
-  /** O número do canal é lido daqui, pelo `clientId` do job: nunca do payload. */
-  readonly clients: Pick<ClientRepository, 'findById'>;
+  /** O número do canal é lido daqui, pelo `companyId` do job: nunca do payload. */
+  readonly companies: Pick<CompanyRepository, 'findById'>;
   readonly messages: Pick<MessageRepository, 'markSent' | 'findByExternalId' | 'findReplyTo'>;
   readonly sender: MessageSender;
   /**
-   * Número, token e estado da credencial do cliente, lidos do banco pelo `clientId` do job a cada
+   * Número, token e estado da credencial da empresa, lidos do banco pelo `companyId` do job a cada
    * envio (spec 015). Nunca vêm do payload nem do job.
    */
   readonly credentials: ChannelCredentials;
@@ -92,7 +92,7 @@ export interface ChannelInboundProcessorDeps {
  *   sem LLM) e agenda o `flush` do contato com a janela deslizante. Só termina depois de agendar.
  * - `flush`: junta as mensagens pendentes do contato, atende (`AttendanceService.respondToPending`:
  *   uma chamada ao LLM, uma resposta, o lote inteiro marcado como respondido), envia a resposta pelo
- *   número que o **banco** associa ao `clientId` do job e grava a marca de envio. Resposta que já
+ *   número que o **banco** associa ao `companyId` do job e grava a marca de envio. Resposta que já
  *   tem `sentAt` não é reenviada. Se ainda sobram pendentes (excederam o limite do lote), agenda o
  *   próximo `flush`, sem nova espera.
  * - `notice`: envia o texto constante, imediato, sem gravar mensagem nem chamar o LLM.
@@ -100,7 +100,7 @@ export interface ChannelInboundProcessorDeps {
  * Erros: transitórios (banco, rede, 5xx, 429, limite de taxa) são relançados para a fila retentar;
  * permanentes viram `NonRetryableJobError`. Falha final **antes de existir resposta gravada** tenta
  * uma vez enviar o texto padrão ao contato (melhor esforço); se a resposta já existe e o que falha é
- * o envio, nada é reenviado como fallback. Cliente suspenso não recebe nada: o job é descartado.
+ * o envio, nada é reenviado como fallback. Empresa suspensa não recebe nada: o job é descartado.
  *
  * Privacidade: nenhum texto, destinatário ou id de mensagem cru vai a log (só `messageRef`/`flushRef`,
  * ids internos e códigos). O `ExternalServiceError` do envio já não carrega dado do contato.
@@ -113,14 +113,14 @@ export class ChannelInboundProcessor {
   }
 
   async process(job: ChannelJob, context: InboundJobContext): Promise<InboundJobOutcome> {
-    const clientId = parseClientId(job);
+    const companyId = parseCompanyId(job);
     switch (job.kind) {
       case 'notice':
-        return this.processNotice(clientId, job);
+        return this.processNotice(companyId, job);
       case 'text':
-        return this.processAccept(clientId, job, context);
+        return this.processAccept(companyId, job, context);
       case 'flush':
-        return this.processFlush(clientId, job, context);
+        return this.processFlush(companyId, job, context);
     }
   }
 
@@ -134,23 +134,23 @@ export class ChannelInboundProcessor {
   async handleUnprocessedFailure(job: ChannelJob): Promise<void> {
     const refs = refFields(job);
     try {
-      const clientId = parseClientId(job);
+      const companyId = parseCompanyId(job);
       if (job.kind === 'notice') {
-        this.deps.logger.warn({ clientId, ...refs }, 'aviso constante não enviado: o job falhou');
+        this.deps.logger.warn({ companyId, ...refs }, 'aviso constante não enviado: o job falhou');
         return;
       }
-      if (await this.alreadyHandled(clientId, job)) {
+      if (await this.alreadyHandled(companyId, job)) {
         this.deps.logger.info(
-          { clientId, ...refs },
+          { companyId, ...refs },
           'job falhou, mas já há resposta gravada ou nada pendente; sem texto padrão',
         );
         return;
       }
       this.deps.logger.error(
-        { clientId, ...refs },
+        { companyId, ...refs },
         'job falhou sem resposta gravada; enviando o texto padrão ao contato',
       );
-      await this.sendFallback(clientId, job);
+      await this.sendFallback(companyId, job);
     } catch (error) {
       this.deps.logger.error(
         { ...refs, ...describeError(error) },
@@ -161,17 +161,17 @@ export class ChannelInboundProcessor {
 
   /** Já existe resposta para o que o job tratava (ou, no `flush`, não há nada pendente)? */
   private async alreadyHandled(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: Exclude<ChannelJob, { kind: 'notice' }>,
   ): Promise<boolean> {
     if (job.kind === 'flush') {
-      return !(await this.deps.attendance.hasPendingMessages(clientId, job.contactRef));
+      return !(await this.deps.attendance.hasPendingMessages(companyId, job.contactRef));
     }
-    const message = await this.deps.messages.findByExternalId(clientId, job.externalId);
+    const message = await this.deps.messages.findByExternalId(companyId, job.externalId);
     if (message === null) return false;
     return (
       message.answeredById !== null ||
-      (await this.deps.messages.findReplyTo(clientId, message.id)) !== null
+      (await this.deps.messages.findReplyTo(companyId, message.id)) !== null
     );
   }
 
@@ -181,7 +181,7 @@ export class ChannelInboundProcessor {
    * existe). Se o processo cair entre gravar e agendar, a retentativa refaz os dois passos.
    */
   private async processAccept(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: Extract<InboundJob, { kind: 'text' }>,
     context: InboundJobContext,
   ): Promise<InboundJobOutcome> {
@@ -189,14 +189,14 @@ export class ChannelInboundProcessor {
     let delayMs: number;
     let mode: 'slide' | 'ensure';
     try {
-      const accepted = await this.deps.attendance.acceptInboundMessage(clientId, {
+      const accepted = await this.deps.attendance.acceptInboundMessage(companyId, {
         contactRef: job.contactRef,
         text: job.text,
         externalId: job.externalId,
       });
       if (accepted.status === 'answered') {
         this.deps.logger.info(
-          { clientId, ...refs },
+          { companyId, ...refs },
           'mensagem já respondida (reentrega do canal); nada a fazer',
         );
         return 'done';
@@ -213,36 +213,36 @@ export class ChannelInboundProcessor {
       if (!scheduled.ok) throw scheduled.error;
     } catch (error) {
       if (error instanceof ForbiddenError) {
-        // Cliente suspenso entre o enfileiramento e o processamento: decisão do dono (2026-10-28),
+        // Empresa suspensa entre o enfileiramento e o processamento: decisão do dono (2026-10-28),
         // nada é enviado ao contato, nem o texto padrão. O job é descartado (métrica `discarded`).
-        this.logSuspended(clientId, job);
+        this.logSuspended(companyId, job);
         return 'discarded';
       }
-      throw await this.onAttendanceFailure(clientId, job, context, error);
+      throw await this.onAttendanceFailure(companyId, job, context, error);
     }
     this.deps.logger.info(
-      { clientId, ...refs, delayMs, mode },
+      { companyId, ...refs, delayMs, mode },
       'resposta agendada para o fim da janela de espera',
     );
     return 'done';
   }
 
   private async processFlush(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: FlushJob,
     context: InboundJobContext,
   ): Promise<InboundJobOutcome> {
     const refs = refFields(job);
     // Credencial recusada pela Meta (`TOKEN_INVALID`): nada a responder e nenhuma chamada ao LLM; as
     // mensagens seguem pendentes e a próxima do contato, depois de reconectar, as responde juntas.
-    if (await this.isTokenInvalid(clientId)) {
-      this.logTokenInvalid(clientId, job);
+    if (await this.isTokenInvalid(companyId)) {
+      this.logTokenInvalid(companyId, job);
       return 'discarded';
     }
     let response: PendingResponse;
     try {
       response = await this.deps.attendance.respondToPending(
-        clientId,
+        companyId,
         job.contactRef,
         { maxMessages: this.deps.batch.maxMessages, maxChars: this.deps.batch.maxChars },
         // Retentativa de um job que já falhou: a resposta gravada e não enviada sai primeiro.
@@ -250,26 +250,26 @@ export class ChannelInboundProcessor {
       );
     } catch (error) {
       if (error instanceof ForbiddenError) {
-        this.logSuspended(clientId, job);
+        this.logSuspended(companyId, job);
         return 'discarded';
       }
-      throw await this.onAttendanceFailure(clientId, job, context, error);
+      throw await this.onAttendanceFailure(companyId, job, context, error);
     }
 
     const { reply } = response;
     if (reply === null) {
-      this.deps.logger.info({ clientId, ...refs }, 'nada pendente para responder');
+      this.deps.logger.info({ companyId, ...refs }, 'nada pendente para responder');
       return 'done';
     }
 
     let outcome: InboundJobOutcome;
     try {
-      outcome = await this.sendOrSkip(clientId, job, reply);
+      outcome = await this.sendOrSkip(companyId, job, reply);
     } catch (error) {
       // Se o job não vai ser retentado (erro permanente ou última tentativa), o excedente do lote
       // não pode ficar sem `flush`; se vai, a retentativa o encontra.
       const willRetry = !(error instanceof NonRetryableJobError) && !context.finalAttempt;
-      if (response.hasMorePending && !willRetry) await this.scheduleNextQuietly(clientId, job);
+      if (response.hasMorePending && !willRetry) await this.scheduleNextQuietly(companyId, job);
       throw error;
     }
     if (outcome === 'discarded') return outcome;
@@ -280,7 +280,7 @@ export class ChannelInboundProcessor {
       const scheduled = await this.deps.queue.scheduleFlush(job, { delayMs: 0, mode: 'ensure' });
       if (!scheduled.ok) throw scheduled.error;
       this.deps.logger.info(
-        { clientId, ...refs },
+        { companyId, ...refs },
         'sobraram mensagens pendentes; próximo turno agendado sem nova espera',
       );
     }
@@ -289,42 +289,42 @@ export class ChannelInboundProcessor {
 
   /** Envia a resposta ainda não enviada; resposta com `sentAt` não é reenviada. */
   private async sendOrSkip(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: FlushJob,
     reply: { readonly id: string; readonly text: string; readonly sentAt: Date | null },
   ): Promise<InboundJobOutcome> {
     if (reply.sentAt !== null) {
       // Retentativa depois de envio concluído: nada a enviar de novo.
       this.deps.logger.info(
-        { clientId, ...refFields(job), replyId: reply.id },
+        { companyId, ...refFields(job), replyId: reply.id },
         'resposta já enviada; nada a reenviar',
       );
       return 'done';
     }
-    return this.sendReply(clientId, job, reply.id, reply.text);
+    return this.sendReply(companyId, job, reply.id, reply.text);
   }
 
   /** Agenda o próximo `flush` sem lançar (o erro que está subindo é o que importa). */
-  private async scheduleNextQuietly(clientId: ClientId, job: FlushJob): Promise<void> {
+  private async scheduleNextQuietly(companyId: CompanyId, job: FlushJob): Promise<void> {
     try {
       const scheduled = await this.deps.queue.scheduleFlush(job, { delayMs: 0, mode: 'ensure' });
       if (!scheduled.ok) throw scheduled.error;
     } catch (error) {
       this.deps.logger.error(
-        { clientId, ...refFields(job), ...describeError(error) },
+        { companyId, ...refFields(job), ...describeError(error) },
         'não foi possível agendar o próximo turno depois de uma falha',
       );
     }
   }
 
   private async processNotice(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: Extract<InboundJob, { kind: 'notice' }>,
   ): Promise<InboundJobOutcome> {
-    const outcome = await this.deliver(clientId, job, CHANNEL_NOTICE_TEXTS[job.reason]);
+    const outcome = await this.deliver(companyId, job, CHANNEL_NOTICE_TEXTS[job.reason]);
     if (outcome.kind === 'discarded') return 'discarded';
     this.deps.logger.info(
-      { clientId, ...refFields(job), reason: job.reason },
+      { companyId, ...refFields(job), reason: job.reason },
       'aviso constante enviado ao contato',
     );
     return 'done';
@@ -332,55 +332,55 @@ export class ChannelInboundProcessor {
 
   /** Envia a resposta gravada e confirma o envio na mensagem (`markSent`). */
   private async sendReply(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: ChannelJob,
     replyId: string,
     text: string,
   ): Promise<InboundJobOutcome> {
-    const outcome = await this.deliver(clientId, job, text);
+    const outcome = await this.deliver(companyId, job, text);
     if (outcome.kind === 'discarded') return 'discarded';
 
     try {
-      const marked = await this.deps.messages.markSent(clientId, replyId, {
+      const marked = await this.deps.messages.markSent(companyId, replyId, {
         channelMessageId: outcome.channelMessageId,
         sentAt: this.now(),
       });
       if (!marked) {
         this.deps.logger.warn(
-          { clientId, replyId, ...refFields(job) },
+          { companyId, replyId, ...refFields(job) },
           'resposta enviada, mas não havia marca de envio a gravar',
         );
       }
     } catch (error) {
       // O contato já recebeu a resposta: relançar reenviaria. Só registra.
       this.deps.logger.error(
-        { clientId, replyId, ...refFields(job), ...describeError(error) },
+        { companyId, replyId, ...refFields(job), ...describeError(error) },
         'resposta enviada, mas a marca de envio não foi gravada',
       );
     }
-    this.deps.logger.info({ clientId, replyId, ...refFields(job) }, 'resposta enviada ao contato');
+    this.deps.logger.info({ companyId, replyId, ...refFields(job) }, 'resposta enviada ao contato');
     return 'done';
   }
 
   /**
-   * Resolve o número do cliente no banco (pelo `clientId` do job) e envia `text` ao contato.
+   * Resolve o número da empresa no banco (pelo `companyId` do job) e envia `text` ao contato.
    * Lança o erro de envio já classificado (retentável ou `NonRetryableJobError`).
    */
   private async deliver(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: ChannelJob,
     text: string,
   ): Promise<{ kind: 'sent'; channelMessageId: string } | { kind: 'discarded' }> {
-    const target = await this.resolvePhoneNumber(clientId, job);
+    const target = await this.resolvePhoneNumber(companyId, job);
     if (target.kind === 'suspended') return { kind: 'discarded' };
     if (target.kind === 'token_invalid') {
-      this.logTokenInvalid(clientId, job);
+      this.logTokenInvalid(companyId, job);
       return { kind: 'discarded' };
     }
     if (target.kind === 'none') {
       this.deps.logger.error(
-        { clientId, ...refFields(job) },
-        'cliente sem número ou sem credencial do canal; mensagem não enviada',
+        { companyId, ...refFields(job) },
+        'empresa sem número ou sem credencial do canal; mensagem não enviada',
       );
       return { kind: 'discarded' };
     }
@@ -391,25 +391,25 @@ export class ChannelInboundProcessor {
       text,
     });
     if (sent.ok) return { kind: 'sent', channelMessageId: sent.value.channelMessageId };
-    throw await this.classifySendFailure(clientId, job, sent.error, target.tokenVersion);
+    throw await this.classifySendFailure(companyId, job, sent.error, target.tokenVersion);
   }
 
-  /** Cliente suspenso não recebe nada do canal: nem resposta, nem aviso, nem texto padrão. */
-  private logSuspended(clientId: ClientId, job: ChannelJob): void {
+  /** Empresa suspensa não recebe nada do canal: nem resposta, nem aviso, nem texto padrão. */
+  private logSuspended(companyId: CompanyId, job: ChannelJob): void {
     this.deps.logger.warn(
-      { clientId, ...refFields(job), jobKind: job.kind },
-      'cliente suspenso; nada é enviado ao contato e o job é descartado',
+      { companyId, ...refFields(job), jobKind: job.kind },
+      'empresa suspensa; nada é enviado ao contato e o job é descartado',
     );
   }
 
   /**
-   * O que o envio precisa do cliente, lido do banco pelo `clientId` do job: número, token e versão
-   * (spec 015), ou que não há credencial, ou que o cliente está suspenso (nada se envia) ou com o
-   * token recusado. Cliente removido, número trocado desde o enfileiramento e texto cifrado que não
+   * O que o envio precisa da empresa, lido do banco pelo `companyId` do job: número, token e versão
+   * (spec 015), ou que não há credencial, ou que a empresa está suspenso (nada se envia) ou com o
+   * token recusado. Empresa removida, número trocado desde o enfileiramento e texto cifrado que não
    * decifra lançam `NonRetryableJobError`.
    */
   private async resolvePhoneNumber(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: ChannelJob,
   ): Promise<
     | {
@@ -423,22 +423,22 @@ export class ChannelInboundProcessor {
     | { readonly kind: 'token_invalid' }
   > {
     try {
-      const client = await this.deps.clients.findById(clientId);
-      if (client.status === 'SUSPENDED') {
-        this.logSuspended(clientId, job);
+      const company = await this.deps.companies.findById(companyId);
+      if (company.status === 'SUSPENDED') {
+        this.logSuspended(companyId, job);
         return { kind: 'suspended' };
       }
-      const current = client.whatsappPhoneNumberId;
+      const current = company.whatsappPhoneNumberId;
       if (current !== null && current !== job.phoneNumberId) {
-        throw this.numberChanged(clientId, job);
+        throw this.numberChanged(companyId, job);
       }
       if (current === null) return { kind: 'none' };
-      const credentials = await this.deps.credentials.forClient(clientId);
+      const credentials = await this.deps.credentials.forCompany(companyId);
       if (credentials.kind === 'token_invalid') return { kind: 'token_invalid' };
       if (credentials.kind === 'none') return { kind: 'none' };
       // O número pode ter mudado entre as duas leituras: o par token/número tem de ser o do job.
       if (credentials.phoneNumberId !== job.phoneNumberId) {
-        throw this.numberChanged(clientId, job);
+        throw this.numberChanged(companyId, job);
       }
       return {
         kind: 'number',
@@ -448,69 +448,69 @@ export class ChannelInboundProcessor {
       };
     } catch (error) {
       if (error instanceof NotFoundError) {
-        // Cliente removido depois de enfileirar: não há por onde responder.
-        throw new NonRetryableJobError('Cliente do job não existe mais', {
+        // Empresa removida depois de enfileirar: não há por onde responder.
+        throw new NonRetryableJobError('Empresa do job não existe mais', {
           cause: error,
-          context: { clientId, ...refFields(job) },
+          context: { companyId, ...refFields(job) },
         });
       }
       if (error instanceof CredentialDecryptionError) {
-        // Falha nossa (chave ausente, texto adulterado ou de outro cliente): sem retentativa, sem
+        // Falha nossa (chave ausente, texto adulterado ou de outra empresa): sem retentativa, sem
         // texto cifrado em log (o erro só carrega `reason`) e sem marcar o token como inválido.
         this.deps.logger.error(
-          { clientId, ...refFields(job), reason: error.reason },
+          { companyId, ...refFields(job), reason: error.reason },
           'credencial do canal não pôde ser decifrada; mensagem não enviada',
         );
         throw new NonRetryableJobError('Credencial do canal não pôde ser decifrada', {
-          context: { clientId, ...refFields(job), reason: error.reason },
+          context: { companyId, ...refFields(job), reason: error.reason },
         });
       }
       throw error;
     }
   }
 
-  private numberChanged(clientId: ClientId, job: ChannelJob): NonRetryableJobError {
-    // O número do cliente mudou desde que a mensagem entrou (ou o job foi adulterado): quem recebeu
-    // a mensagem não é mais o número deste cliente. Nada é enviado. Sem números em log.
+  private numberChanged(companyId: CompanyId, job: ChannelJob): NonRetryableJobError {
+    // O número da empresa mudou desde que a mensagem entrou (ou o job foi adulterado): quem recebeu
+    // a mensagem não é mais o número desta empresa. Nada é enviado. Sem números em log.
     this.deps.logger.error(
-      { clientId, ...refFields(job), jobKind: job.kind },
-      'o número do cliente mudou desde o enfileiramento; mensagem descartada sem envio',
+      { companyId, ...refFields(job), jobKind: job.kind },
+      'o número da empresa mudou desde o enfileiramento; mensagem descartada sem envio',
     );
-    return new NonRetryableJobError('Número do cliente diferente do número do job', {
-      context: { clientId, ...refFields(job) },
+    return new NonRetryableJobError('Número da empresa diferente do número do job', {
+      context: { companyId, ...refFields(job) },
     });
   }
 
-  /** A credencial do cliente está `TOKEN_INVALID`? Qualquer falha de leitura vale como "não". */
-  private async isTokenInvalid(clientId: ClientId): Promise<boolean> {
+  /** A credencial da empresa está `TOKEN_INVALID`? Qualquer falha de leitura vale como "não". */
+  private async isTokenInvalid(companyId: CompanyId): Promise<boolean> {
     try {
-      return (await this.deps.credentials.forClient(clientId)).kind === 'token_invalid';
+      return (await this.deps.credentials.forCompany(companyId)).kind === 'token_invalid';
     } catch {
       return false;
     }
   }
 
-  private logTokenInvalid(clientId: ClientId, job: ChannelJob): void {
+  private logTokenInvalid(companyId: CompanyId, job: ChannelJob): void {
     this.deps.logger.warn(
-      { clientId, ...refFields(job), jobKind: job.kind },
+      { companyId, ...refFields(job), jobKind: job.kind },
       'credencial do canal recusada pela Meta (TOKEN_INVALID); nada é enviado e o job é descartado',
     );
   }
 
   /** Erro 190 (token inválido) com conexão própria: marca `TOKEN_INVALID`, condicional à versão. */
   private async markTokenInvalid(
-    clientId: ClientId,
+    companyId: CompanyId,
     tokenVersion: number | 'legacy',
   ): Promise<void> {
     if (tokenVersion === 'legacy') return;
     try {
       const marked = await this.deps.connections.markTokenInvalid(
-        clientId,
+        companyId,
         tokenVersion,
         this.now(),
       );
       if (marked) {
-        this.deps.logger.warn({ clientId }, 'conexão do canal marcada como TOKEN_INVALID');
+        this.deps.logger.warn({ companyId }, 'conexão do canal marcada como TOKEN_INVALID');
         try {
           this.deps.metrics?.countChannelStateTransition('token_invalid');
         } catch {
@@ -519,25 +519,25 @@ export class ChannelInboundProcessor {
       }
     } catch (error) {
       this.deps.logger.error(
-        { clientId, ...describeError(error) },
+        { companyId, ...describeError(error) },
         'não foi possível marcar a conexão como TOKEN_INVALID',
       );
     }
   }
 
   private async classifySendFailure(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: ChannelJob,
     error: ExternalServiceError,
     tokenVersion: number | 'legacy',
   ): Promise<Error> {
     if (isRetryableSendError(error)) return error;
     if (error instanceof MessageSendError && error.providerCode === TOKEN_INVALID_CODE) {
-      await this.markTokenInvalid(clientId, tokenVersion);
+      await this.markTokenInvalid(companyId, tokenVersion);
     }
     this.deps.logger.error(
       {
-        clientId,
+        companyId,
         ...refFields(job),
         jobKind: job.kind,
         ...(error instanceof MessageSendError
@@ -552,7 +552,7 @@ export class ChannelInboundProcessor {
     );
     return new NonRetryableJobError('Envio recusado de forma permanente pelo canal', {
       cause: error,
-      context: { clientId, ...refFields(job) },
+      context: { companyId, ...refFields(job) },
     });
   }
 
@@ -563,7 +563,7 @@ export class ChannelInboundProcessor {
    * (a próxima mensagem dele agenda um novo `flush` que as responde juntas).
    */
   private async onAttendanceFailure(
-    clientId: ClientId,
+    companyId: CompanyId,
     job: Exclude<ChannelJob, { kind: 'notice' }>,
     context: InboundJobContext,
     error: unknown,
@@ -574,36 +574,36 @@ export class ChannelInboundProcessor {
     }
     this.deps.logger.error(
       {
-        clientId,
+        companyId,
         ...refFields(job),
         permanent,
         ...describeError(error),
       },
       'atendimento falhou sem resposta gravada; enviando o texto padrão ao contato',
     );
-    await this.sendFallback(clientId, job);
+    await this.sendFallback(companyId, job);
     if (permanent) {
       return new NonRetryableJobError('Atendimento falhou de forma permanente', {
         cause: error,
-        context: { clientId, ...refFields(job), ...describeError(error) },
+        context: { companyId, ...refFields(job), ...describeError(error) },
       });
     }
     return error instanceof Error ? error : new Error('falha desconhecida no atendimento');
   }
 
   /** Melhor esforço: falhar aqui só gera log (o contato já ficaria sem resposta de qualquer jeito). */
-  private async sendFallback(clientId: ClientId, job: ChannelJob): Promise<void> {
+  private async sendFallback(companyId: CompanyId, job: ChannelJob): Promise<void> {
     const refs = refFields(job);
     try {
-      const target = await this.resolvePhoneNumber(clientId, job);
+      const target = await this.resolvePhoneNumber(companyId, job);
       // Suspenso: já logado em `resolvePhoneNumber`; nem o texto padrão sai.
       if (target.kind === 'suspended') return;
       if (target.kind === 'token_invalid') {
-        this.logTokenInvalid(clientId, job);
+        this.logTokenInvalid(companyId, job);
         return;
       }
       if (target.kind === 'none') {
-        this.deps.logger.warn({ clientId, ...refs }, 'sem número do canal para o texto padrão');
+        this.deps.logger.warn({ companyId, ...refs }, 'sem número do canal para o texto padrão');
         return;
       }
       const sent = await this.deps.sender.sendText({
@@ -617,14 +617,14 @@ export class ChannelInboundProcessor {
         sent.error instanceof MessageSendError &&
         sent.error.providerCode === TOKEN_INVALID_CODE
       ) {
-        await this.markTokenInvalid(clientId, target.tokenVersion);
+        await this.markTokenInvalid(companyId, target.tokenVersion);
       }
       if (sent.ok) {
-        this.deps.logger.info({ clientId, ...refs }, 'texto padrão enviado ao contato');
+        this.deps.logger.info({ companyId, ...refs }, 'texto padrão enviado ao contato');
       } else {
         this.deps.logger.warn(
           {
-            clientId,
+            companyId,
             ...refs,
             ...describeError(sent.error),
             ...sendErrorFields(sent.error),
@@ -634,14 +634,14 @@ export class ChannelInboundProcessor {
       }
     } catch (error) {
       this.deps.logger.warn(
-        { clientId, ...refs, ...describeError(error) },
+        { companyId, ...refs, ...describeError(error) },
         'falha ao enviar o texto padrão ao contato',
       );
     }
   }
 }
 
-/** Erro que repetir não resolve: cliente removido, entrada inválida (bug do enfileirador). O cliente suspenso (`ForbiddenError`) nem chega aqui: o job é descartado sem envio. */
+/** Erro que repetir não resolve: empresa removida, entrada inválida (bug do enfileirador). A empresa suspensa (`ForbiddenError`) nem chega aqui: o job é descartado sem envio. */
 /** Código do Graph para token inválido ou expirado (OAuthException 190). */
 const TOKEN_INVALID_CODE = 190;
 
@@ -651,18 +651,18 @@ function isPermanentAttendanceError(error: unknown): boolean {
   );
 }
 
-function parseClientId(job: ChannelJob): ClientId {
+function parseCompanyId(job: ChannelJob): CompanyId {
   try {
-    return ClientId.parse(job.clientId);
+    return CompanyId.parse(job.companyId);
   } catch (error) {
-    throw new NonRetryableJobError('clientId do job é inválido', { cause: error });
+    throw new NonRetryableJobError('companyId do job é inválido', { cause: error });
   }
 }
 
 /**
  * Referência para correlacionar linhas de log sem registrar dado do contato: `messageRef` (hash do
  * id da mensagem no canal, que carrega o telefone) em `text` e `notice`; `flushRef` (hash da
- * identidade do `flush`, que inclui o cliente e o contato) em `flush`.
+ * identidade do `flush`, que inclui a empresa e o contato) em `flush`.
  */
 function refFields(job: ChannelJob): { messageRef: string } | { flushRef: string } {
   return job.kind === 'flush'
@@ -674,7 +674,7 @@ function refFields(job: ChannelJob): { messageRef: string } | { flushRef: string
 function flushJobOf(job: Extract<InboundJob, { kind: 'text' }>): FlushJob {
   return {
     kind: 'flush',
-    clientId: job.clientId,
+    companyId: job.companyId,
     phoneNumberId: job.phoneNumberId,
     contactRef: job.contactRef,
     requestId: job.requestId,

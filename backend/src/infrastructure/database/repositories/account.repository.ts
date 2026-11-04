@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
-  ClientId,
+  CompanyId,
   AccountId,
-  UserId,
+  MembershipId,
   type AccountRepository,
   type AccountMembership,
   type ResetFailureOutcome,
@@ -309,12 +309,12 @@ export class PrismaAccountRepository implements AccountRepository {
   }
   async listMemberships(accountId: string): Promise<readonly AccountMembership[]> {
     // Resolve apenas raízes de tenant acessíveis. Cada leitura do vínculo continua escopada.
-    const clients = await withRepositoryErrors('Account.companies', () =>
-      this.db.client.findMany({
+    const companies = await withRepositoryErrors('Account.companies', () =>
+      this.db.company.findMany({
         where: {
           deletedAt: null,
           status: 'ACTIVE',
-          users: { some: { accountId, status: 'ACTIVE' } },
+          memberships: { some: { accountId, status: 'ACTIVE' } },
         },
         select: { id: true },
         orderBy: { id: 'asc' },
@@ -322,24 +322,29 @@ export class PrismaAccountRepository implements AccountRepository {
       }),
     );
     const result = await Promise.all(
-      clients.map(({ id }) => this.membership(accountId, ClientId.parse(id))),
+      companies.map(({ id }) => this.membership(accountId, CompanyId.parse(id))),
     );
     return result.filter((row): row is AccountMembership => row !== null);
   }
-  async membership(accountId: string, clientId: ClientId): Promise<AccountMembership | null> {
+  async membership(accountId: string, companyId: CompanyId): Promise<AccountMembership | null> {
     return withRepositoryErrors('Account.membership', async () => {
-      const client = await this.db.client.findFirst({
-        where: { id: clientId, deletedAt: null, status: 'ACTIVE' },
+      const company = await this.db.company.findFirst({
+        where: { id: companyId, deletedAt: null, status: 'ACTIVE' },
         select: { name: true },
       });
-      if (client === null) return null;
-      const user = await this.db.user.findFirst({
-        where: { clientId, accountId, status: 'ACTIVE' },
+      if (company === null) return null;
+      const membership = await this.db.membership.findFirst({
+        where: { companyId, accountId, status: 'ACTIVE' },
         select: { id: true, role: true },
       });
-      return user === null
+      return membership === null
         ? null
-        : { clientId, userId: UserId.parse(user.id), name: client.name, role: user.role };
+        : {
+            companyId,
+            membershipId: MembershipId.parse(membership.id),
+            name: company.name,
+            role: membership.role,
+          };
     });
   }
   async createCompany(accountId: string, name: string): Promise<AccountMembership> {
@@ -349,13 +354,15 @@ export class PrismaAccountRepository implements AccountRepository {
         const account = await tx.account.findUnique({ where: { id: accountId } });
         if (account?.status !== 'ACTIVE' || account.emailVerifiedAt === null)
           throw new ForbiddenError('Conta indisponível');
-        const count = await tx.client.count({ where: { users: { some: { accountId } } } });
+        const count = await tx.company.count({ where: { memberships: { some: { accountId } } } });
         if (count >= 20) throw new ConflictError('Limite de 20 empresas por conta atingido');
-        const client = await tx.client.create({ data: { name, slug: `empresa-${randomUUID()}` } });
-        const clientId = ClientId.parse(client.id);
-        const user = await tx.user.create({
+        const company = await tx.company.create({
+          data: { name, slug: `empresa-${randomUUID()}` },
+        });
+        const companyId = CompanyId.parse(company.id);
+        const membership = await tx.membership.create({
           data: {
-            clientId,
+            companyId,
             accountId,
             email: account.email,
             passwordHash: 'account-managed',
@@ -364,14 +371,19 @@ export class PrismaAccountRepository implements AccountRepository {
         });
         await tx.auditEvent.create({
           data: {
-            clientId,
-            actorUserId: user.id,
-            targetUserId: user.id,
-            action: 'USER_CREATED',
+            companyId,
+            actorMembershipId: membership.id,
+            targetMembershipId: membership.id,
+            action: 'MEMBERSHIP_CREATED',
             toRole: 'OWNER',
           },
         });
-        return { clientId, userId: UserId.parse(user.id), name: client.name, role: user.role };
+        return {
+          companyId,
+          membershipId: MembershipId.parse(membership.id),
+          name: company.name,
+          role: membership.role,
+        };
       }),
     );
   }

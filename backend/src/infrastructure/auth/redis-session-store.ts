@@ -33,14 +33,14 @@ export interface RedisSessionStoreOptions {
 
 // Toda chave criada aqui tem TTL, e o relógio que decide os prazos é o do Redis (`TIME`).
 //
-// create: KEYS = sess, used, usess; ARGV = userId, refreshHash, idleTtl, maxSeconds, sessionId.
+// create: KEYS = sess, used, usess; ARGV = membershipId, refreshHash, idleTtl, maxSeconds, sessionId.
 const CREATE_SCRIPT = `
 local t = redis.call('TIME')
 local now = tonumber(t[1])
 local maxSeconds = tonumber(ARGV[4])
 local ttl = math.min(tonumber(ARGV[3]), maxSeconds)
 redis.call('DEL', KEYS[1], KEYS[2])
-redis.call('HSET', KEYS[1], 'userId', ARGV[1], 'current', ARGV[2], 'maxAt', now + maxSeconds)
+redis.call('HSET', KEYS[1], 'membershipId', ARGV[1], 'current', ARGV[2], 'maxAt', now + maxSeconds)
 redis.call('EXPIRE', KEYS[1], ttl)
 redis.call('SADD', KEYS[3], ARGV[5])
 redis.call('EXPIRE', KEYS[3], maxSeconds)
@@ -48,12 +48,12 @@ return 1
 `;
 
 // rotate: KEYS = sess, used, rsid; ARGV = presentedHash, newHash, idleTtl, accessTtl, usedKept.
-// Retorna {0} (inválido), {1, userId} (rotacionou) ou {2, userId} (reuso: sessão revogada).
+// Retorna {0} (inválido), {1, membershipId} (rotacionou) ou {2, membershipId} (reuso: sessão revogada).
 const ROTATE_SCRIPT = `
 local current = redis.call('HGET', KEYS[1], 'current')
 if not current then return {0} end
 if redis.call('HGET', KEYS[1], 'revoked') == '1' then return {0} end
-local userId = redis.call('HGET', KEYS[1], 'userId')
+local membershipId = redis.call('HGET', KEYS[1], 'membershipId')
 if ARGV[1] == current then
   local t = redis.call('TIME')
   local maxAt = tonumber(redis.call('HGET', KEYS[1], 'maxAt'))
@@ -64,14 +64,14 @@ if ARGV[1] == current then
   redis.call('HSET', KEYS[1], 'current', ARGV[2])
   redis.call('EXPIRE', KEYS[1], ttl)
   redis.call('EXPIRE', KEYS[2], ttl)
-  return {1, userId}
+  return {1, membershipId}
 end
 local used = redis.call('LRANGE', KEYS[2], 0, -1)
 for _, hash in ipairs(used) do
   if hash == ARGV[1] then
     redis.call('HSET', KEYS[1], 'revoked', '1')
     redis.call('SET', KEYS[3], '1', 'EX', tonumber(ARGV[4]))
-    return {2, userId}
+    return {2, membershipId}
   end
 end
 return {0}
@@ -151,9 +151,9 @@ function assertHash(value: string): void {
 }
 
 /**
- * Sessões no Redis (spec 007). Toda chave começa por `<prefixo><ClientId|platform>:` (as de
- * usuário derivam do `ClientId`, as de administrador de `platform`); a única exceção declarada é o
- * contador de falhas de login (`<prefixo>login-fail:<hash>`), que vale antes de existir `ClientId`.
+ * Sessões no Redis (spec 007). Toda chave começa por `<prefixo><CompanyId|platform>:` (as de
+ * usuário derivam do `CompanyId`, as de administrador de `platform`); a única exceção declarada é o
+ * contador de falhas de login (`<prefixo>login-fail:<hash>`), que vale antes de existir `CompanyId`.
  * Só o **hash** do segredo do refresh fica no Redis. Toda falha vira `ServiceUnavailableError`
  * (fail-closed), logada só por `describeRedisError` (o erro do ioredis carrega `command.args`).
  */

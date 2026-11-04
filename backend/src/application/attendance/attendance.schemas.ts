@@ -10,7 +10,7 @@ const NO_CONTROL_CHARS = /^[^\p{Cc}]*$/u;
 const NO_CONTROL_MESSAGE = 'não pode conter caracteres de controle';
 
 /**
- * Entrada de uma mensagem do contato. O service a valida de novo (como `ClientService`),
+ * Entrada de uma mensagem do contato. O service a valida de novo (como `CompanyService`),
  * porque ele também é chamado por outras camadas no futuro (webhook, fila).
  *
  * - `contactRef`: identificador do contato definido pelo canal, texto livre.

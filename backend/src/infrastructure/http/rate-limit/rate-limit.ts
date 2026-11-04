@@ -85,8 +85,8 @@ export function profileOf(request: FastifyRequest): RateLimitProfile {
 }
 
 /**
- * Chave do contador: perfil + IP normalizado. Nunca `clientId` (antes da autenticação ele não
- * existe; a regra "chave deriva do ClientId" passa a valer na spec 007, com perfis
+ * Chave do contador: perfil + IP normalizado. Nunca `companyId` (antes da autenticação ele não
+ * existe; a regra "chave deriva do CompanyId" passa a valer na spec 007, com perfis
  * autenticados). O perfil na chave dá contadores independentes por perfil: esgotar `admin` não
  * consome `webhook` do mesmo IP, e um IP não consome a cota de outro.
  */

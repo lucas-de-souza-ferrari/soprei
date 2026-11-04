@@ -51,7 +51,7 @@ export type GraphBehavior =
   | { readonly kind: 'hang' }
   /** Derruba a conexão sem responder (erro de rede). */
   | { readonly kind: 'drop' }
-  /** Responde com `status` e despeja corpo sem fim (em pedaços de 16 KiB) até o cliente fechar. */
+  /** Responde com `status` e despeja corpo sem fim (em pedaços de 16 KiB) até a empresa fechar. */
   | { readonly kind: 'flood'; readonly status: number };
 
 export const graphError = (
@@ -85,13 +85,13 @@ export class FakeGraphApi {
   expectedAppToken: string | undefined;
   /** `code` do Embedded Signup (spec 015b): uso único, expirável. */
   private readonly codes = new Map<string, { token: string; used: boolean; expired: boolean }>();
-  /** `client_id` e `client_secret` esperados na troca do `code`; se definido, outro valor é recusado. */
+  /** `company_id` e `client_secret` esperados na troca do `code`; se definido, outro valor é recusado. */
   expectedApp: { readonly id: string; readonly secret: string } | undefined;
   /** PIN com que cada número já está registrado (`null` = não registrado). */
   readonly registeredPins = new Map<string, string | null>();
   /** WABAs com o app assinado (`subscribed_apps`). */
   readonly subscribed = new Set<string>();
-  /** Bytes que o modo `flood` escreveu e se o cliente fechou a conexão antes do fim do teste. */
+  /** Bytes que o modo `flood` escreveu e se a empresa fechou a conexão antes do fim do teste. */
   floodBytesWritten = 0;
   floodClosedByClient = false;
 
@@ -260,7 +260,7 @@ export class FakeGraphApi {
     body: unknown,
   ): GraphBehavior | undefined {
     const bearer = authorization?.replace(/^Bearer /, '');
-    // O corpo de erro ECOA o token de propósito: o cliente nunca pode repassá-lo.
+    // O corpo de erro ECOA o token de propósito: a empresa nunca pode repassá-lo.
     const echo = `eco: ${authorization ?? ''} ${query.input_token ?? ''} ${query.client_secret ?? ''} ${query.code ?? ''} ${JSON.stringify(body ?? '')}`;
     const fail = (status: number, code: number): GraphBehavior => ({
       kind: 'respond',
@@ -270,7 +270,8 @@ export class FakeGraphApi {
     if (operation === 'oauth_token') {
       if (
         this.expectedApp !== undefined &&
-        (query.client_id !== this.expectedApp.id || query.client_secret !== this.expectedApp.secret)
+        (query.company_id !== this.expectedApp.id ||
+          query.client_secret !== this.expectedApp.secret)
       ) {
         return fail(400, 101);
       }

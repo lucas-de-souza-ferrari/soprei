@@ -443,7 +443,7 @@ describe('POST /webhooks/whatsapp (conteúdo)', () => {
     });
   });
 
-  it('o clientId nunca vem de fora: cabeçalho, query e corpo com clientId são ignorados', async () => {
+  it('o companyId nunca vem de fora: cabeçalho, query e corpo com companyId são ignorados', async () => {
     await withServer(async (h) => {
       const payload = webhookPayload([
         {
@@ -453,19 +453,19 @@ describe('POST /webhooks/whatsapp (conteúdo)', () => {
               id: 'wamid.1',
               from: CONTACT,
               text: 'oi',
-              extra: { clientId: randomUUID(), client_id: randomUUID() },
+              extra: { companyId: randomUUID(), company_id: randomUUID() },
             },
           ],
         },
       ]);
-      const body = JSON.stringify({ ...payload, clientId: randomUUID() });
+      const body = JSON.stringify({ ...payload, companyId: randomUUID() });
       const response = await h.app.inject({
         method: 'POST',
-        url: `${WHATSAPP_WEBHOOK_ROUTE}?clientId=${randomUUID()}`,
+        url: `${WHATSAPP_WEBHOOK_ROUTE}?companyId=${randomUUID()}`,
         headers: {
           'content-type': 'application/json',
           'x-hub-signature-256': signWebhookBody(body, APP_SECRET),
-          'x-client-id': randomUUID(),
+          'x-company-id': randomUUID(),
         },
         payload: body,
       });

@@ -117,7 +117,7 @@ describe('config do SMTP (spec 019)', () => {
     assert.ok(parseConfig({ ...ACCOUNTS, EMAIL_PROVIDER_USER: '', EMAIL_PROVIDER_PSWD: '' }).ok);
     const both = parseConfig({ ...ACCOUNTS, EMAIL_PROVIDER_USER: 'u', EMAIL_PROVIDER_PSWD: 'p' });
     assert.ok(both.ok);
-    assert.deepEqual(smtpMailerOptions(both.value).auth, { user: 'u', pass: 'p' });
+    assert.deepEqual(smtpMailerOptions(both.value).auth, { membership: 'u', pass: 'p' });
     assert.ok(!failure({ ...ACCOUNTS, EMAIL_PROVIDER_USER: 'segredo-u' }).includes('segredo-u'));
   });
 

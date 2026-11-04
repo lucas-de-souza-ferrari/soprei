@@ -3,7 +3,7 @@ import { setImmediate as nextTick } from 'node:timers/promises';
 import {
   type AttendanceTransaction,
   type AttendanceUnitOfWork,
-  type ClientId,
+  type CompanyId,
   type Conversation,
   type ConversationRepository,
   DEFAULT_LIST_LIMIT,
@@ -21,8 +21,8 @@ import { ConflictError, NotFoundError, ValidationError } from '../shared/errors/
 /**
  * Repositórios de conversa e de mensagem em memória, mais a "transação", para os testes de
  * service e de rota que não precisam de banco. Mesmas regras do banco: tudo é filtrado pelo
- * `ClientId`, `(cliente, contactRef)`, `(cliente, externalId)` e `(cliente, replyToId)` são
- * únicos (`ConflictError`) e uma mensagem só aponta para conversa do mesmo cliente.
+ * `CompanyId`, `(empresa, contactRef)`, `(empresa, externalId)` e `(empresa, replyToId)` são
+ * únicos (`ConflictError`) e uma mensagem só aponta para conversa do mesma empresa.
  *
  * Cada método cede o controle uma vez (`nextTick`), para que pedidos simultâneos se
  * intercalem de verdade, como ao esperar o banco.
@@ -46,78 +46,78 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
 
   constructor(private readonly now: () => Date = () => new Date()) {
     this.conversations = {
-      findById: (clientId, id) => this.step(() => this.findConversation(clientId, id)),
-      list: (clientId, options) =>
+      findById: (companyId, id) => this.step(() => this.findConversation(companyId, id)),
+      list: (companyId, options) =>
         this.step(() =>
           page(
-            this.conversationRows.filter((row) => row.clientId === clientId),
+            this.conversationRows.filter((row) => row.companyId === companyId),
             options,
           ),
         ),
-      create: (clientId, data) => this.step(() => this.addConversation(clientId, data)),
-      update: (clientId, id) => this.step(() => this.findConversation(clientId, id)),
-      delete: (clientId, id) =>
+      create: (companyId, data) => this.step(() => this.addConversation(companyId, data)),
+      update: (companyId, id) => this.step(() => this.findConversation(companyId, id)),
+      delete: (companyId, id) =>
         this.step(() => {
-          const row = this.findConversation(clientId, id);
+          const row = this.findConversation(companyId, id);
           this.conversationRows.splice(this.conversationRows.indexOf(row), 1);
         }),
-      count: (clientId) =>
-        this.step(() => this.conversationRows.filter((row) => row.clientId === clientId).length),
-      findByContact: (clientId, contactRef) =>
+      count: (companyId) =>
+        this.step(() => this.conversationRows.filter((row) => row.companyId === companyId).length),
+      findByContact: (companyId, contactRef) =>
         this.step(
           () =>
             this.conversationRows.find(
-              (row) => row.clientId === clientId && row.contactRef === contactRef,
+              (row) => row.companyId === companyId && row.contactRef === contactRef,
             ) ?? null,
         ),
-      findOrCreateByContact: (clientId, contactRef) =>
+      findOrCreateByContact: (companyId, contactRef) =>
         this.step(
           () =>
             this.conversationRows.find(
-              (row) => row.clientId === clientId && row.contactRef === contactRef,
-            ) ?? this.addConversation(clientId, { contactRef }),
+              (row) => row.companyId === companyId && row.contactRef === contactRef,
+            ) ?? this.addConversation(companyId, { contactRef }),
         ),
     } satisfies ConversationRepository;
 
     this.messages = {
-      create: (clientId, data) => this.step(() => this.addMessage(clientId, data)),
-      findByExternalId: (clientId, externalId) =>
+      create: (companyId, data) => this.step(() => this.addMessage(companyId, data)),
+      findByExternalId: (companyId, externalId) =>
         this.step(
           () =>
             this.messageRows.find(
-              (row) => row.clientId === clientId && row.externalId === externalId,
+              (row) => row.companyId === companyId && row.externalId === externalId,
             ) ?? null,
         ),
-      findReplyTo: (clientId, messageId) =>
+      findReplyTo: (companyId, messageId) =>
         this.step(
           () =>
             this.messageRows.find(
               (row) =>
-                row.clientId === clientId &&
+                row.companyId === companyId &&
                 row.replyToId === messageId &&
                 row.role === 'ASSISTANT',
             ) ?? null,
         ),
-      listRecent: (clientId, conversationId, limit) =>
-        this.step(() => this.inConversation(clientId, conversationId).slice(-limit)),
-      listBefore: (clientId, conversationId, messageId, limit) =>
+      listRecent: (companyId, conversationId, limit) =>
+        this.step(() => this.inConversation(companyId, conversationId).slice(-limit)),
+      listBefore: (companyId, conversationId, messageId, limit) =>
         this.step(() => {
-          const ordered = this.inConversation(clientId, conversationId);
+          const ordered = this.inConversation(companyId, conversationId);
           const index = ordered.findIndex((row) => row.id === messageId);
           return index === -1 ? [] : ordered.slice(Math.max(0, index - limit), index);
         }),
-      markSent: (clientId, messageId, mark) =>
-        this.step(() => this.applyMark(clientId, messageId, mark)),
-      listPending: (clientId, conversationId, limit) =>
-        this.step(() => this.pendingIn(clientId, conversationId).slice(0, limit)),
-      markAnswered: (clientId, messageIds, replyId) =>
-        this.step(() => this.applyAnswered(clientId, messageIds, replyId)),
-      listByConversation: (clientId, conversationId, options) =>
-        this.step(() => page(this.inConversation(clientId, conversationId), options)),
+      markSent: (companyId, messageId, mark) =>
+        this.step(() => this.applyMark(companyId, messageId, mark)),
+      listPending: (companyId, conversationId, limit) =>
+        this.step(() => this.pendingIn(companyId, conversationId).slice(0, limit)),
+      markAnswered: (companyId, messageIds, replyId) =>
+        this.step(() => this.applyAnswered(companyId, messageIds, replyId)),
+      listByConversation: (companyId, conversationId, options) =>
+        this.step(() => page(this.inConversation(companyId, conversationId), options)),
     } satisfies MessageRepository;
   }
 
-  /** Todas as mensagens guardadas (qualquer cliente), para os testes conferirem o que foi gravado. */
+  /** Todas as mensagens guardadas (qualquer empresa), para os testes conferirem o que foi gravado. */
   allMessages(): readonly Message[] {
     return [...this.messageRows];
   }
@@ -164,18 +164,18 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     return `00000000-0000-7000-8000-${this.sequence.toString(16).padStart(12, '0')}`;
   }
 
-  private findConversation(clientId: ClientId, id: string): Conversation {
+  private findConversation(companyId: CompanyId, id: string): Conversation {
     const row = this.conversationRows.find(
-      (candidate) => candidate.clientId === clientId && candidate.id === id,
+      (candidate) => candidate.companyId === companyId && candidate.id === id,
     );
     if (row === undefined) throw new NotFoundError('Recurso não encontrado');
     return row;
   }
 
-  private addConversation(clientId: ClientId, data: NewConversation): Conversation {
+  private addConversation(companyId: CompanyId, data: NewConversation): Conversation {
     if (
       this.conversationRows.some(
-        (row) => row.clientId === clientId && row.contactRef === data.contactRef,
+        (row) => row.companyId === companyId && row.contactRef === data.contactRef,
       )
     ) {
       throw new ConflictError('Já existe um registro com estes dados');
@@ -183,7 +183,7 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     const now = this.now();
     const row: Conversation = {
       id: this.nextId(),
-      clientId,
+      companyId,
       contactRef: data.contactRef,
       createdAt: now,
       updatedAt: now,
@@ -193,32 +193,34 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     return row;
   }
 
-  private addMessage(clientId: ClientId, data: NewMessage): Message {
+  private addMessage(companyId: CompanyId, data: NewMessage): Message {
     // O que a chave estrangeira composta garante no banco.
-    this.findConversation(clientId, data.conversationId);
+    this.findConversation(companyId, data.conversationId);
     if (
       data.replyToId !== undefined &&
-      !this.messageRows.some((row) => row.clientId === clientId && row.id === data.replyToId)
+      !this.messageRows.some((row) => row.companyId === companyId && row.id === data.replyToId)
     ) {
       throw new NotFoundError('Mensagem respondida não encontrada');
     }
     if (
       data.externalId !== undefined &&
       this.messageRows.some(
-        (row) => row.clientId === clientId && row.externalId === data.externalId,
+        (row) => row.companyId === companyId && row.externalId === data.externalId,
       )
     ) {
       throw new ConflictError('Já existe um registro com estes dados');
     }
     if (
       data.replyToId !== undefined &&
-      this.messageRows.some((row) => row.clientId === clientId && row.replyToId === data.replyToId)
+      this.messageRows.some(
+        (row) => row.companyId === companyId && row.replyToId === data.replyToId,
+      )
     ) {
       throw new ConflictError('Já existe um registro com estes dados');
     }
     const row: Message = {
       id: this.nextId(),
-      clientId,
+      companyId,
       conversationId: data.conversationId,
       role: data.role,
       content: data.content,
@@ -235,11 +237,11 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     return row;
   }
 
-  /** Como o `markSent` do banco: só ASSISTANT deste cliente e ainda sem marca. */
-  private applyMark(clientId: ClientId, messageId: string, mark: MessageSentMark): boolean {
+  /** Como o `markSent` do banco: só ASSISTANT desta empresa e ainda sem marca. */
+  private applyMark(companyId: CompanyId, messageId: string, mark: MessageSentMark): boolean {
     const index = this.messageRows.findIndex(
       (row) =>
-        row.clientId === clientId &&
+        row.companyId === companyId &&
         row.id === messageId &&
         row.role === 'ASSISTANT' &&
         row.sentAt === null,
@@ -255,31 +257,31 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
   }
 
   /** Como o `listPending` do banco: USER, sem `answeredById` e sem resposta por `replyToId`. */
-  private pendingIn(clientId: ClientId, conversationId: string): Message[] {
-    return this.inConversation(clientId, conversationId).filter(
+  private pendingIn(companyId: CompanyId, conversationId: string): Message[] {
+    return this.inConversation(companyId, conversationId).filter(
       (row) =>
         row.role === 'USER' &&
         row.answeredById === null &&
         !this.messageRows.some(
-          (other) => other.clientId === clientId && other.replyToId === row.id,
+          (other) => other.companyId === companyId && other.replyToId === row.id,
         ),
     );
   }
 
-  /** Como o `markAnswered` do banco: só USER deste cliente, ainda sem marca; a resposta é do mesmo cliente. */
+  /** Como o `markAnswered` do banco: só USER desta empresa, ainda sem marca; a resposta é do mesma empresa. */
   private applyAnswered(
-    clientId: ClientId,
+    companyId: CompanyId,
     messageIds: readonly string[],
     replyId: string,
   ): number {
-    if (!this.messageRows.some((row) => row.clientId === clientId && row.id === replyId)) {
+    if (!this.messageRows.some((row) => row.companyId === companyId && row.id === replyId)) {
       throw new NotFoundError('Mensagem de resposta não encontrada');
     }
     let marked = 0;
     for (const id of messageIds) {
       const index = this.messageRows.findIndex(
         (row) =>
-          row.clientId === clientId &&
+          row.companyId === companyId &&
           row.id === id &&
           row.role === 'USER' &&
           row.answeredById === null,
@@ -293,9 +295,9 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     return marked;
   }
 
-  private inConversation(clientId: ClientId, conversationId: string): Message[] {
+  private inConversation(companyId: CompanyId, conversationId: string): Message[] {
     return this.messageRows
-      .filter((row) => row.clientId === clientId && row.conversationId === conversationId)
+      .filter((row) => row.companyId === companyId && row.conversationId === conversationId)
       .sort(
         (left, right) =>
           left.createdAt.getTime() - right.createdAt.getTime() ||

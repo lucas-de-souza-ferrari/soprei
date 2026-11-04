@@ -79,7 +79,7 @@ export const accountController: FastifyPluginCallback<{
     if (
       !['GET', 'HEAD'].includes(request.method) &&
       request.routeOptions.url !== '/auth/logout' &&
-      (request.headers.origin !== origin || request.headers['x-soprei-client'] !== 'web')
+      (request.headers.origin !== origin || request.headers['x-soprei-app'] !== 'web')
     ) {
       next(new ForbiddenError('Origem inválida'));
       return;
@@ -135,7 +135,7 @@ export const accountController: FastifyPluginCallback<{
       if (!result.ok) throw new ServiceUnavailableError('Sessão indisponível');
       return reply.status(204).send();
     }
-    if (request.headers.origin !== origin || request.headers['x-soprei-client'] !== 'web')
+    if (request.headers.origin !== origin || request.headers['x-soprei-app'] !== 'web')
       throw new ForbiddenError('Origem inválida');
     // O cookie só é limpo depois da revogação: se o Redis falhar, a resposta é 503 e o cookie
     // continua, para a pessoa tentar sair de novo (nunca finge uma saída que não aconteceu).
@@ -161,9 +161,9 @@ export const accountController: FastifyPluginCallback<{
     const result = await service.createCompany(accountCookie(request.headers.cookie), name);
     return reply.status(201).send(result);
   });
-  app.post('/account/companies/:clientId/select', admin, async (request, reply) => {
-    const { clientId } = z.object({ clientId: z.uuid() }).parse(request.params);
-    await service.selectCompany(accountCookie(request.headers.cookie), clientId);
+  app.post('/account/companies/:companyId/select', admin, async (request, reply) => {
+    const { companyId } = z.object({ companyId: z.uuid() }).parse(request.params);
+    await service.selectCompany(accountCookie(request.headers.cookie), companyId);
     return reply.status(204).send();
   });
   done();

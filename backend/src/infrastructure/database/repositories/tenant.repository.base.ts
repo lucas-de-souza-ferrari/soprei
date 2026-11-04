@@ -1,9 +1,9 @@
 import type {
-  ClientId,
+  CompanyId,
   ListOptions,
   Page,
   TenantRepository,
-  WithoutClientId,
+  WithoutCompanyId,
 } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
@@ -18,10 +18,10 @@ import {
 import { withRepositoryErrors } from './repository-errors.js';
 import type { TenantScopedDb } from '../extensions/tenant-scope.js';
 
-/** Filtro que a base monta: o `clientId` está sempre presente. */
+/** Filtro que a base monta: o `companyId` está sempre presente. */
 export interface TenantWhere {
   readonly id?: string;
-  readonly clientId: string;
+  readonly companyId: string;
   readonly OR?: AfterCursor[];
 }
 
@@ -33,8 +33,8 @@ export interface TenantWhere {
 export interface TenantModelOps<TRow extends PagedRow, TCreate, TUpdate> {
   findFirst(where: TenantWhere): Promise<TRow | null>;
   findMany(query: { where: TenantWhere; orderBy: StableOrderBy; take: number }): Promise<TRow[]>;
-  /** `data.clientId` é o do parâmetro do repositório; use só ele, nunca outra origem. */
-  create(data: Omit<TCreate, 'clientId'> & { readonly clientId: ClientId }): Promise<TRow>;
+  /** `data.companyId` é o do parâmetro do repositório; use só ele, nunca outra origem. */
+  create(data: Omit<TCreate, 'companyId'> & { readonly companyId: CompanyId }): Promise<TRow>;
   updateMany(where: TenantWhere, data: TUpdate): Promise<{ count: number }>;
   deleteMany(where: TenantWhere): Promise<{ count: number }>;
   count(where: TenantWhere): Promise<number>;
@@ -48,16 +48,16 @@ export interface TenantRepositoryParams<TRow extends PagedRow, T, TCreate, TUpda
 
 /**
  * Base de repositório de tenant. É a primeira barreira de isolamento: o filtro por
- * cliente é montado **aqui** e nunca pelo chamador; só usa `findFirst`, `findMany`,
- * `create`, `updateMany`, `deleteMany` e `count`, sempre com `clientId` no `where`. Um id
- * de outro cliente se comporta como inexistente (`NotFoundError`). Use `forTransaction`
+ * empresa é montado **aqui** e nunca pelo chamador; só usa `findFirst`, `findMany`,
+ * `create`, `updateMany`, `deleteMany` e `count`, sempre com `companyId` no `where`. Um id
+ * de outra empresa se comporta como inexistente (`NotFoundError`). Use `forTransaction`
  * para operar dentro de `runInTransaction` com as mesmas garantias.
  */
 export abstract class PrismaTenantRepository<
   TRow extends PagedRow,
   T,
-  TCreate extends WithoutClientId,
-  TUpdate extends WithoutClientId,
+  TCreate extends WithoutCompanyId,
+  TUpdate extends WithoutCompanyId,
 > implements TenantRepository<T, TCreate, TUpdate> {
   private readonly entity: string;
   private readonly ops: TenantModelOps<TRow, TCreate, TUpdate>;
@@ -72,18 +72,18 @@ export abstract class PrismaTenantRepository<
   /** O mesmo repositório sobre o client de uma transação (`runInTransaction`). */
   abstract forTransaction(tx: TenantScopedDb): TenantRepository<T, TCreate, TUpdate>;
 
-  findById(clientId: ClientId, id: string): Promise<T> {
+  findById(companyId: CompanyId, id: string): Promise<T> {
     return this.run('findById', async () => {
-      const row = await this.findRow(clientId, id);
+      const row = await this.findRow(companyId, id);
       return this.map(row);
     });
   }
 
-  list(clientId: ClientId, options?: ListOptions): Promise<Page<T>> {
+  list(companyId: CompanyId, options?: ListOptions): Promise<Page<T>> {
     return this.run('list', async () => {
       const { limit, take, after } = buildPageQuery(options);
       const rows = await this.ops.findMany({
-        where: { clientId, ...(after === undefined ? {} : { OR: after }) },
+        where: { companyId, ...(after === undefined ? {} : { OR: after }) },
         orderBy: stableOrderBy(),
         take,
       });
@@ -91,39 +91,39 @@ export abstract class PrismaTenantRepository<
     });
   }
 
-  create(clientId: ClientId, data: TCreate): Promise<T> {
+  create(companyId: CompanyId, data: TCreate): Promise<T> {
     return this.run('create', async () => {
-      // O clientId vem DEPOIS do spread: um `clientId` em `data` (que o tipo proíbe, mas o
+      // O companyId vem DEPOIS do spread: um `companyId` em `data` (que o tipo proíbe, mas o
       // runtime não impede) nunca sobrescreve o do parâmetro.
-      const row = await this.ops.create({ ...data, clientId });
+      const row = await this.ops.create({ ...data, companyId });
       return this.map(row);
     });
   }
 
-  update(clientId: ClientId, id: string, data: TUpdate): Promise<T> {
+  update(companyId: CompanyId, id: string, data: TUpdate): Promise<T> {
     return this.run('update', async () => {
       if (!isUuid(id)) throw this.notFound();
-      const { count } = await this.ops.updateMany({ id, clientId }, data);
+      const { count } = await this.ops.updateMany({ id, companyId }, data);
       if (count === 0) throw this.notFound();
-      return this.map(await this.findRow(clientId, id));
+      return this.map(await this.findRow(companyId, id));
     });
   }
 
-  delete(clientId: ClientId, id: string): Promise<void> {
+  delete(companyId: CompanyId, id: string): Promise<void> {
     return this.run('delete', async () => {
       if (!isUuid(id)) throw this.notFound();
-      const { count } = await this.ops.deleteMany({ id, clientId });
+      const { count } = await this.ops.deleteMany({ id, companyId });
       if (count === 0) throw this.notFound();
     });
   }
 
-  count(clientId: ClientId): Promise<number> {
-    return this.run('count', () => this.ops.count({ clientId }));
+  count(companyId: CompanyId): Promise<number> {
+    return this.run('count', () => this.ops.count({ companyId }));
   }
 
-  private async findRow(clientId: ClientId, id: string): Promise<TRow> {
+  private async findRow(companyId: CompanyId, id: string): Promise<TRow> {
     // Id malformado nunca existe: não vai ao banco (o cast para uuid falharia com erro 500).
-    const row = isUuid(id) ? await this.ops.findFirst({ id, clientId }) : null;
+    const row = isUuid(id) ? await this.ops.findFirst({ id, companyId }) : null;
     if (row === null) throw this.notFound();
     return row;
   }

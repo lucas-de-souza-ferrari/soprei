@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { Client } from '../../domain/index.js';
+import type { Company } from '../../domain/index.js';
 import { DatabaseError, ExternalServiceError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { type InboundJob, type InboundJobQueue, inboundJobId } from '../ports/inbound-job-queue.js';
 import {
@@ -39,7 +39,7 @@ class FakeQueue implements Pick<InboundJobQueue, 'enqueue'> {
 }
 
 interface Harness {
-  readonly clients: InMemoryClientRepository;
+  readonly companies: InMemoryCompanyRepository;
   readonly queue: FakeQueue;
   readonly results: ChannelInboundResult[];
   readonly logs: ReturnType<typeof captureLogs>;
@@ -48,16 +48,16 @@ interface Harness {
 }
 
 function setup(
-  clientsOverride?: Pick<InMemoryClientRepository, 'findByWhatsappPhoneNumberId'>,
+  companiesOverride?: Pick<InMemoryCompanyRepository, 'findByWhatsappPhoneNumberId'>,
 ): Harness {
-  const clients = new InMemoryClientRepository();
+  const companies = new InMemoryCompanyRepository();
   const queue = new FakeQueue();
   const results: ChannelInboundResult[] = [];
   const logs = captureLogs();
   const harness = { lookups: 0 };
-  const lookup = clientsOverride ?? clients;
+  const lookup = companiesOverride ?? companies;
   const intake = new ChannelIntakeService({
-    clients: {
+    companies: {
       findByWhatsappPhoneNumberId: (id) => {
         harness.lookups += 1;
         return lookup.findByWhatsappPhoneNumberId(id);
@@ -72,19 +72,19 @@ function setup(
     },
     channel: 'whatsapp',
   });
-  return Object.assign(harness, { clients, queue, results, logs, intake });
+  return Object.assign(harness, { companies, queue, results, logs, intake });
 }
 
-async function newClient(
-  h: Pick<Harness, 'clients'>,
+async function newCompany(
+  h: Pick<Harness, 'companies'>,
   slug: string,
   phoneNumberId: string | null,
-  status: Client['status'] = 'ACTIVE',
-): Promise<Client> {
-  const created = await h.clients.create({ name: `Empresa ${slug}`, slug, status });
+  status: Company['status'] = 'ACTIVE',
+): Promise<Company> {
+  const created = await h.companies.create({ name: `Empresa ${slug}`, slug, status });
   return phoneNumberId === null
     ? created
-    : h.clients.update(created.id, { whatsappPhoneNumberId: phoneNumberId });
+    : h.companies.update(created.id, { whatsappPhoneNumberId: phoneNumberId });
 }
 
 /** `body` e `sender` ausentes valem o padrão; `undefined` explícito vale "o canal não informou". */
@@ -107,9 +107,9 @@ const unsupported = (phoneNumberId: string, messageId: string): InboundChannelMe
 });
 
 describe('ChannelIntakeService: roteamento', () => {
-  it('texto de número mapeado vira job text com contactRef = remetente, externalId = wamid e o clientId do dono', async () => {
+  it('texto de número mapeado vira job text com contactRef = remetente, externalId = wamid e o companyId do dono', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '1001');
+    const company = await newCompany(h, 'alfa', '1001');
 
     const summary = await h.intake.accept([text('1001', WAMID)], 'req-12345678');
 
@@ -117,7 +117,7 @@ describe('ChannelIntakeService: roteamento', () => {
     assert.deepEqual(h.queue.all(), [
       {
         kind: 'text',
-        clientId: client.id,
+        companyId: company.id,
         phoneNumberId: '1001',
         contactRef: CONTACT,
         text: SECRET_TEXT,
@@ -128,10 +128,10 @@ describe('ChannelIntakeService: roteamento', () => {
     assert.deepEqual(h.results, ['enqueued']);
   });
 
-  it('lote com vários números e vários clientes: cada mensagem vai para o cliente certo, na ordem', async () => {
+  it('lote com vários números e várias empresas: cada mensagem vai para a empresa certa, na ordem', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', '1001');
-    const b = await newClient(h, 'beta', '1002');
+    const a = await newCompany(h, 'alfa', '1001');
+    const b = await newCompany(h, 'beta', '1002');
 
     const summary = await h.intake.accept(
       [
@@ -145,7 +145,7 @@ describe('ChannelIntakeService: roteamento', () => {
 
     assert.deepEqual(summary, { enqueued: 4, discarded: 0, failed: 0 });
     assert.deepEqual(
-      h.queue.all().map((job) => [job.clientId, job.externalId, job.kind]),
+      h.queue.all().map((job) => [job.companyId, job.externalId, job.kind]),
       [
         [a.id, 'wamid.1', 'text'],
         [b.id, 'wamid.2', 'text'],
@@ -157,35 +157,35 @@ describe('ChannelIntakeService: roteamento', () => {
     assert.equal(h.lookups, 2);
   });
 
-  it('o mesmo wamid em clientes diferentes não colide: dois jobs, cada um do seu cliente', async () => {
+  it('o mesmo wamid em empresas diferentes não colide: dois jobs, cada uma da sua empresa', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', '1001');
-    const b = await newClient(h, 'beta', '1002');
+    const a = await newCompany(h, 'alfa', '1001');
+    const b = await newCompany(h, 'beta', '1002');
     await h.intake.accept(
       [text('1001', 'wamid.mesmo'), text('1002', 'wamid.mesmo')],
       'req-12345678',
     );
     assert.equal(h.queue.jobs.size, 2);
-    assert.deepEqual(new Set(h.queue.all().map((job) => job.clientId)), new Set([a.id, b.id]));
+    assert.deepEqual(new Set(h.queue.all().map((job) => job.companyId)), new Set([a.id, b.id]));
     assert.notEqual(
-      inboundJobId({ clientId: a.id, externalId: 'wamid.mesmo' }),
-      inboundJobId({ clientId: b.id, externalId: 'wamid.mesmo' }),
+      inboundJobId({ companyId: a.id, externalId: 'wamid.mesmo' }),
+      inboundJobId({ companyId: b.id, externalId: 'wamid.mesmo' }),
     );
   });
 
   it('reentrega do mesmo evento não gera segundo job', async () => {
     const h = setup();
-    await newClient(h, 'alfa', '1001');
+    await newCompany(h, 'alfa', '1001');
     await h.intake.accept([text('1001', 'wamid.1')], 'req-aaaaaaaa');
     await h.intake.accept([text('1001', 'wamid.1')], 'req-bbbbbbbb');
     assert.equal(h.queue.jobs.size, 1);
   });
 
-  it('número desconhecido, cliente removido e cliente suspenso: nada enfileirado, métrica e log warn', async () => {
+  it('número desconhecido, empresa removida e empresa suspensa: nada enfileirado, métrica e log warn', async () => {
     const h = setup();
-    await newClient(h, 'suspenso', '1003', 'SUSPENDED');
-    const removed = await newClient(h, 'removido', '1004');
-    await h.clients.delete(removed.id);
+    await newCompany(h, 'suspenso', '1003', 'SUSPENDED');
+    const removed = await newCompany(h, 'removido', '1004');
+    await h.companies.delete(removed.id);
 
     const summary = await h.intake.accept(
       [text('9999', 'wamid.1'), text('1003', 'wamid.2'), text('1004', 'wamid.3')],
@@ -194,7 +194,7 @@ describe('ChannelIntakeService: roteamento', () => {
 
     assert.deepEqual(summary, { enqueued: 0, discarded: 3, failed: 0 });
     assert.equal(h.queue.attempts, 0);
-    assert.deepEqual(h.results, ['unknown_number', 'client_unavailable', 'unknown_number']);
+    assert.deepEqual(h.results, ['unknown_number', 'company_unavailable', 'unknown_number']);
     const warns = h.logs.lines().filter((line) => line.level === 40);
     assert.equal(warns.length, 3);
   });
@@ -203,7 +203,7 @@ describe('ChannelIntakeService: roteamento', () => {
 describe('ChannelIntakeService: avisos constantes (nunca silêncio)', () => {
   it('tipo não textual vira notice unsupported_type; texto inválido vira notice invalid_text', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '1001');
+    const company = await newCompany(h, 'alfa', '1001');
     const invalid = [
       ['vazio', ''],
       ['só espaços', '   \n\t '],
@@ -220,7 +220,7 @@ describe('ChannelIntakeService: avisos constantes (nunca silêncio)', () => {
 
     assert.deepEqual(summary, { enqueued: 6, discarded: 0, failed: 0 });
     const jobs = h.queue.all();
-    assert.ok(jobs.every((job) => job.kind === 'notice' && job.clientId === client.id));
+    assert.ok(jobs.every((job) => job.kind === 'notice' && job.companyId === company.id));
     assert.deepEqual(
       jobs.map((job) => (job.kind === 'notice' ? job.reason : undefined)),
       [
@@ -244,7 +244,7 @@ describe('ChannelIntakeService: avisos constantes (nunca silêncio)', () => {
 
   it('texto de 4000 caracteres e com quebra de linha segue sendo texto', async () => {
     const h = setup();
-    await newClient(h, 'alfa', '1001');
+    await newCompany(h, 'alfa', '1001');
     await h.intake.accept(
       [
         text('1001', 'wamid.max', { body: 'x'.repeat(4000) }),
@@ -262,7 +262,7 @@ describe('ChannelIntakeService: avisos constantes (nunca silêncio)', () => {
 describe('ChannelIntakeService: remetente e identificadores', () => {
   it('mensagem sem remetente utilizável é descartada com log e métrica (sem erro)', async () => {
     const h = setup();
-    await newClient(h, 'alfa', '1001');
+    await newCompany(h, 'alfa', '1001');
     const summary = await h.intake.accept(
       [
         text('1001', 'wamid.1', { sender: undefined }),
@@ -283,7 +283,7 @@ describe('ChannelIntakeService: remetente e identificadores', () => {
 
   it('id de mensagem inválido (vazio, grande demais, controle) ou número do negócio inválido é descartado', async () => {
     const h = setup();
-    await newClient(h, 'alfa', '1001');
+    await newCompany(h, 'alfa', '1001');
     const summary = await h.intake.accept(
       [
         text('1001', ''),
@@ -304,14 +304,14 @@ describe('ChannelIntakeService: remetente e identificadores', () => {
 
   it('wamid com ":" ou "%" gera um jobId sem ":" (o BullMQ recusa dois-pontos)', () => {
     const id = inboundJobId({
-      clientId: '018f3a52-0000-7000-8000-000000000001',
+      companyId: '018f3a52-0000-7000-8000-000000000001',
       externalId: 'wamid:abc%def==',
     });
     assert.ok(!id.includes(':'));
     assert.ok(id.startsWith('018f3a52-0000-7000-8000-000000000001_'));
     assert.notEqual(
-      inboundJobId({ clientId: 'c', externalId: 'a:b' }),
-      inboundJobId({ clientId: 'c', externalId: 'a%3Ab' }),
+      inboundJobId({ companyId: 'c', externalId: 'a:b' }),
+      inboundJobId({ companyId: 'c', externalId: 'a%3Ab' }),
     );
   });
 });
@@ -319,7 +319,7 @@ describe('ChannelIntakeService: remetente e identificadores', () => {
 describe('ChannelIntakeService: falhas', () => {
   it('falha ao enfileirar uma mensagem não impede as outras; a reentrega enfileira só o que faltou', async () => {
     const h = setup();
-    await newClient(h, 'alfa', '1001');
+    await newCompany(h, 'alfa', '1001');
     h.queue.failOn = (job) => job.externalId === 'wamid.2';
 
     const first = await h.intake.accept(
@@ -348,28 +348,28 @@ describe('ChannelIntakeService: falhas', () => {
     );
   });
 
-  it('banco fora na resolução do cliente conta como falha (500 para a Meta retentar), sem derrubar o lote', async () => {
-    const real = new InMemoryClientRepository();
+  it('banco fora na resolução da empresa conta como falha (500 para a Meta retentar), sem derrubar o lote', async () => {
+    const real = new InMemoryCompanyRepository();
     const h = setup({
       findByWhatsappPhoneNumberId: (id) =>
         id === '1001'
           ? Promise.reject(new DatabaseError('banco fora'))
           : real.findByWhatsappPhoneNumberId(id),
     });
-    const other = await newClient({ clients: real }, 'beta', '1002');
+    const other = await newCompany({ companies: real }, 'beta', '1002');
     const summary = await h.intake.accept(
       [text('1001', 'wamid.1'), text('1002', 'wamid.2')],
       'req-12345678',
     );
     assert.deepEqual(summary, { enqueued: 1, discarded: 0, failed: 1 });
-    assert.equal(h.queue.all()[0]?.clientId, other.id);
+    assert.equal(h.queue.all()[0]?.companyId, other.id);
   });
 
   it('métrica que lança não derruba o atendimento da mensagem', async () => {
-    const clients = new InMemoryClientRepository();
+    const companies = new InMemoryCompanyRepository();
     const queue = new FakeQueue();
     const intake = new ChannelIntakeService({
-      clients,
+      companies,
       queue,
       logger: captureLogs().logger,
       metrics: {
@@ -379,7 +379,7 @@ describe('ChannelIntakeService: falhas', () => {
       },
       channel: 'whatsapp',
     });
-    await newClient({ clients }, 'alfa', '1001');
+    await newCompany({ companies }, 'alfa', '1001');
     assert.deepEqual(await intake.accept([text('1001', 'wamid.1')], 'req-12345678'), {
       enqueued: 1,
       discarded: 0,
@@ -391,8 +391,8 @@ describe('ChannelIntakeService: falhas', () => {
 describe('ChannelIntakeService: privacidade nos logs', () => {
   it('texto, remetente e wamid não aparecem em nenhuma linha de log (sucesso, descartes e falhas)', async () => {
     const h = setup();
-    await newClient(h, 'alfa', '1001');
-    await newClient(h, 'suspenso', '1003', 'SUSPENDED');
+    await newCompany(h, 'alfa', '1001');
+    await newCompany(h, 'suspenso', '1003', 'SUSPENDED');
     h.queue.failOn = (job) => job.externalId.includes('falha');
 
     await h.intake.accept(
@@ -423,7 +423,7 @@ describe('ChannelIntakeService: privacidade nos logs', () => {
 describe('ChannelIntakeService: tipos que não são mensagem do contato', () => {
   it('reação, system, unsupported e tipo desconhecido: sem job, sem aviso, métrica ignored_type e log sem conteúdo', async () => {
     const h = setup();
-    await newClient(h, 'alfa', '1001');
+    await newCompany(h, 'alfa', '1001');
     const ignored = (id: string): InboundChannelMessage => ({
       phoneNumberId: '1001',
       messageId: id,
@@ -437,7 +437,7 @@ describe('ChannelIntakeService: tipos que não são mensagem do contato', () => 
     assert.deepEqual(summary, { enqueued: 0, discarded: 3, failed: 0 });
     assert.equal(h.queue.attempts, 0);
     assert.deepEqual(h.results, ['ignored_type', 'ignored_type', 'ignored_type']);
-    assert.equal(h.lookups, 0, 'nem resolve o cliente');
+    assert.equal(h.lookups, 0, 'nem resolve a empresa');
     assert.ok(h.logs.lines().every((line) => Number(line.level) <= 30));
   });
 

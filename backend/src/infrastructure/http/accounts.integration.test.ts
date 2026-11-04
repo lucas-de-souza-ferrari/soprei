@@ -5,7 +5,7 @@ import type { AccountSessionStore } from '../../application/ports/account-sessio
 import { Result } from '../../shared/types/index.js';
 import { test } from 'node:test';
 import { AccountService } from '../../application/auth/account.service.js';
-import { ClientService } from '../../application/clients/client.service.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import { noResetMail } from '../../test-support/no-reset-mail.js';
@@ -14,7 +14,7 @@ import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import {
   createDatabase,
   PrismaAccountRepository,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
 } from '../database/index.js';
 import { createAuthRedis } from '../auth/auth-redis.js';
 import { createAuthComponents } from '../auth/create-auth.js';
@@ -46,7 +46,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
   let sessionsDown = false;
   const sessions: AccountSessionStore = {
     create: (id) => store.create(id),
-    select: (secret, clientId) => store.select(secret, clientId),
+    select: (secret, companyId) => store.select(secret, companyId),
     revoke: (secret) => store.revoke(secret),
     revokeAll: (id) => store.revokeAll(id),
     read: (secret) =>
@@ -73,13 +73,13 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     logger: logs.logger,
     readiness: { database: () => db.check(), redis: () => Promise.resolve(Result.ok(undefined)) },
     auth: auth.service,
-    userAdmin: auth.userAdmin,
-    admin: { clients: new ClientService(new PrismaClientRepository(db.prisma)) },
+    membershipAdmin: auth.membershipAdmin,
+    admin: { companies: new CompanyService(new PrismaCompanyRepository(db.prisma)) },
     accounts: { service, origin: 'http://localhost:5174', secure: false },
   });
   const emails = [0, 1].map(() => `accounts-${randomUUID()}@example.test`);
   const password = `Secret1-${randomUUID()}`;
-  const headers = { origin: 'http://localhost:5174', 'x-soprei-client': 'web' };
+  const headers = { origin: 'http://localhost:5174', 'x-soprei-app': 'web' };
   const post = (url: string, payload: object, cookie?: string) =>
     app.inject({
       method: 'POST',
@@ -113,10 +113,10 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     }
     const [a, b] = cookieValues;
     assert.ok(a && b);
-    const legacyClient = await tenants.createClient('legacy-account');
+    const legacyCompany = await tenants.createCompany('legacy-account');
     const legacyEmail = `legacy-${randomUUID()}@example.test`;
     emails.push(legacyEmail);
-    await auth.users.create(legacyClient.id, {
+    await auth.memberships.create(legacyCompany.id, {
       email: legacyEmail,
       passwordHash: await passwords.hash(password),
       role: 'OWNER',
@@ -129,7 +129,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
       hasher: passwords,
     });
     const oldLogin = await legacyAuth.service.login({
-      clientSlug: legacyClient.slug,
+      companySlug: legacyCompany.slug,
       email: legacyEmail,
       password,
     });
@@ -167,13 +167,13 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     );
     const create = await post('/account/companies', { name: 'Empresa secreta A' }, a);
     assert.equal(create.statusCode, 201);
-    const company = create.json<{ clientId: string; role: string }>();
-    tenants.track(company.clientId);
+    const company = create.json<{ companyId: string; role: string }>();
+    tenants.track(company.companyId);
     assert.equal(company.role, 'OWNER');
     const second = await post('/account/companies', { name: 'Segunda empresa A' }, a);
     assert.equal(second.statusCode, 201);
-    const secondCompany = second.json<{ clientId: string }>();
-    tenants.track(secondCompany.clientId);
+    const secondCompany = second.json<{ companyId: string }>();
+    tenants.track(secondCompany.companyId);
     assert.equal(
       (await repo.listMemberships((await repo.findByEmail(emails[0] ?? ''))?.id ?? '')).length,
       2,
@@ -190,7 +190,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     assert.equal(
       (
         await app.inject({
-          url: `/admin/clients/${company.clientId}/users`,
+          url: `/admin/companies/${company.companyId}/memberships`,
           headers: { cookie: b },
         })
       ).statusCode,
@@ -198,20 +198,20 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     );
     const ownB = await post('/account/companies', { name: 'Empresa B' }, b);
     assert.equal(ownB.statusCode, 201);
-    const companyB = ownB.json<{ clientId: string }>();
-    tenants.track(companyB.clientId);
+    const companyB = ownB.json<{ companyId: string }>();
+    tenants.track(companyB.companyId);
     assert.equal(
-      (await post(`/account/companies/${company.clientId}/select`, {}, b)).statusCode,
+      (await post(`/account/companies/${company.companyId}/select`, {}, b)).statusCode,
       404,
     );
     assert.equal(
-      (await post(`/account/companies/${company.clientId}/select`, {}, a)).statusCode,
+      (await post(`/account/companies/${company.companyId}/select`, {}, a)).statusCode,
       204,
     );
     assert.equal(
       (
         await app.inject({
-          url: `/admin/clients/${company.clientId}/users`,
+          url: `/admin/companies/${company.companyId}/memberships`,
           headers: { cookie: a },
         })
       ).statusCode,
@@ -220,7 +220,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     assert.equal(
       (
         await app.inject({
-          url: `/admin/clients/${companyB.clientId}/users`,
+          url: `/admin/companies/${companyB.companyId}/memberships`,
           headers: { cookie: a },
         })
       ).statusCode,
@@ -228,17 +228,20 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     );
     const session = await app.inject({ url: '/auth/session', headers: { cookie: a } });
     const privateCacheCheck = await app.inject({
-      url: `/admin/clients/${company.clientId}/users`,
+      url: `/admin/companies/${company.companyId}/memberships`,
       headers: { cookie: a },
     });
     assert.equal(privateCacheCheck.headers['cache-control'], 'no-store');
-    assert.equal(session.json<{ selectedClientId: string }>().selectedClientId, company.clientId);
+    assert.equal(
+      session.json<{ selectedCompanyId: string }>().selectedCompanyId,
+      company.companyId,
+    );
     // Mutações com cookie sem Origin/cabeçalho do app são recusadas (CSRF), também em rota de tenant.
     for (const request of [
       { method: 'POST', url: '/account/companies', payload: { name: 'sem origem' } },
       {
         method: 'PATCH',
-        url: `/admin/clients/${company.clientId}/users/${randomUUID()}`,
+        url: `/admin/companies/${company.companyId}/memberships/${randomUUID()}`,
         payload: { role: 'VIEWER' },
       },
     ] as const) {
@@ -246,26 +249,26 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     }
     // Redis das sessões fora: fail-closed (503), nunca aceita o cookie sem poder conferir.
     sessionsDown = true;
-    for (const url of ['/auth/session', `/admin/clients/${company.clientId}/users`]) {
+    for (const url of ['/auth/session', `/admin/companies/${company.companyId}/memberships`]) {
       assert.equal((await app.inject({ url, headers: { cookie: a } })).statusCode, 503);
     }
     sessionsDown = false;
     assert.equal(session.headers['set-cookie'], undefined);
-    await db.prisma.user.updateMany({
-      where: { clientId: company.clientId },
+    await db.prisma.membership.updateMany({
+      where: { companyId: company.companyId },
       data: { role: 'VIEWER' },
     });
     assert.equal((await service.tenantIdentity(a.slice('soprei_session='.length)))?.role, 'VIEWER');
-    await service.selectCompany(a.slice('soprei_session='.length), secondCompany.clientId);
+    await service.selectCompany(a.slice('soprei_session='.length), secondCompany.companyId);
     assert.equal((await service.tenantIdentity(a.slice('soprei_session='.length)))?.role, 'OWNER');
-    await service.selectCompany(a.slice('soprei_session='.length), company.clientId);
+    await service.selectCompany(a.slice('soprei_session='.length), company.companyId);
     const creation = await Promise.allSettled(
       Array.from({ length: 19 }, (_, index) =>
         service.createCompany(a.slice('soprei_session='.length), `Limite concorrente ${index}`),
       ),
     );
     for (const result of creation)
-      if (result.status === 'fulfilled') tenants.track(result.value.clientId);
+      if (result.status === 'fulfilled') tenants.track(result.value.companyId);
     assert.equal(creation.filter((result) => result.status === 'fulfilled').length, 18);
     assert.equal((await service.companies(a.slice('soprei_session='.length))).length, 20);
     const accountA = await repo.findByEmail(emails[0] ?? '');
@@ -277,7 +280,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
       JSON.stringify({
         accountId: accountA.id,
         id: randomUUID(),
-        clientId: null,
+        companyId: null,
         createdAt: 0,
         expiresAt: 1,
       }),
@@ -287,12 +290,12 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     assert.equal(await store.read(expired), null);
     assert.equal(await redis.client.exists(expiredKey), 0);
     // Em novo request, o vínculo é relido; desativá-lo não conserva a identidade anterior.
-    await db.prisma.user.updateMany({
-      where: { clientId: company.clientId },
+    await db.prisma.membership.updateMany({
+      where: { companyId: company.companyId },
       data: { status: 'DISABLED' },
     });
     assert.equal(
-      (await post(`/account/companies/${company.clientId}/select`, {}, a)).statusCode,
+      (await post(`/account/companies/${company.companyId}/select`, {}, a)).statusCode,
       404,
     );
     const secret = a.slice('soprei_session='.length);
@@ -319,7 +322,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
       const secureLogin = await secureApp.inject({
         method: 'POST',
         url: '/auth/login',
-        headers: { origin: 'https://soprei.example', 'x-soprei-client': 'web' },
+        headers: { origin: 'https://soprei.example', 'x-soprei-app': 'web' },
         payload: { email: emails[0], password },
       });
       assert.equal(secureLogin.statusCode, 204);

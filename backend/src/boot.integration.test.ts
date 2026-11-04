@@ -220,8 +220,8 @@ describe('boot com rate limiting (spec 005)', () => {
     });
     const redis = createRedis(config, createLogger(config));
     try {
-      const url = `http://127.0.0.1:${String(server.port)}/admin/clients`;
-      // O "proxy" (o próprio fetch, em 127.0.0.1) acrescenta o IP do cliente ao fim; o começo é forjado.
+      const url = `http://127.0.0.1:${String(server.port)}/admin/companies`;
+      // O "proxy" (o próprio fetch, em 127.0.0.1) acrescenta o IP da empresa ao fim; o começo é forjado.
       const headers = { 'x-forwarded-for': `203.0.113.250, ${clientIp}` };
       const statuses: number[] = [];
       let last: Response | undefined;
@@ -262,7 +262,7 @@ describe('boot com rate limiting (spec 005)', () => {
       RATE_LIMIT_ADMIN_MAX: '1',
     });
     try {
-      const url = `http://127.0.0.1:${String(server.port)}/admin/clients`;
+      const url = `http://127.0.0.1:${String(server.port)}/admin/companies`;
       for (let i = 0; i < 4; i += 1) {
         assert.equal((await fetch(url)).status, 401);
       }

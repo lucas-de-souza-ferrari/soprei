@@ -1,7 +1,7 @@
 import type {
   AuditEvent,
   AuditRepository,
-  ClientId,
+  CompanyId,
   ListOptions,
   NewAuditEvent,
   Page,
@@ -13,10 +13,10 @@ import { withRepositoryErrors } from './repository-errors.js';
 
 /**
  * Trilha de auditoria (spec 008, model de tenant). Só `create` e `list`: a trilha é imutável pela
- * API (não há `update` nem `delete` aqui, de propósito). O filtro por cliente é montado neste
- * repositório (`clientId` em todo `where` e em todo `create`) e a `tenant-scope` recusa qualquer
+ * API (não há `update` nem `delete` aqui, de propósito). O filtro por empresa é montado neste
+ * repositório (`companyId` em todo `where` e em todo `create`) e a `tenant-scope` recusa qualquer
  * consulta sem ele. As chaves estrangeiras compostas do banco impedem apontar para usuário de
- * outro cliente.
+ * outra empresa.
  */
 export class PrismaAuditRepository implements AuditRepository {
   constructor(private readonly db: TenantScopedDb) {}
@@ -25,14 +25,14 @@ export class PrismaAuditRepository implements AuditRepository {
     return new PrismaAuditRepository(tx);
   }
 
-  create(clientId: ClientId, data: NewAuditEvent): Promise<AuditEvent> {
+  create(companyId: CompanyId, data: NewAuditEvent): Promise<AuditEvent> {
     return withRepositoryErrors('AuditEvent.create', async () => {
       const row = await this.db.auditEvent.create({
         data: {
-          clientId,
+          companyId,
           action: data.action,
-          actorUserId: data.actorUserId,
-          targetUserId: data.targetUserId ?? null,
+          actorMembershipId: data.actorMembershipId,
+          targetMembershipId: data.targetMembershipId ?? null,
           fromRole: data.fromRole ?? null,
           toRole: data.toRole ?? null,
         },
@@ -41,11 +41,11 @@ export class PrismaAuditRepository implements AuditRepository {
     });
   }
 
-  list(clientId: ClientId, options?: ListOptions): Promise<Page<AuditEvent>> {
+  list(companyId: CompanyId, options?: ListOptions): Promise<Page<AuditEvent>> {
     return withRepositoryErrors('AuditEvent.list', async () => {
       const { limit, take, after } = buildDescPageQuery(options);
       const rows = await this.db.auditEvent.findMany({
-        where: { clientId, ...(after === undefined ? {} : { OR: after }) },
+        where: { companyId, ...(after === undefined ? {} : { OR: after }) },
         orderBy: descOrderBy(),
         take,
       });

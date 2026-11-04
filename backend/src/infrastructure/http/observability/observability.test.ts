@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../../application/clients/client.service.js';
+import { CompanyService } from '../../../application/companies/company.service.js';
 import { BaseError } from '../../../shared/errors/index.js';
-import { setClientId } from '../../../shared/request-context/index.js';
+import { setCompanyId } from '../../../shared/request-context/index.js';
 import { Result } from '../../../shared/types/index.js';
 import { bearer as bearerHeader, buildTestAuth } from '../../../test-support/in-memory-auth.js';
-import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../../test-support/in-memory-company.repository.js';
 import { captureLogs, type LogCapture, type LogLine } from '../../../test-support/log-capture.js';
 import { createMetrics, type Metrics } from '../../metrics/index.js';
 import { buildServer } from '../server.js';
@@ -63,15 +63,15 @@ function buildHarness(options: { admin?: boolean; metricsToken?: string } = {}):
     ...(options.admin === true
       ? {
           auth: testAuth.service,
-          admin: { clients: new ClientService(new InMemoryClientRepository()) },
+          admin: { companies: new CompanyService(new InMemoryCompanyRepository()) },
         }
       : {}),
   });
 
-  // Hook de teste: define o cliente (como a autenticação fará) e loga depois de um await.
+  // Hook de teste: define a empresa (como a autenticação fará) e loga depois de um await.
   app.addHook('preHandler', async (request) => {
-    const clientId = request.headers['x-test-client'];
-    if (typeof clientId === 'string') setClientId(clientId);
+    const companyId = request.headers['x-test-company'];
+    if (typeof companyId === 'string') setCompanyId(companyId);
     await sleep(numberHeader(request.headers['x-test-hook-delay']));
     capture.logger.info({ label: 'hook' }, 'hook depois do await');
   });
@@ -88,13 +88,13 @@ function buildHarness(options: { admin?: boolean; metricsToken?: string } = {}):
     await sleep(5);
     throw new BoomError();
   });
-  app.get('/test/set-client', async () => {
-    setClientId('client-from-handler');
+  app.get('/test/set-company', async () => {
+    setCompanyId('company-from-handler');
     await sleep(5);
     return { ok: true };
   });
-  app.get('/test/boom-with-client', async () => {
-    setClientId('client-from-handler');
+  app.get('/test/boom-with-company', async () => {
+    setCompanyId('company-from-handler');
     await sleep(5);
     throw new BoomError();
   });
@@ -125,7 +125,7 @@ describe('contexto por requisição (inject)', () => {
     await h.app.close();
   });
 
-  it('duas requisições concorrentes, com atrasos intercalados, não misturam requestId nem clientId', async () => {
+  it('duas requisições concorrentes, com atrasos intercalados, não misturam requestId nem companyId', async () => {
     const idA = 'req-aaaaaaaa-0001';
     const idB = 'req-bbbbbbbb-0002';
     const [a, b] = await Promise.all([
@@ -134,7 +134,7 @@ describe('contexto por requisição (inject)', () => {
         url: '/test/work',
         headers: {
           'x-request-id': idA,
-          'x-test-client': 'client-A',
+          'x-test-company': 'company-A',
           'x-test-hook-delay': '40',
           'x-test-handler-delay': '10',
         },
@@ -144,7 +144,7 @@ describe('contexto por requisição (inject)', () => {
         url: '/test/work',
         headers: {
           'x-request-id': idB,
-          'x-test-client': 'client-B',
+          'x-test-company': 'company-B',
           'x-test-hook-delay': '5',
           'x-test-handler-delay': '50',
         },
@@ -153,9 +153,9 @@ describe('contexto por requisição (inject)', () => {
     assert.equal(a.statusCode, 200);
     assert.equal(b.statusCode, 200);
 
-    for (const [id, client] of [
-      [idA, 'client-A'],
-      [idB, 'client-B'],
+    for (const [id, company] of [
+      [idA, 'company-A'],
+      [idB, 'company-B'],
     ] as const) {
       const lines = byRequestId(h.capture.lines(), id);
       assert.deepEqual(
@@ -164,7 +164,7 @@ describe('contexto por requisição (inject)', () => {
         `logs de ${id}`,
       );
       for (const line of lines) {
-        assert.equal(line.clientId, client, `clientId errado em ${JSON.stringify(line)}`);
+        assert.equal(line.companyId, company, `companyId errado em ${JSON.stringify(line)}`);
         assert.equal(line.operation, 'GET /test/work');
       }
     }
@@ -187,32 +187,32 @@ describe('contexto por requisição (inject)', () => {
     const id = 'req-setclient-0001';
     const response = await h.app.inject({
       method: 'GET',
-      url: '/test/set-client',
+      url: '/test/set-company',
       headers: { 'x-request-id': id },
     });
     assert.equal(response.statusCode, 200);
     const done = endLine(h.capture.lines(), id);
     assert.ok(done);
-    assert.equal(done.clientId, 'client-from-handler');
-    assert.equal(done.operation, 'GET /test/set-client');
+    assert.equal(done.companyId, 'company-from-handler');
+    assert.equal(done.operation, 'GET /test/set-company');
   });
 
   it('o contexto chega ao log do error handler quando o handler lança', async () => {
     const id = 'req-boom-0001';
     const response = await h.app.inject({
       method: 'GET',
-      url: '/test/boom-with-client',
+      url: '/test/boom-with-company',
       headers: { 'x-request-id': id },
     });
     assert.equal(response.statusCode, 500);
     const lines = byRequestId(h.capture.lines(), id);
     const errorLog = lines.find((line) => line.msg === 'erro de aplicação');
     assert.ok(errorLog, 'esperava o log do error handler');
-    assert.equal(errorLog.clientId, 'client-from-handler');
-    assert.equal(errorLog.operation, 'GET /test/boom-with-client');
+    assert.equal(errorLog.companyId, 'company-from-handler');
+    assert.equal(errorLog.operation, 'GET /test/boom-with-company');
     const done = endLine(h.capture.lines(), id);
     assert.ok(done);
-    assert.equal(done.clientId, 'client-from-handler');
+    assert.equal(done.companyId, 'company-from-handler');
     assert.equal(done.statusCode, 500);
     assert.equal(done.level, 50);
   });
@@ -232,7 +232,7 @@ describe('contexto por requisição (servidor HTTP real, corpo e keep-alive)', (
 
   const post = (
     id: string,
-    client: string,
+    company: string,
     hookDelay: number,
     handlerDelay: number,
   ): Promise<Response> =>
@@ -241,11 +241,11 @@ describe('contexto por requisição (servidor HTTP real, corpo e keep-alive)', (
       headers: {
         'content-type': 'application/json',
         'x-request-id': id,
-        'x-test-client': client,
+        'x-test-company': company,
         'x-test-hook-delay': String(hookDelay),
         'x-test-handler-delay': String(handlerDelay),
       },
-      body: JSON.stringify({ client }),
+      body: JSON.stringify({ company }),
     });
 
   it('POST concorrentes com corpo (o parse do corpo roda fora do als.run) mantêm o contexto', async () => {
@@ -253,14 +253,14 @@ describe('contexto por requisição (servidor HTTP real, corpo e keep-alive)', (
       const idA = `req-post-a-${String(round)}-xxxx`;
       const idB = `req-post-b-${String(round)}-xxxx`;
       const [a, b] = await Promise.all([
-        post(idA, 'client-A', 30, 10),
-        post(idB, 'client-B', 5, 40),
+        post(idA, 'company-A', 30, 10),
+        post(idB, 'company-B', 5, 40),
       ]);
       assert.equal(a.status, 200);
       assert.equal(b.status, 200);
-      for (const [id, client] of [
-        [idA, 'client-A'],
-        [idB, 'client-B'],
+      for (const [id, company] of [
+        [idA, 'company-A'],
+        [idB, 'company-B'],
       ] as const) {
         const lines = byRequestId(h.capture.lines(), id);
         assert.deepEqual(
@@ -269,7 +269,7 @@ describe('contexto por requisição (servidor HTTP real, corpo e keep-alive)', (
           `logs de ${id}`,
         );
         for (const line of lines) {
-          assert.equal(line.clientId, client, JSON.stringify(line));
+          assert.equal(line.companyId, company, JSON.stringify(line));
           assert.equal(line.operation, 'POST /test/work');
         }
       }
@@ -379,17 +379,17 @@ describe('log de requisição', () => {
     const id = randomUUID();
     const response = await h.app.inject({
       method: 'GET',
-      url: `/admin/clients/${id}`,
+      url: `/admin/companies/${id}`,
       headers: { ...admin, 'x-request-id': 'req-route-0001' },
     });
     assert.equal(response.statusCode, 404);
     const line = endLine(h.capture.lines(), 'req-route-0001');
     assert.ok(line);
-    assert.equal(line.route, '/admin/clients/:id');
+    assert.equal(line.route, '/admin/companies/:id');
     assert.equal(line.method, 'GET');
     assert.equal(line.statusCode, 404);
     assert.equal(typeof line.durationMs, 'number');
-    assert.equal(line.operation, 'GET /admin/clients/:id');
+    assert.equal(line.operation, 'GET /admin/companies/:id');
     assert.equal(line.level, 40);
     assert.ok(!h.capture.raw().includes(id), 'o id real da URL não pode aparecer no log');
   });
@@ -397,12 +397,12 @@ describe('log de requisição', () => {
   it('a rota "/" do prefixo aparece sem barra final', async () => {
     await h.app.inject({
       method: 'GET',
-      url: '/admin/clients',
+      url: '/admin/companies',
       headers: { ...admin, 'x-request-id': 'req-list-00001' },
     });
     const line = endLine(h.capture.lines(), 'req-list-00001');
     assert.ok(line);
-    assert.equal(line.route, '/admin/clients');
+    assert.equal(line.route, '/admin/companies');
     assert.equal(line.level, 30);
   });
 
@@ -495,13 +495,13 @@ describe('redação de segredos', () => {
     const valid = await h.adminHeaders();
     const token = valid.authorization.slice('Bearer '.length);
     const forged = `${token.slice(0, -4)}AAAA`;
-    await h.app.inject({ method: 'GET', url: '/admin/clients', headers: valid });
+    await h.app.inject({ method: 'GET', url: '/admin/companies', headers: valid });
     await h.app.inject({
       method: 'GET',
-      url: '/admin/clients',
+      url: '/admin/companies',
       headers: { authorization: `Bearer ${forged}`, cookie: `sid=${token}` },
     });
-    await h.app.inject({ method: 'GET', url: '/admin/clients' });
+    await h.app.inject({ method: 'GET', url: '/admin/companies' });
     await h.app.close();
 
     const raw = h.capture.raw();
@@ -510,7 +510,7 @@ describe('redação de segredos', () => {
     assert.ok(!raw.includes(forged), 'o token forjado apareceu no log');
     const refused = h.capture.lines().filter((line) => line.msg === 'autenticação recusada');
     assert.equal(refused.length, 2);
-    for (const line of refused) assert.equal(line.route, '/admin/clients');
+    for (const line of refused) assert.equal(line.route, '/admin/companies');
   });
 });
 
@@ -570,8 +570,8 @@ describe('GET /metrics e métricas HTTP', () => {
     const h = buildHarness({ metricsToken: TOKEN, admin: true });
     await h.app.ready();
     const admin = await h.adminHeaders();
-    await h.app.inject({ method: 'GET', url: `/admin/clients/${randomUUID()}`, headers: admin });
-    await h.app.inject({ method: 'GET', url: `/admin/clients/${randomUUID()}`, headers: admin });
+    await h.app.inject({ method: 'GET', url: `/admin/companies/${randomUUID()}`, headers: admin });
+    await h.app.inject({ method: 'GET', url: `/admin/companies/${randomUUID()}`, headers: admin });
     await h.app.inject({ method: 'GET', url: '/rota/que/nao/existe/1' });
     await h.app.inject({ method: 'GET', url: '/rota/que/nao/existe/2' });
     await h.app.inject({ method: 'GET', url: '/metrics', headers: bearer });
@@ -581,7 +581,7 @@ describe('GET /metrics e métricas HTTP', () => {
     const body = response.body;
     assert.match(
       body,
-      /http_requests_total\{method="GET",route="\/admin\/clients\/:id",status_class="4xx"\} 2/,
+      /http_requests_total\{method="GET",route="\/admin\/companies\/:id",status_class="4xx"\} 2/,
     );
     assert.match(
       body,
@@ -589,7 +589,7 @@ describe('GET /metrics e métricas HTTP', () => {
     );
     assert.doesNotMatch(body, /route="\/metrics"/);
     assert.doesNotMatch(body, UUID_ANYWHERE);
-    assert.doesNotMatch(body, /clientId/i);
+    assert.doesNotMatch(body, /companyId/i);
     assert.match(body, /http_request_duration_seconds_bucket\{le="0\.005"/);
     assert.match(body, /http_request_duration_seconds_bucket\{le="10"/);
   });
@@ -597,12 +597,12 @@ describe('GET /metrics e métricas HTTP', () => {
   it('401 em /admin entra com o padrão da rota, não com a URL', async () => {
     const h = buildHarness({ metricsToken: TOKEN, admin: true });
     await h.app.ready();
-    await h.app.inject({ method: 'GET', url: `/admin/clients/${randomUUID()}` });
+    await h.app.inject({ method: 'GET', url: `/admin/companies/${randomUUID()}` });
     const response = await h.app.inject({ method: 'GET', url: '/metrics', headers: bearer });
     await h.app.close();
     assert.match(
       response.body,
-      /http_requests_total\{method="GET",route="\/admin\/clients\/:id",status_class="4xx"\} 1/,
+      /http_requests_total\{method="GET",route="\/admin\/companies\/:id",status_class="4xx"\} 1/,
     );
   });
 });
@@ -633,7 +633,7 @@ describe('falha de métrica', () => {
   });
 });
 
-describe('requisição abortada pelo cliente', () => {
+describe('requisição abortada pela empresa', () => {
   it('o log e a métrica de fim saem uma única vez', async () => {
     const capture = captureLogs();
     const metrics = createMetrics();

@@ -3,7 +3,7 @@ import { ChannelConnectionService } from './application/channel/channel-connecti
 import { ChannelCredentialsService } from './application/channel/channel-credentials.service.js';
 import { ChannelInboundProcessor } from './application/channel/channel-inbound.processor.js';
 import { ChannelIntakeService } from './application/channel/channel-intake.service.js';
-import { ClientService } from './application/clients/client.service.js';
+import { CompanyService } from './application/companies/company.service.js';
 import { createAuthRedis } from './infrastructure/auth/auth-redis.js';
 import { createAuthComponents, warmUpAuth } from './infrastructure/auth/create-auth.js';
 import { createRateLimitRedis } from './infrastructure/cache/rate-limit-redis.js';
@@ -20,7 +20,7 @@ import {
   PrismaAttendanceUnitOfWork,
   PrismaChannelConnectionRepository,
   PrismaChannelUnitOfWork,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
 } from './infrastructure/database/index.js';
@@ -107,12 +107,12 @@ async function main(): Promise<void> {
   }
   if (config.TRUST_PROXY === true) {
     logger.warn(
-      'TRUST_PROXY=true confia em toda a cadeia X-Forwarded-For (o cliente escolhe o IP); use só em ambiente fechado',
+      'TRUST_PROXY=true confia em toda a cadeia X-Forwarded-For (a empresa escolhe o IP); use só em ambiente fechado',
     );
   }
 
   const { prisma } = infrastructure.database;
-  const clientRepository = new PrismaClientRepository(prisma);
+  const companyRepository = new PrismaCompanyRepository(prisma);
   const auth = createAuthComponents({
     config,
     logger,
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
   });
   await warmUpAuth(auth);
   const attendance = new AttendanceService({
-    clients: clientRepository,
+    companies: companyRepository,
     conversations: new PrismaConversationRepository(prisma),
     messages: new PrismaMessageRepository(prisma),
     unitOfWork: new PrismaAttendanceUnitOfWork(prisma),
@@ -139,13 +139,13 @@ async function main(): Promise<void> {
   let channelService: ChannelConnectionService | undefined;
   if (whatsapp !== undefined && inboundQueue !== undefined) {
     const channelLogger = logger;
-    // Credenciais por cliente (spec 015): a config já validou as chaves; aqui só se monta a cifra.
+    // Credenciais por empresa (spec 015): a config já validou as chaves; aqui só se monta a cifra.
     const parsedKeys = parseCredentialKeys(whatsapp.credentialKeys);
     if (!parsedKeys.ok) throw new Error('CHANNEL_CREDENTIALS_KEYS inválida');
     const cipher = new AesGcmCredentialCipher(parsedKeys.keys, whatsapp.credentialActiveKeyId);
     const connections = new PrismaChannelConnectionRepository(prisma);
     channelService = new ChannelConnectionService({
-      clients: clientRepository,
+      companies: companyRepository,
       connections,
       unitOfWork: new PrismaChannelUnitOfWork(prisma),
       cipher,
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     });
     const processor = new ChannelInboundProcessor({
       attendance,
-      clients: clientRepository,
+      companies: companyRepository,
       messages: new PrismaMessageRepository(prisma),
       sender: new WhatsappCloudApiClient({
         baseUrl: whatsapp.apiBaseUrl,
@@ -171,7 +171,7 @@ async function main(): Promise<void> {
         metrics,
       }),
       credentials: new ChannelCredentialsService({
-        clients: clientRepository,
+        companies: companyRepository,
         connections,
         cipher,
         legacyToken: whatsapp.legacyAccessToken,
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
       appSecret: whatsapp.appSecret,
       verifyToken: whatsapp.verifyToken,
       intake: new ChannelIntakeService({
-        clients: clientRepository,
+        companies: companyRepository,
         queue: inboundQueue.queue,
         logger: channelLogger,
         metrics,
@@ -273,7 +273,7 @@ async function main(): Promise<void> {
     metrics,
     metricsToken: config.METRICS_TOKEN,
     auth: auth.service,
-    userAdmin: auth.userAdmin,
+    membershipAdmin: auth.membershipAdmin,
     trustProxy: config.TRUST_PROXY,
     ...(rateLimitRedis === undefined
       ? {}
@@ -289,7 +289,7 @@ async function main(): Promise<void> {
       redis: () => infrastructure.redis.check(),
     },
     admin: {
-      clients: new ClientService(clientRepository),
+      companies: new CompanyService(companyRepository),
       attendance,
       ...(channelService === undefined ? {} : { channel: channelService }),
     },

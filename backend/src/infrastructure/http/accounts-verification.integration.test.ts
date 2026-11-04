@@ -73,7 +73,7 @@ test('confirmação por código de 6 dígitos: erros, esgotamento, reenvio, mét
       method: 'POST',
       url,
       payload,
-      headers: { origin, 'x-soprei-client': 'web' },
+      headers: { origin, 'x-soprei-app': 'web' },
     });
   const email = `verificacao-${randomUUID()}@example.test`;
   const password = `Dono1-${randomUUID()}`;

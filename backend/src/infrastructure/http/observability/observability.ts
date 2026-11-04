@@ -14,7 +14,7 @@ import type { Metrics } from '../../metrics/index.js';
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{8,128}$/;
 export const REQUEST_ID_HEADER = 'x-request-id';
 
-/** Status registrado quando o cliente desconecta antes da resposta (convenção do nginx). */
+/** Status registrado quando a empresa desconecta antes da resposta (convenção do nginx). */
 const CLIENT_CLOSED_STATUS = 499;
 
 /** Rotas de infraestrutura: o log de requisição bem-sucedida delas sai em `debug`. */
@@ -47,7 +47,7 @@ function levelFor(route: string, statusCode: number): LogLevel {
 /**
  * Liga à instância (chame antes de registrar as rotas): contexto por requisição, cabeçalho
  * `x-request-id`, log de requisição próprio (o padrão do Fastify fica desligado) e métricas
- * HTTP. O fim da requisição é registrado uma única vez, também quando o cliente desconecta.
+ * HTTP. O fim da requisição é registrado uma única vez, também quando a empresa desconecta.
  */
 export function registerObservability(
   app: FastifyInstance,
@@ -61,7 +61,7 @@ export function registerObservability(
    * Fim da requisição, uma única vez. Roda DENTRO do contexto guardado da requisição: o
    * `onRequestAbort` vem de um evento `close` do socket, que o Node entrega fora do
    * `als.run` aberto no `onRequest` (verificado em teste: o log de aborto saía sem
-   * `operation`/`clientId`). Os hooks normais (`onResponse`) já chegam com o contexto, mas
+   * `operation`/`companyId`). Os hooks normais (`onResponse`) já chegam com o contexto, mas
    * reentrar aqui deixa os dois caminhos iguais.
    */
   function recordEnd(request: FastifyRequest, statusCode: number): void {

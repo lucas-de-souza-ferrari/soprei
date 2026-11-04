@@ -1,6 +1,6 @@
 import {
-  type Client,
-  type ClientRepository,
+  type Company,
+  type CompanyRepository,
   WHATSAPP_PHONE_NUMBER_ID_PATTERN,
 } from '../../domain/index.js';
 import { messageRef } from '../../shared/utils/index.js';
@@ -16,7 +16,7 @@ import {
 export type ChannelInboundResult =
   | 'enqueued'
   | 'unknown_number'
-  | 'client_unavailable'
+  | 'company_unavailable'
   | 'unsupported_type'
   | 'invalid_text'
   | 'missing_sender'
@@ -61,7 +61,7 @@ export function contentFromType(
 }
 
 export interface InboundChannelMessage {
-  /** Número do **negócio** que recebeu a mensagem (`phone_number_id`): o que resolve o cliente. */
+  /** Número do **negócio** que recebeu a mensagem (`phone_number_id`): o que resolve a empresa. */
   readonly phoneNumberId: string;
   /** Id da mensagem no canal (`wamid`): idempotência e id do job. */
   readonly messageId: string;
@@ -78,14 +78,14 @@ export interface InboundChannelMessage {
 export interface IntakeSummary {
   /** Mensagens que viraram job (texto ou aviso). */
   readonly enqueued: number;
-  /** Descartadas de propósito (número desconhecido, cliente indisponível, sem remetente...). */
+  /** Descartadas de propósito (número desconhecido, empresa indisponível, sem remetente...). */
   readonly discarded: number;
   /** Que não puderam ser enfileiradas (fila ou banco fora): o webhook responde 500. */
   readonly failed: number;
 }
 
 export interface ChannelIntakeDeps {
-  readonly clients: Pick<ClientRepository, 'findByWhatsappPhoneNumberId'>;
+  readonly companies: Pick<CompanyRepository, 'findByWhatsappPhoneNumberId'>;
   /** O webhook só enfileira mensagens e avisos; o `flush` é agendado pelo processador. */
   readonly queue: Pick<InboundJobQueue, 'enqueue'>;
   readonly logger: ChannelLogger;
@@ -98,12 +98,12 @@ export interface ChannelIntakeDeps {
 const SENDER_PATTERN = /^[0-9]{1,32}$/;
 
 /**
- * Entrada do canal (spec 011): para cada mensagem, resolve o cliente **no banco** pelo número do
+ * Entrada do canal (spec 011): para cada mensagem, resolve a empresa **no banco** pelo número do
  * negócio e enfileira um job de atendimento (`text`) ou de aviso (`notice`). Não chama LLM nem o
  * canal: é o que o webhook faz de forma síncrona antes de responder 200.
  *
- * Isolamento: o `ClientId` nasce aqui, da resolução `phone_number_id` -> cliente (assinada pela
- * Meta e conferida no banco), e é a única origem do cliente do job. Nada vem de cabeçalho, query
+ * Isolamento: o `CompanyId` nasce aqui, da resolução `phone_number_id` -> empresa (assinada pela
+ * Meta e conferida no banco), e é a única origem da empresa do job. Nada vem de cabeçalho, query
  * ou corpo. Privacidade: nenhum texto, remetente nem id de mensagem cru vai a log (só `messageRef`).
  */
 export class ChannelIntakeService {
@@ -117,12 +117,12 @@ export class ChannelIntakeService {
     let discarded = 0;
     let failed = 0;
     // Uma resolução por número dentro do lote (um lote costuma ter um número só).
-    const clientCache = new Map<string, Promise<Client | null>>();
+    const companyCache = new Map<string, Promise<Company | null>>();
 
     // Em sequência: a ordem de chegada do lote é a ordem dos jobs (fila de concorrência 1).
     for (const message of messages) {
       try {
-        const outcome = await this.acceptOne(message, requestId, clientCache);
+        const outcome = await this.acceptOne(message, requestId, companyCache);
         if (outcome === 'enqueued') enqueued += 1;
         else if (outcome === 'failed') failed += 1;
         else discarded += 1;
@@ -140,7 +140,7 @@ export class ChannelIntakeService {
   private async acceptOne(
     message: InboundChannelMessage,
     requestId: string,
-    clientCache: Map<string, Promise<Client | null>>,
+    companyCache: Map<string, Promise<Company | null>>,
   ): Promise<'enqueued' | 'discarded' | 'failed'> {
     const { logger } = this.deps;
     const ref = messageRef(message.messageId);
@@ -169,35 +169,35 @@ export class ChannelIntakeService {
       return 'discarded';
     }
 
-    let lookup = clientCache.get(message.phoneNumberId);
+    let lookup = companyCache.get(message.phoneNumberId);
     if (lookup === undefined) {
-      lookup = this.deps.clients.findByWhatsappPhoneNumberId(message.phoneNumberId);
-      clientCache.set(message.phoneNumberId, lookup);
+      lookup = this.deps.companies.findByWhatsappPhoneNumberId(message.phoneNumberId);
+      companyCache.set(message.phoneNumberId, lookup);
     }
-    const client = await lookup;
-    if (client === null) {
+    const company = await lookup;
+    if (company === null) {
       this.count('unknown_number');
       logger.warn(
         { phoneNumberId: message.phoneNumberId, messageRef: ref },
-        'mensagem para número sem cliente descartada',
+        'mensagem para número sem empresa descartada',
       );
       return 'discarded';
     }
-    if (client.status === 'SUSPENDED') {
-      this.count('client_unavailable');
+    if (company.status === 'SUSPENDED') {
+      this.count('company_unavailable');
       logger.warn(
-        { clientId: client.id, messageRef: ref },
-        'mensagem de cliente suspenso descartada',
+        { companyId: company.id, messageRef: ref },
+        'mensagem de empresa suspensa descartada',
       );
       return 'discarded';
     }
 
-    const { job, result } = this.buildJob(message, client, contactRef, requestId);
+    const { job, result } = this.buildJob(message, company, contactRef, requestId);
     const enqueuedJob = await this.deps.queue.enqueue(job);
     if (!enqueuedJob.ok) {
       logger.error(
         {
-          clientId: client.id,
+          companyId: company.id,
           messageRef: ref,
           jobKind: job.kind,
           ...describeError(enqueuedJob.error),
@@ -208,7 +208,7 @@ export class ChannelIntakeService {
     }
     this.count(result);
     logger.info(
-      { clientId: client.id, messageRef: ref, jobKind: job.kind, result },
+      { companyId: company.id, messageRef: ref, jobKind: job.kind, result },
       'mensagem de entrada enfileirada',
     );
     return 'enqueued';
@@ -217,12 +217,12 @@ export class ChannelIntakeService {
   /** Texto válido vira `text`; tipo não textual ou texto inválido vira `notice` (nunca silêncio). */
   private buildJob(
     message: InboundChannelMessage,
-    client: Client,
+    company: Company,
     contactRef: string,
     requestId: string,
   ): { job: InboundJob; result: ChannelInboundResult } {
     const base = {
-      clientId: client.id,
+      companyId: company.id,
       phoneNumberId: message.phoneNumberId,
       contactRef,
       externalId: message.messageId,

@@ -6,7 +6,7 @@ import {
   AttendanceService,
   ATTENDANCE_STYLE_INSTRUCTION,
 } from '../../application/attendance/attendance.service.js';
-import type { Client } from '../../domain/index.js';
+import type { Company } from '../../domain/index.js';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
@@ -14,7 +14,7 @@ import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { MOCK_FAIL_MARKER, MockLlmProvider } from '../external-apis/llm/mock-llm.provider.js';
 import { createLogger } from '../logger/logger.js';
 import { PrismaAttendanceUnitOfWork } from './repositories/attendance-unit-of-work.js';
-import { PrismaClientRepository } from './repositories/client.repository.js';
+import { PrismaCompanyRepository } from './repositories/company.repository.js';
 import { PrismaConversationRepository } from './repositories/conversation.repository.js';
 import { createDatabase, type Database } from './database.js';
 import { PrismaMessageRepository } from './repositories/message.repository.js';
@@ -24,7 +24,7 @@ const config = loadIntegrationConfig();
 
 let database: Database;
 let tenants: TestTenants;
-let clients: PrismaClientRepository;
+let companies: PrismaCompanyRepository;
 let conversations: PrismaConversationRepository;
 let messages: PrismaMessageRepository;
 let llm: MockLlmProvider;
@@ -34,12 +34,12 @@ const logs = captureLogs();
 before(() => {
   database = createDatabase(config, createLogger(config));
   tenants = new TestTenants(database.prisma);
-  clients = new PrismaClientRepository(database.prisma);
+  companies = new PrismaCompanyRepository(database.prisma);
   conversations = new PrismaConversationRepository(database.prisma);
   messages = new PrismaMessageRepository(database.prisma);
   llm = new MockLlmProvider({ recordCalls: true });
   service = new AttendanceService({
-    clients,
+    companies,
     conversations,
     messages,
     unitOfWork: new PrismaAttendanceUnitOfWork(database.prisma),
@@ -57,9 +57,9 @@ after(async () => {
   }
 });
 
-async function clientWithPersona(label: string, persona?: string): Promise<Client> {
-  const client = await tenants.createClient(label);
-  return persona === undefined ? client : clients.update(client.id, { persona });
+async function companyWithPersona(label: string, persona?: string): Promise<Company> {
+  const company = await tenants.createCompany(label);
+  return persona === undefined ? company : companies.update(company.id, { persona });
 }
 
 /** Chamadas ao LLM cujo `userMessage` começa com `prefix` (isola testes que compartilham o mock). */
@@ -73,15 +73,15 @@ function withStyle(persona: string): string {
 
 describe('atendimento contra o PostgreSQL de testes', () => {
   it('pipeline completo: conversa por contactRef, mensagem do contato e resposta gravadas', async () => {
-    const client = await clientWithPersona('att-e2e', 'Persona-E2E');
-    const first = await service.handleInboundMessage(client.id, {
+    const company = await companyWithPersona('att-e2e', 'Persona-E2E');
+    const first = await service.handleInboundMessage(company.id, {
       contactRef: 'contato-e2e',
       text: 'e2e-um',
     });
     // A ordem da conversa é por `createdAt` (ms): sem uma folga, a pergunta seguinte pode cair no
     // mesmo milissegundo da resposta anterior e inverter a ordem que este teste confere.
     await sleep(5);
-    const second = await service.handleInboundMessage(client.id, {
+    const second = await service.handleInboundMessage(company.id, {
       contactRef: 'contato-e2e',
       text: 'e2e-dois',
     });
@@ -94,7 +94,7 @@ describe('atendimento contra o PostgreSQL de testes', () => {
     );
     assert.match(second.reply.text, /histórico: 2/);
 
-    const stored = (await messages.listByConversation(client.id, first.conversationId)).items;
+    const stored = (await messages.listByConversation(company.id, first.conversationId)).items;
     assert.deepEqual(
       stored.map((m) => [m.role, m.content === first.reply.text ? 'r1' : m.content]),
       [
@@ -117,24 +117,24 @@ describe('atendimento contra o PostgreSQL de testes', () => {
   });
 
   it('falha do provider: o fallback é gravado com isFallback = true no banco', async () => {
-    const client = await clientWithPersona('att-fb');
-    const result = await service.handleInboundMessage(client.id, {
+    const company = await companyWithPersona('att-fb');
+    const result = await service.handleInboundMessage(company.id, {
       contactRef: 'contato-fb',
       text: `fb ${MOCK_FAIL_MARKER}`,
     });
     assert.equal(result.reply.text, ATTENDANCE_FALLBACK_TEXT);
     assert.equal(result.reply.isFallback, true);
-    const stored = await messages.findById(client.id, result.reply.id);
+    const stored = await messages.findById(company.id, result.reply.id);
     assert.equal(stored.isFallback, true);
     assert.equal(stored.content, ATTENDANCE_FALLBACK_TEXT);
     assert.equal(stored.replyToId, result.messageId);
   });
 
   it('a chamada ao LLM fica fora da transação: com o provider bloqueado, nenhuma transação está aberta', async () => {
-    const client = await clientWithPersona('att-tx');
+    const company = await companyWithPersona('att-tx');
     const release = llm.hold();
     const before = llm.calls.length;
-    const pending = service.handleInboundMessage(client.id, {
+    const pending = service.handleInboundMessage(company.id, {
       contactRef: 'contato-tx',
       text: 'tx-bloqueado',
     });
@@ -151,11 +151,14 @@ describe('atendimento contra o PostgreSQL de testes', () => {
       assert.equal(open[0]?.total, 0n, 'nenhuma transação aberta durante a chamada ao LLM');
 
       // A mensagem do contato já está gravada (a transação anterior foi confirmada).
-      const stored = await messages.findByExternalId(client.id, 'nao-existe');
+      const stored = await messages.findByExternalId(company.id, 'nao-existe');
       assert.equal(stored, null);
-      const recent = await conversations.list(client.id);
+      const recent = await conversations.list(company.id);
       assert.equal(recent.items.length, 1);
-      assert.equal((await messages.listRecent(client.id, recent.items[0]?.id ?? '', 10)).length, 1);
+      assert.equal(
+        (await messages.listRecent(company.id, recent.items[0]?.id ?? '', 10)).length,
+        1,
+      );
     } finally {
       release();
     }
@@ -164,11 +167,11 @@ describe('atendimento contra o PostgreSQL de testes', () => {
   });
 
   it('controle da checagem anterior: uma transação aberta de verdade é detectada pela mesma consulta', async () => {
-    const client = await clientWithPersona('att-ctl');
+    const company = await companyWithPersona('att-ctl');
     let detected = 0n;
     await runInTransaction(database.prisma, async (tx) => {
       // Abre a transação de fato (uma operação dentro dela) e consulta por outra conexão.
-      await tx.conversation.count({ where: { clientId: client.id } });
+      await tx.conversation.count({ where: { companyId: company.id } });
       const open = await database.prisma.$queryRaw<{ total: bigint }[]>`
         SELECT count(*) AS total
         FROM pg_stat_activity
@@ -184,16 +187,16 @@ describe('atendimento contra o PostgreSQL de testes', () => {
   });
 
   it('dois envios simultâneos com o mesmo externalId: uma única chamada ao LLM e uma única resposta', async () => {
-    const client = await clientWithPersona('att-race');
+    const company = await companyWithPersona('att-race');
     const input = { contactRef: 'contato-race', text: 'race-unico', externalId: 'ext-race' };
     const outcomes = await Promise.allSettled(
-      Array.from({ length: 5 }, () => service.handleInboundMessage(client.id, input)),
+      Array.from({ length: 5 }, () => service.handleInboundMessage(company.id, input)),
     );
 
     assert.equal(callsFor('race-unico').length, 1);
-    const conversation = (await conversations.list(client.id)).items;
+    const conversation = (await conversations.list(company.id)).items;
     assert.equal(conversation.length, 1);
-    const stored = (await messages.listByConversation(client.id, conversation[0]?.id ?? '')).items;
+    const stored = (await messages.listByConversation(company.id, conversation[0]?.id ?? '')).items;
     assert.equal(stored.filter((m) => m.role === 'USER').length, 1);
     assert.equal(stored.filter((m) => m.role === 'ASSISTANT').length, 1);
 
@@ -205,33 +208,33 @@ describe('atendimento contra o PostgreSQL de testes', () => {
   });
 
   it('envios simultâneos do mesmo contato (sem externalId) usam uma única conversa', async () => {
-    const client = await clientWithPersona('att-conv-race');
+    const company = await companyWithPersona('att-conv-race');
     const results = await Promise.all(
       Array.from({ length: 6 }, (_, i) =>
-        service.handleInboundMessage(client.id, {
+        service.handleInboundMessage(company.id, {
           contactRef: 'contato-novo',
           text: `conv-race-${String(i)}`,
         }),
       ),
     );
     assert.equal(new Set(results.map((r) => r.conversationId)).size, 1);
-    assert.equal((await conversations.list(client.id)).items.length, 1);
-    assert.equal(await messages.count(client.id), 12);
+    assert.equal((await conversations.list(company.id)).items.length, 1);
+    assert.equal(await messages.count(company.id), 12);
   });
 
   it('mensagem do contato sem resposta: recente dá 409; antiga é retomada e completa o fluxo', async () => {
-    const client = await clientWithPersona('att-stale');
-    const conversation = await conversations.findOrCreateByContact(client.id, 'contato-stale');
+    const company = await companyWithPersona('att-stale');
+    const conversation = await conversations.findOrCreateByContact(company.id, 'contato-stale');
 
     // Recente (acabou de ser gravada): ainda "em andamento".
-    await messages.create(client.id, {
+    await messages.create(company.id, {
       conversationId: conversation.id,
       role: 'USER',
       content: 'stale-recente',
       externalId: 'ext-recente',
     });
     await assert.rejects(
-      service.handleInboundMessage(client.id, {
+      service.handleInboundMessage(company.id, {
         contactRef: 'contato-stale',
         text: 'stale-recente',
         externalId: 'ext-recente',
@@ -241,14 +244,14 @@ describe('atendimento contra o PostgreSQL de testes', () => {
     assert.equal(callsFor('stale-recente').length, 0);
 
     // Antiga (o servidor caiu antes de responder): a retentativa gera a resposta que faltava.
-    const orphan = await messages.create(client.id, {
+    const orphan = await messages.create(company.id, {
       conversationId: conversation.id,
       role: 'USER',
       content: 'stale-antiga',
       externalId: 'ext-antiga',
       createdAt: new Date(Date.now() - 5 * 60_000),
     });
-    const result = await service.handleInboundMessage(client.id, {
+    const result = await service.handleInboundMessage(company.id, {
       contactRef: 'contato-stale',
       text: 'stale-antiga',
       externalId: 'ext-antiga',
@@ -256,9 +259,9 @@ describe('atendimento contra o PostgreSQL de testes', () => {
     assert.equal(result.duplicate, false);
     assert.equal(result.messageId, orphan.id);
     assert.equal(callsFor('stale-antiga').length, 1);
-    assert.equal((await messages.findReplyTo(client.id, orphan.id))?.id, result.reply.id);
+    assert.equal((await messages.findReplyTo(company.id, orphan.id))?.id, result.reply.id);
 
-    const again = await service.handleInboundMessage(client.id, {
+    const again = await service.handleInboundMessage(company.id, {
       contactRef: 'contato-stale',
       text: 'stale-antiga',
       externalId: 'ext-antiga',
@@ -267,11 +270,11 @@ describe('atendimento contra o PostgreSQL de testes', () => {
     assert.equal(callsFor('stale-antiga').length, 1);
   });
 
-  it('cliente removido ou suspenso: 404/403 e nada é gravado', async () => {
-    const removed = await clientWithPersona('att-removed');
-    await clients.delete(removed.id);
-    const suspended = await clientWithPersona('att-suspended');
-    await clients.update(suspended.id, { status: 'SUSPENDED' });
+  it('empresa removida ou suspenso: 404/403 e nada é gravado', async () => {
+    const removed = await companyWithPersona('att-removed');
+    await companies.delete(removed.id);
+    const suspended = await companyWithPersona('att-suspended');
+    await companies.update(suspended.id, { status: 'SUSPENDED' });
 
     await assert.rejects(
       service.handleInboundMessage(removed.id, { contactRef: 'c', text: 'nada-removido' }),
@@ -281,24 +284,24 @@ describe('atendimento contra o PostgreSQL de testes', () => {
       service.handleInboundMessage(suspended.id, { contactRef: 'c', text: 'nada-suspenso' }),
       ForbiddenError,
     );
-    for (const client of [removed, suspended]) {
-      assert.equal(await conversations.count(client.id), 0);
-      assert.equal(await messages.count(client.id), 0);
+    for (const company of [removed, suspended]) {
+      assert.equal(await conversations.count(company.id), 0);
+      assert.equal(await messages.count(company.id), 0);
     }
     assert.equal(callsFor('nada-').length, 0);
   });
 });
 
-describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e mesmo externalId)', () => {
-  let a: Client;
-  let b: Client;
+describe('isolamento do atendimento entre empresas (A e B, mesmo contactRef e mesmo externalId)', () => {
+  let a: Company;
+  let b: Company;
   const resultsA: { conversationId: string; replyId: string }[] = [];
   const resultsB: { conversationId: string; replyId: string }[] = [];
 
   before(async () => {
-    a = await clientWithPersona('iso-att-a', 'Persona-Alfa-ISO');
-    b = await clientWithPersona('iso-att-b', 'Persona-Beta-ISO');
-    // Conversas intercaladas, com os mesmos contactRef e externalId nos dois clientes.
+    a = await companyWithPersona('iso-att-a', 'Persona-Alfa-ISO');
+    b = await companyWithPersona('iso-att-b', 'Persona-Beta-ISO');
+    // Conversas intercaladas, com os mesmos contactRef e externalId nas duas empresas.
     for (let i = 0; i < 4; i++) {
       const ra = await service.handleInboundMessage(a.id, {
         contactRef: 'contato-comum',
@@ -323,13 +326,13 @@ describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e me
       .items;
     assert.equal(historyA.length, 8);
     assert.equal(historyB.length, 8);
-    assert.ok(historyA.every((m) => m.clientId === a.id && !m.content.includes('isoB')));
-    assert.ok(historyB.every((m) => m.clientId === b.id && !m.content.includes('isoA')));
+    assert.ok(historyA.every((m) => m.companyId === a.id && !m.content.includes('isoB')));
+    assert.ok(historyB.every((m) => m.companyId === b.id && !m.content.includes('isoA')));
     assert.deepEqual(
       (await conversations.list(a.id)).items.map((c) => c.id),
       [resultsA[0]?.conversationId],
     );
-    // O conversationId de B com o ClientId de A: 404.
+    // O conversationId de B com o CompanyId de A: 404.
     await assert.rejects(
       service.listMessages(a.id, resultsB[0]?.conversationId ?? ''),
       NotFoundError,
@@ -364,7 +367,7 @@ describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e me
     );
   });
 
-  it('o mesmo externalId em clientes diferentes não colide nem devolve a resposta do outro', async () => {
+  it('o mesmo externalId em empresas diferentes não colide nem devolve a resposta do outro', async () => {
     const againA = await service.handleInboundMessage(a.id, {
       contactRef: 'contato-comum',
       text: 'isoA-0',
@@ -389,7 +392,7 @@ describe('isolamento do atendimento entre clientes (A e B, mesmo contactRef e me
     );
   });
 
-  it('pedidos simultâneos dos dois clientes não misturam contexto', async () => {
+  it('pedidos simultâneos das duas empresas não misturam contexto', async () => {
     await Promise.all(
       Array.from({ length: 6 }, (_, i) => [
         service.handleInboundMessage(a.id, {

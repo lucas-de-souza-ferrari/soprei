@@ -15,7 +15,7 @@ function prismaError(code: string, message = 'falha'): Prisma.PrismaClientKnownR
 
 describe('toDatabaseError', () => {
   it('gera DatabaseError 500 não operacional com mensagem genérica, sem vazar SQL', () => {
-    const sql = 'SELECT secret_column FROM users WHERE id = 1';
+    const sql = 'SELECT secret_column FROM memberships WHERE id = 1';
     const error = toDatabaseError(prismaError('P2010', `Invalid invocation: ${sql}`), 'consulta');
 
     assert.ok(error instanceof DatabaseError);

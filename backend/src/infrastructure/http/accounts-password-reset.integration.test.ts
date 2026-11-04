@@ -21,7 +21,7 @@ import { buildServer } from './server.js';
 
 const config = loadIntegrationConfig();
 const origin = 'http://localhost:5174';
-const headers = { origin, 'x-soprei-client': 'web' };
+const headers = { origin, 'x-soprei-app': 'web' };
 
 test('recuperação de senha de ponta a ponta: sessões revogadas, uniformidade, 503 do Redis, métricas e log sem segredo', async () => {
   const logs = captureLogs();
@@ -46,7 +46,7 @@ test('recuperação de senha de ponta a ponta: sessões revogadas, uniformidade,
   const sessions: AccountSessionStore = {
     create: (id) => store.create(id),
     read: (secret) => store.read(secret),
-    select: (secret, clientId) => store.select(secret, clientId),
+    select: (secret, companyId) => store.select(secret, companyId),
     revoke: (secret) => store.revoke(secret),
     revokeAll: (id) => {
       fault.calls += 1;

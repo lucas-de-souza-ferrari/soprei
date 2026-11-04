@@ -2,17 +2,17 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../application/clients/client.service.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import { buildTestServer } from '../../infrastructure/http/test-server.js';
 import { createLogger } from '../../infrastructure/logger/logger.js';
 import { bearer, buildTestAuth, type TestAuth } from '../../test-support/in-memory-auth.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 
 // Tokens emitidos por logins de verdade (autenticação em memória), só deste arquivo.
 const testAuth = buildTestAuth({ logger: createLogger({ NODE_ENV: 'test', LOG_LEVEL: 'silent' }) });
 let auth: { authorization: string };
 
-interface ClientBody {
+interface CompanyBody {
   id: string;
   name: string;
   slug: string;
@@ -29,12 +29,12 @@ interface ErrorBody {
 function buildApp(source: TestAuth): FastifyInstance {
   return buildTestServer(
     undefined,
-    { clients: new ClientService(new InMemoryClientRepository()) },
+    { companies: new CompanyService(new InMemoryCompanyRepository()) },
     { auth: source.service },
   );
 }
 
-describe('rotas /admin/clients', () => {
+describe('rotas /admin/companies', () => {
   let app: FastifyInstance;
 
   before(async () => {
@@ -46,27 +46,27 @@ describe('rotas /admin/clients', () => {
     await app.close();
   });
 
-  async function createClient(slug: string, name = 'Cliente Teste'): Promise<ClientBody> {
+  async function createCompany(slug: string, name = 'Empresa Teste'): Promise<CompanyBody> {
     const response = await app.inject({
       method: 'POST',
-      url: '/admin/clients',
+      url: '/admin/companies',
       headers: auth,
       payload: { name, slug },
     });
     assert.equal(response.statusCode, 201);
-    return response.json<ClientBody>();
+    return response.json<CompanyBody>();
   }
 
   describe('CRUD com o token do administrador da plataforma', () => {
     it('POST cria (201) e devolve só campos seguros', async () => {
       const response = await app.inject({
         method: 'POST',
-        url: '/admin/clients',
+        url: '/admin/companies',
         headers: auth,
         payload: { name: ' Acme ', slug: 'acme-crud' },
       });
       assert.equal(response.statusCode, 201);
-      const body = response.json<ClientBody>();
+      const body = response.json<CompanyBody>();
       assert.deepEqual(Object.keys(body).sort(), [
         'createdAt',
         'id',
@@ -82,11 +82,11 @@ describe('rotas /admin/clients', () => {
       assert.ok(!Number.isNaN(Date.parse(body.createdAt)));
     });
 
-    it('GET /:id devolve o cliente; GET / lista com paginação', async () => {
-      const created = await createClient('acme-get');
+    it('GET /:id devolve a empresa; GET / lista com paginação', async () => {
+      const created = await createCompany('acme-get');
       const one = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
       });
       assert.equal(one.statusCode, 200);
@@ -94,61 +94,61 @@ describe('rotas /admin/clients', () => {
 
       const list = await app.inject({
         method: 'GET',
-        url: '/admin/clients?limit=1',
+        url: '/admin/companies?limit=1',
         headers: auth,
       });
       assert.equal(list.statusCode, 200);
-      const page = list.json<{ items: ClientBody[]; nextCursor: string | null }>();
+      const page = list.json<{ items: CompanyBody[]; nextCursor: string | null }>();
       assert.equal(page.items.length, 1);
       assert.ok(page.nextCursor !== null);
       const next = await app.inject({
         method: 'GET',
-        url: `/admin/clients?limit=1&cursor=${page.nextCursor}`,
+        url: `/admin/companies?limit=1&cursor=${page.nextCursor}`,
         headers: auth,
       });
       assert.equal(next.statusCode, 200);
     });
 
     it('PATCH define a persona (com trim), a devolve no GET e null a limpa', async () => {
-      const created = await createClient('acme-persona');
+      const created = await createCompany('acme-persona');
       assert.equal(created.persona, null);
 
       const set = await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
         payload: { persona: '  Você é a Ana, atendente da Acme.  ' },
       });
       assert.equal(set.statusCode, 200);
-      assert.equal(set.json<ClientBody>().persona, 'Você é a Ana, atendente da Acme.');
+      assert.equal(set.json<CompanyBody>().persona, 'Você é a Ana, atendente da Acme.');
       const read = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
       });
-      assert.equal(read.json<ClientBody>().persona, 'Você é a Ana, atendente da Acme.');
+      assert.equal(read.json<CompanyBody>().persona, 'Você é a Ana, atendente da Acme.');
 
       // Persona mexe só na persona: o resto fica como estava.
-      assert.equal(set.json<ClientBody>().name, created.name);
-      assert.equal(set.json<ClientBody>().status, 'ACTIVE');
+      assert.equal(set.json<CompanyBody>().name, created.name);
+      assert.equal(set.json<CompanyBody>().status, 'ACTIVE');
 
       const cleared = await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
         payload: { persona: null },
       });
       assert.equal(cleared.statusCode, 200);
-      assert.equal(cleared.json<ClientBody>().persona, null);
+      assert.equal(cleared.json<CompanyBody>().persona, null);
     });
 
-    it('PATCH não aceita mais whatsappPhoneNumberId (spec 015): 400, o número só muda pelo canal do cliente', async () => {
-      const created = await createClient('acme-wa');
+    it('PATCH não aceita mais whatsappPhoneNumberId (spec 015): 400, o número só muda pelo canal da empresa', async () => {
+      const created = await createCompany('acme-wa');
       assert.equal(created.whatsappPhoneNumberId, null);
       for (const value of ['106540352242922', null, 'abc']) {
         const response = await app.inject({
           method: 'PATCH',
-          url: `/admin/clients/${created.id}`,
+          url: `/admin/companies/${created.id}`,
           headers: auth,
           payload: { whatsappPhoneNumberId: value },
         });
@@ -156,25 +156,25 @@ describe('rotas /admin/clients', () => {
       }
       const withName = await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
         payload: { name: 'Outro nome', whatsappPhoneNumberId: '106540352242922' },
       });
       assert.equal(withName.statusCode, 400);
       const read = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
       });
-      assert.equal(read.json<ClientBody>().whatsappPhoneNumberId, null);
-      assert.equal(read.json<ClientBody>().name, created.name);
+      assert.equal(read.json<CompanyBody>().whatsappPhoneNumberId, null);
+      assert.equal(read.json<CompanyBody>().name, created.name);
     });
 
     it('persona de 4000 caracteres é aceita', async () => {
-      const created = await createClient('acme-persona-max');
+      const created = await createCompany('acme-persona-max');
       const response = await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
         payload: { persona: 'p'.repeat(4000) },
       });
@@ -182,29 +182,29 @@ describe('rotas /admin/clients', () => {
     });
 
     it('PATCH atualiza nome e status; DELETE remove (204) e depois é 404', async () => {
-      const created = await createClient('acme-upd');
+      const created = await createCompany('acme-upd');
       const patched = await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
         payload: { name: 'Novo Nome', status: 'SUSPENDED' },
       });
       assert.equal(patched.statusCode, 200);
-      assert.equal(patched.json<ClientBody>().name, 'Novo Nome');
-      assert.equal(patched.json<ClientBody>().status, 'SUSPENDED');
-      assert.equal(patched.json<ClientBody>().slug, 'acme-upd');
+      assert.equal(patched.json<CompanyBody>().name, 'Novo Nome');
+      assert.equal(patched.json<CompanyBody>().status, 'SUSPENDED');
+      assert.equal(patched.json<CompanyBody>().slug, 'acme-upd');
 
-      // Cliente suspenso continua legível e editável pelo CRUD.
+      // Empresa suspensa continua legível e editável pelo CRUD.
       const read = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
       });
       assert.equal(read.statusCode, 200);
 
       const deleted = await app.inject({
         method: 'DELETE',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
       });
       assert.equal(deleted.statusCode, 204);
@@ -213,7 +213,7 @@ describe('rotas /admin/clients', () => {
       for (const method of ['GET', 'DELETE'] as const) {
         const gone = await app.inject({
           method,
-          url: `/admin/clients/${created.id}`,
+          url: `/admin/companies/${created.id}`,
           headers: auth,
         });
         assert.equal(gone.statusCode, 404, method);
@@ -221,7 +221,7 @@ describe('rotas /admin/clients', () => {
       }
       const patchGone = await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${created.id}`,
+        url: `/admin/companies/${created.id}`,
         headers: auth,
         payload: { name: 'x' },
       });
@@ -231,11 +231,11 @@ describe('rotas /admin/clients', () => {
 
   describe('autenticação (401)', () => {
     const routes = [
-      { method: 'POST', url: '/admin/clients', payload: { name: 'X', slug: 'sem-auth' } },
-      { method: 'GET', url: '/admin/clients' },
-      { method: 'GET', url: `/admin/clients/${randomUUID()}` },
-      { method: 'PATCH', url: `/admin/clients/${randomUUID()}`, payload: { name: 'X' } },
-      { method: 'DELETE', url: `/admin/clients/${randomUUID()}` },
+      { method: 'POST', url: '/admin/companies', payload: { name: 'X', slug: 'sem-auth' } },
+      { method: 'GET', url: '/admin/companies' },
+      { method: 'GET', url: `/admin/companies/${randomUUID()}` },
+      { method: 'PATCH', url: `/admin/companies/${randomUUID()}`, payload: { name: 'X' } },
+      { method: 'DELETE', url: `/admin/companies/${randomUUID()}` },
     ] as const;
 
     it('sem cabeçalho Authorization: 401 em todas as rotas', async () => {
@@ -259,7 +259,7 @@ describe('rotas /admin/clients', () => {
       ]) {
         const response = await app.inject({
           method: 'GET',
-          url: '/admin/clients',
+          url: '/admin/companies',
           headers: { authorization },
         });
         assert.equal(response.statusCode, 401, authorization);
@@ -268,10 +268,10 @@ describe('rotas /admin/clients', () => {
     });
 
     it('a resposta 401 é igual com cabeçalho ausente e com token errado (não revela qual)', async () => {
-      const missing = await app.inject({ method: 'GET', url: '/admin/clients' });
+      const missing = await app.inject({ method: 'GET', url: '/admin/companies' });
       const wrong = await app.inject({
         method: 'GET',
-        url: '/admin/clients',
+        url: '/admin/companies',
         headers: { authorization: 'Bearer a.b.c' },
       });
       assert.equal(missing.json<ErrorBody>().error.message, wrong.json<ErrorBody>().error.message);
@@ -281,17 +281,17 @@ describe('rotas /admin/clients', () => {
     it('aceita o esquema Bearer em qualquer caixa', async () => {
       const response = await app.inject({
         method: 'GET',
-        url: '/admin/clients',
+        url: '/admin/companies',
         headers: { authorization: `bearer ${auth.authorization.slice('Bearer '.length)}` },
       });
       assert.equal(response.statusCode, 200);
     });
 
-    it('token de User (de cliente) recebe 403 em todas as rotas /admin/clients', async () => {
-      const client = await testAuth.clients.create({ name: 'Cliente X', slug: 'cliente-x-403' });
-      const user = bearer((await testAuth.userToken(client.id)).accessToken);
+    it('token de Membership (de empresa) recebe 403 em todas as rotas /admin/companies', async () => {
+      const company = await testAuth.companies.create({ name: 'Empresa X', slug: 'empresa-x-403' });
+      const membership = bearer((await testAuth.membershipToken(company.id)).accessToken);
       for (const route of routes) {
-        const response = await app.inject({ ...route, headers: user });
+        const response = await app.inject({ ...route, headers: membership });
         assert.equal(response.statusCode, 403, `${route.method} ${route.url}`);
         assert.equal(response.json<ErrorBody>().error.code, 'FORBIDDEN');
       }
@@ -300,7 +300,11 @@ describe('rotas /admin/clients', () => {
     it('rotas /admin não existem quando o servidor sobe sem o módulo admin', async () => {
       const bare = buildTestServer();
       try {
-        const response = await bare.inject({ method: 'GET', url: '/admin/clients', headers: auth });
+        const response = await bare.inject({
+          method: 'GET',
+          url: '/admin/companies',
+          headers: auth,
+        });
         assert.equal(response.statusCode, 404);
       } finally {
         await bare.close();
@@ -323,7 +327,7 @@ describe('rotas /admin/clients', () => {
         ] as const) {
           const response = await app.inject({
             method,
-            url: `/admin/clients/${id}`,
+            url: `/admin/companies/${id}`,
             headers: auth,
             ...(payload === undefined ? {} : { payload }),
           });
@@ -336,7 +340,7 @@ describe('rotas /admin/clients', () => {
     it('id válido mas inexistente é 404', async () => {
       const response = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${randomUUID()}`,
+        url: `/admin/companies/${randomUUID()}`,
         headers: auth,
       });
       assert.equal(response.statusCode, 404);
@@ -354,7 +358,7 @@ describe('rotas /admin/clients', () => {
       ]) {
         const response = await app.inject({
           method: 'POST',
-          url: '/admin/clients',
+          url: '/admin/companies',
           headers: auth,
           payload: { name: 'X', slug },
         });
@@ -371,23 +375,23 @@ describe('rotas /admin/clients', () => {
         { name: '', slug: 'nome-vazio' },
         { name: 'x'.repeat(121), slug: 'nome-longo' },
         { name: 'X', slug: 'status-ruim', status: 'DELETED' },
-        { name: 'X', slug: 'extra-key', clientId: randomUUID() },
+        { name: 'X', slug: 'extra-key', companyId: randomUUID() },
         { name: 'X', slug: 'deleted-at', deletedAt: '2020-01-01' },
       ]) {
         const response = await app.inject({
           method: 'POST',
-          url: '/admin/clients',
+          url: '/admin/companies',
           headers: auth,
           payload,
         });
         assert.equal(response.statusCode, 400, JSON.stringify(payload));
       }
-      const noBody = await app.inject({ method: 'POST', url: '/admin/clients', headers: auth });
+      const noBody = await app.inject({ method: 'POST', url: '/admin/companies', headers: auth });
       assert.equal(noBody.statusCode, 400);
     });
 
     it('PATCH exige name, status ou persona e não aceita slug nem persona inválida', async () => {
-      const created = await createClient('acme-patch400');
+      const created = await createCompany('acme-patch400');
       for (const payload of [
         {},
         { slug: 'outro-slug' },
@@ -401,7 +405,7 @@ describe('rotas /admin/clients', () => {
       ]) {
         const response = await app.inject({
           method: 'PATCH',
-          url: `/admin/clients/${created.id}`,
+          url: `/admin/companies/${created.id}`,
           headers: auth,
           payload,
         });
@@ -409,21 +413,21 @@ describe('rotas /admin/clients', () => {
       }
     });
 
-    it('slug duplicado é 409, inclusive de cliente removido', async () => {
-      const created = await createClient('acme-dup');
+    it('slug duplicado é 409, inclusive de empresa removida', async () => {
+      const created = await createCompany('acme-dup');
       const again = await app.inject({
         method: 'POST',
-        url: '/admin/clients',
+        url: '/admin/companies',
         headers: auth,
         payload: { name: 'Outro', slug: 'acme-dup' },
       });
       assert.equal(again.statusCode, 409);
       assert.equal(again.json<ErrorBody>().error.code, 'CONFLICT');
 
-      await app.inject({ method: 'DELETE', url: `/admin/clients/${created.id}`, headers: auth });
+      await app.inject({ method: 'DELETE', url: `/admin/companies/${created.id}`, headers: auth });
       const reuse = await app.inject({
         method: 'POST',
-        url: '/admin/clients',
+        url: '/admin/companies',
         headers: auth,
         payload: { name: 'Reuso', slug: 'acme-dup' },
       });
@@ -443,7 +447,7 @@ describe('rotas /admin/clients', () => {
       ]) {
         const response = await app.inject({
           method: 'GET',
-          url: `/admin/clients?${query}`,
+          url: `/admin/companies?${query}`,
           headers: auth,
         });
         assert.equal(response.statusCode, 400, query);
@@ -451,14 +455,14 @@ describe('rotas /admin/clients', () => {
     });
 
     it('listagem de removidos: some da lista', async () => {
-      const created = await createClient('acme-list-del');
-      await app.inject({ method: 'DELETE', url: `/admin/clients/${created.id}`, headers: auth });
+      const created = await createCompany('acme-list-del');
+      await app.inject({ method: 'DELETE', url: `/admin/companies/${created.id}`, headers: auth });
       const list = await app.inject({
         method: 'GET',
-        url: '/admin/clients?limit=200',
+        url: '/admin/companies?limit=200',
         headers: auth,
       });
-      const slugs = list.json<{ items: ClientBody[] }>().items.map((client) => client.slug);
+      const slugs = list.json<{ items: CompanyBody[] }>().items.map((company) => company.slug);
       assert.ok(!slugs.includes('acme-list-del'));
     });
   });

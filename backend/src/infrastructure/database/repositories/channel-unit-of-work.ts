@@ -2,30 +2,30 @@ import type {
   ChannelTransaction,
   ChannelUnitOfWork,
 } from '../../../application/ports/channel-unit-of-work.js';
-import type { ClientId } from '../../../domain/index.js';
+import type { CompanyId } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
 import { PrismaAuditRepository } from './audit.repository.js';
 import { PrismaChannelConnectionRepository } from './channel-connection.repository.js';
-import { PrismaClientRepository } from './client.repository.js';
+import { PrismaCompanyRepository } from './company.repository.js';
 
 /**
- * Trava a linha do cliente até o fim da transação: mesmo SQL controlado da gestão de usuários
- * (`SELECT ... FOR NO KEY UPDATE` parametrizado, cast para uuid, tabela global `clients`).
+ * Trava a linha da empresa até o fim da transação: mesmo SQL controlado da gestão de usuários
+ * (`SELECT ... FOR NO KEY UPDATE` parametrizado, cast para uuid, tabela global `companies`).
  */
-async function lockClientRow(db: TenantScopedDb, clientId: ClientId): Promise<void> {
+async function lockCompanyRow(db: TenantScopedDb, companyId: CompanyId): Promise<void> {
   const rows = await db.$queryRaw<{ id: string }[]>`
-    SELECT id FROM clients WHERE id = ${clientId}::uuid AND deleted_at IS NULL FOR NO KEY UPDATE`;
+    SELECT id FROM companies WHERE id = ${companyId}::uuid AND deleted_at IS NULL FOR NO KEY UPDATE`;
   if (rows.length === 0) {
-    throw new NotFoundError('Cliente não encontrado', { context: { entity: 'Client' } });
+    throw new NotFoundError('Empresa não encontrado', { context: { entity: 'Company' } });
   }
 }
 
-/** Transação do canal (spec 015): conexão, número do cliente e auditoria sobre o mesmo client. */
+/** Transação do canal (spec 015): conexão, número da empresa e auditoria sobre o mesmo company. */
 export class PrismaChannelUnitOfWork implements ChannelUnitOfWork {
   private readonly connections: PrismaChannelConnectionRepository;
-  private readonly clients: PrismaClientRepository;
+  private readonly companies: PrismaCompanyRepository;
   private readonly audit: PrismaAuditRepository;
 
   constructor(
@@ -33,7 +33,7 @@ export class PrismaChannelUnitOfWork implements ChannelUnitOfWork {
     private readonly options: TransactionOptions = {},
   ) {
     this.connections = new PrismaChannelConnectionRepository(prisma);
-    this.clients = new PrismaClientRepository(prisma);
+    this.companies = new PrismaCompanyRepository(prisma);
     this.audit = new PrismaAuditRepository(prisma);
   }
 
@@ -43,9 +43,9 @@ export class PrismaChannelUnitOfWork implements ChannelUnitOfWork {
       (db) =>
         fn({
           connections: this.connections.forTransaction(db),
-          clients: this.clients.forTransaction(db),
+          companies: this.companies.forTransaction(db),
           audit: this.audit.forTransaction(db),
-          lockClient: (clientId) => lockClientRow(db, clientId),
+          lockCompany: (companyId) => lockCompanyRow(db, companyId),
         }),
       this.options,
     );

@@ -6,14 +6,14 @@ import type { AuthService } from '../../application/auth/auth.service.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
-import type { ClientService } from '../../application/clients/client.service.js';
-import type { UserAdminService } from '../../application/users/user-admin.service.js';
+import type { CompanyService } from '../../application/companies/company.service.js';
+import type { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
 import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminAuditController } from '../../presentation/admin/audit.controller.js';
 import { adminChannelController } from '../../presentation/admin/channel.controller.js';
-import { adminClientsController } from '../../presentation/admin/clients.controller.js';
-import { adminUsersController } from '../../presentation/admin/users.controller.js';
+import { adminCompaniesController } from '../../presentation/admin/companies.controller.js';
+import { adminMembershipsController } from '../../presentation/admin/memberships.controller.js';
 import {
   healthController,
   type ReadinessChecks,
@@ -27,12 +27,12 @@ import { generateRequestId, registerObservability } from './observability/observ
 import { type RateLimitParams, registerRateLimit } from './rate-limit/rate-limit.js';
 
 export interface AdminRoutesParams {
-  readonly clients: ClientService;
+  readonly companies: CompanyService;
   /** Sem isto as rotas de mensagens e conversas (spec 010) não são registradas. */
   readonly attendance?: AttendanceService;
   /**
-   * Conexão do canal WhatsApp do cliente (spec 015): `GET`, `PUT` e `DELETE` em
-   * `/admin/clients/:clientId/channel`. Só existe com `WHATSAPP_ENABLED=true` (sem isto, 404).
+   * Conexão do canal WhatsApp da empresa (spec 015): `GET`, `PUT` e `DELETE` em
+   * `/admin/companies/:companyId/channel`. Só existe com `WHATSAPP_ENABLED=true` (sem isto, 404).
    */
   readonly channel?: Pick<
     ChannelConnectionService,
@@ -59,11 +59,11 @@ export interface BuildServerParams {
    */
   readonly auth?: AuthService;
   /**
-   * Gestão de usuários do cliente, auditoria e troca da própria senha (spec 008): registra
-   * `POST /auth/password` e, com `admin`, as rotas `/admin/clients/:clientId/users` e
+   * Gestão de usuários da empresa, auditoria e troca da própria senha (spec 008): registra
+   * `POST /auth/password` e, com `admin`, as rotas `/admin/companies/:companyId/memberships` e
    * `.../audit-events`. Exige `auth`. Sem isto essas rotas não existem.
    */
-  readonly userAdmin?: UserAdminService;
+  readonly membershipAdmin?: MembershipAdminService;
   /** Sem isto as rotas /admin não são registradas (ex.: testes que não precisam delas). */
   readonly admin?: AdminRoutesParams;
   /** Canal WhatsApp (spec 011). Opt-in: sem isto (`WHATSAPP_ENABLED=false`) as rotas não existem. */
@@ -97,7 +97,7 @@ export function buildServer({
   logger,
   readiness,
   auth,
-  userAdmin,
+  membershipAdmin,
   admin,
   whatsapp,
   metrics,
@@ -138,8 +138,8 @@ export function buildServer({
       if (path.startsWith('/admin/') || path === '/auth/me')
         void reply.header('cache-control', 'no-store');
       if (
-        (path.endsWith('/users') && request.method === 'POST') ||
-        path.endsWith('/users/:userId/password') ||
+        (path.endsWith('/memberships') && request.method === 'POST') ||
+        path.endsWith('/memberships/:membershipId/password') ||
         path === '/auth/password'
       ) {
         throw new ForbiddenError('Gestão de senha e criação de conta são globais');
@@ -154,7 +154,7 @@ export function buildServer({
       if (
         request.auth !== null &&
         !['GET', 'HEAD'].includes(request.method) &&
-        (request.headers.origin !== accounts.origin || request.headers['x-soprei-client'] !== 'web')
+        (request.headers.origin !== accounts.origin || request.headers['x-soprei-app'] !== 'web')
       ) {
         throw new ForbiddenError('Origem inválida');
       }
@@ -179,7 +179,7 @@ export function buildServer({
       auth,
       metrics,
       browserAccounts: accounts !== undefined,
-      ...(userAdmin === undefined ? {} : { userAdmin }),
+      ...(membershipAdmin === undefined ? {} : { membershipAdmin }),
     });
   }
   if (admin !== undefined) {
@@ -187,29 +187,29 @@ export function buildServer({
     if (auth === undefined) {
       throw new Error('as rotas /admin exigem o serviço de autenticação (auth)');
     }
-    void app.register(adminClientsController, {
-      prefix: '/admin/clients',
+    void app.register(adminCompaniesController, {
+      prefix: '/admin/companies',
       auth,
       metrics,
-      clients: admin.clients,
+      companies: admin.companies,
     });
-    if (userAdmin !== undefined) {
-      void app.register(adminUsersController, {
-        prefix: '/admin/clients',
+    if (membershipAdmin !== undefined) {
+      void app.register(adminMembershipsController, {
+        prefix: '/admin/companies',
         auth,
         metrics,
-        users: userAdmin,
+        memberships: membershipAdmin,
       });
       void app.register(adminAuditController, {
-        prefix: '/admin/clients',
+        prefix: '/admin/companies',
         auth,
         metrics,
-        users: userAdmin,
+        memberships: membershipAdmin,
       });
     }
     if (admin.channel !== undefined) {
       void app.register(adminChannelController, {
-        prefix: '/admin/clients',
+        prefix: '/admin/companies',
         auth,
         metrics,
         channel: admin.channel,
@@ -217,7 +217,7 @@ export function buildServer({
     }
     if (admin.attendance !== undefined) {
       void app.register(adminAttendanceController, {
-        prefix: '/admin/clients',
+        prefix: '/admin/companies',
         auth,
         metrics,
         attendance: admin.attendance,

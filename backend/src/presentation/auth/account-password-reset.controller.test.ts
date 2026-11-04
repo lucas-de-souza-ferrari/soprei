@@ -71,7 +71,7 @@ function build(service: Partial<AccountService>) {
   const post = (
     url: string,
     payload: object,
-    headers: Record<string, string> = { origin: ORIGIN, 'x-soprei-client': 'web' },
+    headers: Record<string, string> = { origin: ORIGIN, 'x-soprei-app': 'web' },
   ) => app.inject({ method: 'POST', url, payload, headers });
   return { app, post };
 }
@@ -146,7 +146,7 @@ test('POST /auth/password-reset/confirm: 204 sem cookie; 400 antes do serviço; 
   }
 });
 
-test('as duas rotas exigem Origin e X-Soprei-Client válidos (403 antes de qualquer trabalho)', async () => {
+test('as duas rotas exigem Origin e X-Soprei-App válidos (403 antes de qualquer trabalho)', async () => {
   const calls: string[] = [];
   const { app, post } = build({
     requestPasswordReset: () => {
@@ -163,9 +163,9 @@ test('as duas rotas exigem Origin e X-Soprei-Client válidos (403 antes de qualq
       const payload = url.endsWith('request') ? { email: CONFIRM.email } : CONFIRM;
       const bad: Record<string, string>[] = [
         {},
-        { origin: 'http://evil.example.test', 'x-soprei-client': 'web' },
+        { origin: 'http://evil.example.test', 'x-soprei-app': 'web' },
         { origin: ORIGIN },
-        { 'x-soprei-client': 'web' },
+        { 'x-soprei-app': 'web' },
       ];
       for (const headers of bad) {
         assert.equal((await post(url, payload, headers)).statusCode, 403, url);

@@ -12,7 +12,7 @@ import {
 } from '../../application/channel/channel-inbound.processor.js';
 import { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import { CHANNEL_NOTICE_TEXTS } from '../../application/channel/channel-texts.js';
-import type { Client } from '../../domain/index.js';
+import type { Company } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
 import { FakeGraphApi } from '../../test-support/fake-graph-api.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
@@ -31,7 +31,7 @@ import {
   createDatabase,
   type Database,
   PrismaAttendanceUnitOfWork,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
 } from '../database/index.js';
@@ -124,10 +124,10 @@ async function start(
   });
   const llm = new MockLlmProvider({ recordCalls: true });
   const { prisma } = database;
-  const clients = new PrismaClientRepository(prisma);
+  const companies = new PrismaCompanyRepository(prisma);
   const messages = new PrismaMessageRepository(prisma);
   const attendance = new AttendanceService({
-    clients,
+    companies,
     conversations: new PrismaConversationRepository(prisma),
     messages,
     unitOfWork: new PrismaAttendanceUnitOfWork(prisma),
@@ -139,9 +139,9 @@ async function start(
   const stack = buildChannelCredentials(prisma, { legacyToken: ACCESS_TOKEN, metrics });
   const processor = new ChannelInboundProcessor({
     attendance,
-    clients,
+    companies,
     messages,
-    // Clientes de teste só têm número (sem conexão): são `LEGACY` e usam o token global.
+    // Empresas de teste só têm número (sem conexão): são `LEGACY` e usam o token global.
     credentials: stack.credentials,
     connections: stack.connections,
     sender: new WhatsappCloudApiClient({
@@ -169,7 +169,7 @@ async function start(
       appSecret: APP_SECRET,
       verifyToken: VERIFY_TOKEN,
       intake: new ChannelIntakeService({
-        clients,
+        companies,
         queue: queue.queue,
         logger: logs.logger,
         metrics,
@@ -217,13 +217,13 @@ async function withHarness(
   }
 }
 
-async function newClient(label: string, number: string): Promise<Client> {
-  const client = await tenants.createClient(label, number);
-  await fixturesDb.prisma.client.updateMany({
-    where: { id: client.id },
+async function newCompany(label: string, number: string): Promise<Company> {
+  const company = await tenants.createCompany(label, number);
+  await fixturesDb.prisma.company.updateMany({
+    where: { id: company.id },
     data: { persona: `${PERSONA} ${label}` },
   });
-  return client;
+  return company;
 }
 
 async function send(
@@ -270,21 +270,22 @@ async function waitFor(
   throw new Error(`tempo esgotado esperando: ${label}`);
 }
 
-async function stored(client: Client, contact: string) {
+async function stored(company: Company, contact: string) {
   const conversation = await fixturesDb.prisma.conversation.findFirst({
-    where: { clientId: client.id, contactRef: contact },
+    where: { companyId: company.id, contactRef: contact },
   });
   if (conversation === null) return [];
   return fixturesDb.prisma.message.findMany({
-    where: { clientId: client.id, conversationId: conversation.id },
+    where: { companyId: company.id, conversationId: conversation.id },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
 }
 
-const sentCount = async (client: Client, contact: string): Promise<number> =>
-  (await stored(client, contact)).filter((m) => m.role === 'ASSISTANT' && m.sentAt !== null).length;
-const userCount = async (client: Client, contact: string): Promise<number> =>
-  (await stored(client, contact)).filter((m) => m.role === 'USER').length;
+const sentCount = async (company: Company, contact: string): Promise<number> =>
+  (await stored(company, contact)).filter((m) => m.role === 'ASSISTANT' && m.sentAt !== null)
+    .length;
+const userCount = async (company: Company, contact: string): Promise<number> =>
+  (await stored(company, contact)).filter((m) => m.role === 'USER').length;
 const textsSent = (): string[] =>
   graph.requests.map((request) => (request.body as { text: { body: string } }).text.body);
 
@@ -292,18 +293,18 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('três mensagens dentro da janela: uma chamada ao LLM com um turno user, uma resposta, todas marcadas', async () => {
     await withHarness({}, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('lote', number);
+      const company = await newCompany('lote', number);
       const contact = contactNumber();
       // Um turno antigo já respondido: é o histórico do lote.
       await send(h, number, contact, 'pergunta antiga');
-      await waitFor(async () => (await sentCount(client, contact)) === 1, 'turno antigo');
+      await waitFor(async () => (await sentCount(company, contact)) === 1, 'turno antigo');
       h.llm.calls.length = 0;
       graph.requests.length = 0;
 
       await send(h, number, contact, 'oi');
       await send(h, number, contact, 'tudo bem?');
       await send(h, number, contact, 'preciso de ajuda');
-      await waitFor(async () => (await sentCount(client, contact)) === 2, 'resposta do lote');
+      await waitFor(async () => (await sentCount(company, contact)) === 2, 'resposta do lote');
       await sleep(400);
 
       assert.equal(h.llm.calls.length, 1, 'uma só chamada ao LLM');
@@ -317,7 +318,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
         ],
       );
       assert.equal(graph.requests.length, 1, 'um só envio');
-      const rows = await stored(client, contact);
+      const rows = await stored(company, contact);
       const reply = rows.filter((m) => m.role === 'ASSISTANT').at(-1);
       assert.ok(reply !== undefined);
       const batch = rows.filter((m) => m.role === 'USER').slice(-3);
@@ -327,12 +328,12 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
     });
   });
 
-  it('janela deslizante: mensagem nova dentro da janela adia a resposta; o job flush não leva texto e a chave inclui o cliente', async (t) => {
+  it('janela deslizante: mensagem nova dentro da janela adia a resposta; o job flush não leva texto e a chave inclui a empresa', async (t) => {
     const release = keepEventLoopAlive();
     t.after(release);
     await withHarness({ windowMs: 2_000, maxWaitMs: 10_000 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('desliza', number);
+      const company = await newCompany('desliza', number);
       const contact = contactNumber();
       const rawConnection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
       const raw = new Queue(INBOUND_QUEUE_NAME, { connection: rawConnection, prefix: h.prefix });
@@ -343,19 +344,19 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
 
       const begin = Date.now();
       await send(h, number, contact, `${SECRET_TEXT} primeira`);
-      await waitFor(async () => (await userCount(client, contact)) === 1, 'primeira aceita');
+      await waitFor(async () => (await userCount(company, contact)) === 1, 'primeira aceita');
       // O flush é agendado depois de gravar a mensagem: espera aparecer em vez de assumir.
       await waitFor(async () => (await raw.getDelayed()).length > 0, 'flush agendado');
       const [flush] = await raw.getDelayed();
       assert.ok(flush !== undefined, 'há um flush esperando');
       assert.equal(flush.name, 'flush');
       assert.ok(!JSON.stringify(flush.data).includes(SECRET_TEXT), 'o job não leva texto');
-      assert.ok(flush.id?.includes(client.id), 'a chave do flush inclui o clientId');
+      assert.ok(flush.id?.includes(company.id), 'a chave do flush inclui o companyId');
       assert.ok(!flush.id?.includes(contact), 'e não o telefone');
 
       await sleep(1_000);
       await send(h, number, contact, 'segunda');
-      await waitFor(async () => (await userCount(client, contact)) === 2, 'segunda aceita');
+      await waitFor(async () => (await userCount(company, contact)) === 2, 'segunda aceita');
       const secondAcceptedAt = Date.now();
       // Passou a janela da primeira (2 s desde `begin`): sem deslizar, a resposta já teria saído.
       await sleep(Math.max(0, begin + 2_000 + 300 - Date.now()));
@@ -363,7 +364,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       assert.equal((await raw.getDelayed()).length, 1, 'ainda um só flush esperando');
 
       await waitFor(
-        async () => (await sentCount(client, contact)) === 1,
+        async () => (await sentCount(company, contact)) === 1,
         'resposta depois da janela',
       );
       assert.ok(
@@ -378,7 +379,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('teto de espera: quem escreve sem parar recebe resposta ao completar o teto, e as seguintes viram o turno seguinte', async () => {
     await withHarness({ windowMs: 1_000, maxWaitMs: 2_200 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('teto', number);
+      const company = await newCompany('teto', number);
       const contact = contactNumber();
 
       const total = 12;
@@ -392,12 +393,12 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       assert.ok(firstReplyAfterSent < total, 'o primeiro turno saiu no meio da sequência');
 
       await waitFor(
-        async () => (await userCount(client, contact)) === total && h.llm.calls.length >= 2,
+        async () => (await userCount(company, contact)) === total && h.llm.calls.length >= 2,
         'segundo turno',
       );
       await waitFor(
         async () =>
-          (await stored(client, contact)).every(
+          (await stored(company, contact)).every(
             (m) => m.role !== 'USER' || m.answeredById !== null,
           ),
         'todas respondidas',
@@ -415,13 +416,13 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('mensagens separadas por mais que a janela geram duas respostas, na ordem', async () => {
     await withHarness({ windowMs: 250 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('duas', number);
+      const company = await newCompany('duas', number);
       const contact = contactNumber();
 
       await send(h, number, contact, 'primeira');
-      await waitFor(async () => (await sentCount(client, contact)) === 1, 'primeira resposta');
+      await waitFor(async () => (await sentCount(company, contact)) === 1, 'primeira resposta');
       await send(h, number, contact, 'segunda');
-      await waitFor(async () => (await sentCount(client, contact)) === 2, 'segunda resposta');
+      await waitFor(async () => (await sentCount(company, contact)) === 2, 'segunda resposta');
 
       assert.deepEqual(
         h.llm.calls.map((call) => call.userMessage),
@@ -436,11 +437,11 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('janela zero responde sem espera, com atraso zero agendado', async () => {
     await withHarness({ windowMs: 0, maxWaitMs: 0 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('zero', number);
+      const company = await newCompany('zero', number);
       const contact = contactNumber();
       await send(h, number, contact, 'sem espera');
       await waitFor(
-        async () => (await sentCount(client, contact)) === 1,
+        async () => (await sentCount(company, contact)) === 1,
         'resposta imediata',
         3_000,
       );
@@ -454,23 +455,23 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('mais pendentes que o limite de mensagens ou de caracteres: turnos sucessivos, sem perder nenhuma e sem nova espera', async () => {
     await withHarness({ windowMs: 1_500, maxMessages: 2, maxChars: 8_000 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('limite', number);
+      const company = await newCompany('limite', number);
       const contact = contactNumber();
       for (let i = 1; i <= 5; i += 1) await send(h, number, contact, `m${String(i)}`);
-      await waitFor(async () => (await sentCount(client, contact)) === 3, 'três turnos');
+      await waitFor(async () => (await sentCount(company, contact)) === 3, 'três turnos');
       assert.deepEqual(
         h.llm.calls.map((call) => call.userMessage),
         ['m1\nm2', 'm3\nm4', 'm5'],
       );
-      const users = (await stored(client, contact)).filter((m) => m.role === 'USER');
+      const users = (await stored(company, contact)).filter((m) => m.role === 'USER');
       assert.ok(users.every((user) => user.answeredById !== null));
     });
     await withHarness({ windowMs: 1_500, maxMessages: 10, maxChars: 70 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('limite-chars', number);
+      const company = await newCompany('limite-chars', number);
       const contact = contactNumber();
       for (const letter of ['a', 'b', 'c']) await send(h, number, contact, letter.repeat(30));
-      await waitFor(async () => (await sentCount(client, contact)) === 2, 'dois turnos');
+      await waitFor(async () => (await sentCount(company, contact)) === 2, 'dois turnos');
       // 30 + 1 + 30 = 61 cabe em 70; a terceira (92) vira o turno seguinte.
       assert.deepEqual(
         h.llm.calls.map((call) => call.userMessage.length),
@@ -484,7 +485,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
     t.after(release);
     await withHarness({ windowMs: 200 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('durante', number);
+      const company = await newCompany('durante', number);
       const contact = contactNumber();
       const open = h.llm.hold();
       t.after(open);
@@ -495,7 +496,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       await sleep(300);
       open();
 
-      await waitFor(async () => (await sentCount(client, contact)) === 2, 'duas respostas');
+      await waitFor(async () => (await sentCount(company, contact)) === 2, 'duas respostas');
       assert.deepEqual(
         h.llm.calls.map((call) => call.userMessage),
         ['primeira', 'chegou durante'],
@@ -508,7 +509,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
         ],
         'o segundo turno enxerga o primeiro e a resposta dele',
       );
-      const users = (await stored(client, contact)).filter((m) => m.role === 'USER');
+      const users = (await stored(company, contact)).filter((m) => m.role === 'USER');
       assert.ok(users.every((user) => user.answeredById !== null));
       assert.equal(graph.requests.length, 2);
     });
@@ -517,28 +518,28 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('aviso constante (áudio) não espera e não entra no lote; o texto pendente continua esperando a janela', async () => {
     await withHarness({ windowMs: 4_000, maxWaitMs: 12_000 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('aviso', number);
+      const company = await newCompany('aviso', number);
       const contact = contactNumber();
 
       await send(h, number, contact, 'texto pendente');
-      await waitFor(async () => (await userCount(client, contact)) === 1, 'texto aceito');
+      await waitFor(async () => (await userCount(company, contact)) === 1, 'texto aceito');
       await send(h, number, contact, '', { type: 'audio' });
       await waitFor(() => graph.requests.length === 1, 'aviso enviado', 3_000);
       assert.equal(textsSent()[0], CHANNEL_NOTICE_TEXTS.unsupported_type);
       assert.equal(h.llm.calls.length, 0, 'o texto ainda espera a janela');
 
-      await waitFor(async () => (await sentCount(client, contact)) === 1, 'resposta ao texto');
+      await waitFor(async () => (await sentCount(company, contact)) === 1, 'resposta ao texto');
       assert.equal(h.llm.calls[0]?.userMessage, 'texto pendente');
-      assert.equal(await userCount(client, contact), 1, 'o aviso não foi gravado nem agrupado');
+      assert.equal(await userCount(company, contact), 1, 'o aviso não foi gravado nem agrupado');
     });
   });
 
-  it('dois contatos do mesmo cliente e o mesmo contato em dois clientes escrevendo juntos nunca se misturam', async () => {
+  it('dois contatos do mesma empresa e o mesmo contato em duas empresas escrevendo juntos nunca se misturam', async () => {
     await withHarness({ windowMs: 1_500 }, async (h) => {
       const numberA = phoneNumberId();
       const numberB = phoneNumberId();
-      const clientA = await newClient('iso-a', numberA);
-      const clientB = await newClient('iso-b', numberB);
+      const companyA = await newCompany('iso-a', numberA);
+      const companyB = await newCompany('iso-b', numberB);
       const same = contactNumber();
       const other = contactNumber();
 
@@ -549,9 +550,9 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       await send(h, numberB, same, 'B-dois');
       await waitFor(
         async () =>
-          (await sentCount(clientA, same)) === 1 &&
-          (await sentCount(clientB, same)) === 1 &&
-          (await sentCount(clientA, other)) === 1,
+          (await sentCount(companyA, same)) === 1 &&
+          (await sentCount(companyB, same)) === 1 &&
+          (await sentCount(companyA, other)) === 1,
         'três respostas',
       );
 
@@ -563,7 +564,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       assert.match(byText.get('A-um\nA-dois')?.systemPrompt ?? '', /iso-a/);
       assert.match(byText.get('B-um\nB-dois')?.systemPrompt ?? '', /iso-b/);
       assert.deepEqual(byText.get('A-um\nA-dois')?.history, []);
-      // Cada resposta saiu pelo número do seu cliente.
+      // Cada resposta saiu pelo número da sua empresa.
       const pairs = graph.requests.map((request) => [
         request.phoneNumberId,
         (request.body as { to: string }).to,
@@ -575,12 +576,12 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
     });
   });
 
-  it('cliente suspenso ou número trocado durante a espera: o flush é descartado e nada é enviado', async () => {
+  it('empresa suspensa ou número trocado durante a espera: o flush é descartado e nada é enviado', async () => {
     await withHarness({ windowMs: 2_000 }, async (h) => {
       const numberS = phoneNumberId();
       const numberC = phoneNumberId();
-      const suspended = await newClient('susp', numberS);
-      const changed = await newClient('troca', numberC);
+      const suspended = await newCompany('susp', numberS);
+      const changed = await newCompany('troca', numberC);
       const contact = contactNumber();
       await send(h, numberS, contact, 'oi');
       await send(h, numberC, contact, 'oi');
@@ -589,11 +590,11 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
           (await userCount(suspended, contact)) === 1 && (await userCount(changed, contact)) === 1,
         'mensagens aceitas',
       );
-      await fixturesDb.prisma.client.updateMany({
+      await fixturesDb.prisma.company.updateMany({
         where: { id: suspended.id },
         data: { status: 'SUSPENDED' },
       });
-      await fixturesDb.prisma.client.updateMany({
+      await fixturesDb.prisma.company.updateMany({
         where: { id: changed.id },
         data: { whatsappPhoneNumberId: phoneNumberId() },
       });
@@ -604,12 +605,12 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
             .lines()
             .some(
               (line) =>
-                line.msg === 'cliente suspenso; nada é enviado ao contato e o job é descartado',
+                line.msg === 'empresa suspensa; nada é enviado ao contato e o job é descartado',
             ),
         'flush descartado',
       );
       await waitFor(
-        () => h.logs.lines().some((line) => String(line.msg).includes('o número do cliente mudou')),
+        () => h.logs.lines().some((line) => String(line.msg).includes('o número da empresa mudou')),
         'número trocado detectado',
       );
       assert.equal(graph.requests.length, 0, 'nada chegou ao Graph');
@@ -619,13 +620,13 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
   it('as métricas do lote aparecem em /metrics; texto, contato, persona e segredos não aparecem em nenhum log', async () => {
     await withHarness({ windowMs: 1_500 }, async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('privado', number);
+      const company = await newCompany('privado', number);
       const contact = contactNumber();
       await send(h, number, contact, `${SECRET_TEXT} 1`);
       await send(h, number, contact, `${SECRET_TEXT} 2`);
-      await waitFor(async () => (await sentCount(client, contact)) === 1, 'resposta');
+      await waitFor(async () => (await sentCount(company, contact)) === 1, 'resposta');
       await send(h, number, contact, `${SECRET_TEXT} [[mock:fail]]`);
-      await waitFor(async () => (await sentCount(client, contact)) === 2, 'fallback enviado');
+      await waitFor(async () => (await sentCount(company, contact)) === 2, 'fallback enviado');
 
       const response = await h.app.inject({
         method: 'GET',
@@ -639,7 +640,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
         response.body,
         /queue_jobs_total\{queue="channel-inbound",result="completed"\} /,
       );
-      assert.doesNotMatch(response.body, new RegExp(`${client.id}|${contact}|${SECRET_TEXT}`));
+      assert.doesNotMatch(response.body, new RegExp(`${company.id}|${contact}|${SECRET_TEXT}`));
 
       const raw = h.logs.raw();
       for (const secret of [
@@ -661,21 +662,21 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
       { windowMs: 300 },
       async (h) => {
         const number = phoneNumberId();
-        const client = await newClient('backoff', number);
+        const company = await newCompany('backoff', number);
         const contact = contactNumber();
         graph.failNext(1, { kind: 'respond', status: 503 });
 
         await send(h, number, contact, 'primeira');
         await waitFor(() => graph.requests.length === 1, 'envio que falhou');
         await waitFor(
-          async () => (await stored(client, contact)).some((m) => m.role === 'ASSISTANT'),
+          async () => (await stored(company, contact)).some((m) => m.role === 'ASSISTANT'),
           'resposta gravada',
         );
         // O job está esperando o backoff (3 s). A mensagem nova o substitui.
         await send(h, number, contact, 'segunda');
-        await waitFor(async () => (await sentCount(client, contact)) === 1, 'segunda respondida');
+        await waitFor(async () => (await sentCount(company, contact)) === 1, 'segunda respondida');
 
-        const rows = await stored(client, contact);
+        const rows = await stored(company, contact);
         const replies = rows.filter((m) => m.role === 'ASSISTANT');
         assert.equal(replies.length, 2);
         assert.equal(replies[0]?.sentAt, null, 'a resposta antiga ficou gravada, sem sentAt');
@@ -690,7 +691,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
           .lines()
           .find((line) => String(line.msg).includes('não foi enviada e não será reenviada'));
         assert.equal(warn?.level, 40);
-        assert.equal(warn.clientId, client.id);
+        assert.equal(warn.companyId, company.id);
         assert.equal(warn.replyId, replies[0].id);
         const metrics = await h.app.inject({
           method: 'GET',

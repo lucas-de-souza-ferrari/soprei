@@ -3,8 +3,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { after, afterEach, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
-import { ClientService } from '../../application/clients/client.service.js';
-import type { Client, UserRole } from '../../domain/index.js';
+import { CompanyService } from '../../application/companies/company.service.js';
+import type { Company, MembershipRole } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
 import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
 import { FakeGraphApi, FULL_SCOPES, graphError } from '../../test-support/fake-graph-api.js';
@@ -21,7 +21,7 @@ import {
   createDatabase,
   type Database,
   PrismaChannelUnitOfWork,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
 } from '../database/index.js';
 import { WhatsappGraphAdminClient } from '../external-apis/whatsapp/whatsapp-graph-admin.client.js';
 import { createMetrics, type Metrics } from '../metrics/index.js';
@@ -90,10 +90,10 @@ async function createHarness(options: { withChannel?: boolean } = {}): Promise<H
     metrics,
     hasher: new ScryptPasswordHasher({ cost: { N: 1024, r: 8, p: 1 } }),
   });
-  const clients = new PrismaClientRepository(database.prisma);
+  const companies = new PrismaCompanyRepository(database.prisma);
   const stack = buildChannelCredentials(database.prisma);
   const channel = new ChannelConnectionService({
-    clients,
+    companies,
     connections: stack.connections,
     unitOfWork: new PrismaChannelUnitOfWork(database.prisma),
     cipher: stack.cipher,
@@ -117,9 +117,9 @@ async function createHarness(options: { withChannel?: boolean } = {}): Promise<H
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
     auth: auth.service,
-    userAdmin: auth.userAdmin,
+    membershipAdmin: auth.membershipAdmin,
     admin: {
-      clients: new ClientService(clients),
+      companies: new CompanyService(companies),
       ...(options.withChannel === false ? {} : { channel }),
     },
   });
@@ -157,9 +157,9 @@ interface Person {
   accessToken: string;
 }
 
-async function enroll(h: Harness, client: Client, role: UserRole): Promise<Person> {
+async function enroll(h: Harness, company: Company, role: MembershipRole): Promise<Person> {
   const email = emailFor(role.toLowerCase());
-  const user = await h.auth.users.create(client.id, {
+  const membership = await h.auth.memberships.create(company.id, {
     email,
     passwordHash: await h.auth.hasher.hash(PASSWORD),
     role,
@@ -167,17 +167,17 @@ async function enroll(h: Harness, client: Client, role: UserRole): Promise<Perso
   const response = await h.app.inject({
     method: 'POST',
     url: '/auth/login',
-    payload: { clientSlug: client.slug, email, password: PASSWORD },
+    payload: { companySlug: company.slug, email, password: PASSWORD },
     remoteAddress: '203.0.113.10',
   });
   assert.equal(response.statusCode, 200, response.body);
-  return { id: user.id, accessToken: response.json<{ accessToken: string }>().accessToken };
+  return { id: membership.id, accessToken: response.json<{ accessToken: string }>().accessToken };
 }
 
-const signup = (h: Harness, who: Person, clientId: string, payload: object) =>
+const signup = (h: Harness, who: Person, companyId: string, payload: object) =>
   h.app.inject({
     method: 'POST',
-    url: `/admin/clients/${clientId}/channel/embedded-signup`,
+    url: `/admin/companies/${companyId}/channel/embedded-signup`,
     headers: bearer(who.accessToken),
     remoteAddress: '203.0.113.10',
     payload,
@@ -187,12 +187,12 @@ const call = (
   h: Harness,
   who: Person,
   method: 'GET' | 'PUT' | 'DELETE',
-  clientId: string,
+  companyId: string,
   payload?: object,
 ) =>
   h.app.inject({
     method,
-    url: `/admin/clients/${clientId}/channel`,
+    url: `/admin/companies/${companyId}/channel`,
     headers: bearer(who.accessToken),
     remoteAddress: '203.0.113.10',
     ...(payload === undefined ? {} : { payload }),
@@ -207,13 +207,13 @@ interface ChannelBody {
 const errorCode = (response: LightMyRequestResponse): string =>
   response.json<{ error: { code: string } }>().error.code;
 
-async function dbState(clientId: string) {
-  const [client, connection, events] = await Promise.all([
-    database.prisma.client.findFirst({ where: { id: clientId } }),
-    database.prisma.channelConnection.findFirst({ where: { clientId } }),
-    database.prisma.auditEvent.findMany({ where: { clientId }, orderBy: { createdAt: 'asc' } }),
+async function dbState(companyId: string) {
+  const [company, connection, events] = await Promise.all([
+    database.prisma.company.findFirst({ where: { id: companyId } }),
+    database.prisma.channelConnection.findFirst({ where: { companyId } }),
+    database.prisma.auditEvent.findMany({ where: { companyId }, orderBy: { createdAt: 'asc' } }),
   ]);
-  return { number: client?.whatsappPhoneNumberId ?? null, connection, events };
+  return { number: company?.whatsappPhoneNumberId ?? null, connection, events };
 }
 
 /** Um cenário: WABA com o número, token do nosso app que a enxerga e o `code` que o troca por ele. */
@@ -239,11 +239,11 @@ function freshCode(token: string): string {
 describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () => {
   it('feliz: troca o code, prova a posse, registra com PIN aleatório, grava tudo cifrado e não vaza nada', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('es-ok');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('es-ok');
+      const owner = await enroll(h, company, 'OWNER');
       const { number, waba, token, code } = givenSignup();
 
-      const response = await signup(h, owner, client.id, {
+      const response = await signup(h, owner, company.id, {
         code,
         wabaId: waba,
         phoneNumberId: number,
@@ -259,7 +259,7 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
         ['oauth_token', 'debug_token', 'phone_numbers', 'subscribe', 'register'],
       );
       const [exchange] = graph.ofOperation('oauth_token');
-      assert.equal(exchange?.query.client_id, APP_ID);
+      assert.equal(exchange?.query.company_id, APP_ID);
       assert.equal(exchange.query.client_secret, APP_SECRET);
       assert.equal(exchange.query.code, code);
       const [register] = graph.ofOperation('register');
@@ -268,22 +268,22 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
       assert.equal(register?.headers.authorization, `Bearer ${token}`);
       assert.ok(graph.subscribed.has(waba));
 
-      const stored = await dbState(client.id);
+      const stored = await dbState(company.id);
       assert.equal(stored.number, number);
       assert.ok(stored.connection !== null);
       assert.equal(
-        h.stack.cipher.decrypt(client.id, stored.connection.tokenCiphertext).reveal(),
+        h.stack.cipher.decrypt(company.id, stored.connection.tokenCiphertext).reveal(),
         token,
       );
       const pinCipher = stored.connection.registrationPinCiphertext;
       assert.ok(pinCipher !== null && !pinCipher.includes(pin));
-      assert.equal(h.stack.cipher.decrypt(client.id, pinCipher).reveal(), pin);
+      assert.equal(h.stack.cipher.decrypt(company.id, pinCipher).reveal(), pin);
       assert.deepEqual(
         stored.events.map((event) => event.action),
         ['CHANNEL_CONNECTED'],
       );
-      assert.equal(stored.events[0]?.targetUserId, null);
-      assert.deepEqual((await call(h, owner, 'GET', client.id)).json<ChannelBody>(), body);
+      assert.equal(stored.events[0]?.targetMembershipId, null);
+      assert.deepEqual((await call(h, owner, 'GET', company.id)).json<ChannelBody>(), body);
 
       const metricsBody = await h.metrics.render();
       for (const secret of [
@@ -308,11 +308,11 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
 
   it('recusado: nada é gravado e nenhum segredo nem corpo da Meta vaza', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('es-refused');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('es-refused');
+      const owner = await enroll(h, company, 'OWNER');
       const { number, waba, token, code } = givenSignup();
       const base = { wabaId: waba, phoneNumberId: number };
-      const attempt = (payload: object) => signup(h, owner, client.id, payload);
+      const attempt = (payload: object) => signup(h, owner, company.id, payload);
 
       const expired = newCode();
       graph.addCode(expired, token, { expired: true });
@@ -398,7 +398,7 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
         assert.ok(!response.body.includes(secretValue));
       }
 
-      const stored = await dbState(client.id);
+      const stored = await dbState(company.id);
       assert.equal(stored.number, null);
       assert.equal(stored.connection, null);
       assert.deepEqual(stored.events, []);
@@ -413,10 +413,10 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
     });
   });
 
-  it('code de uso único: duas submissões simultâneas (uma vence) e o reuso por outro cliente é recusado', async () => {
+  it('code de uso único: duas submissões simultâneas (uma vence) e o reuso por outra empresa é recusado', async () => {
     await withHarness(async (h) => {
-      const a = await tenants.createClient('es-once-a');
-      const b = await tenants.createClient('es-once-b');
+      const a = await tenants.createCompany('es-once-a');
+      const b = await tenants.createCompany('es-once-b');
       const ownerA = await enroll(h, a, 'OWNER');
       const ownerB = await enroll(h, b, 'OWNER');
       const { number, waba, code } = givenSignup();
@@ -437,10 +437,10 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
     });
   });
 
-  it('dois clientes: ids de A com o code de B são recusados, o número de A dá 409 sem revelar A e A segue intacto', async () => {
+  it('duas empresas: ids de A com o code de B são recusados, o número de A dá 409 sem revelar A e A segue intacto', async () => {
     await withHarness(async (h) => {
-      const a = await tenants.createClient('es-two-a');
-      const b = await tenants.createClient('es-two-b');
+      const a = await tenants.createCompany('es-two-a');
+      const b = await tenants.createCompany('es-two-b');
       const ownerA = await enroll(h, a, 'OWNER');
       const ownerB = await enroll(h, b, 'OWNER');
       const sa = givenSignup();
@@ -485,7 +485,7 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
         'o número de A não foi registrado de novo',
       );
 
-      // O code de B nunca conecta A: o clientId vem do token, outro id no caminho é 404.
+      // O code de B nunca conecta A: o companyId vem do token, outro id no caminho é 404.
       const cross = await signup(h, ownerB, a.id, {
         code: freshCode(sb.token),
         wabaId: sa.waba,
@@ -510,22 +510,22 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
 
   it('refazer o Embedded Signup reaproveita o PIN guardado; o PUT manual o preserva; o DELETE o apaga com a conexão', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('es-pin');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('es-pin');
+      const owner = await enroll(h, company, 'OWNER');
       const s1 = givenSignup();
-      await signup(h, owner, client.id, {
+      await signup(h, owner, company.id, {
         code: s1.code,
         wabaId: s1.waba,
         phoneNumberId: s1.number,
       });
-      const first = (await dbState(client.id)).connection;
+      const first = (await dbState(company.id)).connection;
       assert.ok(first?.registrationPinCiphertext);
-      const pin1 = h.stack.cipher.decrypt(client.id, first.registrationPinCiphertext).reveal();
+      const pin1 = h.stack.cipher.decrypt(company.id, first.registrationPinCiphertext).reveal();
 
       // Reconexão: o número já está registrado com esse PIN e a Meta só aceita o mesmo.
       const s2 = givenSignup();
       graph.setRegistered(s2.number, pin1);
-      const second = await signup(h, owner, client.id, {
+      const second = await signup(h, owner, company.id, {
         code: s2.code,
         wabaId: s2.waba,
         phoneNumberId: s2.number,
@@ -533,55 +533,55 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
       assert.equal(second.statusCode, 200, second.body);
       const [, registerAgain] = graph.ofOperation('register');
       assert.equal((registerAgain?.body as { pin: string }).pin, pin1);
-      const stored2 = (await dbState(client.id)).connection;
+      const stored2 = (await dbState(company.id)).connection;
       assert.equal(stored2?.tokenVersion, 2);
       assert.notEqual(stored2.registrationPinCiphertext, first.registrationPinCiphertext);
       assert.deepEqual(
-        (await dbState(client.id)).events.map((event) => event.action),
+        (await dbState(company.id)).events.map((event) => event.action),
         ['CHANNEL_CONNECTED', 'CHANNEL_TOKEN_REPLACED'],
       );
 
       // PUT manual depois: troca o token e mantém o PIN.
       const manualToken = newToken();
       graph.addToken(manualToken, { appId: APP_ID, scopes: FULL_SCOPES, wabaIds: [s2.waba] });
-      const put = await call(h, owner, 'PUT', client.id, {
+      const put = await call(h, owner, 'PUT', company.id, {
         phoneNumberId: s2.number,
         wabaId: s2.waba,
         accessToken: manualToken,
       });
       assert.equal(put.statusCode, 200, put.body);
-      const stored3 = (await dbState(client.id)).connection;
+      const stored3 = (await dbState(company.id)).connection;
       assert.equal(
-        h.stack.cipher.decrypt(client.id, stored3?.registrationPinCiphertext ?? '').reveal(),
+        h.stack.cipher.decrypt(company.id, stored3?.registrationPinCiphertext ?? '').reveal(),
         pin1,
       );
 
-      assert.equal((await call(h, owner, 'DELETE', client.id)).statusCode, 204);
-      assert.equal((await dbState(client.id)).connection, null);
+      assert.equal((await call(h, owner, 'DELETE', company.id)).statusCode, 204);
+      assert.equal((await dbState(company.id)).connection, null);
     });
   });
 
-  it('PIN guardado que não decifra: gera um PIN novo, avisa só com o clientId e não vaza nenhum PIN', async () => {
+  it('PIN guardado que não decifra: gera um PIN novo, avisa só com o companyId e não vaza nenhum PIN', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('es-badpin');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('es-badpin');
+      const owner = await enroll(h, company, 'OWNER');
       const s1 = givenSignup();
-      await signup(h, owner, client.id, {
+      await signup(h, owner, company.id, {
         code: s1.code,
         wabaId: s1.waba,
         phoneNumberId: s1.number,
       });
-      const first = (await dbState(client.id)).connection;
+      const first = (await dbState(company.id)).connection;
       assert.ok(first?.registrationPinCiphertext);
-      const oldPin = h.stack.cipher.decrypt(client.id, first.registrationPinCiphertext).reveal();
+      const oldPin = h.stack.cipher.decrypt(company.id, first.registrationPinCiphertext).reveal();
       // Texto do PIN adulterado (como se a chave tivesse sido removida).
       await database.prisma.channelConnection.updateMany({
-        where: { clientId: client.id },
+        where: { companyId: company.id },
         data: { registrationPinCiphertext: 'v1.teste.AAAA.BBBB.CCCC' },
       });
 
       const s2 = givenSignup();
-      const response = await signup(h, owner, client.id, {
+      const response = await signup(h, owner, company.id, {
         code: s2.code,
         wabaId: s2.waba,
         phoneNumberId: s2.number,
@@ -591,16 +591,16 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
       const [, registerAgain] = graph.ofOperation('register');
       const newPin = (registerAgain?.body as { pin: string }).pin;
       assert.match(newPin, /^[0-9]{6}$/);
-      const stored = (await dbState(client.id)).connection;
+      const stored = (await dbState(company.id)).connection;
       assert.equal(
-        h.stack.cipher.decrypt(client.id, stored?.registrationPinCiphertext ?? '').reveal(),
+        h.stack.cipher.decrypt(company.id, stored?.registrationPinCiphertext ?? '').reveal(),
         newPin,
       );
       const warning = h.logs
         .lines()
         .find((line) => String(line.msg).includes('PIN de registro guardado'));
       assert.equal(warning?.level, 40);
-      assert.equal(warning.clientId, client.id);
+      assert.equal(warning.companyId, company.id);
       const raw = h.logs.raw();
       for (const secret of [oldPin, newPin, 'AAAA.BBBB.CCCC']) {
         assert.ok(!raw.includes(secret), 'log');
@@ -608,16 +608,16 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
     });
   });
 
-  it('permissões: AGENT/VIEWER 403, PlatformAdmin 403, :clientId alheio 404, sem token 401; sem canal habilitado 404', async () => {
+  it('permissões: AGENT/VIEWER 403, PlatformAdmin 403, :companyId alheio 404, sem token 401; sem canal habilitado 404', async () => {
     await withHarness(async (h) => {
-      const a = await tenants.createClient('es-perm-a');
-      const b = await tenants.createClient('es-perm-b');
-      const people: Partial<Record<UserRole, Person>> = {};
+      const a = await tenants.createCompany('es-perm-a');
+      const b = await tenants.createCompany('es-perm-b');
+      const people: Partial<Record<MembershipRole, Person>> = {};
       for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const) {
         people[role] = await enroll(h, a, role);
       }
       const payload = { code: newCode(), wabaId: digits(), phoneNumberId: digits() };
-      const who = (role: UserRole): Person => {
+      const who = (role: MembershipRole): Person => {
         const person = people[role];
         assert.ok(person !== undefined);
         return person;
@@ -629,7 +629,7 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
       assert.equal((await signup(h, who('OWNER'), b.id, payload)).statusCode, 404);
       const anonymous = await h.app.inject({
         method: 'POST',
-        url: `/admin/clients/${a.id}/channel/embedded-signup`,
+        url: `/admin/companies/${a.id}/channel/embedded-signup`,
         payload,
       });
       assert.equal(anonymous.statusCode, 401);
@@ -655,9 +655,9 @@ describe('Embedded Signup (spec 015b, Postgres e Redis reais, Graph falso)', () 
     });
     await withHarness(
       async (h) => {
-        const client = await tenants.createClient('es-off');
-        const owner = await enroll(h, client, 'OWNER');
-        const response = await signup(h, owner, client.id, {
+        const company = await tenants.createCompany('es-off');
+        const owner = await enroll(h, company, 'OWNER');
+        const response = await signup(h, owner, company.id, {
           code: newCode(),
           wabaId: digits(),
           phoneNumberId: digits(),

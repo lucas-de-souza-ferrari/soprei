@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { ClientId } from '../../domain/index.js';
+import { CompanyId } from '../../domain/index.js';
 import { CredentialDecryptionError } from '../../shared/errors/index.js';
 import { SecretString } from '../../shared/types/index.js';
 import {
@@ -11,8 +11,8 @@ import {
 } from './aes-gcm-credential-cipher.js';
 
 const key = (keyId: string): CredentialKey => ({ keyId, key: randomBytes(32) });
-const A = ClientId.parse(randomUUID());
-const B = ClientId.parse(randomUUID());
+const A = CompanyId.parse(randomUUID());
+const B = CompanyId.parse(randomUUID());
 const TOKEN = 'EAAG-token-de-teste-bem-secreto-123';
 
 function reasonOf(fn: () => unknown): string {
@@ -37,7 +37,7 @@ test('roundtrip e IV aleatório', () => {
   assert.equal(cipher.decrypt(A, one).reveal(), TOKEN);
 });
 
-test('chave errada, keyId desconhecido, formato inválido e outro cliente (AAD)', () => {
+test('chave errada, keyId desconhecido, formato inválido e outra empresa (AAD)', () => {
   const cipher = new AesGcmCredentialCipher([key('k1')], 'k1');
   const stored = cipher.encrypt(A, new SecretString(TOKEN));
   assert.equal(

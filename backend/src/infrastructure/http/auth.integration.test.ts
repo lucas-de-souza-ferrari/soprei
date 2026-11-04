@@ -3,8 +3,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
-import { ClientService } from '../../application/clients/client.service.js';
-import type { Client } from '../../domain/index.js';
+import { CompanyService } from '../../application/companies/company.service.js';
+import type { Company } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
 import { bearer } from '../../test-support/in-memory-auth.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
@@ -20,7 +20,7 @@ import { createRateLimitRedis, type RateLimitRedisHandle } from '../cache/rate-l
 import {
   createDatabase,
   type Database,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaAttendanceUnitOfWork,
   PrismaMessageRepository,
@@ -134,11 +134,11 @@ async function createHarness(
     metrics,
     hasher,
   });
-  const clientRepository = new PrismaClientRepository(database.prisma);
+  const companyRepository = new PrismaCompanyRepository(database.prisma);
   const llm = new MockLlmProvider({ recordCalls: true });
   const attendanceCalls = { count: 0 };
   const attendance = new AttendanceService({
-    clients: clientRepository,
+    companies: companyRepository,
     conversations: new PrismaConversationRepository(database.prisma),
     messages: new PrismaMessageRepository(database.prisma),
     unitOfWork: new PrismaAttendanceUnitOfWork(database.prisma),
@@ -162,7 +162,7 @@ async function createHarness(
     metrics,
     metricsToken: METRICS_TOKEN,
     auth: auth.service,
-    admin: { clients: new ClientService(clientRepository), attendance },
+    admin: { companies: new CompanyService(companyRepository), attendance },
     rateLimit: {
       redis: rateRedis.client,
       profiles: options.profiles ?? profiles(),
@@ -205,13 +205,13 @@ async function withHarness(
 const emailFor = (label: string): string =>
   `${label}-${randomBytes(5).toString('hex')}@auth-it.test`;
 
-async function createUser(
+async function createMembership(
   h: Harness,
-  client: Client,
+  company: Company,
   email: string,
   role: 'OWNER' | 'AGENT' = 'OWNER',
 ): Promise<void> {
-  await h.auth.users.create(client.id, {
+  await h.auth.memberships.create(company.id, {
     email,
     passwordHash: await h.auth.hasher.hash(PASSWORD),
     role,
@@ -237,11 +237,11 @@ interface Tokens {
   refreshToken: string;
 }
 
-async function login(h: Harness, client: Client, email: string, ip?: string): Promise<Tokens> {
+async function login(h: Harness, company: Company, email: string, ip?: string): Promise<Tokens> {
   const response = await postJson(
     h,
     '/auth/login',
-    { clientSlug: client.slug, email, password: PASSWORD },
+    { companySlug: company.slug, email, password: PASSWORD },
     ip === undefined ? {} : { ip },
   );
   assert.equal(response.statusCode, 200, response.body);
@@ -253,79 +253,79 @@ const stable = (response: LightMyRequestResponse): unknown => {
   return { status: response.statusCode, error: { ...body.error, requestId: 'x' } };
 };
 
-describe('isolamento de ponta a ponta nas rotas /admin (dois clientes, banco e Redis reais)', () => {
-  it('o usuário do cliente A com o :clientId do B recebe 404 idêntico ao de cliente inexistente, sem tocar em dados do B', async () => {
+describe('isolamento de ponta a ponta nas rotas /admin (duas empresas, banco e Redis reais)', () => {
+  it('o usuário da empresa A com o :companyId do B recebe 404 idêntico ao de empresa inexistente, sem tocar em dados do B', async () => {
     await withHarness({}, async (h) => {
-      const clientA = await tenants.createClient('e2e-a');
-      const clientB = await tenants.createClient('e2e-b');
+      const companyA = await tenants.createCompany('e2e-a');
+      const companyB = await tenants.createCompany('e2e-b');
       const emailA = emailFor('a');
-      await createUser(h, clientA, emailA);
-      await createUser(h, clientB, emailFor('b'));
-      const tokenA = await login(h, clientA, emailA);
+      await createMembership(h, companyA, emailA);
+      await createMembership(h, companyB, emailFor('b'));
+      const tokenA = await login(h, companyA, emailA);
 
       const secretText = `texto-secreto-${randomUUID()}`;
       const attempts = [
-        (clientId: string) =>
+        (companyId: string) =>
           h.app.inject({
             method: 'POST',
-            url: `/admin/clients/${clientId}/messages`,
+            url: `/admin/companies/${companyId}/messages`,
             headers: bearer(tokenA.accessToken),
             payload: { contactRef: 'c1', text: secretText },
           }),
-        (clientId: string) =>
+        (companyId: string) =>
           h.app.inject({
             method: 'GET',
-            url: `/admin/clients/${clientId}/conversations`,
+            url: `/admin/companies/${companyId}/conversations`,
             headers: bearer(tokenA.accessToken),
           }),
-        (clientId: string) =>
+        (companyId: string) =>
           h.app.inject({
             method: 'GET',
-            url: `/admin/clients/${clientId}/conversations/${randomUUID()}/messages`,
+            url: `/admin/companies/${companyId}/conversations/${randomUUID()}/messages`,
             headers: bearer(tokenA.accessToken),
           }),
       ];
       for (const attempt of attempts) {
-        const cross = await attempt(clientB.id);
+        const cross = await attempt(companyB.id);
         const ghost = await attempt(randomUUID());
         const malformed = await attempt('nao-e-uuid');
         assert.equal(cross.statusCode, 404);
         assert.deepEqual(stable(cross), stable(ghost));
         assert.deepEqual(stable(cross), stable(malformed));
-        assert.ok(!cross.body.includes(clientB.id));
+        assert.ok(!cross.body.includes(companyB.id));
       }
       // Nada foi gravado nem lido no B, e o LLM nem foi chamado.
       assert.equal(
-        await database.prisma.conversation.count({ where: { clientId: clientB.id } }),
+        await database.prisma.conversation.count({ where: { companyId: companyB.id } }),
         0,
       );
-      assert.equal(await database.prisma.message.count({ where: { clientId: clientB.id } }), 0);
+      assert.equal(await database.prisma.message.count({ where: { companyId: companyB.id } }), 0);
       assert.equal(
-        await database.prisma.conversation.count({ where: { clientId: clientA.id } }),
+        await database.prisma.conversation.count({ where: { companyId: companyA.id } }),
         0,
       );
       assert.equal(h.attendanceCalls.count, 0);
 
-      // Com o :clientId do A funciona, e o ClientId repassado ao service é o do token.
+      // Com o :companyId do A funciona, e o CompanyId repassado ao service é o do token.
       const ok = await h.app.inject({
         method: 'POST',
-        url: `/admin/clients/${clientA.id}/messages`,
+        url: `/admin/companies/${companyA.id}/messages`,
         headers: bearer(tokenA.accessToken),
         payload: { contactRef: 'c1', text: secretText },
       });
       assert.equal(ok.statusCode, 201);
       assert.equal(
-        await database.prisma.conversation.count({ where: { clientId: clientA.id } }),
+        await database.prisma.conversation.count({ where: { companyId: companyA.id } }),
         1,
       );
       assert.equal(
-        await database.prisma.conversation.count({ where: { clientId: clientB.id } }),
+        await database.prisma.conversation.count({ where: { companyId: companyB.id } }),
         0,
       );
-      // O :clientId em maiúsculas é o mesmo cliente (ids de UUID são comparados em minúsculas).
+      // O :companyId em maiúsculas é o mesma empresa (ids de UUID são comparados em minúsculas).
       const upper = await h.app.inject({
         method: 'GET',
-        url: `/admin/clients/${clientA.id.toUpperCase()}/conversations`,
+        url: `/admin/companies/${companyA.id.toUpperCase()}/conversations`,
         headers: bearer(tokenA.accessToken),
       });
       assert.equal(upper.statusCode, 200);
@@ -334,12 +334,12 @@ describe('isolamento de ponta a ponta nas rotas /admin (dois clientes, banco e R
     });
   });
 
-  it('User no CRUD de clientes: 403; PlatformAdmin nas rotas de atendimento: 403; sem token ou expirado: 401', async () => {
+  it('Membership no CRUD de empresas: 403; PlatformAdmin nas rotas de atendimento: 403; sem token ou expirado: 401', async () => {
     await withHarness({}, async (h) => {
-      const client = await tenants.createClient('e2e-roles');
+      const company = await tenants.createCompany('e2e-roles');
       const email = emailFor('roles');
-      await createUser(h, client, email);
-      const user = await login(h, client, email);
+      await createMembership(h, company, email);
+      const membership = await login(h, company, email);
       const adminEmail = emailFor('plataforma');
       await h.auth.platformAdmins.create({
         email: adminEmail,
@@ -354,19 +354,19 @@ describe('isolamento de ponta a ponta nas rotas /admin (dois clientes, banco e R
 
       const crud = await h.app.inject({
         method: 'GET',
-        url: '/admin/clients',
-        headers: bearer(user.accessToken),
+        url: '/admin/companies',
+        headers: bearer(membership.accessToken),
       });
       assert.equal(crud.statusCode, 403);
       const crudOk = await h.app.inject({
         method: 'GET',
-        url: '/admin/clients',
+        url: '/admin/companies',
         headers: bearer(platform.accessToken),
       });
       assert.equal(crudOk.statusCode, 200);
       for (const url of [
-        `/admin/clients/${client.id}/conversations`,
-        `/admin/clients/${client.id}/conversations/${randomUUID()}/messages`,
+        `/admin/companies/${company.id}/conversations`,
+        `/admin/companies/${company.id}/conversations/${randomUUID()}/messages`,
       ]) {
         const response = await h.app.inject({
           method: 'GET',
@@ -377,14 +377,14 @@ describe('isolamento de ponta a ponta nas rotas /admin (dois clientes, banco e R
       }
       const post = await h.app.inject({
         method: 'POST',
-        url: `/admin/clients/${client.id}/messages`,
+        url: `/admin/companies/${company.id}/messages`,
         headers: bearer(platform.accessToken),
         payload: { contactRef: 'c', text: 'oi' },
       });
       assert.equal(post.statusCode, 403);
       for (const url of [
-        '/admin/clients',
-        `/admin/clients/${client.id}/conversations`,
+        '/admin/companies',
+        `/admin/companies/${company.id}/conversations`,
         '/auth/me',
       ]) {
         assert.equal((await h.app.inject({ method: 'GET', url })).statusCode, 401, url);
@@ -394,12 +394,12 @@ describe('isolamento de ponta a ponta nas rotas /admin (dois clientes, banco e R
 
   it('logout-all e logout derrubam o access token ainda dentro do prazo (Redis real)', async () => {
     await withHarness({}, async (h) => {
-      const client = await tenants.createClient('e2e-revoke');
+      const company = await tenants.createCompany('e2e-revoke');
       const email = emailFor('rev');
-      await createUser(h, client, email);
-      const one = await login(h, client, email);
+      await createMembership(h, company, email);
+      const one = await login(h, company, email);
       await sleep(1_100); // o `nbf` compara segundos: o token novo precisa nascer depois
-      const two = await login(h, client, email);
+      const two = await login(h, company, email);
       const me = (token: string) =>
         h.app.inject({ method: 'GET', url: '/auth/me', headers: bearer(token) });
       assert.equal((await me(one.accessToken)).statusCode, 200);
@@ -429,7 +429,7 @@ describe('limites de taxa e falha fechada (login e refresh)', () => {
       },
       async (h) => {
         const wrongLogin = {
-          clientSlug: 'qualquer-slug',
+          companySlug: 'qualquer-slug',
           email: 'x@auth-it.test',
           password: PASSWORD,
         };
@@ -497,11 +497,11 @@ describe('limites de taxa e falha fechada (login e refresh)', () => {
       viaProxy.port = String(proxy.listeningPort);
       try {
         await withHarness({ rateRedisUrl: viaProxy.toString() }, async (h) => {
-          const client = await tenants.createClient('e2e-limiter-down');
+          const company = await tenants.createCompany('e2e-limiter-down');
           const email = emailFor('down');
-          await createUser(h, client, email);
-          const tokens = await login(h, client, email);
-          const body = { clientSlug: client.slug, email, password: PASSWORD };
+          await createMembership(h, company, email);
+          const tokens = await login(h, company, email);
+          const body = { companySlug: company.slug, email, password: PASSWORD };
           const refresh = { refreshToken: tokens.refreshToken };
 
           for (const mode of ['blackhole', 'stop'] as const) {
@@ -564,16 +564,16 @@ describe('limites de taxa e falha fechada (login e refresh)', () => {
       viaProxy.port = String(proxy.listeningPort);
       try {
         await withHarness({ authRedisUrl: viaProxy.toString() }, async (h) => {
-          const client = await tenants.createClient('e2e-auth-down');
+          const company = await tenants.createCompany('e2e-auth-down');
           const email = emailFor('adown');
-          await createUser(h, client, email);
-          const tokens = await login(h, client, email);
+          await createMembership(h, company, email);
+          const tokens = await login(h, company, email);
           const logsBefore = h.logs.lines().length;
           await proxy.stop();
           const before = h.hasher.verifyCalls;
           const responses = [
             await postJson(h, '/auth/login', {
-              clientSlug: client.slug,
+              companySlug: company.slug,
               email,
               password: PASSWORD,
             }),
@@ -591,7 +591,7 @@ describe('limites de taxa e falha fechada (login e refresh)', () => {
             }),
             await h.app.inject({
               method: 'GET',
-              url: `/admin/clients/${client.id}/conversations`,
+              url: `/admin/companies/${company.id}/conversations`,
               headers: bearer(tokens.accessToken),
             }),
           ];
@@ -625,12 +625,12 @@ describe('limites de taxa e falha fechada (login e refresh)', () => {
 describe('privacidade e métricas de ponta a ponta', () => {
   it('senha, e-mail, access token, refresh token e JWT_SECRET nunca aparecem em log, métrica nem corpo de erro', async () => {
     await withHarness({ maxFailures: 2 }, async (h) => {
-      const client = await tenants.createClient('e2e-priv');
+      const company = await tenants.createCompany('e2e-priv');
       const email = emailFor('segredo');
-      await createUser(h, client, email);
+      await createMembership(h, company, email);
       const responses: LightMyRequestResponse[] = [];
       const good = await postJson(h, '/auth/login', {
-        clientSlug: client.slug,
+        companySlug: company.slug,
         email,
         password: PASSWORD,
       });
@@ -639,23 +639,23 @@ describe('privacidade e métricas de ponta a ponta', () => {
       const wrongPassword = `errada-${randomUUID()}`;
       responses.push(
         await postJson(h, '/auth/login', {
-          clientSlug: client.slug,
+          companySlug: company.slug,
           email,
           password: wrongPassword,
         }),
         await postJson(h, '/auth/login', {
-          clientSlug: client.slug,
+          companySlug: company.slug,
           email,
           password: wrongPassword,
         }),
-        await postJson(h, '/auth/login', { clientSlug: client.slug, email, password: PASSWORD }), // bloqueada
+        await postJson(h, '/auth/login', { companySlug: company.slug, email, password: PASSWORD }), // bloqueada
         await postJson(h, '/auth/login', {
-          clientSlug: client.slug,
+          companySlug: company.slug,
           email: 'nao-e-email',
           password: PASSWORD,
         }), // 400
         await postJson(h, '/auth/login', {
-          clientSlug: client.slug,
+          companySlug: company.slug,
           email,
           password: 'a'.repeat(200),
         }), // 400
@@ -691,7 +691,7 @@ describe('privacidade e métricas de ponta a ponta', () => {
         refreshed.json<Tokens>().accessToken,
         refreshed.json<Tokens>().refreshToken,
         config.JWT_SECRET,
-        client.slug,
+        company.slug,
       ];
       const logs = h.logs.raw();
       assert.ok(logs.length > 0);
@@ -704,7 +704,7 @@ describe('privacidade e métricas de ponta a ponta', () => {
       }
       // Nem o hash da senha, em lugar algum.
       const hash =
-        (await h.auth.users.findCredentialsByEmail(client.id, email))?.passwordHash ?? 'x';
+        (await h.auth.memberships.findCredentialsByEmail(company.id, email))?.passwordHash ?? 'x';
       assert.ok(hash.startsWith('scrypt$'));
       assert.ok(!logs.includes(hash) && !metrics.includes(hash));
     });
@@ -712,14 +712,14 @@ describe('privacidade e métricas de ponta a ponta', () => {
 
   it('/metrics expõe os contadores auth_* com labels fixos e nenhum id, e-mail ou IP', async () => {
     await withHarness({ maxFailures: 2 }, async (h) => {
-      const client = await tenants.createClient('e2e-metrics');
+      const company = await tenants.createCompany('e2e-metrics');
       const email = emailFor('metricas');
-      await createUser(h, client, email);
-      const tokens = await login(h, client, email, '192.0.2.77');
+      await createMembership(h, company, email);
+      const tokens = await login(h, company, email, '192.0.2.77');
       await postJson(
         h,
         '/auth/login',
-        { clientSlug: client.slug, email, password: 'errada-errada-12' },
+        { companySlug: company.slug, email, password: 'errada-errada-12' },
         { ip: '192.0.2.77' },
       );
       await postJson(
@@ -744,8 +744,8 @@ describe('privacidade e métricas de ponta a ponta', () => {
       assert.equal(response.statusCode, 200);
       const body = response.body;
       for (const expected of [
-        /auth_logins_total\{kind="user",result="ok"\} 1/,
-        /auth_logins_total\{kind="user",result="invalid"\} 1/,
+        /auth_logins_total\{kind="membership",result="ok"\} 1/,
+        /auth_logins_total\{kind="membership",result="invalid"\} 1/,
         /auth_refresh_total\{result="ok"\} 1/,
         /auth_refresh_total\{result="reuse"\} 1/,
         /auth_token_rejections_total\{reason="missing"\} 1/,
@@ -757,11 +757,11 @@ describe('privacidade e métricas de ponta a ponta', () => {
       for (const line of authLines) {
         assert.match(line, /^auth_[a-z_]+\{[a-z]+="[a-z]+"(,[a-z]+="[a-z]+")*\} \d+$/, line);
       }
-      for (const secret of [email, client.id, client.slug, '192.0.2.77', tokens.accessToken]) {
+      for (const secret of [email, company.id, company.slug, '192.0.2.77', tokens.accessToken]) {
         assert.ok(!body.includes(secret));
       }
       // "email" só vale como nome de label: a métrica account_password_reset_emails_total (021) o tem no nome.
-      assert.doesNotMatch(body, /clientId|userId|\{[^}]*email|\bip=/i);
+      assert.doesNotMatch(body, /companyId|membershipId|\{[^}]*email|\bip=/i);
     });
   });
 });

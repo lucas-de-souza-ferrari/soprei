@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline';
 import { loadConfig } from '../../config/index.js';
-import { createDatabase, PrismaClientRepository } from '../../database/index.js';
+import { createDatabase, PrismaCompanyRepository } from '../../database/index.js';
 import { createLogger } from '../../logger/logger.js';
 import { createAuthRedis } from '../auth-redis.js';
 import { createAuthComponents } from '../create-auth.js';
@@ -78,8 +78,8 @@ async function main(): Promise<number> {
     const auth = createAuthComponents({ config, logger, prisma: database.prisma, authRedis });
     const interactive = process.stdin.isTTY;
     const deps: AuthCliDeps = {
-      clients: new PrismaClientRepository(database.prisma),
-      users: auth.users,
+      companies: new PrismaCompanyRepository(database.prisma),
+      memberships: auth.memberships,
       platformAdmins: auth.platformAdmins,
       hasher: auth.hasher,
       sessions: auth.sessions,

@@ -1,10 +1,10 @@
 export {
-  CLIENT_SLUG_PATTERN,
-  CLIENT_STATUSES,
+  COMPANY_SLUG_PATTERN,
+  COMPANY_STATUSES,
   PERSONA_MAX_LENGTH,
   WHATSAPP_PHONE_NUMBER_ID_PATTERN,
-} from './entities/client.js';
-export type { Client, ClientStatus, ClientUpdate, NewClient } from './entities/client.js';
+} from './entities/company.js';
+export type { Company, CompanyStatus, CompanyUpdate, NewCompany } from './entities/company.js';
 export { CONTACT_REF_MAX_LENGTH } from './entities/conversation.js';
 export type { Conversation, ConversationUpdate, NewConversation } from './entities/conversation.js';
 export {
@@ -21,30 +21,31 @@ export type {
 } from './entities/message.js';
 export { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT } from './pagination.js';
 export type { ListOptions, Page } from './pagination.js';
-export type { ClientRepository } from './repositories/client.repository.js';
+export type { CompanyRepository } from './repositories/company.repository.js';
 export type {
   AttendanceTransaction,
   AttendanceUnitOfWork,
 } from './repositories/attendance-unit-of-work.js';
 export type { ConversationRepository } from './repositories/conversation.repository.js';
 export type { MessageRepository } from './repositories/message.repository.js';
-export type { TenantRepository, WithoutClientId } from './repositories/tenant.repository.js';
-export { ClientId } from './value-objects/client-id.js';
-export { EMAIL_MAX_LENGTH, USER_ROLES, USER_STATUSES } from './entities/user.js';
+export type { TenantRepository, WithoutCompanyId } from './repositories/tenant.repository.js';
+export { CompanyId } from './value-objects/company-id.js';
+export { EMAIL_MAX_LENGTH, MEMBERSHIP_ROLES, ACCESS_STATUSES } from './entities/membership.js';
 export type {
   NewPlatformAdmin,
-  NewUser,
+  NewMembership,
   PlatformAdmin,
   PlatformAdminCredentials,
-  User,
-  UserCredentials,
-  UserRole,
-  UserStatus,
-  UserUpdate,
-} from './entities/user.js';
+  Membership,
+  MembershipCredentials,
+  MembershipRole,
+  AccessStatus,
+  MembershipUpdate,
+} from './entities/membership.js';
 export type { PlatformAdminRepository } from './repositories/platform-admin.repository.js';
-export type { UserRepository } from './repositories/user.repository.js';
-export { AccountId, PlatformAdminId, UserId } from './value-objects/user-id.js';
+export type { MembershipRepository } from './repositories/membership.repository.js';
+export { AccountId, PlatformAdminId } from './value-objects/account-id.js';
+export { MembershipId } from './value-objects/membership-id.js';
 export { AUDIT_ACTIONS } from './entities/audit-event.js';
 export type { AuditAction, AuditEvent, NewAuditEvent } from './entities/audit-event.js';
 export { canManageRole, hasPermission, PERMISSIONS, ROLE_PERMISSIONS } from './permissions.js';

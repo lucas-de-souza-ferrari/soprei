@@ -4,9 +4,9 @@ import {
   type AuditAction,
   type ChannelConnection,
   type ChannelConnectionRepository,
-  type Client,
-  type ClientId,
-  type ClientRepository,
+  type Company,
+  type CompanyId,
+  type CompanyRepository,
   hasPermission,
   type Permission,
 } from '../../domain/index.js';
@@ -18,7 +18,7 @@ import {
   ValidationError,
 } from '../../shared/errors/index.js';
 import { SecretString } from '../../shared/types/index.js';
-import type { UserIdentity } from '../auth/identity.js';
+import type { MembershipIdentity } from '../auth/identity.js';
 import type { ChannelUnitOfWork } from '../ports/channel-unit-of-work.js';
 import {
   type ChannelProvisionError,
@@ -35,7 +35,7 @@ export const CHANNEL_ERRORS = {
   CHANNEL_WRONG_APP: 'O token não pertence ao aplicativo do Soprei',
   CHANNEL_MISSING_SCOPE: 'O token não tem as permissões necessárias do WhatsApp',
   CHANNEL_NUMBER_NOT_IN_WABA: 'O número informado não pertence à conta WhatsApp Business do token',
-  CHANNEL_NUMBER_IN_USE: 'Este número já está conectado a outro cliente',
+  CHANNEL_NUMBER_IN_USE: 'Este número já está conectado a outra empresa',
   CHANNEL_CODE_INVALID: 'O código do Embedded Signup é inválido, expirou ou já foi usado',
   CHANNEL_REGISTRATION_FAILED: 'Não foi possível registrar o número na Meta',
 } as const;
@@ -93,7 +93,7 @@ export interface EmbeddedSignupInput {
 export interface ChannelConnectionServiceDeps {
   /** Gera o PIN de 6 dígitos do registro; por padrão `crypto.randomInt` (CSPRNG). Só os testes trocam. */
   readonly generatePin?: () => string;
-  readonly clients: Pick<ClientRepository, 'findById' | 'findByWhatsappPhoneNumberId'>;
+  readonly companies: Pick<CompanyRepository, 'findById' | 'findByWhatsappPhoneNumberId'>;
   readonly connections: Pick<ChannelConnectionRepository, 'find'>;
   readonly unitOfWork: ChannelUnitOfWork;
   readonly cipher: CredentialCipher;
@@ -108,8 +108,8 @@ interface PendingAudit {
   readonly action: AuditAction;
 }
 
-function toView(client: Client, connection: ChannelConnection | null): ChannelStateView {
-  const number = client.whatsappPhoneNumberId;
+function toView(company: Company, connection: ChannelConnection | null): ChannelStateView {
+  const number = company.whatsappPhoneNumberId;
   if (connection === null) {
     return {
       state: number === null ? 'NOT_CONNECTED' : 'LEGACY',
@@ -131,29 +131,29 @@ function toView(client: Client, connection: ChannelConnection | null): ChannelSt
 }
 
 /**
- * Conexão do canal WhatsApp do próprio cliente (spec 015): estado, conectar ou trocar o token
- * (`PUT`) e desconectar. O `ClientId` vem sempre do ator (token de acesso). Antes de gravar, prova a
- * posse do número com o **token do próprio cliente** (`debug_token` com `app_id` fixo, escopos, lista
- * de números da WABA e `subscribed_apps`); a gravação (cifra, conexão, número do cliente e
- * auditoria) é uma transação com o cliente travado. **Nunca** loga nem devolve token, texto cifrado,
+ * Conexão do canal WhatsApp da própria empresa (spec 015): estado, conectar ou trocar o token
+ * (`PUT`) e desconectar. O `CompanyId` vem sempre do ator (token de acesso). Antes de gravar, prova a
+ * posse do número com o **token da própria empresa** (`debug_token` com `app_id` fixo, escopos, lista
+ * de números da WABA e `subscribed_apps`); a gravação (cifra, conexão, número da empresa e
+ * auditoria) é uma transação com a empresa travado. **Nunca** loga nem devolve token, texto cifrado,
  * número ou WABA: só ids internos e enums.
  */
 export class ChannelConnectionService {
   constructor(private readonly deps: ChannelConnectionServiceDeps) {}
 
-  async getState(actor: UserIdentity): Promise<ChannelStateView> {
+  async getState(actor: MembershipIdentity): Promise<ChannelStateView> {
     this.requirePermission(actor, 'channel:read');
-    const [client, connection] = await Promise.all([
-      this.deps.clients.findById(actor.clientId),
-      this.deps.connections.find(actor.clientId),
+    const [company, connection] = await Promise.all([
+      this.deps.companies.findById(actor.companyId),
+      this.deps.connections.find(actor.companyId),
     ]);
-    return toView(client, connection);
+    return toView(company, connection);
   }
 
   /** Conecta ou troca o token (idempotente; também reconecta depois de `TOKEN_INVALID`). */
-  async connect(actor: UserIdentity, input: ConnectChannelInput): Promise<ChannelStateView> {
+  async connect(actor: MembershipIdentity, input: ConnectChannelInput): Promise<ChannelStateView> {
     this.requirePermission(actor, 'channel:manage');
-    const existing = await this.deps.connections.find(actor.clientId);
+    const existing = await this.deps.connections.find(actor.companyId);
     const action = existing === null ? 'connect' : 'replace_token';
     const token = new SecretString(input.accessToken);
     try {
@@ -172,23 +172,26 @@ export class ChannelConnectionService {
    * Embedded Signup (spec 015b): troca o `code` pelo token de negócio, faz a **mesma** prova de posse
    * do `PUT` (os ids do navegador não são confiados: valem só se a Graph os confirmar com o token
    * obtido), registra o número com um PIN aleatório de 6 dígitos gerado aqui (nunca visto nem
-   * digitado pelo cliente) e grava tudo cifrado, com auditoria, na mesma transação do `PUT`. Se o
-   * `/register` falhar, **nada é gravado** (o cliente refaz o fluxo, que gera outro `code`). O `code`,
+   * digitado pela empresa) e grava tudo cifrado, com auditoria, na mesma transação do `PUT`. Se o
+   * `/register` falhar, **nada é gravado** (a empresa refaz o fluxo, que gera outro `code`). O `code`,
    * o token e o PIN nunca vão a log, erro, métrica nem resposta.
    */
-  async embeddedSignup(actor: UserIdentity, input: EmbeddedSignupInput): Promise<ChannelStateView> {
+  async embeddedSignup(
+    actor: MembershipIdentity,
+    input: EmbeddedSignupInput,
+  ): Promise<ChannelStateView> {
     this.requirePermission(actor, 'channel:manage');
     try {
       const exchanged = await this.deps.provisioner.exchangeCode(new SecretString(input.code));
       if (!exchanged.ok) throw this.providerFailure(exchanged.error);
       const token = exchanged.value;
       const expiresAt = await this.proveOwnership(token, input);
-      // Número de OUTRO cliente: 409 antes de registrar. Sem isto, um token que enxerga a WABA
+      // Número de Outra empresa: 409 antes de registrar. Sem isto, um token que enxerga a WABA
       // compartilhada trocaria o PIN do número alheio pelo `/register`. (A corrida entre dois
-      // clientes ainda é decidida pelo `@unique`, na transação.)
-      const owner = await this.deps.clients.findByWhatsappPhoneNumberId(input.phoneNumberId);
-      if (owner !== null && owner.id !== actor.clientId) throw channelConflict();
-      const pin = await this.registrationPin(actor.clientId);
+      // empresas ainda é decidida pelo `@unique`, na transação.)
+      const owner = await this.deps.companies.findByWhatsappPhoneNumberId(input.phoneNumberId);
+      if (owner !== null && owner.id !== actor.companyId) throw channelConflict();
+      const pin = await this.registrationPin(actor.companyId);
       const registered = await this.deps.provisioner.registerNumber(
         input.phoneNumberId,
         token,
@@ -200,7 +203,7 @@ export class ChannelConnectionService {
         input,
         token,
         expiresAt,
-        this.deps.cipher.encrypt(actor.clientId, pin),
+        this.deps.cipher.encrypt(actor.companyId, pin),
       );
       this.afterCommit(actor, [{ action: outcome.audit }]);
       this.count('embedded_signup', 'ok');
@@ -212,20 +215,20 @@ export class ChannelConnectionService {
   }
 
   /**
-   * PIN do registro: o que já está guardado para este cliente (o número já foi registrado com ele e
+   * PIN do registro: o que já está guardado para esta empresa (o número já foi registrado com ele e
    * registrar de novo com o mesmo PIN é aceito), senão um novo, aleatório. PIN guardado que não
-   * decifra é ignorado, com `warn` só com o `clientId` (gera outro).
+   * decifra é ignorado, com `warn` só com o `companyId` (gera outro).
    */
-  private async registrationPin(clientId: ClientId): Promise<SecretString> {
-    const existing = await this.deps.connections.find(clientId);
+  private async registrationPin(companyId: CompanyId): Promise<SecretString> {
+    const existing = await this.deps.connections.find(companyId);
     if (existing?.registrationPinCiphertext != null) {
       try {
-        return this.deps.cipher.decrypt(clientId, existing.registrationPinCiphertext);
+        return this.deps.cipher.decrypt(companyId, existing.registrationPinCiphertext);
       } catch {
         // Falha ao decifrar (chave removida, texto adulterado): segue com um PIN novo, mas avisa. O
-        // log leva só o `clientId`: nada do PIN, do texto cifrado nem do erro.
+        // log leva só o `companyId`: nada do PIN, do texto cifrado nem do erro.
         this.deps.logger.warn(
-          { clientId },
+          { companyId },
           'PIN de registro guardado não pôde ser decifrado; gerando um PIN novo',
         );
       }
@@ -235,23 +238,23 @@ export class ChannelConnectionService {
   }
 
   /** Desconecta (idempotente): apaga a conexão, limpa o número e audita; o `unsubscribe` é melhor esforço. */
-  async disconnect(actor: UserIdentity): Promise<void> {
+  async disconnect(actor: MembershipIdentity): Promise<void> {
     this.requirePermission(actor, 'channel:manage');
     const outcome = await this.deps.unitOfWork.run(async (tx) => {
-      await tx.lockClient(actor.clientId);
-      const client = await tx.clients.findById(actor.clientId);
-      const connection = await tx.connections.find(actor.clientId);
+      await tx.lockCompany(actor.companyId);
+      const company = await tx.companies.findById(actor.companyId);
+      const connection = await tx.connections.find(actor.companyId);
       // Nada a desconectar (segundo DELETE): sem mudança e sem evento.
-      if (connection === null && client.whatsappPhoneNumberId === null) {
+      if (connection === null && company.whatsappPhoneNumberId === null) {
         return { changed: false as const };
       }
-      if (connection !== null) await tx.connections.removeByClient(actor.clientId);
-      if (client.whatsappPhoneNumberId !== null) {
-        await tx.clients.update(actor.clientId, { whatsappPhoneNumberId: null });
+      if (connection !== null) await tx.connections.removeByCompany(actor.companyId);
+      if (company.whatsappPhoneNumberId !== null) {
+        await tx.companies.update(actor.companyId, { whatsappPhoneNumberId: null });
       }
-      await tx.audit.create(actor.clientId, {
+      await tx.audit.create(actor.companyId, {
         action: 'CHANNEL_DISCONNECTED',
-        actorUserId: actor.userId,
+        actorMembershipId: actor.membershipId,
       });
       return {
         changed: true as const,
@@ -264,22 +267,22 @@ export class ChannelConnectionService {
     if (!outcome.changed) return;
     this.afterCommit(actor, [{ action: 'CHANNEL_DISCONNECTED' }]);
     this.count('disconnect', 'ok');
-    if (outcome.old !== undefined) await this.unsubscribe(actor.clientId, outcome.old);
+    if (outcome.old !== undefined) await this.unsubscribe(actor.companyId, outcome.old);
   }
 
   // --- internos ---
 
-  private requirePermission(actor: UserIdentity, permission: Permission): void {
+  private requirePermission(actor: MembershipIdentity, permission: Permission): void {
     if (hasPermission(actor.role, permission)) return;
     this.deps.logger.warn(
-      { actorUserId: actor.userId, role: actor.role, permission },
+      { actorMembershipId: actor.membershipId, role: actor.role, permission },
       'operação do canal negada pela permissão',
     );
     throw new ForbiddenError();
   }
 
   /**
-   * Prova de posse com o token do cliente, antes de gravar qualquer coisa. Devolve a validade
+   * Prova de posse com o token da empresa, antes de gravar qualquer coisa. Devolve a validade
    * informada pela Meta (`null` = não expira).
    */
   private async proveOwnership(token: SecretString, input: ChannelTarget): Promise<Date | null> {
@@ -309,30 +312,33 @@ export class ChannelConnectionService {
     return inspection.expiresAt;
   }
 
-  /** Cifra e grava, numa transação com o cliente travado: conexão, número e auditoria juntos. */
+  /** Cifra e grava, numa transação com a empresa travado: conexão, número e auditoria juntos. */
   private async persist(
-    actor: UserIdentity,
+    actor: MembershipIdentity,
     input: ChannelTarget,
     token: SecretString,
     expiresAt: Date | null,
     pinCiphertext?: string,
   ): Promise<{ readonly audit: AuditAction; readonly view: ChannelStateView }> {
-    const ciphertext = this.deps.cipher.encrypt(actor.clientId, token);
+    const ciphertext = this.deps.cipher.encrypt(actor.companyId, token);
     try {
       return await this.deps.unitOfWork.run(async (tx) => {
-        await tx.lockClient(actor.clientId);
-        const saved = await tx.connections.save(actor.clientId, {
+        await tx.lockCompany(actor.companyId);
+        const saved = await tx.connections.save(actor.companyId, {
           wabaId: input.wabaId,
           tokenCiphertext: ciphertext,
           tokenExpiresAt: expiresAt,
           ...(pinCiphertext === undefined ? {} : { registrationPinCiphertext: pinCiphertext }),
         });
-        const client = await tx.clients.update(actor.clientId, {
+        const company = await tx.companies.update(actor.companyId, {
           whatsappPhoneNumberId: input.phoneNumberId,
         });
         const audit: AuditAction = saved.replaced ? 'CHANNEL_TOKEN_REPLACED' : 'CHANNEL_CONNECTED';
-        await tx.audit.create(actor.clientId, { action: audit, actorUserId: actor.userId });
-        return { audit, view: toView(client, saved.connection) };
+        await tx.audit.create(actor.companyId, {
+          action: audit,
+          actorMembershipId: actor.membershipId,
+        });
+        return { audit, view: toView(company, saved.connection) };
       });
     } catch (error) {
       // O `@unique` de `whatsappPhoneNumberId` decide a corrida; a transação inteira foi desfeita.
@@ -372,34 +378,34 @@ export class ChannelConnectionService {
   }
 
   private async unsubscribe(
-    clientId: ClientId,
+    companyId: CompanyId,
     old: { readonly wabaId: string; readonly ciphertext: string },
   ): Promise<void> {
     try {
-      const token = this.deps.cipher.decrypt(clientId, old.ciphertext);
+      const token = this.deps.cipher.decrypt(companyId, old.ciphertext);
       const result = await this.deps.provisioner.unsubscribeApp(old.wabaId, token);
       if (result.ok) return;
       this.deps.logger.warn(
-        { clientId, operation: result.error.operation, httpStatus: result.error.httpStatus },
+        { companyId, operation: result.error.operation, httpStatus: result.error.httpStatus },
         'não foi possível desassinar o app da WABA depois de desconectar',
       );
     } catch {
       this.deps.logger.warn(
-        { clientId },
+        { companyId },
         'não foi possível desassinar o app da WABA depois de desconectar',
       );
     }
     this.count('disconnect', 'unsubscribe_failed');
   }
 
-  private afterCommit(actor: UserIdentity, events: readonly PendingAudit[]): void {
+  private afterCommit(actor: MembershipIdentity, events: readonly PendingAudit[]): void {
     for (const event of events) {
       this.deps.logger.info(
         {
           event: 'audit',
           action: event.action,
-          clientId: actor.clientId,
-          actorUserId: actor.userId,
+          companyId: actor.companyId,
+          actorMembershipId: actor.membershipId,
         },
         'audit',
       );

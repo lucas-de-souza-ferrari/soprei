@@ -2,9 +2,9 @@ import { ExternalServiceError } from '../../shared/errors/index.js';
 import type { Result, SecretString } from '../../shared/types/index.js';
 
 export interface SendTextInput {
-  /** Número do **cliente** pelo qual a mensagem sai (o `phone_number_id` do canal). */
+  /** Número do **empresa** pelo qual a mensagem sai (o `phone_number_id` do canal). */
   readonly phoneNumberId: string;
-  /** Token **do cliente** dono do número, lido do banco pelo `clientId` do job (spec 015). */
+  /** Token **da empresa** dono do número, lido do banco pelo `companyId` do job (spec 015). */
   readonly accessToken: SecretString;
   /** Destinatário: o contato, como o canal o identificou (`contactRef`). Nunca vai a log. */
   readonly to: string;

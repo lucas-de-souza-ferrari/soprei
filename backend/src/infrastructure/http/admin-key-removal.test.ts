@@ -3,9 +3,9 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ClientService } from '../../application/clients/client.service.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import { Result } from '../../shared/types/index.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { createLogger } from '../logger/logger.js';
 import { buildServer } from './server.js';
 
@@ -41,7 +41,7 @@ describe('ADMIN_API_KEY foi removida (spec 007)', () => {
             database: () => Promise.resolve(Result.ok(undefined)),
             redis: () => Promise.resolve(Result.ok(undefined)),
           },
-          admin: { clients: new ClientService(new InMemoryClientRepository()) },
+          admin: { companies: new CompanyService(new InMemoryCompanyRepository()) },
         }),
       /exigem o serviço de autenticação/,
     );

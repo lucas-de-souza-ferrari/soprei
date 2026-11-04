@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { CredentialCipher } from '../../application/ports/credential-cipher.js';
-import type { ClientId } from '../../domain/index.js';
+import type { CompanyId } from '../../domain/index.js';
 import {
   CredentialDecryptionError,
   type CredentialDecryptionReason,
@@ -52,13 +52,13 @@ export function parseCredentialKeys(raw: string): ParsedKeys {
   return { ok: true, keys };
 }
 
-function aad(clientId: ClientId, keyId: string): Buffer {
-  return Buffer.from(`${clientId}|${keyId}`, 'utf8');
+function aad(companyId: CompanyId, keyId: string): Buffer {
+  return Buffer.from(`${companyId}|${keyId}`, 'utf8');
 }
 
 /**
  * AES-256-GCM (spec 015): IV aleatório de 12 bytes por cifra, tag de 16 bytes, formato
- * `v1.<keyId>.<iv>.<tag>.<ciphertext>` (base64url). A AAD é `clientId|keyId`. Chaves com `keyId`:
+ * `v1.<keyId>.<iv>.<tag>.<ciphertext>` (base64url). A AAD é `companyId|keyId`. Chaves com `keyId`:
  * a ativa cifra, todas decifram (rotação).
  */
 export class AesGcmCredentialCipher implements CredentialCipher {
@@ -72,10 +72,10 @@ export class AesGcmCredentialCipher implements CredentialCipher {
     this.active = active;
   }
 
-  encrypt(clientId: ClientId, plain: SecretString): string {
+  encrypt(companyId: CompanyId, plain: SecretString): string {
     const iv = randomBytes(IV_BYTES);
     const cipher = createCipheriv(ALGORITHM, this.active.key, iv, { authTagLength: TAG_BYTES });
-    cipher.setAAD(aad(clientId, this.active.keyId));
+    cipher.setAAD(aad(companyId, this.active.keyId));
     const body = Buffer.concat([cipher.update(plain.reveal(), 'utf8'), cipher.final()]);
     return [
       VERSION,
@@ -86,7 +86,7 @@ export class AesGcmCredentialCipher implements CredentialCipher {
     ].join('.');
   }
 
-  decrypt(clientId: ClientId, stored: string): SecretString {
+  decrypt(companyId: CompanyId, stored: string): SecretString {
     const parts = stored.split('.');
     const [version, keyId, ivText, tagText, bodyText] = parts;
     if (
@@ -106,7 +106,7 @@ export class AesGcmCredentialCipher implements CredentialCipher {
     if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) throw fail('malformed');
     try {
       const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_BYTES });
-      decipher.setAAD(aad(clientId, keyId));
+      decipher.setAAD(aad(companyId, keyId));
       decipher.setAuthTag(tag);
       const plain = Buffer.concat([
         decipher.update(Buffer.from(bodyText, 'base64url')),

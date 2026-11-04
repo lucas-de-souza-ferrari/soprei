@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { AuthService, deriveLoginLockSecret } from '../application/auth/auth.service.js';
-import { UserAdminService } from '../application/users/user-admin.service.js';
+import { MembershipAdminService } from '../application/memberships/membership-admin.service.js';
 import type {
-  UserAdminTransaction,
-  UserAdminUnitOfWork,
-} from '../application/ports/user-admin-unit-of-work.js';
+  MembershipAdminTransaction,
+  MembershipAdminUnitOfWork,
+} from '../application/ports/membership-admin-unit-of-work.js';
 import type {
   HashLane,
   HashOptions,
@@ -20,29 +20,29 @@ import type {
 import {
   type AuditEvent,
   type AuditRepository,
-  type ClientId,
-  type ClientRepository,
+  type CompanyId,
+  type CompanyRepository,
   DEFAULT_LIST_LIMIT,
   type ListOptions,
   type NewAuditEvent,
   type NewPlatformAdmin,
-  type NewUser,
+  type NewMembership,
   type Page,
   type PlatformAdmin,
   type PlatformAdminCredentials,
   PlatformAdminId,
   type PlatformAdminRepository,
-  type User,
-  type UserCredentials,
-  UserId,
-  type UserRepository,
-  type UserRole,
-  type UserUpdate,
+  type Membership,
+  type MembershipCredentials,
+  MembershipId,
+  type MembershipRepository,
+  type MembershipRole,
+  type MembershipUpdate,
 } from '../domain/index.js';
 import { JoseAccessTokenService } from '../infrastructure/auth/jose-access-token.service.js';
 import type { Metrics } from '../infrastructure/metrics/index.js';
 import { ConflictError, NotFoundError } from '../shared/errors/index.js';
-import { InMemoryClientRepository } from './in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from './in-memory-company.repository.js';
 
 export const TEST_JWT_SECRET = 'segredo-de-teste-com-mais-de-32-caracteres-0123456789';
 export const TEST_PASSWORD = 'senha-de-teste-forte-123';
@@ -86,99 +86,114 @@ function attempt<T>(fn: () => T): Promise<T> {
   }
 }
 
-/** `UserRepository` em memória com o mesmo isolamento do real: tudo filtrado por `ClientId`. */
-export class InMemoryUserRepository implements UserRepository {
-  private readonly rows: { user: User; passwordHash: string }[] = [];
+/** `MembershipRepository` em memória com o mesmo isolamento do real: tudo filtrado por `CompanyId`. */
+export class InMemoryMembershipRepository implements MembershipRepository {
+  private readonly rows: { membership: Membership; passwordHash: string }[] = [];
 
-  findById(clientId: ClientId, id: string): Promise<User> {
-    return attempt(() => this.get(clientId, id).user);
+  findById(companyId: CompanyId, id: string): Promise<Membership> {
+    return attempt(() => this.get(companyId, id).membership);
   }
 
-  list(clientId: ClientId, options: ListOptions = {}): Promise<Page<User>> {
+  list(companyId: CompanyId, options: ListOptions = {}): Promise<Page<Membership>> {
     const limit = options.limit ?? DEFAULT_LIST_LIMIT;
-    const all = this.rows.filter((row) => row.user.clientId === clientId).map((row) => row.user);
+    const all = this.rows
+      .filter((row) => row.membership.companyId === companyId)
+      .map((row) => row.membership);
     return Promise.resolve(pageOf(all, limit, options.cursor));
   }
 
   /** Cópia do estado (para o "rollback" da unidade de trabalho em memória). */
-  snapshot(): { user: User; passwordHash: string }[] {
-    return this.rows.map((row) => ({ user: row.user, passwordHash: row.passwordHash }));
+  snapshot(): { membership: Membership; passwordHash: string }[] {
+    return this.rows.map((row) => ({ membership: row.membership, passwordHash: row.passwordHash }));
   }
 
-  restore(snapshot: readonly { user: User; passwordHash: string }[]): void {
+  restore(snapshot: readonly { membership: Membership; passwordHash: string }[]): void {
     this.rows.splice(0, this.rows.length, ...snapshot.map((row) => ({ ...row })));
   }
 
-  create(clientId: ClientId, data: NewUser): Promise<User> {
-    if (this.rows.some((row) => row.user.clientId === clientId && row.user.email === data.email)) {
+  create(companyId: CompanyId, data: NewMembership): Promise<Membership> {
+    if (
+      this.rows.some(
+        (row) => row.membership.companyId === companyId && row.membership.email === data.email,
+      )
+    ) {
       return Promise.reject(new ConflictError('Já existe um registro com estes dados'));
     }
     const now = new Date();
-    const user: User = {
-      id: UserId.parse(randomUUID()),
-      clientId,
+    const membership: Membership = {
+      id: MembershipId.parse(randomUUID()),
+      companyId,
       email: data.email,
       role: data.role ?? 'AGENT',
       status: data.status ?? 'ACTIVE',
       createdAt: now,
       updatedAt: now,
     };
-    this.rows.push({ user, passwordHash: data.passwordHash });
-    return Promise.resolve(user);
+    this.rows.push({ membership, passwordHash: data.passwordHash });
+    return Promise.resolve(membership);
   }
 
-  update(clientId: ClientId, id: string, data: UserUpdate): Promise<User> {
+  update(companyId: CompanyId, id: string, data: MembershipUpdate): Promise<Membership> {
     return attempt(() => {
-      const row = this.get(clientId, id);
-      row.user = { ...row.user, ...data, updatedAt: new Date() };
-      return row.user;
+      const row = this.get(companyId, id);
+      row.membership = { ...row.membership, ...data, updatedAt: new Date() };
+      return row.membership;
     });
   }
 
-  delete(clientId: ClientId, id: string): Promise<void> {
+  delete(companyId: CompanyId, id: string): Promise<void> {
     return attempt(() => {
-      const row = this.get(clientId, id);
+      const row = this.get(companyId, id);
       this.rows.splice(this.rows.indexOf(row), 1);
     });
   }
 
-  count(clientId: ClientId): Promise<number> {
-    return Promise.resolve(this.rows.filter((row) => row.user.clientId === clientId).length);
-  }
-
-  findCredentialsByEmail(clientId: ClientId, email: string): Promise<UserCredentials | null> {
-    const row = this.rows.find((r) => r.user.clientId === clientId && r.user.email === email);
+  count(companyId: CompanyId): Promise<number> {
     return Promise.resolve(
-      row === undefined ? null : { user: row.user, passwordHash: row.passwordHash },
+      this.rows.filter((row) => row.membership.companyId === companyId).length,
     );
   }
 
-  findCredentialsById(clientId: ClientId, id: string): Promise<UserCredentials> {
+  findCredentialsByEmail(
+    companyId: CompanyId,
+    email: string,
+  ): Promise<MembershipCredentials | null> {
+    const row = this.rows.find(
+      (r) => r.membership.companyId === companyId && r.membership.email === email,
+    );
+    return Promise.resolve(
+      row === undefined ? null : { membership: row.membership, passwordHash: row.passwordHash },
+    );
+  }
+
+  findCredentialsById(companyId: CompanyId, id: string): Promise<MembershipCredentials> {
     return attempt(() => {
-      const row = this.get(clientId, id);
-      return { user: row.user, passwordHash: row.passwordHash };
+      const row = this.get(companyId, id);
+      return { membership: row.membership, passwordHash: row.passwordHash };
     });
   }
 
-  countActiveOwners(clientId: ClientId): Promise<number> {
+  countActiveOwners(companyId: CompanyId): Promise<number> {
     return Promise.resolve(
       this.rows.filter(
         (row) =>
-          row.user.clientId === clientId &&
-          row.user.role === 'OWNER' &&
-          row.user.status === 'ACTIVE',
+          row.membership.companyId === companyId &&
+          row.membership.role === 'OWNER' &&
+          row.membership.status === 'ACTIVE',
       ).length,
     );
   }
 
-  updatePassword(clientId: ClientId, id: string, passwordHash: string): Promise<void> {
+  updatePassword(companyId: CompanyId, id: string, passwordHash: string): Promise<void> {
     return attempt(() => {
-      this.get(clientId, id).passwordHash = passwordHash;
+      this.get(companyId, id).passwordHash = passwordHash;
     });
   }
 
-  private get(clientId: ClientId, id: string): { user: User; passwordHash: string } {
-    const row = this.rows.find((r) => r.user.clientId === clientId && r.user.id === id);
+  private get(companyId: CompanyId, id: string): { membership: Membership; passwordHash: string } {
+    const row = this.rows.find(
+      (r) => r.membership.companyId === companyId && r.membership.id === id,
+    );
     if (row === undefined) throw new NotFoundError('Recurso não encontrado');
     return row;
   }
@@ -201,14 +216,14 @@ export class InMemoryAuditRepository implements AuditRepository {
   /** Liga uma falha na gravação da trilha (para provar que a mudança do usuário é desfeita). */
   failWith: Error | undefined;
 
-  create(clientId: ClientId, data: NewAuditEvent): Promise<AuditEvent> {
+  create(companyId: CompanyId, data: NewAuditEvent): Promise<AuditEvent> {
     if (this.failWith !== undefined) return Promise.reject(this.failWith);
     const event: AuditEvent = {
       id: randomUUID(),
-      clientId,
+      companyId,
       action: data.action,
-      actorUserId: data.actorUserId,
-      targetUserId: data.targetUserId ?? null,
+      actorMembershipId: data.actorMembershipId,
+      targetMembershipId: data.targetMembershipId ?? null,
       fromRole: data.fromRole ?? null,
       toRole: data.toRole ?? null,
       createdAt: new Date(),
@@ -217,8 +232,8 @@ export class InMemoryAuditRepository implements AuditRepository {
     return Promise.resolve(event);
   }
 
-  list(clientId: ClientId, options: ListOptions = {}): Promise<Page<AuditEvent>> {
-    const all = this.events.filter((event) => event.clientId === clientId).reverse();
+  list(companyId: CompanyId, options: ListOptions = {}): Promise<Page<AuditEvent>> {
+    const all = this.events.filter((event) => event.companyId === companyId).reverse();
     return Promise.resolve(pageOf(all, options.limit ?? DEFAULT_LIST_LIMIT, options.cursor));
   }
 
@@ -232,34 +247,34 @@ export class InMemoryAuditRepository implements AuditRepository {
 }
 
 /**
- * Unidade de trabalho em memória: serializa as execuções (o papel do bloqueio do cliente) e desfaz
+ * Unidade de trabalho em memória: serializa as execuções (o papel do bloqueio da empresa) e desfaz
  * usuários e auditoria se `fn` lançar (o papel do rollback).
  */
-export class InMemoryUserAdminUnitOfWork implements UserAdminUnitOfWork {
+export class InMemoryMembershipAdminUnitOfWork implements MembershipAdminUnitOfWork {
   private tail: Promise<unknown> = Promise.resolve();
-  /** Quantas vezes `lockClient` foi chamado (os testes provam que toda escrita trava o cliente). */
+  /** Quantas vezes `lockCompany` foi chamado (os testes provam que toda escrita trava a empresa). */
   lockCalls = 0;
 
   constructor(
-    private readonly users: InMemoryUserRepository,
+    private readonly memberships: InMemoryMembershipRepository,
     private readonly audit: InMemoryAuditRepository,
   ) {}
 
-  run<T>(fn: (tx: UserAdminTransaction) => Promise<T>): Promise<T> {
+  run<T>(fn: (tx: MembershipAdminTransaction) => Promise<T>): Promise<T> {
     const result = this.tail.then(async () => {
-      const users = this.users.snapshot();
+      const memberships = this.memberships.snapshot();
       const events = this.audit.snapshot();
       try {
         return await fn({
-          users: this.users,
+          memberships: this.memberships,
           audit: this.audit,
-          lockClient: () => {
+          lockCompany: () => {
             this.lockCalls += 1;
             return Promise.resolve();
           },
         });
       } catch (error) {
-        this.users.restore(users);
+        this.memberships.restore(memberships);
         this.audit.restore(events);
         throw error;
       }
@@ -472,7 +487,7 @@ export class InMemorySessionStore implements SessionStore {
 
 export interface TestAuthOptions {
   readonly logger: FastifyBaseLogger;
-  readonly clients?: ClientRepository;
+  readonly companies?: CompanyRepository;
   readonly metrics?: Metrics | undefined;
   readonly now?: () => Date;
   readonly ttlSeconds?: number;
@@ -485,17 +500,17 @@ export interface IssuedLogin {
   readonly accessToken: string;
   readonly refreshToken: string;
   readonly email: string;
-  readonly userId: string;
+  readonly membershipId: string;
 }
 
 /**
  * Autenticação completa em memória para testes de rota: o `AuthService` real, `jose` de verdade,
- * hasher falso e `SessionStore` em memória. `userToken`/`platformToken` fazem o login de verdade
+ * hasher falso e `SessionStore` em memória. `membershipToken`/`platformToken` fazem o login de verdade
  * (conta nova com e-mail único) e devolvem os tokens para o cabeçalho `Authorization`.
  */
 export function buildTestAuth(options: TestAuthOptions) {
-  const clients = options.clients ?? new InMemoryClientRepository();
-  const users = new InMemoryUserRepository();
+  const companies = options.companies ?? new InMemoryCompanyRepository();
+  const memberships = new InMemoryMembershipRepository();
   const platformAdmins = new InMemoryPlatformAdminRepository();
   const hasher = new FakePasswordHasher();
   const sessions =
@@ -513,9 +528,9 @@ export function buildTestAuth(options: TestAuthOptions) {
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const audit = new InMemoryAuditRepository();
-  const unitOfWork = new InMemoryUserAdminUnitOfWork(users, audit);
-  const userAdmin = new UserAdminService({
-    users,
+  const unitOfWork = new InMemoryMembershipAdminUnitOfWork(memberships, audit);
+  const membershipAdmin = new MembershipAdminService({
+    memberships,
     audit,
     unitOfWork,
     hasher,
@@ -525,8 +540,8 @@ export function buildTestAuth(options: TestAuthOptions) {
     loginLockSecret: deriveLoginLockSecret(TEST_JWT_SECRET),
   });
   const service = new AuthService({
-    clients,
-    users,
+    companies,
+    memberships,
     platformAdmins,
     hasher,
     tokens,
@@ -536,24 +551,28 @@ export function buildTestAuth(options: TestAuthOptions) {
     loginLockSecret: deriveLoginLockSecret(TEST_JWT_SECRET),
   });
 
-  async function userToken(
-    clientId: ClientId,
-    opts: { role?: UserRole; email?: string } = {},
+  async function membershipToken(
+    companyId: CompanyId,
+    opts: { role?: MembershipRole; email?: string } = {},
   ): Promise<IssuedLogin> {
-    const client = await clients.findById(clientId);
+    const company = await companies.findById(companyId);
     const email = opts.email ?? `u-${randomUUID()}@exemplo.test`;
-    const user = await users.create(clientId, {
+    const membership = await memberships.create(companyId, {
       email,
       passwordHash: await hasher.hash(TEST_PASSWORD),
       role: opts.role ?? 'OWNER',
     });
-    const result = await service.login({ clientSlug: client.slug, email, password: TEST_PASSWORD });
+    const result = await service.login({
+      companySlug: company.slug,
+      email,
+      password: TEST_PASSWORD,
+    });
     if (!result.ok) throw new Error(`login de teste falhou: ${result.error.reason}`);
     return {
       accessToken: result.value.accessToken,
       refreshToken: result.value.refreshToken,
       email,
-      userId: user.id,
+      membershipId: membership.id,
     };
   }
 
@@ -568,22 +587,22 @@ export function buildTestAuth(options: TestAuthOptions) {
       accessToken: result.value.accessToken,
       refreshToken: result.value.refreshToken,
       email,
-      userId: admin.id,
+      membershipId: admin.id,
     };
   }
 
   return {
     service,
-    clients,
-    users,
+    companies,
+    memberships,
     audit,
     unitOfWork,
-    userAdmin,
+    membershipAdmin,
     platformAdmins,
     hasher,
     sessions,
     tokens,
-    userToken,
+    membershipToken,
     platformToken,
   };
 }

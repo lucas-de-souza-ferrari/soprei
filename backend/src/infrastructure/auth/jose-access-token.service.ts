@@ -7,7 +7,7 @@ import type {
   IssuedAccessToken,
   VerifiedAccessToken,
 } from '../../application/ports/access-token-service.js';
-import { ClientId, PlatformAdminId, USER_ROLES, UserId } from '../../domain/index.js';
+import { CompanyId, PlatformAdminId, MEMBERSHIP_ROLES, MembershipId } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
 import { isUuid } from '../../shared/utils/index.js';
 
@@ -29,10 +29,10 @@ const uuid = z.string().refine(isUuid, 'uuid');
 
 const claimsSchema = z.discriminatedUnion('kind', [
   z.object({
-    kind: z.literal('user'),
+    kind: z.literal('membership'),
     sub: uuid,
     cid: uuid,
-    role: z.enum(USER_ROLES),
+    role: z.enum(MEMBERSHIP_ROLES),
     sid: uuid,
     iat: z.number().int().nonnegative(),
   }),
@@ -65,10 +65,15 @@ export class JoseAccessTokenService implements AccessTokenService {
     const now = (this.options.now ?? (() => new Date()))();
     const issuedAt = Math.floor(now.getTime() / 1000);
     const claims =
-      identity.kind === 'user'
-        ? { kind: 'user', cid: identity.clientId, role: identity.role, sid: identity.sessionId }
+      identity.kind === 'membership'
+        ? {
+            kind: 'membership',
+            cid: identity.companyId,
+            role: identity.role,
+            sid: identity.sessionId,
+          }
         : { kind: 'platform', sid: identity.sessionId };
-    const subject = identity.kind === 'user' ? identity.userId : identity.adminId;
+    const subject = identity.kind === 'membership' ? identity.membershipId : identity.adminId;
     const token = await new SignJWT(claims)
       .setProtectedHeader({ alg: ALGORITHM, typ: ACCESS_TOKEN_TYP })
       .setIssuer(this.options.issuer)
@@ -100,11 +105,11 @@ export class JoseAccessTokenService implements AccessTokenService {
     if (!parsed.success) return Result.err('invalid');
     const claims = parsed.data;
     const identity: AuthIdentity =
-      claims.kind === 'user'
+      claims.kind === 'membership'
         ? {
-            kind: 'user',
-            userId: UserId.parse(claims.sub),
-            clientId: ClientId.parse(claims.cid),
+            kind: 'membership',
+            membershipId: MembershipId.parse(claims.sub),
+            companyId: CompanyId.parse(claims.cid),
             role: claims.role,
             sessionId: claims.sid.toLowerCase(),
           }

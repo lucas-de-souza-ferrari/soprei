@@ -26,11 +26,11 @@ export { PrismaAttendanceUnitOfWork } from './repositories/attendance-unit-of-wo
 export { PrismaChannelConnectionRepository } from './repositories/channel-connection.repository.js';
 export { PrismaChannelUnitOfWork } from './repositories/channel-unit-of-work.js';
 export { PrismaAuditRepository } from './repositories/audit.repository.js';
-export { PrismaUserAdminUnitOfWork } from './repositories/user-admin-unit-of-work.js';
-export { PrismaClientRepository } from './repositories/client.repository.js';
+export { PrismaMembershipAdminUnitOfWork } from './repositories/membership-admin-unit-of-work.js';
+export { PrismaCompanyRepository } from './repositories/company.repository.js';
 export { PrismaConversationRepository } from './repositories/conversation.repository.js';
 export { PrismaPlatformAdminRepository } from './repositories/platform-admin.repository.js';
-export { PrismaUserRepository } from './repositories/user.repository.js';
+export { PrismaMembershipRepository } from './repositories/membership.repository.js';
 export { PrismaMessageRepository } from './repositories/message.repository.js';
 export { withRepositoryErrors } from './repositories/repository-errors.js';
 export { PrismaTenantRepository } from './repositories/tenant.repository.base.js';

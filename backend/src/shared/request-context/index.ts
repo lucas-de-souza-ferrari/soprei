@@ -2,8 +2,8 @@ export {
   createRequestContext,
   getContext,
   runWithContext,
-  setClientId,
+  setCompanyId,
   setOperation,
-  setUserId,
+  setActorId,
 } from './request-context.js';
 export type { RequestContext } from './request-context.js';

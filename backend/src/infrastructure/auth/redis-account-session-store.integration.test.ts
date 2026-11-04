@@ -59,11 +59,11 @@ describe('sessões da conta: revogação em massa por geração (spec 021)', () 
     const fresh = await store.create(a);
     const session = await store.read(fresh);
     assert.equal(session?.accountId, a);
-    assert.equal(session.clientId, null);
+    assert.equal(session.companyId, null);
     // A seleção de empresa continua funcionando e não perde a geração.
-    const clientId = randomUUID();
-    await store.select(fresh, clientId);
-    assert.equal((await store.read(fresh))?.clientId, clientId);
+    const companyId = randomUUID();
+    await store.select(fresh, companyId);
+    assert.equal((await store.read(fresh))?.companyId, companyId);
     // Uma segunda revogação derruba também a sessão criada depois da primeira.
     await store.revokeAll(a);
     assert.equal(await store.read(fresh), null);
@@ -81,7 +81,7 @@ describe('sessões da conta: revogação em massa por geração (spec 021)', () 
       JSON.stringify({
         accountId,
         id: randomUUID(),
-        clientId: null,
+        companyId: null,
         createdAt: now,
         expiresAt: now + 30 * 86400,
       }),

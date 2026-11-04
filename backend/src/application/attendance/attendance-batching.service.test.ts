@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ZodError } from 'zod';
-import type { Client, Message } from '../../domain/index.js';
+import type { Company, Message } from '../../domain/index.js';
 import {
   MOCK_FAIL_MARKER,
   MockLlmProvider,
@@ -9,7 +9,7 @@ import {
 import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors/index.js';
 import { steppingClock } from '../../test-support/clock.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import {
   ATTENDANCE_FALLBACK_TEXT,
@@ -44,13 +44,13 @@ class FakeMetrics implements AttendanceMetrics {
 function setup() {
   // Relógio que anda 10 ms a cada leitura: mensagens nunca caem no mesmo instante.
   const now = steppingClock(10);
-  const clients = new InMemoryClientRepository();
+  const companies = new InMemoryCompanyRepository();
   const store = new InMemoryAttendanceStore(now);
   const llm = new MockLlmProvider({ recordCalls: true });
   const metrics = new FakeMetrics();
   const logs = captureLogs();
   const service = new AttendanceService({
-    clients,
+    companies,
     conversations: store.conversations,
     messages: store.messages,
     unitOfWork: store,
@@ -59,25 +59,25 @@ function setup() {
     metrics,
     options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000, now },
   });
-  return { clients, store, llm, metrics, logs, service };
+  return { companies, store, llm, metrics, logs, service };
 }
 
 type Harness = ReturnType<typeof setup>;
 
-async function newClient(
+async function newCompany(
   h: Harness,
   slug: string,
   persona = `${PERSONA} ${slug}`,
-): Promise<Client> {
-  const client = await h.clients.create({ name: `Empresa ${slug}`, slug });
-  return h.clients.update(client.id, { persona });
+): Promise<Company> {
+  const company = await h.companies.create({ name: `Empresa ${slug}`, slug });
+  return h.companies.update(company.id, { persona });
 }
 
 let sequence = 0;
 /** Aceita uma mensagem do contato (sem LLM). */
-function accept(h: Harness, client: Client, text: string, contactRef = 'contato-1') {
+function accept(h: Harness, company: Company, text: string, contactRef = 'contato-1') {
   sequence += 1;
-  return h.service.acceptInboundMessage(client.id, {
+  return h.service.acceptInboundMessage(company.id, {
     contactRef,
     text,
     externalId: `wamid.${String(sequence)}`,
@@ -90,10 +90,10 @@ const sorted = (messages: readonly Message[]): Message[] =>
 describe('AttendanceService.acceptInboundMessage (spec 013)', () => {
   it('grava a conversa e a mensagem do contato sem chamar o LLM, e diz desde quando há pendentes', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
 
-    const first = await accept(h, client, 'primeira');
-    const second = await accept(h, client, 'segunda');
+    const first = await accept(h, company, 'primeira');
+    const second = await accept(h, company, 'segunda');
 
     assert.equal(first.status, 'accepted');
     assert.equal(second.status, 'accepted');
@@ -115,11 +115,11 @@ describe('AttendanceService.acceptInboundMessage (spec 013)', () => {
 
   it('é idempotente por externalId: reentrega de mensagem pendente não grava de novo (pending)', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     const input = { contactRef: 'c1', text: 'oi', externalId: 'wamid.fixo' };
 
-    const first = await h.service.acceptInboundMessage(client.id, input);
-    const again = await h.service.acceptInboundMessage(client.id, input);
+    const first = await h.service.acceptInboundMessage(company.id, input);
+    const again = await h.service.acceptInboundMessage(company.id, input);
 
     assert.equal(first.status, 'accepted');
     assert.equal(again.status, 'pending');
@@ -129,14 +129,14 @@ describe('AttendanceService.acceptInboundMessage (spec 013)', () => {
 
   it('reentrega de mensagem já respondida devolve answered e não grava nem responde', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     const input = { contactRef: 'c1', text: 'oi', externalId: 'wamid.fixo' };
-    await h.service.acceptInboundMessage(client.id, input);
-    await h.service.respondToPending(client.id, 'c1', LIMITS);
+    await h.service.acceptInboundMessage(company.id, input);
+    await h.service.respondToPending(company.id, 'c1', LIMITS);
     const llmCalls = h.llm.calls.length;
     const stored = h.store.allMessages().length;
 
-    const again = await h.service.acceptInboundMessage(client.id, input);
+    const again = await h.service.acceptInboundMessage(company.id, input);
 
     assert.equal(again.status, 'answered');
     assert.equal(again.oldestPendingAt, null);
@@ -146,14 +146,14 @@ describe('AttendanceService.acceptInboundMessage (spec 013)', () => {
 
   it('externalId de outro contato é conflito, não duplicata', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await h.service.acceptInboundMessage(client.id, {
+    const company = await newCompany(h, 'alfa');
+    await h.service.acceptInboundMessage(company.id, {
       contactRef: 'c1',
       text: 'oi',
       externalId: 'wamid.fixo',
     });
     await assert.rejects(
-      h.service.acceptInboundMessage(client.id, {
+      h.service.acceptInboundMessage(company.id, {
         contactRef: 'c2',
         text: 'oi',
         externalId: 'wamid.fixo',
@@ -162,12 +162,12 @@ describe('AttendanceService.acceptInboundMessage (spec 013)', () => {
     );
   });
 
-  it('cliente suspenso (403) e removido (404): nada é gravado', async () => {
+  it('empresa suspensa (403) e removido (404): nada é gravado', async () => {
     const h = setup();
-    const suspended = await newClient(h, 'alfa');
-    await h.clients.update(suspended.id, { status: 'SUSPENDED' });
-    const removed = await newClient(h, 'beta');
-    await h.clients.delete(removed.id);
+    const suspended = await newCompany(h, 'alfa');
+    await h.companies.update(suspended.id, { status: 'SUSPENDED' });
+    const removed = await newCompany(h, 'beta');
+    await h.companies.delete(removed.id);
 
     await assert.rejects(accept(h, suspended, 'oi'), ForbiddenError);
     await assert.rejects(accept(h, removed, 'oi'), NotFoundError);
@@ -177,25 +177,25 @@ describe('AttendanceService.acceptInboundMessage (spec 013)', () => {
 
   it('valida a entrada com Zod (texto vazio, NUL)', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await assert.rejects(accept(h, client, '   '), ZodError);
-    await assert.rejects(accept(h, client, 'a\u0000b'), ZodError);
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(accept(h, company, '   '), ZodError);
+    await assert.rejects(accept(h, company, 'a\u0000b'), ZodError);
   });
 });
 
 describe('AttendanceService.respondToPending (spec 013)', () => {
   it('três mensagens pendentes: uma chamada ao LLM, um turno user com os textos em ordem separados por quebra de linha, e o histórico anterior à primeira', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     // Um turno antigo já respondido: é o histórico.
-    await accept(h, client, 'pergunta antiga');
-    await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    await accept(h, company, 'pergunta antiga');
+    await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     h.llm.calls.length = 0;
 
-    await accept(h, client, 'oi');
-    await accept(h, client, 'tudo bem?');
-    await accept(h, client, 'preciso de ajuda');
-    const result = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    await accept(h, company, 'oi');
+    await accept(h, company, 'tudo bem?');
+    await accept(h, company, 'preciso de ajuda');
+    const result = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
 
     assert.equal(h.llm.calls.length, 1);
     const [call] = h.llm.calls;
@@ -215,12 +215,12 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('grava UMA resposta com replyToId = a última do lote e marca todas como respondidas', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    const a = await accept(h, client, 'um');
-    await accept(h, client, 'dois');
-    const c = await accept(h, client, 'tres');
+    const company = await newCompany(h, 'alfa');
+    const a = await accept(h, company, 'um');
+    await accept(h, company, 'dois');
+    const c = await accept(h, company, 'tres');
 
-    const result = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const result = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
 
     const stored = h.store.allMessages();
     const replies = stored.filter((message) => message.role === 'ASSISTANT');
@@ -228,7 +228,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     const [reply] = replies;
     assert.ok(reply !== undefined);
     assert.equal(reply.id, result.reply?.id);
-    assert.equal(reply.replyToId, c.messageId, 'a unicidade (cliente, replyToId) segue valendo');
+    assert.equal(reply.replyToId, c.messageId, 'a unicidade (empresa, replyToId) segue valendo');
     assert.equal(reply.isFallback, false);
     const users = stored.filter((message) => message.role === 'USER');
     assert.equal(users.length, 3);
@@ -242,18 +242,18 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('uma segunda chamada não encontra pendentes e não chama o LLM de novo (empty)', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'oi');
-    await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'oi');
+    await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     // Marca a resposta como enviada para que não seja um `resend`.
     const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
     assert.ok(reply !== undefined);
-    await h.store.messages.markSent(client.id, reply.id, {
+    await h.store.messages.markSent(company.id, reply.id, {
       channelMessageId: 'wamid.out',
       sentAt: new Date(),
     });
 
-    const again = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const again = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
 
     assert.equal(again.outcome, 'empty');
     assert.equal(again.reply, null);
@@ -265,21 +265,21 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('contato sem conversa: empty, sem criar nada', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    const result = await h.service.respondToPending(client.id, 'ninguem', LIMITS);
+    const company = await newCompany(h, 'alfa');
+    const result = await h.service.respondToPending(company.id, 'ninguem', LIMITS);
     assert.equal(result.outcome, 'empty');
     assert.equal(h.store.allConversations().length, 0);
   });
 
   it('mais pendentes que o limite de mensagens: turnos sucessivos, sem perder nenhuma e na ordem', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    for (let i = 1; i <= 5; i += 1) await accept(h, client, `m${String(i)}`);
+    const company = await newCompany(h, 'alfa');
+    for (let i = 1; i <= 5; i += 1) await accept(h, company, `m${String(i)}`);
     const limits = { maxMessages: 2, maxChars: 8_000 };
 
     const turns = [];
     for (let i = 0; i < 3; i += 1) {
-      turns.push(await h.service.respondToPending(client.id, 'contato-1', limits));
+      turns.push(await h.service.respondToPending(company.id, 'contato-1', limits));
     }
 
     assert.deepEqual(
@@ -316,18 +316,18 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('o limite de caracteres corta o lote; uma única mensagem maior que o limite segue sozinha', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'a'.repeat(10));
-    await accept(h, client, 'b'.repeat(10));
-    await accept(h, client, 'c'.repeat(10));
-    await accept(h, client, 'd'.repeat(50));
-    await accept(h, client, 'e'.repeat(5));
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'a'.repeat(10));
+    await accept(h, company, 'b'.repeat(10));
+    await accept(h, company, 'c'.repeat(10));
+    await accept(h, company, 'd'.repeat(50));
+    await accept(h, company, 'e'.repeat(5));
     // 10 + 1 + 10 = 21 cabe em 25; a terceira (21 + 11 = 32) vira o turno seguinte.
     const limits = { maxMessages: 10, maxChars: 25 };
 
     const sizes = [];
     for (let i = 0; i < 4; i += 1) {
-      const turn = await h.service.respondToPending(client.id, 'contato-1', limits);
+      const turn = await h.service.respondToPending(company.id, 'contato-1', limits);
       sizes.push(turn.batchSize);
       if (!turn.hasMorePending) break;
     }
@@ -341,20 +341,20 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('mensagem que chega durante a chamada ao LLM não entra no lote em andamento e recebe a sua própria resposta, com a primeira no histórico', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'primeira');
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'primeira');
     const release = h.llm.hold();
 
-    const running = h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const running = h.service.respondToPending(company.id, 'contato-1', LIMITS);
     // Espera a chamada ao LLM começar e então chega uma mensagem nova.
     while (h.llm.calls.length === 0) await new Promise((resolve) => setImmediate(resolve));
-    await accept(h, client, 'chegou durante');
+    await accept(h, company, 'chegou durante');
     release();
     const first = await running;
 
     assert.equal(first.batchSize, 1);
     assert.deepEqual(h.llm.calls[0]?.userMessage, 'primeira');
-    const second = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const second = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.equal(second.batchSize, 1);
     assert.equal(h.llm.calls[1]?.userMessage, 'chegou durante');
     assert.deepEqual(
@@ -371,8 +371,8 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('a chamada ao LLM fica fora de qualquer transação', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'oi');
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'oi');
     let openDuringCall = -1;
     const generate = h.llm.generate.bind(h.llm);
     h.llm.generate = (input) => {
@@ -380,18 +380,18 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
       return generate(input);
     };
 
-    await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    await h.service.respondToPending(company.id, 'contato-1', LIMITS);
 
     assert.equal(openDuringCall, 0);
   });
 
   it('falha do LLM no lote grava um fallback que marca todas as mensagens do lote', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'um');
-    await accept(h, client, `${MOCK_FAIL_MARKER} dois`);
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'um');
+    await accept(h, company, `${MOCK_FAIL_MARKER} dois`);
 
-    const result = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const result = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
 
     assert.equal(result.reply?.isFallback, true);
     assert.equal(result.reply.text, ATTENDANCE_FALLBACK_TEXT);
@@ -408,13 +408,13 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('se marcar as mensagens falha, a resposta também é desfeita (mesma transação) e o lote segue pendente', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'um');
-    await accept(h, client, 'dois');
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'um');
+    await accept(h, company, 'dois');
     const real = h.store.messages.markAnswered.bind(h.store.messages);
     h.store.messages.markAnswered = () => Promise.reject(new Error('queda simulada'));
 
-    await assert.rejects(h.service.respondToPending(client.id, 'contato-1', LIMITS), /queda/);
+    await assert.rejects(h.service.respondToPending(company.id, 'contato-1', LIMITS), /queda/);
 
     assert.equal(
       h.store.allMessages().filter((message) => message.role === 'ASSISTANT').length,
@@ -422,20 +422,20 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
       'a resposta não sobrou sozinha',
     );
     h.store.messages.markAnswered = real;
-    const retry = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const retry = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.equal(retry.batchSize, 2);
     assert.equal(h.store.allMessages().filter((message) => message.role === 'ASSISTANT').length, 1);
   });
 
   it('duas execuções simultâneas para o mesmo contato nunca duplicam a resposta', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'um');
-    await accept(h, client, 'dois');
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'um');
+    await accept(h, company, 'dois');
 
     const [left, right] = await Promise.all([
-      h.service.respondToPending(client.id, 'contato-1', LIMITS),
-      h.service.respondToPending(client.id, 'contato-1', LIMITS),
+      h.service.respondToPending(company.id, 'contato-1', LIMITS),
+      h.service.respondToPending(company.id, 'contato-1', LIMITS),
     ]);
 
     assert.equal(h.store.allMessages().filter((message) => message.role === 'ASSISTANT').length, 1);
@@ -446,9 +446,9 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('lotes diferentes do mesmo contato em paralelo: se outra execução já respondeu parte do lote, esta resposta é desfeita (ConflictError) e a retentativa resolve', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    const m1 = await accept(h, client, 'um');
-    await accept(h, client, 'dois');
+    const company = await newCompany(h, 'alfa');
+    const m1 = await accept(h, company, 'um');
+    await accept(h, company, 'dois');
     // Simula a outra execução: ela já respondeu `m1` (resposta própria, já confirmada) entre a
     // leitura das pendentes e a transação desta execução (durante a chamada ao LLM).
     const generate = h.llm.generate.bind(h.llm);
@@ -456,25 +456,28 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     h.llm.generate = async (input) => {
       if (!interfered) {
         interfered = true;
-        const other = await h.store.messages.create(client.id, {
+        const other = await h.store.messages.create(company.id, {
           conversationId: m1.conversationId,
           role: 'ASSISTANT',
           content: 'resposta da outra execução',
           replyToId: m1.messageId,
           createdAt: new Date(m1.messageCreatedAt.getTime() + 1),
         });
-        await h.store.messages.markAnswered(client.id, [m1.messageId], other.id);
+        await h.store.messages.markAnswered(company.id, [m1.messageId], other.id);
       }
       return generate(input);
     };
 
-    await assert.rejects(h.service.respondToPending(client.id, 'contato-1', LIMITS), ConflictError);
+    await assert.rejects(
+      h.service.respondToPending(company.id, 'contato-1', LIMITS),
+      ConflictError,
+    );
 
     const replies = h.store.allMessages().filter((message) => message.role === 'ASSISTANT');
     assert.equal(replies.length, 1, 'só a da outra execução: esta foi desfeita');
     assert.equal(replies[0]?.content, 'resposta da outra execução');
     // A retentativa responde o que sobrou, sem duplicar o que já tinha dono.
-    const retry = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const retry = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.equal(retry.batchSize, 1);
     assert.equal(h.llm.calls.at(-1)?.userMessage, 'dois');
     assert.equal(h.store.allMessages().filter((m) => m.role === 'ASSISTANT').length, 2);
@@ -488,35 +491,35 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('resposta gravada e ainda não enviada: resend, sem nova chamada ao LLM; depois do sentAt, empty', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'oi');
-    const answered = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'oi');
+    const answered = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.equal(answered.reply?.sentAt, null);
     const llmCalls = h.llm.calls.length;
 
-    const resend = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const resend = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.equal(resend.outcome, 'resend');
     assert.equal(resend.reply?.id, answered.reply.id);
     assert.equal(resend.batchSize, 0);
     assert.equal(h.llm.calls.length, llmCalls);
 
-    await h.store.messages.markSent(client.id, answered.reply.id, {
+    await h.store.messages.markSent(company.id, answered.reply.id, {
       channelMessageId: 'wamid.out',
       sentAt: new Date(),
     });
-    const done = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const done = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.equal(done.outcome, 'empty');
   });
 
   it('retentativa (resumeUnsent) com pendentes depois de uma resposta não enviada: reenvia a resposta primeiro e avisa que há mais', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'um');
-    const first = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
-    await accept(h, client, 'dois');
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'um');
+    const first = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    await accept(h, company, 'dois');
     const llmCalls = h.llm.calls.length;
 
-    const resumed = await h.service.respondToPending(client.id, 'contato-1', LIMITS, {
+    const resumed = await h.service.respondToPending(company.id, 'contato-1', LIMITS, {
       resumeUnsent: true,
     });
 
@@ -527,14 +530,14 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
     // Sem a opção (primeira tentativa), a resposta anterior não é reenviada: responde as pendentes,
     // avisa em log (só ids) e conta o evento.
-    const normal = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    const normal = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.equal(normal.outcome, 'answered');
     assert.equal(normal.batchSize, 1);
     const warn = h.logs
       .lines()
       .find((line) => String(line.msg).includes('não foi enviada e não será reenviada'));
     assert.equal(warn?.level, 40);
-    assert.equal(warn.clientId, client.id);
+    assert.equal(warn.companyId, company.id);
     assert.equal(warn.replyId, first.reply?.id);
     assert.ok(!h.logs.raw().includes('um'.repeat(10)), 'sem texto no aviso');
     assert.deepEqual(
@@ -546,31 +549,31 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('não avisa quando a resposta anterior já foi enviada', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'um');
-    const first = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
-    await h.store.messages.markSent(client.id, first.reply?.id ?? '', {
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'um');
+    const first = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    await h.store.messages.markSent(company.id, first.reply?.id ?? '', {
       channelMessageId: 'wamid.out',
       sentAt: new Date(),
     });
-    await accept(h, client, 'dois');
-    await h.service.respondToPending(client.id, 'contato-1', LIMITS);
+    await accept(h, company, 'dois');
+    await h.service.respondToPending(company.id, 'contato-1', LIMITS);
     assert.ok(!h.logs.raw().includes('não será reenviada'));
     assert.equal(h.metrics.unsentReplies, 0);
   });
 
   it('resumeUnsent não reenvia resposta que já tem sentAt', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'um');
-    const first = await h.service.respondToPending(client.id, 'contato-1', LIMITS);
-    await h.store.messages.markSent(client.id, first.reply?.id ?? '', {
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'um');
+    const first = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    await h.store.messages.markSent(company.id, first.reply?.id ?? '', {
       channelMessageId: 'wamid.out',
       sentAt: new Date(),
     });
-    await accept(h, client, 'dois');
+    await accept(h, company, 'dois');
 
-    const resumed = await h.service.respondToPending(client.id, 'contato-1', LIMITS, {
+    const resumed = await h.service.respondToPending(company.id, 'contato-1', LIMITS, {
       resumeUnsent: true,
     });
 
@@ -578,17 +581,17 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     assert.equal(resumed.batchSize, 1);
   });
 
-  it('cliente suspenso (403) e removido (404): nada é respondido', async () => {
+  it('empresa suspensa (403) e removido (404): nada é respondido', async () => {
     const h = setup();
-    const suspended = await newClient(h, 'alfa');
+    const suspended = await newCompany(h, 'alfa');
     await accept(h, suspended, 'oi');
-    await h.clients.update(suspended.id, { status: 'SUSPENDED' });
+    await h.companies.update(suspended.id, { status: 'SUSPENDED' });
     await assert.rejects(
       h.service.respondToPending(suspended.id, 'contato-1', LIMITS),
       ForbiddenError,
     );
-    const removed = await newClient(h, 'beta');
-    await h.clients.delete(removed.id);
+    const removed = await newCompany(h, 'beta');
+    await h.companies.delete(removed.id);
     await assert.rejects(
       h.service.respondToPending(removed.id, 'contato-1', LIMITS),
       NotFoundError,
@@ -599,34 +602,34 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
   it('limites inválidos são recusados (Zod)', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     await assert.rejects(
-      h.service.respondToPending(client.id, 'c', { maxMessages: 0, maxChars: 10 }),
+      h.service.respondToPending(company.id, 'c', { maxMessages: 0, maxChars: 10 }),
       ZodError,
     );
     await assert.rejects(
-      h.service.respondToPending(client.id, 'c', { maxMessages: 1, maxChars: 0 }),
+      h.service.respondToPending(company.id, 'c', { maxMessages: 1, maxChars: 0 }),
       ZodError,
     );
   });
 
   it('hasPendingMessages reflete o que espera resposta', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    assert.equal(await h.service.hasPendingMessages(client.id, 'contato-1'), false);
-    await accept(h, client, 'oi');
-    assert.equal(await h.service.hasPendingMessages(client.id, 'contato-1'), true);
-    await h.service.respondToPending(client.id, 'contato-1', LIMITS);
-    assert.equal(await h.service.hasPendingMessages(client.id, 'contato-1'), false);
+    const company = await newCompany(h, 'alfa');
+    assert.equal(await h.service.hasPendingMessages(company.id, 'contato-1'), false);
+    await accept(h, company, 'oi');
+    assert.equal(await h.service.hasPendingMessages(company.id, 'contato-1'), true);
+    await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    assert.equal(await h.service.hasPendingMessages(company.id, 'contato-1'), false);
   });
 });
 
-describe('isolamento entre clientes no agrupamento (spec 013)', () => {
-  it('o mesmo contactRef em dois clientes nunca se mistura: lotes, histórico e persona de cada um', async () => {
+describe('isolamento entre empresas no agrupamento (spec 013)', () => {
+  it('o mesmo contactRef em duas empresas nunca se mistura: lotes, histórico e persona de cada um', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', `${PERSONA}-A`);
-    const b = await newClient(h, 'beta', `${PERSONA}-B`);
-    // Intercalado: mesmas pessoas (contactRef), clientes diferentes.
+    const a = await newCompany(h, 'alfa', `${PERSONA}-A`);
+    const b = await newCompany(h, 'beta', `${PERSONA}-B`);
+    // Intercalado: mesmas pessoas (contactRef), empresas diferentes.
     await accept(h, a, 'a-um');
     await accept(h, b, 'b-um');
     await accept(h, a, 'a-dois');
@@ -645,8 +648,8 @@ describe('isolamento entre clientes no agrupamento (spec 013)', () => {
     assert.deepEqual(h.llm.calls[0].history, []);
     assert.deepEqual(h.llm.calls[1].history, []);
     const stored = h.store.allMessages();
-    for (const client of [a, b]) {
-      const own = stored.filter((message) => message.clientId === client.id);
+    for (const company of [a, b]) {
+      const own = stored.filter((message) => message.companyId === company.id);
       const replies = own.filter((message) => message.role === 'ASSISTANT');
       assert.equal(replies.length, 1);
       assert.ok(
@@ -657,18 +660,18 @@ describe('isolamento entre clientes no agrupamento (spec 013)', () => {
     }
   });
 
-  it('dois contatos do mesmo cliente nunca se misturam', async () => {
+  it('dois contatos do mesma empresa nunca se misturam', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, 'x1', 'contato-x');
-    await accept(h, client, 'y1', 'contato-y');
-    await accept(h, client, 'x2', 'contato-x');
-    await accept(h, client, 'y2', 'contato-y');
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, 'x1', 'contato-x');
+    await accept(h, company, 'y1', 'contato-y');
+    await accept(h, company, 'x2', 'contato-x');
+    await accept(h, company, 'y2', 'contato-y');
 
-    await h.service.respondToPending(client.id, 'contato-x', LIMITS);
+    await h.service.respondToPending(company.id, 'contato-x', LIMITS);
     // O lote de X não encosta nas mensagens de Y.
-    assert.equal(await h.service.hasPendingMessages(client.id, 'contato-y'), true);
-    await h.service.respondToPending(client.id, 'contato-y', LIMITS);
+    assert.equal(await h.service.hasPendingMessages(company.id, 'contato-y'), true);
+    await h.service.respondToPending(company.id, 'contato-y', LIMITS);
 
     assert.deepEqual(
       h.llm.calls.map((call) => call.userMessage),
@@ -680,11 +683,11 @@ describe('isolamento entre clientes no agrupamento (spec 013)', () => {
 describe('privacidade no agrupamento (spec 013)', () => {
   it('texto, persona e contato não aparecem em log nem em métrica (aceitar, responder, falhar)', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await accept(h, client, SECRET_TEXT, 'contato-secreto-b13');
-    await accept(h, client, `${MOCK_FAIL_MARKER} ${SECRET_TEXT}`, 'contato-secreto-b13');
-    await h.service.respondToPending(client.id, 'contato-secreto-b13', LIMITS);
-    await accept(h, client, `outra ${SECRET_TEXT}`, 'contato-secreto-b13');
+    const company = await newCompany(h, 'alfa');
+    await accept(h, company, SECRET_TEXT, 'contato-secreto-b13');
+    await accept(h, company, `${MOCK_FAIL_MARKER} ${SECRET_TEXT}`, 'contato-secreto-b13');
+    await h.service.respondToPending(company.id, 'contato-secreto-b13', LIMITS);
+    await accept(h, company, `outra ${SECRET_TEXT}`, 'contato-secreto-b13');
     const raw = h.logs.raw();
     for (const secret of [SECRET_TEXT, PERSONA, 'contato-secreto-b13']) {
       assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);

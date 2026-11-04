@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { ClientId, type TenantRepository } from '../../../domain/index.js';
+import { CompanyId, type TenantRepository } from '../../../domain/index.js';
 import { Prisma } from '../../../generated/prisma/client.js';
 import {
   ConflictError,
@@ -18,7 +18,7 @@ import {
 interface Row {
   readonly id: string;
   readonly createdAt: Date;
-  readonly clientId: string;
+  readonly companyId: string;
 }
 type Entity = Row;
 type NewEntity = Readonly<Record<string, never>>;
@@ -51,11 +51,11 @@ function setup(overrides: Partial<TenantModelOps<Row, NewEntity, NewEntity>> = {
   calls: Calls;
 } {
   const calls = newCalls();
-  const row = (clientId: string): Row => ({ id: randomUUID(), createdAt: new Date(), clientId });
+  const row = (companyId: string): Row => ({ id: randomUUID(), createdAt: new Date(), companyId });
   const repo = new FakeRepository({
     findFirst: (where) => {
       calls.findFirst.push(where);
-      return Promise.resolve(row(where.clientId));
+      return Promise.resolve(row(where.companyId));
     },
     findMany: ({ where, take }) => {
       calls.findMany.push({ where, take });
@@ -63,7 +63,7 @@ function setup(overrides: Partial<TenantModelOps<Row, NewEntity, NewEntity>> = {
     },
     create: (data) => {
       calls.create.push(data);
-      return Promise.resolve(row(data.clientId));
+      return Promise.resolve(row(data.companyId));
     },
     updateMany: (where) => {
       calls.updateMany.push(where);
@@ -82,44 +82,44 @@ function setup(overrides: Partial<TenantModelOps<Row, NewEntity, NewEntity>> = {
   return { repo, calls };
 }
 
-const clientA = ClientId.parse(randomUUID());
-const clientB = ClientId.parse(randomUUID());
+const companyA = CompanyId.parse(randomUUID());
+const companyB = CompanyId.parse(randomUUID());
 
 describe('base de repositório de tenant (com operações falsas)', () => {
-  it('toda operação monta o filtro com o clientId do parâmetro', async () => {
+  it('toda operação monta o filtro com o companyId do parâmetro', async () => {
     const { repo, calls } = setup();
     const id = randomUUID();
-    await repo.findById(clientA, id);
-    await repo.list(clientA);
-    await repo.create(clientA, {});
-    await repo.update(clientA, id, {});
-    await repo.delete(clientA, id);
-    await repo.count(clientA);
+    await repo.findById(companyA, id);
+    await repo.list(companyA);
+    await repo.create(companyA, {});
+    await repo.update(companyA, id, {});
+    await repo.delete(companyA, id);
+    await repo.count(companyA);
 
-    assert.deepEqual(calls.findMany[0]?.where, { clientId: clientA });
-    assert.deepEqual(calls.updateMany, [{ id, clientId: clientA }]);
-    assert.deepEqual(calls.deleteMany, [{ id, clientId: clientA }]);
-    assert.deepEqual(calls.count, [{ clientId: clientA }]);
+    assert.deepEqual(calls.findMany[0]?.where, { companyId: companyA });
+    assert.deepEqual(calls.updateMany, [{ id, companyId: companyA }]);
+    assert.deepEqual(calls.deleteMany, [{ id, companyId: companyA }]);
+    assert.deepEqual(calls.count, [{ companyId: companyA }]);
     // findById e o findFirst que update faz depois de atualizar
     assert.deepEqual(calls.findFirst, [
-      { id, clientId: clientA },
-      { id, clientId: clientA },
+      { id, companyId: companyA },
+      { id, companyId: companyA },
     ]);
   });
 
-  it('create aplica o clientId do parâmetro depois do spread, mesmo com clientId em data', async () => {
+  it('create aplica o companyId do parâmetro depois do spread, mesmo com companyId em data', async () => {
     const { repo, calls } = setup();
-    // O tipo proíbe `clientId` em NewEntity; aqui forçamos para provar que o runtime não cede.
-    const hostile = { clientId: clientB } as unknown as NewEntity;
-    const created = await repo.create(clientA, hostile);
+    // O tipo proíbe `companyId` em NewEntity; aqui forçamos para provar que o runtime não cede.
+    const hostile = { companyId: companyB } as unknown as NewEntity;
+    const created = await repo.create(companyA, hostile);
 
-    assert.deepEqual(calls.create, [{ clientId: clientA }]);
-    assert.equal(created.clientId, clientA);
+    assert.deepEqual(calls.create, [{ companyId: companyA }]);
+    assert.equal(created.companyId, companyA);
   });
 
-  it('id de outro cliente (findFirst sem resultado) vira NotFoundError', async () => {
+  it('id de outra empresa (findFirst sem resultado) vira NotFoundError', async () => {
     const { repo } = setup({ findFirst: () => Promise.resolve(null) });
-    await assert.rejects(repo.findById(clientA, randomUUID()), NotFoundError);
+    await assert.rejects(repo.findById(companyA, randomUUID()), NotFoundError);
   });
 
   it('update e delete que afetam 0 linhas viram NotFoundError', async () => {
@@ -127,28 +127,28 @@ describe('base de repositório de tenant (com operações falsas)', () => {
       updateMany: () => Promise.resolve({ count: 0 }),
       deleteMany: () => Promise.resolve({ count: 0 }),
     });
-    await assert.rejects(repo.update(clientA, randomUUID(), {}), NotFoundError);
-    await assert.rejects(repo.delete(clientA, randomUUID()), NotFoundError);
+    await assert.rejects(repo.update(companyA, randomUUID(), {}), NotFoundError);
+    await assert.rejects(repo.delete(companyA, randomUUID()), NotFoundError);
   });
 
   it('update cujo registro some entre o updateMany e a leitura vira NotFoundError', async () => {
     const { repo } = setup({ findFirst: () => Promise.resolve(null) });
-    await assert.rejects(repo.update(clientA, randomUUID(), {}), NotFoundError);
+    await assert.rejects(repo.update(companyA, randomUUID(), {}), NotFoundError);
   });
 
   it('id malformado é NotFoundError e nem chega ao banco', async () => {
     const { repo, calls } = setup();
-    await assert.rejects(repo.findById(clientA, 'nao-e-uuid'), NotFoundError);
-    await assert.rejects(repo.update(clientA, "1' OR '1'='1", {}), NotFoundError);
-    await assert.rejects(repo.delete(clientA, ''), NotFoundError);
+    await assert.rejects(repo.findById(companyA, 'nao-e-uuid'), NotFoundError);
+    await assert.rejects(repo.update(companyA, "1' OR '1'='1", {}), NotFoundError);
+    await assert.rejects(repo.delete(companyA, ''), NotFoundError);
     assert.deepEqual(calls.findFirst, []);
     assert.deepEqual(calls.updateMany, []);
     assert.deepEqual(calls.deleteMany, []);
   });
 
-  it('a mensagem de NotFoundError não revela se o id existe em outro cliente', async () => {
+  it('a mensagem de NotFoundError não revela se o id existe em outra empresa', async () => {
     const { repo } = setup({ findFirst: () => Promise.resolve(null) });
-    await assert.rejects(repo.findById(clientA, randomUUID()), (error: unknown) => {
+    await assert.rejects(repo.findById(companyA, randomUUID()), (error: unknown) => {
       assert.ok(error instanceof NotFoundError);
       assert.equal(error.message, 'Recurso não encontrado');
       return true;
@@ -157,16 +157,16 @@ describe('base de repositório de tenant (com operações falsas)', () => {
 
   it('list valida limit e cursor antes de consultar', async () => {
     const { repo, calls } = setup();
-    await assert.rejects(repo.list(clientA, { limit: 0 }), ValidationError);
-    await assert.rejects(repo.list(clientA, { limit: 201 }), ValidationError);
-    await assert.rejects(repo.list(clientA, { cursor: 'invalido' }), ValidationError);
+    await assert.rejects(repo.list(companyA, { limit: 0 }), ValidationError);
+    await assert.rejects(repo.list(companyA, { limit: 201 }), ValidationError);
+    await assert.rejects(repo.list(companyA, { cursor: 'invalido' }), ValidationError);
     assert.equal(calls.findMany.length, 0);
   });
 
-  it('list busca limit + 1 (50 por padrão) e o cursor entra junto do clientId', async () => {
+  it('list busca limit + 1 (50 por padrão) e o cursor entra junto do companyId', async () => {
     const { repo, calls } = setup();
-    await repo.list(clientA);
-    await repo.list(clientA, { limit: 200 });
+    await repo.list(companyA);
+    await repo.list(companyA, { limit: 200 });
     assert.equal(calls.findMany[0]?.take, 51);
     assert.equal(calls.findMany[1]?.take, 201);
   });
@@ -181,7 +181,7 @@ describe('base de repositório de tenant (com operações falsas)', () => {
           }),
         ),
     });
-    await assert.rejects(repo.create(clientA, {}), (error: unknown) => {
+    await assert.rejects(repo.create(companyA, {}), (error: unknown) => {
       assert.ok(error instanceof ConflictError);
       assert.equal(error.statusCode, 409);
       assert.ok(!error.message.includes('segredo-sql'));
@@ -199,7 +199,7 @@ describe('base de repositório de tenant (com operações falsas)', () => {
           }),
         ),
     });
-    await assert.rejects(repo.count(clientA), (error: unknown) => {
+    await assert.rejects(repo.count(companyA), (error: unknown) => {
       assert.ok(error instanceof DatabaseError);
       assert.ok(!error.message.includes('SELECT'));
       return true;
@@ -209,6 +209,6 @@ describe('base de repositório de tenant (com operações falsas)', () => {
   it('erro de regra (não do banco) sobe intacto', async () => {
     const business = new ValidationError('regra');
     const { repo } = setup({ count: () => Promise.reject(business) });
-    await assert.rejects(repo.count(clientA), (error: unknown) => error === business);
+    await assert.rejects(repo.count(companyA), (error: unknown) => error === business);
   });
 });

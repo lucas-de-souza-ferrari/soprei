@@ -73,7 +73,7 @@ async function withPurge(
     });
   } finally {
     await tenants.cleanup();
-    await sql.query('DELETE FROM users WHERE account_id = ANY($1::uuid[])', [ids]);
+    await sql.query('DELETE FROM memberships WHERE account_id = ANY($1::uuid[])', [ids]);
     await sql.query('DELETE FROM accounts WHERE id = ANY($1::uuid[])', [ids]);
     await sql.end();
     await db.close();
@@ -87,10 +87,10 @@ test('apaga só conta não confirmada, sem vínculo e antiga; respeita o tamanho
     const confirmedOld = await insert({ updatedAt: OLD, verified: true });
     const withMember = await insert({ updatedAt: OLD });
     // Mesmo forçando o estado (conta não confirmada com vínculo), a conta não é apagada.
-    const client = await tenants.createClient('purga');
-    await prisma.user.create({
+    const client = await tenants.createCompany('purga');
+    await prisma.membership.create({
       data: {
-        clientId: client.id,
+        companyId: client.id,
         accountId: withMember.id,
         email: withMember.email,
         passwordHash: 'account-managed',
@@ -104,8 +104,8 @@ test('apaga só conta não confirmada, sem vínculo e antiga; respeita o tamanho
     assert.equal(await exists(withMember.id), true);
     // Nada a fazer: execução vazia.
     assert.equal(await purge.purgeUnverified(CUTOFF, 100), 0);
-    // Cliente e usuário do vínculo continuam intactos.
-    assert.equal(await prisma.user.count({ where: { clientId: client.id } }), 1);
+    // Empresa e usuário do vínculo continuam intactos.
+    assert.equal(await prisma.membership.count({ where: { companyId: client.id } }), 1);
 
     const batch = [await insert({ updatedAt: OLD }), await insert({ updatedAt: OLD })];
     batch.push(await insert({ updatedAt: OLD }));

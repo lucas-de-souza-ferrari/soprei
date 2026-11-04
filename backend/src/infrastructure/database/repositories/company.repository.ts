@@ -1,88 +1,88 @@
 import type {
-  Client,
-  ClientId,
-  ClientRepository,
-  ClientUpdate,
+  Company,
+  CompanyId,
+  CompanyRepository,
+  CompanyUpdate,
   ListOptions,
-  NewClient,
+  NewCompany,
   Page,
 } from '../../../domain/index.js';
 import { WHATSAPP_PHONE_NUMBER_ID_PATTERN } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import { buildPageQuery, stableOrderBy, toPage } from './cursor.js';
-import { toClient } from './mappers.js';
+import { toCompany } from './mappers.js';
 import { withRepositoryErrors } from './repository-errors.js';
 import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction } from '../transaction.js';
 
 /**
- * `Client` é a raiz do tenant (model global): não é filtrado por `clientId`. Clientes
+ * `Company` é a raiz do tenant (model global): não é filtrado por `companyId`. Empresas
  * removidos (soft delete, `deletedAt`) somem de buscas e listagens, mas a linha continua e
  * o slug fica reservado para sempre (a unicidade do banco vale para todas as linhas).
  */
-export class PrismaClientRepository implements ClientRepository {
+export class PrismaCompanyRepository implements CompanyRepository {
   constructor(private readonly db: TenantScopedDb) {}
 
   /** O mesmo repositório sobre o client de uma transação (`runInTransaction`). */
-  forTransaction(tx: TenantScopedDb): ClientRepository {
-    return new PrismaClientRepository(tx);
+  forTransaction(tx: TenantScopedDb): CompanyRepository {
+    return new PrismaCompanyRepository(tx);
   }
 
-  findById(id: ClientId): Promise<Client> {
-    return withRepositoryErrors('Client.findById', async () => {
-      const row = await this.db.client.findFirst({ where: { id, deletedAt: null } });
+  findById(id: CompanyId): Promise<Company> {
+    return withRepositoryErrors('Company.findById', async () => {
+      const row = await this.db.company.findFirst({ where: { id, deletedAt: null } });
       if (row === null) throw notFound();
-      return toClient(row);
+      return toCompany(row);
     });
   }
 
-  findBySlug(slug: string): Promise<Client> {
-    return withRepositoryErrors('Client.findBySlug', async () => {
-      const row = await this.db.client.findFirst({ where: { slug, deletedAt: null } });
+  findBySlug(slug: string): Promise<Company> {
+    return withRepositoryErrors('Company.findBySlug', async () => {
+      const row = await this.db.company.findFirst({ where: { slug, deletedAt: null } });
       if (row === null) throw notFound();
-      return toClient(row);
+      return toCompany(row);
     });
   }
 
-  findByWhatsappPhoneNumberId(phoneNumberId: string): Promise<Client | null> {
-    return withRepositoryErrors('Client.findByWhatsappPhoneNumberId', async () => {
-      // Formato inválido nunca casa com nada: não vai ao banco. Cliente removido não aparece.
+  findByWhatsappPhoneNumberId(phoneNumberId: string): Promise<Company | null> {
+    return withRepositoryErrors('Company.findByWhatsappPhoneNumberId', async () => {
+      // Formato inválido nunca casa com nada: não vai ao banco. Empresa removida não aparece.
       if (!WHATSAPP_PHONE_NUMBER_ID_PATTERN.test(phoneNumberId)) return null;
-      const row = await this.db.client.findFirst({
+      const row = await this.db.company.findFirst({
         where: { whatsappPhoneNumberId: phoneNumberId, deletedAt: null },
       });
-      return row === null ? null : toClient(row);
+      return row === null ? null : toCompany(row);
     });
   }
 
-  list(options?: ListOptions): Promise<Page<Client>> {
-    return withRepositoryErrors('Client.list', async () => {
+  list(options?: ListOptions): Promise<Page<Company>> {
+    return withRepositoryErrors('Company.list', async () => {
       const { limit, take, after } = buildPageQuery(options);
-      const rows = await this.db.client.findMany({
+      const rows = await this.db.company.findMany({
         where: { deletedAt: null, ...(after === undefined ? {} : { OR: after }) },
         orderBy: stableOrderBy(),
         take,
       });
-      return toPage(rows, limit, toClient);
+      return toPage(rows, limit, toCompany);
     });
   }
 
-  create(data: NewClient): Promise<Client> {
-    return withRepositoryErrors('Client.create', async () => {
-      const row = await this.db.client.create({
+  create(data: NewCompany): Promise<Company> {
+    return withRepositoryErrors('Company.create', async () => {
+      const row = await this.db.company.create({
         data: {
           name: data.name,
           slug: data.slug,
           ...(data.status === undefined ? {} : { status: data.status }),
         },
       });
-      return toClient(row);
+      return toCompany(row);
     });
   }
 
-  update(id: ClientId, data: ClientUpdate): Promise<Client> {
-    return withRepositoryErrors('Client.update', async () => {
-      const { count } = await this.db.client.updateMany({
+  update(id: CompanyId, data: CompanyUpdate): Promise<Company> {
+    return withRepositoryErrors('Company.update', async () => {
+      const { count } = await this.db.company.updateMany({
         where: { id, deletedAt: null },
         data: {
           ...(data.name === undefined ? {} : { name: data.name }),
@@ -94,26 +94,26 @@ export class PrismaClientRepository implements ClientRepository {
         },
       });
       if (count === 0) throw notFound();
-      const row = await this.db.client.findFirst({ where: { id, deletedAt: null } });
+      const row = await this.db.company.findFirst({ where: { id, deletedAt: null } });
       if (row === null) throw notFound();
-      return toClient(row);
+      return toCompany(row);
     });
   }
 
-  delete(id: ClientId): Promise<void> {
-    return withRepositoryErrors('Client.delete', async () => {
+  delete(id: CompanyId): Promise<void> {
+    return withRepositoryErrors('Company.delete', async () => {
       const remove = async (db: TenantScopedDb): Promise<void> => {
-        const { count } = await db.client.updateMany({
+        const { count } = await db.company.updateMany({
           where: { id, deletedAt: null },
-          // O número do WhatsApp é liberado junto: um cliente removido não recebe mais mensagens e o
-          // número pode ser ligado a outro cliente.
+          // O número do WhatsApp é liberado junto: uma empresa removida não recebe mais mensagens e o
+          // número pode ser ligado a outra empresa.
           data: { deletedAt: new Date(), whatsappPhoneNumberId: null },
         });
         if (count === 0) throw notFound();
         // Spec 015: a credencial do canal (texto cifrado) some na mesma transação.
-        await db.channelConnection.deleteMany({ where: { clientId: id } });
+        await db.channelConnection.deleteMany({ where: { companyId: id } });
       };
-      // Fora de uma transação (client raiz) abre uma; dentro de uma, já está nela.
+      // Fora de uma transação (company raiz) abre uma; dentro de uma, já está nela.
       if ('$transaction' in this.db) {
         await runInTransaction(this.db as TenantScopedPrisma, remove);
       } else {
@@ -124,5 +124,5 @@ export class PrismaClientRepository implements ClientRepository {
 }
 
 function notFound(): NotFoundError {
-  return new NotFoundError('Cliente não encontrado', { context: { entity: 'Client' } });
+  return new NotFoundError('Empresa não encontrado', { context: { entity: 'Company' } });
 }

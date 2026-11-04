@@ -36,7 +36,7 @@ export const MAX_QUEUED_HASHES = 32;
  * Dentro do teto acima, no máximo este tanto de esperas pode ser de hashes de **administração**
  * (`lane: 'admin'`): sobram pelo menos `MAX_QUEUED_HASHES - MAX_QUEUED_ADMIN_HASHES` vagas para
  * login e refresh, então a fila cheia de administração recusa só a rota de administração (503) e
- * nunca o login dos clientes.
+ * nunca o login das empresas.
  */
 export const MAX_QUEUED_ADMIN_HASHES = 8;
 

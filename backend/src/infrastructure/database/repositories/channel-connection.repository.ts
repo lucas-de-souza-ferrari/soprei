@@ -2,7 +2,7 @@ import type {
   ChannelConnection,
   ChannelConnectionRepository,
   ChannelConnectionUpdate,
-  ClientId,
+  CompanyId,
   NewChannelConnection,
 } from '../../../domain/index.js';
 import { DatabaseError } from '../../../shared/errors/index.js';
@@ -20,7 +20,7 @@ function connectionOps(
     create: (data) =>
       db.channelConnection.create({
         data: {
-          clientId: data.clientId,
+          companyId: data.companyId,
           wabaId: data.wabaId,
           tokenCiphertext: data.tokenCiphertext,
           tokenExpiresAt: data.tokenExpiresAt ?? null,
@@ -42,9 +42,9 @@ function connectionOps(
 }
 
 /**
- * Credencial do canal por cliente (spec 015). Mesmas garantias da base de tenant (`clientId` em todo
+ * Credencial do canal por empresa (spec 015). Mesmas garantias da base de tenant (`companyId` em todo
  * `where`, nunca `findUnique`/`upsert`); o texto cifrado só sai na entidade para o serviço de
- * credenciais, que o decifra com o `clientId` (AAD).
+ * credenciais, que o decifra com o `companyId` (AAD).
  */
 export class PrismaChannelConnectionRepository
   extends PrismaTenantRepository<
@@ -63,23 +63,23 @@ export class PrismaChannelConnectionRepository
     return new PrismaChannelConnectionRepository(tx);
   }
 
-  find(clientId: ClientId): Promise<ChannelConnection | null> {
+  find(companyId: CompanyId): Promise<ChannelConnection | null> {
     return this.run('find', async () => {
-      const row = await this.db.channelConnection.findFirst({ where: { clientId } });
+      const row = await this.db.channelConnection.findFirst({ where: { companyId } });
       return row === null ? null : toChannelConnection(row);
     });
   }
 
   save(
-    clientId: ClientId,
+    companyId: CompanyId,
     data: NewChannelConnection,
   ): Promise<{ readonly connection: ChannelConnection; readonly replaced: boolean }> {
     return this.run('save', async () => {
-      const existing = await this.db.channelConnection.findFirst({ where: { clientId } });
+      const existing = await this.db.channelConnection.findFirst({ where: { companyId } });
       if (existing === null) {
         const row = await this.db.channelConnection.create({
           data: {
-            clientId,
+            companyId,
             wabaId: data.wabaId,
             tokenCiphertext: data.tokenCiphertext,
             tokenExpiresAt: data.tokenExpiresAt,
@@ -89,7 +89,7 @@ export class PrismaChannelConnectionRepository
         return { connection: toChannelConnection(row), replaced: false };
       }
       await this.db.channelConnection.updateMany({
-        where: { clientId },
+        where: { companyId },
         data: {
           wabaId: data.wabaId,
           tokenCiphertext: data.tokenCiphertext,
@@ -102,9 +102,9 @@ export class PrismaChannelConnectionRepository
           tokenInvalidAt: null,
         },
       });
-      const row = await this.db.channelConnection.findFirst({ where: { clientId } });
+      const row = await this.db.channelConnection.findFirst({ where: { companyId } });
       // Só acontece se a conexão foi removida entre o update e a leitura (a transação do canal
-      // serializa por `lockClient`, então é falha de infraestrutura, não de entrada).
+      // serializa por `lockCompany`, então é falha de infraestrutura, não de entrada).
       if (row === null) {
         throw new DatabaseError('Conexão do canal sumiu durante a gravação', {
           context: { entity: 'ChannelConnection' },
@@ -114,19 +114,19 @@ export class PrismaChannelConnectionRepository
     });
   }
 
-  markTokenInvalid(clientId: ClientId, tokenVersion: number, at: Date): Promise<boolean> {
+  markTokenInvalid(companyId: CompanyId, tokenVersion: number, at: Date): Promise<boolean> {
     return this.run('markTokenInvalid', async () => {
       const { count } = await this.db.channelConnection.updateMany({
-        where: { clientId, tokenVersion, status: 'CONNECTED' },
+        where: { companyId, tokenVersion, status: 'CONNECTED' },
         data: { status: 'TOKEN_INVALID', tokenInvalidAt: at },
       });
       return count > 0;
     });
   }
 
-  removeByClient(clientId: ClientId): Promise<boolean> {
-    return this.run('removeByClient', async () => {
-      const { count } = await this.db.channelConnection.deleteMany({ where: { clientId } });
+  removeByCompany(companyId: CompanyId): Promise<boolean> {
+    return this.run('removeByCompany', async () => {
+      const { count } = await this.db.channelConnection.deleteMany({ where: { companyId } });
       return count > 0;
     });
   }

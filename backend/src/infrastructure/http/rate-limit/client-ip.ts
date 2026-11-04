@@ -8,7 +8,7 @@ const BRACKETED = /^\[([^\]]+)\](?::\d+)?$/;
 const IPV4_WITH_PORT = /^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/;
 
 /**
- * IP do cliente em forma canônica para virar chave de limite. Mantém a normalização do plugin
+ * IP da empresa em forma canônica para virar chave de limite. Mantém a normalização do plugin
  * (`normalizeIP`: IPv4 mapeado em IPv6 vira IPv4; IPv6 agrupado em /64) e acrescenta o que ela
  * não cobre: colchetes e porta (`[::1]:8080`, `1.2.3.4:80`) e zona de IPv6 (`fe80::1%eth0`)
  * são removidos antes. Nunca lança: o que não for IP vira `unknown`.

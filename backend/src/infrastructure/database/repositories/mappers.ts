@@ -1,29 +1,29 @@
 import {
   type AuditEvent,
   type ChannelConnection,
-  type Client,
-  ClientId,
+  type Company,
+  CompanyId,
   type Conversation,
   type Message,
   type PlatformAdmin,
   PlatformAdminId,
-  type User,
-  UserId,
+  type Membership,
+  MembershipId,
 } from '../../../domain/index.js';
 import type {
   AuditEvent as AuditEventRow,
   ChannelConnection as ChannelConnectionRow,
-  Client as ClientRow,
+  Company as CompanyRow,
   Conversation as ConversationRow,
   Message as MessageRow,
   PlatformAdmin as PlatformAdminRow,
-  User as UserRow,
+  Membership as MembershipRow,
 } from '../../../generated/prisma/client.js';
 
 /** Linha do Prisma para entidade de domínio. Nada do Prisma sai desta pasta. */
-export function toClient(row: ClientRow): Client {
+export function toCompany(row: CompanyRow): Company {
   return {
-    id: ClientId.parse(row.id),
+    id: CompanyId.parse(row.id),
     name: row.name,
     slug: row.slug,
     // O enum do Prisma e o tipo do domínio têm os mesmos valores: o compilador confere.
@@ -38,7 +38,7 @@ export function toClient(row: ClientRow): Client {
 export function toConversation(row: ConversationRow): Conversation {
   return {
     id: row.id,
-    clientId: ClientId.parse(row.clientId),
+    companyId: CompanyId.parse(row.companyId),
     contactRef: row.contactRef,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -48,7 +48,7 @@ export function toConversation(row: ConversationRow): Conversation {
 export function toMessage(row: MessageRow): Message {
   return {
     id: row.id,
-    clientId: ClientId.parse(row.clientId),
+    companyId: CompanyId.parse(row.companyId),
     conversationId: row.conversationId,
     // O enum do Prisma e o tipo do domínio têm os mesmos valores: o compilador confere.
     role: row.role,
@@ -63,11 +63,11 @@ export function toMessage(row: MessageRow): Message {
   };
 }
 
-/** Linha para entidade: o `passwordHash` fica de fora de propósito (só `UserCredentials` o leva). */
-export function toUser(row: UserRow): User {
+/** Linha para entidade: o `passwordHash` fica de fora de propósito (só `MembershipCredentials` o leva). */
+export function toMembership(row: MembershipRow): Membership {
   return {
-    id: UserId.parse(row.id),
-    clientId: ClientId.parse(row.clientId),
+    id: MembershipId.parse(row.id),
+    companyId: CompanyId.parse(row.companyId),
     email: row.email,
     role: row.role,
     status: row.status,
@@ -89,10 +89,10 @@ export function toPlatformAdmin(row: PlatformAdminRow): PlatformAdmin {
 export function toAuditEvent(row: AuditEventRow): AuditEvent {
   return {
     id: row.id,
-    clientId: ClientId.parse(row.clientId),
+    companyId: CompanyId.parse(row.companyId),
     action: row.action,
-    actorUserId: row.actorUserId,
-    targetUserId: row.targetUserId,
+    actorMembershipId: row.actorMembershipId,
+    targetMembershipId: row.targetMembershipId,
     fromRole: row.fromRole,
     toRole: row.toRole,
     createdAt: row.createdAt,
@@ -103,7 +103,7 @@ export function toAuditEvent(row: AuditEventRow): AuditEvent {
 export function toChannelConnection(row: ChannelConnectionRow): ChannelConnection {
   return {
     id: row.id,
-    clientId: ClientId.parse(row.clientId),
+    companyId: CompanyId.parse(row.companyId),
     wabaId: row.wabaId,
     tokenCiphertext: row.tokenCiphertext,
     registrationPinCiphertext: row.registrationPinCiphertext,

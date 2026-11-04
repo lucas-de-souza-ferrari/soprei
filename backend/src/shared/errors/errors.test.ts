@@ -44,12 +44,12 @@ describe('hierarquia de erros', () => {
 
   it('guarda context e cause', () => {
     const cause = new Error('origem');
-    const error = new NotFoundError('Cliente não encontrado', {
-      context: { clientId: 'c1' },
+    const error = new NotFoundError('Empresa não encontrado', {
+      context: { companyId: 'c1' },
       cause,
     });
-    assert.equal(error.message, 'Cliente não encontrado');
-    assert.deepEqual(error.context, { clientId: 'c1' });
+    assert.equal(error.message, 'Empresa não encontrado');
+    assert.deepEqual(error.context, { companyId: 'c1' });
     assert.equal(error.cause, cause);
     assert.equal(error.isOperational, true);
   });

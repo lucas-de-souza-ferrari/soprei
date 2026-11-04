@@ -4,26 +4,26 @@ import { TenantScopeError } from '../../../shared/errors/index.js';
 import { type ModelInfo, readModels } from './schema-info.js';
 
 /**
- * Segunda barreira do isolamento entre clientes (a primeira é a base de repositório, a
- * terceira é o lint). Todo model do Prisma é de **tenant** (tem `clientId`) ou **global**
- * (a raiz do tenant e o que não pertence a cliente algum). O compilador exige que a tabela
+ * Segunda barreira do isolamento entre empresas (a primeira é a base de repositório, a
+ * terceira é o lint). Todo model do Prisma é de **tenant** (tem `companyId`) ou **global**
+ * (a raiz do tenant e o que não pertence a empresa algum). O compilador exige que a tabela
  * abaixo cubra todos os models; o teste de cobertura confere que a classificação bate com
- * a presença de `clientId` no schema.
+ * a presença de `companyId` no schema.
  */
 export type ModelScope = 'tenant' | 'global';
 
 export const MODEL_SCOPES = {
-  Client: 'global',
+  Company: 'global',
   Conversation: 'tenant',
   Message: 'tenant',
-  User: 'tenant',
+  Membership: 'tenant',
   AuditEvent: 'tenant',
   ChannelConnection: 'tenant',
   PlatformAdmin: 'global',
   Account: 'global',
 } as const satisfies Record<Prisma.ModelName, ModelScope>;
 
-/** Operações de model que carregam um `where` que pode (e precisa) conter `clientId`. */
+/** Operações de model que carregam um `where` que pode (e precisa) conter `companyId`. */
 const OPERATIONS_WITH_WHERE: ReadonlySet<string> = new Set([
   'findMany',
   'findFirst',
@@ -45,9 +45,9 @@ const CREATE_OPERATIONS: ReadonlySet<string> = new Set([
 const UPDATE_OPERATIONS: ReadonlySet<string> = new Set(['updateMany', 'updateManyAndReturn']);
 
 /**
- * Operações que identificam o registro só por chave única (sem `clientId`) ou fazem as duas
+ * Operações que identificam o registro só por chave única (sem `companyId`) ou fazem as duas
  * coisas ao mesmo tempo (`upsert`). Proibidas em model de tenant; use `findFirst`,
- * `updateMany` e `deleteMany` com `clientId` no `where`.
+ * `updateMany` e `deleteMany` com `companyId` no `where`.
  */
 const FORBIDDEN_UNIQUE_OPERATIONS: ReadonlySet<string> = new Set([
   'findUnique',
@@ -66,12 +66,12 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 /**
- * `clientId` precisamente definido: uma string, ou `{ equals: string }`. `undefined` (que o
+ * `companyId` precisamente definido: uma string, ou `{ equals: string }`. `undefined` (que o
  * Prisma trata como "sem filtro"), `null`, `in`, `not` e afins não servem como escopo.
  */
 function hasTenantValue(container: unknown): boolean {
-  if (!isRecord(container) || !Object.hasOwn(container, 'clientId')) return false;
-  const value = container.clientId;
+  if (!isRecord(container) || !Object.hasOwn(container, 'companyId')) return false;
+  const value = container.companyId;
   if (isNonEmptyString(value)) return true;
   return (
     isRecord(value) &&
@@ -96,18 +96,18 @@ export function findScopeProblems(
 ): readonly string[] {
   const problems: string[] = [];
   for (const model of models) {
-    const hasClientId = model.fields.some(
-      (field) => field.name === 'clientId' && field.kind === 'scalar',
+    const hasCompanyId = model.fields.some(
+      (field) => field.name === 'companyId' && field.kind === 'scalar',
     );
     const scope = Object.hasOwn(scopes, model.name) ? scopes[model.name] : undefined;
     if (scope === undefined) {
       problems.push(
-        `model ${model.name} não está classificado em MODEL_SCOPES (${hasClientId ? 'tenant' : 'global'}?)`,
+        `model ${model.name} não está classificado em MODEL_SCOPES (${hasCompanyId ? 'tenant' : 'global'}?)`,
       );
-    } else if (hasClientId && scope !== 'tenant') {
-      problems.push(`model ${model.name} tem clientId e precisa ser "tenant", não "${scope}"`);
-    } else if (!hasClientId && scope !== 'global') {
-      problems.push(`model ${model.name} não tem clientId e precisa ser "global", não "${scope}"`);
+    } else if (hasCompanyId && scope !== 'tenant') {
+      problems.push(`model ${model.name} tem companyId e precisa ser "tenant", não "${scope}"`);
+    } else if (!hasCompanyId && scope !== 'global') {
+      problems.push(`model ${model.name} não tem companyId e precisa ser "global", não "${scope}"`);
     }
   }
   const known = new Set(models.map((model) => model.name));
@@ -143,12 +143,12 @@ export function createTenantScopeGuard(
 
   function reject(check: TenantScopeCheck, reason: string): never {
     throw new TenantScopeError(
-      `Operação ${check.operation} em ${check.model ?? '?'} sem escopo de cliente: ${reason}`,
+      `Operação ${check.operation} em ${check.model ?? '?'} sem escopo de empresa: ${reason}`,
       { context: { model: check.model, operation: check.operation, reason } },
     );
   }
 
-  /** Num model global, ler um relacionamento para model de tenant atravessaria clientes. */
+  /** Num model global, ler um relacionamento para model de tenant atravessaria empresas. */
   function assertNoTenantRelationReads(
     check: TenantScopeCheck,
     model: string,
@@ -193,16 +193,19 @@ export function createTenantScopeGuard(
     }
 
     if (FORBIDDEN_UNIQUE_OPERATIONS.has(operation)) {
-      reject(check, 'operação por chave única não carrega o filtro de cliente');
+      reject(check, 'operação por chave única não carrega o filtro de empresa');
     }
     const body = isRecord(args) ? args : {};
 
     if (OPERATIONS_WITH_WHERE.has(operation)) {
-      if (!hasTenantValue(body.where)) reject(check, 'where sem clientId');
+      if (!hasTenantValue(body.where)) reject(check, 'where sem companyId');
       if (UPDATE_OPERATIONS.has(operation)) {
         const { data } = body;
-        if (isRecord(data) && (Object.hasOwn(data, 'clientId') || Object.hasOwn(data, 'client'))) {
-          reject(check, 'update não pode mudar o cliente do registro');
+        if (
+          isRecord(data) &&
+          (Object.hasOwn(data, 'companyId') || Object.hasOwn(data, 'company'))
+        ) {
+          reject(check, 'update não pode mudar a empresa do registro');
         }
       }
       return;
@@ -211,9 +214,9 @@ export function createTenantScopeGuard(
     if (CREATE_OPERATIONS.has(operation)) {
       const rows: readonly unknown[] = Array.isArray(body.data) ? body.data : [body.data];
       const complete = rows.length > 0 && rows.every((row) => hasTenantValue(row));
-      if (!complete) reject(check, 'dados de criação sem clientId');
-      if (rows.some((row) => isRecord(row) && Object.hasOwn(row, 'client'))) {
-        reject(check, 'criação por relacionamento (client) em vez de clientId');
+      if (!complete) reject(check, 'dados de criação sem companyId');
+      if (rows.some((row) => isRecord(row) && Object.hasOwn(row, 'company'))) {
+        reject(check, 'criação por relacionamento (company) em vez de companyId');
       }
       return;
     }
@@ -224,7 +227,7 @@ export function createTenantScopeGuard(
 }
 
 /**
- * Aplica a barreira ao client: toda operação de model passa pela verificação antes de ir
+ * Aplica a barreira ao client do Prisma: toda operação de model passa pela verificação antes de ir
  * ao banco. Vale também dentro de transações (`$transaction` herda as extensões).
  */
 export function extendWithTenantScope(client: PrismaClient) {

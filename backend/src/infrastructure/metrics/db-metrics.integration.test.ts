@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../application/clients/client.service.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import { Result } from '../../shared/types/index.js';
 import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
-import { createDatabase, PrismaClientRepository, type Database } from '../database/index.js';
+import { createDatabase, PrismaCompanyRepository, type Database } from '../database/index.js';
 import { buildServer } from '../http/server.js';
 import { createLogger } from '../logger/logger.js';
 import { createMetrics, type Metrics } from './metrics.js';
@@ -43,7 +43,7 @@ before(async () => {
     },
     auth: testAuth.service,
     admin: {
-      clients: new ClientService(new PrismaClientRepository(database.prisma)),
+      companies: new CompanyService(new PrismaCompanyRepository(database.prisma)),
     },
   });
   await app.ready();
@@ -68,13 +68,13 @@ function count(body: string, model: string, operation: string): number {
 describe('métricas do banco contra o PostgreSQL de testes', () => {
   it('operações reais com o Prisma geram amostras por model e operation', async () => {
     const before = await metrics.render();
-    const created = await tenants.createClient('metrics');
-    await database.prisma.conversation.create({ data: { clientId: created.id, contactRef: 'c' } });
-    await database.prisma.conversation.findMany({ where: { clientId: created.id } });
-    await database.prisma.client.count();
+    const created = await tenants.createCompany('metrics');
+    await database.prisma.conversation.create({ data: { companyId: created.id, contactRef: 'c' } });
+    await database.prisma.conversation.findMany({ where: { companyId: created.id } });
+    await database.prisma.company.count();
 
     const after = await metrics.render();
-    assert.equal(count(after, 'Client', 'create') - count(before, 'Client', 'create'), 1);
+    assert.equal(count(after, 'Company', 'create') - count(before, 'Company', 'create'), 1);
     assert.equal(
       count(after, 'Conversation', 'create') - count(before, 'Conversation', 'create'),
       1,
@@ -83,12 +83,12 @@ describe('métricas do banco contra o PostgreSQL de testes', () => {
       count(after, 'Conversation', 'findMany') - count(before, 'Conversation', 'findMany'),
       1,
     );
-    assert.equal(count(after, 'Client', 'count') - count(before, 'Client', 'count'), 1);
-    assert.match(after, /db_query_duration_seconds_bucket\{le="0\.001",model="Client"/);
+    assert.equal(count(after, 'Company', 'count') - count(before, 'Company', 'count'), 1);
+    assert.match(after, /db_query_duration_seconds_bucket\{le="0\.001",model="Company"/);
   });
 
   it('o gauge do pool reflete poolMetrics() no momento da coleta', async () => {
-    await database.prisma.client.count();
+    await database.prisma.company.count();
     const body = await metrics.render();
     const pool = database.poolMetrics();
     const gauge = (state: string): number =>
@@ -99,20 +99,20 @@ describe('métricas do banco contra o PostgreSQL de testes', () => {
     assert.ok(pool.totalCount >= 1);
   });
 
-  it('via HTTP: /metrics expõe as queries e o pool sem clientId nem UUID', async () => {
+  it('via HTTP: /metrics expõe as queries e o pool sem companyId nem UUID', async () => {
     const slug = `metrics-${randomBytes(6).toString('hex')}`;
     const created = await app.inject({
       method: 'POST',
-      url: '/admin/clients',
+      url: '/admin/companies',
       headers: adminAuth,
-      payload: { name: 'Cliente Métricas', slug },
+      payload: { name: 'Empresa Métricas', slug },
     });
     assert.equal(created.statusCode, 201);
     const { id } = created.json<{ id: string }>();
     tenants.track(id);
     await app.inject({
       method: 'GET',
-      url: `/admin/clients/${id}`,
+      url: `/admin/companies/${id}`,
       headers: adminAuth,
     });
 
@@ -124,19 +124,19 @@ describe('métricas do banco contra o PostgreSQL de testes', () => {
     assert.equal(response.statusCode, 200);
     assert.match(
       response.body,
-      /db_query_duration_seconds_count\{model="Client",operation="create"\}/,
+      /db_query_duration_seconds_count\{model="Company",operation="create"\}/,
     );
     assert.match(response.body, /db_pool_connections\{state="total"\}/);
     assert.match(
       response.body,
-      /http_requests_total\{method="POST",route="\/admin\/clients",status_class="2xx"\} 1/,
+      /http_requests_total\{method="POST",route="\/admin\/companies",status_class="2xx"\} 1/,
     );
     assert.match(
       response.body,
-      /http_requests_total\{method="GET",route="\/admin\/clients\/:id",status_class="2xx"\} 1/,
+      /http_requests_total\{method="GET",route="\/admin\/companies\/:id",status_class="2xx"\} 1/,
     );
     assert.ok(!response.body.includes(id));
     assert.ok(!response.body.includes(slug));
-    assert.doesNotMatch(response.body, /clientId/i);
+    assert.doesNotMatch(response.body, /companyId/i);
   });
 });

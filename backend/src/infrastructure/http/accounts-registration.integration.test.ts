@@ -62,7 +62,7 @@ test('cadastro público: dono real do e-mail assume conta não confirmada; confi
     auth: auth.service,
     accounts: { service, origin, secure: false },
   });
-  const headers = { origin, 'x-soprei-client': 'web' };
+  const headers = { origin, 'x-soprei-app': 'web' };
   const post = (url: string, payload: object) =>
     app.inject({ method: 'POST', url, payload, headers });
   const emails = [0, 1, 2, 3].map(() => `reg-${randomUUID()}@example.test`);

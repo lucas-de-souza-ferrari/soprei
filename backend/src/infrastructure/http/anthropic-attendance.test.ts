@@ -4,15 +4,15 @@ import { after, afterEach, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
 import { ATTENDANCE_FALLBACK_TEXT } from '../../application/attendance/attendance.service.js';
-import { ClientService } from '../../application/clients/client.service.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import { Result } from '../../shared/types/index.js';
 import { FakeAnthropicApi, textMessage } from '../../test-support/fake-anthropic-api.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { AnthropicLlmProvider } from '../external-apis/llm/anthropic-llm.provider.js';
 import { createMetrics } from '../metrics/index.js';
-import { ClientId } from '../../domain/index.js';
+import { CompanyId } from '../../domain/index.js';
 import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
 import { buildServer } from './server.js';
 
@@ -24,7 +24,7 @@ import { buildServer } from './server.js';
 const METRICS_TOKEN = `metrics-${randomUUID()}-${randomUUID()}`;
 const API_KEY = `chave-falsa-${randomUUID()}`;
 let auth: { authorization: string };
-let userAuth: { authorization: string };
+let membershipAuth: { authorization: string };
 
 const SECRET_PERSONA = 'PERSONA-SECRETA-0a1b2c';
 const SECRET_HISTORY = 'HISTORICO-SECRETO-3d4e5f';
@@ -33,7 +33,7 @@ const SECRET_CONTACT = 'CONTATO-SECRETO-5511988887777';
 const fake = new FakeAnthropicApi();
 let app: FastifyInstance;
 let logs: ReturnType<typeof captureLogs>;
-let clientId = '';
+let companyId = '';
 
 interface ReplyBody {
   reply: { text: string; isFallback: boolean };
@@ -42,10 +42,10 @@ interface ReplyBody {
 async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } = {}) {
   const llmTimeoutMs = options.llmTimeoutMs ?? 400;
   logs = captureLogs();
-  const clients = new InMemoryClientRepository();
+  const companies = new InMemoryCompanyRepository();
   const store = new InMemoryAttendanceStore(() => new Date());
   const metrics = createMetrics();
-  const testAuth = buildTestAuth({ logger: logs.logger, clients });
+  const testAuth = buildTestAuth({ logger: logs.logger, companies });
   app = buildServer({
     logger: logs.logger,
     metrics,
@@ -56,9 +56,9 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
     },
     auth: testAuth.service,
     admin: {
-      clients: new ClientService(clients),
+      companies: new CompanyService(companies),
       attendance: new AttendanceService({
-        clients,
+        companies,
         conversations: store.conversations,
         messages: store.messages,
         unitOfWork: store,
@@ -81,15 +81,15 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
   auth = bearer((await testAuth.platformToken()).accessToken);
   const created = await app.inject({
     method: 'POST',
-    url: '/admin/clients',
+    url: '/admin/companies',
     headers: auth,
     payload: { name: 'Empresa Teste', slug: 'empresa-014' },
   });
-  clientId = created.json<{ id: string }>().id;
-  userAuth = bearer((await testAuth.userToken(ClientId.parse(clientId))).accessToken);
+  companyId = created.json<{ id: string }>().id;
+  membershipAuth = bearer((await testAuth.membershipToken(CompanyId.parse(companyId))).accessToken);
   const patched = await app.inject({
     method: 'PATCH',
-    url: `/admin/clients/${clientId}`,
+    url: `/admin/companies/${companyId}`,
     headers: auth,
     payload: { persona: SECRET_PERSONA },
   });
@@ -99,8 +99,8 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
 const send = (text: string, contactRef = 'c1') =>
   app.inject({
     method: 'POST',
-    url: `/admin/clients/${clientId}/messages`,
-    headers: userAuth,
+    url: `/admin/companies/${companyId}/messages`,
+    headers: membershipAuth,
     payload: { contactRef, text },
   });
 
@@ -155,8 +155,8 @@ describe('atendimento com o provedor Anthropic (servidor falso)', () => {
     assert.match(metrics, /llm_tokens_total\{provider="anthropic",type="input"\} 120/);
     assert.match(metrics, /llm_tokens_total\{provider="anthropic",type="output"\} 30/);
     assert.match(metrics, /llm_tokens_total\{provider="anthropic",type="cache_read"\} 100/);
-    assert.doesNotMatch(metrics, /(clientId|client_id)=/i, 'nenhum label de cliente');
-    assert.ok(!metrics.includes(clientId), 'o id do cliente não aparece em /metrics');
+    assert.doesNotMatch(metrics, /(companyId|company_id)=/i, 'nenhum label de empresa');
+    assert.ok(!metrics.includes(companyId), 'o id da empresa não aparece em /metrics');
     for (const secret of [SECRET_PERSONA, SECRET_CONTACT, API_KEY, 'Abrimos']) {
       assert.ok(!metrics.includes(secret), `${secret} apareceu em /metrics`);
       assert.ok(!logs.raw().includes(secret), `${secret} apareceu no log`);

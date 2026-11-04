@@ -3,21 +3,21 @@ import { describe, it } from 'node:test';
 import type { Redis } from 'ioredis';
 import { AttendanceService } from '../../../application/attendance/attendance.service.js';
 import type { AccountService } from '../../../application/auth/account.service.js';
-import { ClientService } from '../../../application/clients/client.service.js';
+import { CompanyService } from '../../../application/companies/company.service.js';
 import { Result } from '../../../shared/types/index.js';
 import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
 import {
   REQUIRED_AUTH_KIND,
   REQUIRED_PERMISSION,
   requirePermission,
-  requireUser,
+  requireMembership,
 } from '../../../presentation/common/auth.hooks.js';
 import { PERMISSIONS } from '../../../domain/index.js';
 import { rateLimitProfile } from '../../../presentation/common/rate-limit.js';
 import { buildTestAuth } from '../../../test-support/in-memory-auth.js';
 import { captureLogs, type LogLine } from '../../../test-support/log-capture.js';
 import { InMemoryAttendanceStore } from '../../../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../../test-support/in-memory-company.repository.js';
 import { createLogger } from '../../logger/logger.js';
 import { createMetrics } from '../../metrics/index.js';
 import { MockLlmProvider } from '../../external-apis/llm/mock-llm.provider.js';
@@ -74,7 +74,7 @@ function permissionProblem(permissions: readonly unknown[]): string | undefined 
 }
 
 describe('inventário: o verificador de permissão de rota de tenant (spec 008)', () => {
-  it('falha para rota que só declara requireUser, para dois hooks e para permissão desconhecida', async () => {
+  it('falha para rota que só declara requireMembership, para dois hooks e para permissão desconhecida', async () => {
     const app = buildServer({ logger, readiness: ALL_UP });
     const seen = new Map<string, unknown[]>();
     app.addHook('onRoute', (route) => {
@@ -86,32 +86,32 @@ describe('inventário: o verificador de permissão de rota de tenant (spec 008)'
       );
     });
     app.get(
-      '/admin/clients/:clientId/so-requireuser',
-      { onRequest: requireUser({ clientParam: 'clientId' }) },
+      '/admin/companies/:companyId/so-requireuser',
+      { onRequest: requireMembership({ companyParam: 'companyId' }) },
       () => ({}),
     );
     app.get(
-      '/admin/clients/:clientId/com-permissao',
-      { onRequest: requirePermission('user:read', { clientParam: 'clientId' }) },
+      '/admin/companies/:companyId/com-permissao',
+      { onRequest: requirePermission('membership:read', { companyParam: 'companyId' }) },
       () => ({}),
     );
     await app.ready();
     await app.close();
-    const onlyUser = seen.get('/admin/clients/:clientId/so-requireuser') ?? [];
-    const withPermission = seen.get('/admin/clients/:clientId/com-permissao') ?? [];
-    assert.match(permissionProblem(onlyUser) ?? '', /deve declarar requirePermission/);
+    const onlyMembership = seen.get('/admin/companies/:companyId/so-requireuser') ?? [];
+    const withPermission = seen.get('/admin/companies/:companyId/com-permissao') ?? [];
+    assert.match(permissionProblem(onlyMembership) ?? '', /deve declarar requirePermission/);
     assert.equal(permissionProblem(withPermission), undefined);
     assert.match(permissionProblem(['a', 'b']) ?? '', /deve declarar/);
-    assert.match(permissionProblem(['user:destroy']) ?? '', /desconhecida/);
+    assert.match(permissionProblem(['membership:destroy']) ?? '', /desconhecida/);
   });
 });
 
 describe('inventário de rotas: toda rota declara o seu perfil', () => {
   it('toda rota tem perfil declarado; /admin é admin e só /health e /metrics ficam sem limite', async () => {
-    const clients = new InMemoryClientRepository();
+    const companies = new InMemoryCompanyRepository();
     const store = new InMemoryAttendanceStore();
     const metrics = createMetrics();
-    const testAuth = buildTestAuth({ logger, clients });
+    const testAuth = buildTestAuth({ logger, companies });
     const app = buildServer({
       logger,
       readiness: ALL_UP,
@@ -123,7 +123,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         intake: { accept: () => Promise.resolve({ enqueued: 0, discarded: 0, failed: 0 }) },
       },
       auth: testAuth.service,
-      userAdmin: testAuth.userAdmin,
+      membershipAdmin: testAuth.membershipAdmin,
       // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
       accounts: {
         service: { drain: () => Promise.resolve() } as unknown as AccountService,
@@ -131,7 +131,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         secure: false,
       },
       admin: {
-        clients: new ClientService(clients),
+        companies: new CompanyService(companies),
         channel: {
           getState: () => Promise.reject(new Error('inventário')),
           connect: () => Promise.reject(new Error('inventário')),
@@ -139,7 +139,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           embeddedSignup: () => Promise.reject(new Error('inventário')),
         },
         attendance: new AttendanceService({
-          clients,
+          companies,
           conversations: store.conversations,
           messages: store.messages,
           unitOfWork: store,
@@ -180,13 +180,13 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/health',
       '/health/ready',
       '/metrics',
-      '/admin/clients',
-      '/admin/clients/:clientId/users',
-      '/admin/clients/:clientId/audit-events',
-      '/admin/clients/:clientId/channel',
-      '/admin/clients/:clientId/channel/embedded-signup',
-      '/admin/clients/:clientId/users/:userId',
-      '/admin/clients/:clientId/users/:userId/password',
+      '/admin/companies',
+      '/admin/companies/:companyId/memberships',
+      '/admin/companies/:companyId/audit-events',
+      '/admin/companies/:companyId/channel',
+      '/admin/companies/:companyId/channel/embedded-signup',
+      '/admin/companies/:companyId/memberships/:membershipId',
+      '/admin/companies/:companyId/memberships/:membershipId/password',
       '/auth/login',
       '/auth/platform/login',
       '/auth/refresh',
@@ -206,7 +206,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
 
     // Spec 015: as três rotas do canal existem e exigem a permissão certa (leitura x gestão).
     const channelRoutes = routes.filter(
-      (route) => route.url === '/admin/clients/:clientId/channel',
+      (route) => route.url === '/admin/companies/:companyId/channel',
     );
     assert.deepEqual(
       channelRoutes
@@ -218,7 +218,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     );
 
     const signup = routes.filter(
-      (route) => route.url === '/admin/clients/:clientId/channel/embedded-signup',
+      (route) => route.url === '/admin/companies/:companyId/channel/embedded-signup',
     );
     assert.deepEqual(
       signup.map((route) => `${String(route.method)}:${String(route.permissions.find(Boolean))}`),
@@ -247,14 +247,16 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         );
       } else if (route.url.startsWith('/admin/')) {
         assert.equal(route.config.rateLimitProfile, 'admin', `${label} deve ser do perfil admin`);
-        // Spec 007: toda rota /admin declara a espécie de identidade que exige. CRUD de clientes
-        // é do administrador da plataforma; as rotas de um cliente (`:clientId`) são do usuário.
-        const expected = route.url.startsWith('/admin/clients/:clientId') ? 'user' : 'platform';
+        // Spec 007: toda rota /admin declara a espécie de identidade que exige. CRUD de empresas
+        // é do administrador da plataforma; as rotas de uma empresa (`:companyId`) são do usuário.
+        const expected = route.url.startsWith('/admin/companies/:companyId')
+          ? 'membership'
+          : 'platform';
         assert.ok(
           route.authKinds.includes(expected),
-          `${label} deve declarar ${expected === 'user' ? 'requireUser()' : 'requirePlatform()'}`,
+          `${label} deve declarar ${expected === 'membership' ? 'requireMembership()' : 'requirePlatform()'}`,
         );
-        if (expected === 'user') {
+        if (expected === 'membership') {
           // Spec 008: nenhuma rota de tenant sem permissão explícita (e a permissão existe).
           assert.equal(permissionProblem(route.permissions), undefined, label);
         }
@@ -352,7 +354,7 @@ describe('log do fail-open não vaza o IP', () => {
   const PREFIX = 'soprei:ratelimit:';
 
   /** Client de mentira cujo script sempre falha com um erro no formato do ioredis (`command.args`). */
-  function failingClient(makeError: () => Error): Redis {
+  function failingCompany(makeError: () => Error): Redis {
     const client = {
       defineCommand(name: string): void {
         (client as unknown as Record<string, unknown>)[name] = (...args: unknown[]): void => {
@@ -374,7 +376,7 @@ describe('log do fail-open não vaza o IP', () => {
     const app = buildServer({
       logger: logs.logger,
       readiness: ALL_UP,
-      rateLimit: { redis: failingClient(makeError), profiles: PROFILES, keyPrefix: PREFIX },
+      rateLimit: { redis: failingCompany(makeError), profiles: PROFILES, keyPrefix: PREFIX },
     });
     void app.register((instance, _options, done) => {
       instance.get('/test/webhook', { config: rateLimitProfile('webhook') }, () => ({ ok: true }));

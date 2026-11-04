@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
-import { type Client } from '../../../domain/index.js';
+import { type Company } from '../../../domain/index.js';
 import { TenantScopeError } from '../../../shared/errors/index.js';
 import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
 import { TestTenants } from '../../../test-support/tenant-fixtures.js';
@@ -14,8 +14,8 @@ const config = loadIntegrationConfig();
 
 let database: Database;
 let tenants: TestTenants;
-let clientA: Client;
-let clientB: Client;
+let companyA: Company;
+let companyB: Company;
 let conversationB: string;
 
 const isTenantScopeError = (error: unknown): boolean => error instanceof TenantScopeError;
@@ -23,14 +23,14 @@ const isTenantScopeError = (error: unknown): boolean => error instanceof TenantS
 before(async () => {
   database = createDatabase(config, createLogger(config));
   tenants = new TestTenants(database.prisma);
-  clientA = await tenants.createClient('scope-a');
-  clientB = await tenants.createClient('scope-b');
+  companyA = await tenants.createCompany('scope-a');
+  companyB = await tenants.createCompany('scope-b');
   await database.prisma.conversation.create({
-    data: { clientId: clientA.id, contactRef: randomUUID() },
+    data: { companyId: companyA.id, contactRef: randomUUID() },
   });
   conversationB = (
     await database.prisma.conversation.create({
-      data: { clientId: clientB.id, contactRef: randomUUID() },
+      data: { companyId: companyB.id, contactRef: randomUUID() },
     })
   ).id;
 });
@@ -61,16 +61,16 @@ function unscopedCalls(db: TenantScopedDb): readonly (readonly [string, () => Pr
       () =>
         db.conversation.upsert({
           where: { id },
-          create: { clientId: clientA.id, contactRef: randomUUID() },
+          create: { companyId: companyA.id, contactRef: randomUUID() },
           update: {},
         }),
     ],
-    ['clientId undefined', () => db.conversation.findMany({ where: { clientId: undefined } })],
+    ['companyId undefined', () => db.conversation.findMany({ where: { companyId: undefined } })],
     [
-      'create sem clientId (via relação)',
+      'create sem companyId (via relação)',
       () =>
         db.conversation.create({
-          data: { contactRef: randomUUID(), client: { connect: { id: clientA.id } } },
+          data: { contactRef: randomUUID(), company: { connect: { id: companyA.id } } },
         }),
     ],
   ];
@@ -90,7 +90,9 @@ describe('segunda barreira contra o banco real', () => {
   it('o mesmo vale dentro de runInTransaction (e o erro desfaz a transação)', async () => {
     await assert.rejects(
       runInTransaction(database.prisma, async (tx) => {
-        await tx.conversation.create({ data: { clientId: clientA.id, contactRef: randomUUID() } });
+        await tx.conversation.create({
+          data: { companyId: companyA.id, contactRef: randomUUID() },
+        });
         for (const [label, call] of unscopedCalls(tx)) {
           await assert.rejects(call(), isTenantScopeError, `tx: ${label}`);
         }
@@ -99,32 +101,38 @@ describe('segunda barreira contra o banco real', () => {
       isTenantScopeError,
     );
     // A criação feita antes do erro, dentro da transação, foi desfeita.
-    assert.equal(await database.prisma.conversation.count({ where: { clientId: clientA.id } }), 1);
+    assert.equal(
+      await database.prisma.conversation.count({ where: { companyId: companyA.id } }),
+      1,
+    );
   });
 
   it('nada foi alterado no banco pelas chamadas recusadas', async () => {
-    assert.equal(await database.prisma.conversation.count({ where: { clientId: clientB.id } }), 1);
+    assert.equal(
+      await database.prisma.conversation.count({ where: { companyId: companyB.id } }),
+      1,
+    );
     assert.ok(
       await database.prisma.conversation.findFirst({
-        where: { id: conversationB, clientId: clientB.id },
+        where: { id: conversationB, companyId: companyB.id },
       }),
     );
   });
 
-  it('com clientId no where as operações funcionam e só enxergam o cliente informado', async () => {
+  it('com companyId no where as operações funcionam e só enxergam a empresa informado', async () => {
     const db = database.prisma;
-    assert.equal(await db.conversation.count({ where: { clientId: clientA.id } }), 1);
+    assert.equal(await db.conversation.count({ where: { companyId: companyA.id } }), 1);
     assert.equal(
-      await db.conversation.findFirst({ where: { id: conversationB, clientId: clientA.id } }),
+      await db.conversation.findFirst({ where: { id: conversationB, companyId: companyA.id } }),
       null,
     );
     const { count } = await db.conversation.updateMany({
-      where: { id: conversationB, clientId: clientA.id },
+      where: { id: conversationB, companyId: companyA.id },
       data: { updatedAt: new Date() },
     });
     assert.equal(count, 0);
     const inTx = await runInTransaction(database.prisma, (tx) =>
-      tx.conversation.findMany({ where: { clientId: clientB.id } }),
+      tx.conversation.findMany({ where: { companyId: companyB.id } }),
     );
     assert.deepEqual(
       inTx.map((row) => row.id),
@@ -132,24 +140,26 @@ describe('segunda barreira contra o banco real', () => {
     );
   });
 
-  it('não deixa ler conversas de todos os clientes pelo model global (include no Client)', async () => {
+  it('não deixa ler conversas de todos as empresas pelo model global (include no Company)', async () => {
     await assert.rejects(
-      database.prisma.client.findMany({ include: { conversations: true } }),
+      database.prisma.company.findMany({ include: { conversations: true } }),
       isTenantScopeError,
     );
     await assert.rejects(
-      database.prisma.client.findFirst({ select: { _count: { select: { conversations: true } } } }),
+      database.prisma.company.findFirst({
+        select: { _count: { select: { conversations: true } } },
+      }),
       isTenantScopeError,
     );
-    const plain = await database.prisma.client.findFirst({ where: { id: clientA.id } });
-    assert.equal(plain?.id, clientA.id);
+    const plain = await database.prisma.company.findFirst({ where: { id: companyA.id } });
+    assert.equal(plain?.id, companyA.id);
   });
 
-  it('o model global Client segue com findUnique e update (é a raiz, sem clientId)', async () => {
-    const found = await database.prisma.client.findUnique({ where: { id: clientA.id } });
-    assert.equal(found?.slug, clientA.slug);
-    const updated = await database.prisma.client.update({
-      where: { id: clientA.id },
+  it('o model global Company segue com findUnique e update (é a raiz, sem companyId)', async () => {
+    const found = await database.prisma.company.findUnique({ where: { id: companyA.id } });
+    assert.equal(found?.slug, companyA.slug);
+    const updated = await database.prisma.company.update({
+      where: { id: companyA.id },
       data: { name: 'Renomeado' },
     });
     assert.equal(updated.name, 'Renomeado');

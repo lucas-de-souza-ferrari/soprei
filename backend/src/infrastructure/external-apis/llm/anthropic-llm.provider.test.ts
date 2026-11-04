@@ -163,7 +163,7 @@ describe('AnthropicLlmProvider: pedido', () => {
     ]);
   });
 
-  it('não guarda estado entre chamadas: duas chamadas intercaladas de dois clientes não se misturam', async () => {
+  it('não guarda estado entre chamadas: duas chamadas intercaladas de duas empresas não se misturam', async () => {
     fake.always(textMessage('ok', { delayMs: 40 }));
     const provider = makeProvider();
     const [a, b] = await Promise.all([

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
-import { type Client, ClientId } from '../../../domain/index.js';
+import { type Company, CompanyId } from '../../../domain/index.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../../shared/errors/index.js';
 import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
 import { TestTenants } from '../../../test-support/tenant-fixtures.js';
 import { createLogger } from '../../logger/logger.js';
-import { PrismaClientRepository } from './client.repository.js';
+import { PrismaCompanyRepository } from './company.repository.js';
 import { createDatabase, type Database } from '../database.js';
 import { runInTransaction } from '../transaction.js';
 
@@ -14,20 +14,20 @@ const config = loadIntegrationConfig();
 
 let database: Database;
 let tenants: TestTenants;
-let repo: PrismaClientRepository;
+let repo: PrismaCompanyRepository;
 
 const slug = (label: string): string => `${label}-${randomBytes(6).toString('hex')}`;
 
-async function createTracked(label: string): Promise<Client> {
-  const client = await repo.create({ name: `Cliente ${label}`, slug: slug(label) });
-  tenants.track(client.id);
-  return client;
+async function createTracked(label: string): Promise<Company> {
+  const company = await repo.create({ name: `Empresa ${label}`, slug: slug(label) });
+  tenants.track(company.id);
+  return company;
 }
 
 before(() => {
   database = createDatabase(config, createLogger(config));
   tenants = new TestTenants(database.prisma);
-  repo = new PrismaClientRepository(database.prisma);
+  repo = new PrismaCompanyRepository(database.prisma);
 });
 
 after(async () => {
@@ -38,13 +38,13 @@ after(async () => {
   }
 });
 
-describe('repositório de Client (raiz do tenant)', () => {
+describe('repositório de Company (raiz do tenant)', () => {
   it('cria com status ACTIVE por padrão e devolve a entidade de domínio', async () => {
     const created = await createTracked('crud');
     assert.equal(created.status, 'ACTIVE');
-    assert.equal(created.name, 'Cliente crud');
+    assert.equal(created.name, 'Empresa crud');
     assert.ok(created.createdAt instanceof Date);
-    assert.equal(ClientId.parse(created.id), created.id);
+    assert.equal(CompanyId.parse(created.id), created.id);
     assert.ok(!('deletedAt' in created));
   });
 
@@ -64,7 +64,7 @@ describe('repositório de Client (raiz do tenant)', () => {
     assert.deepEqual(await repo.findBySlug(created.slug), created);
     await assert.rejects(repo.findBySlug(slug('inexistente')), NotFoundError);
     await assert.rejects(
-      repo.findById(ClientId.parse('01890a5d-ac96-774b-bcce-b302099a8057')),
+      repo.findById(CompanyId.parse('01890a5d-ac96-774b-bcce-b302099a8057')),
       NotFoundError,
     );
   });
@@ -120,13 +120,13 @@ describe('repositório de Client (raiz do tenant)', () => {
     let cursor: string | undefined;
     do {
       const page = await repo.list({ limit: 200, ...(cursor === undefined ? {} : { cursor }) });
-      listedIds.push(...page.items.map((client) => client.id));
+      listedIds.push(...page.items.map((company) => company.id));
       cursor = page.nextCursor ?? undefined;
     } while (cursor !== undefined);
     assert.ok(!listedIds.includes(created.id));
 
     // A linha continua no banco (soft delete) e o slug não pode ser reutilizado.
-    const row = await database.prisma.client.findFirst({ where: { id: created.id } });
+    const row = await database.prisma.company.findFirst({ where: { id: created.id } });
     assert.ok(row?.deletedAt instanceof Date);
     await assert.rejects(repo.create({ name: 'Reuso', slug: created.slug }), ConflictError);
   });
@@ -135,9 +135,9 @@ describe('repositório de Client (raiz do tenant)', () => {
     const created = await Promise.all(
       Array.from({ length: 5 }, (_, index) => createTracked(`pag${String(index)}`)),
     );
-    const mine = new Set(created.map((client) => client.id));
+    const mine = new Set(created.map((company) => company.id));
 
-    const seen: Client[] = [];
+    const seen: Company[] = [];
     let cursor: string | undefined;
     let pages = 0;
     do {
@@ -148,7 +148,7 @@ describe('repositório de Client (raiz do tenant)', () => {
       pages++;
     } while (cursor !== undefined && pages < 200);
 
-    const ids = seen.map((client) => client.id);
+    const ids = seen.map((company) => company.id);
     assert.equal(new Set(ids).size, ids.length, 'sem repetição entre páginas');
     for (const id of mine) assert.ok(ids.includes(id));
     const sorted = [...seen].sort(
@@ -156,8 +156,8 @@ describe('repositório de Client (raiz do tenant)', () => {
         left.createdAt.getTime() - right.createdAt.getTime() || (left.id < right.id ? -1 : 1),
     );
     assert.deepEqual(
-      seen.map((client) => client.id),
-      sorted.map((client) => client.id),
+      seen.map((company) => company.id),
+      sorted.map((company) => company.id),
     );
 
     await assert.rejects(repo.list({ limit: 0 }), ValidationError);
@@ -165,7 +165,7 @@ describe('repositório de Client (raiz do tenant)', () => {
     await assert.rejects(repo.list({ cursor: 'invalido' }), ValidationError);
   });
 
-  it('forTransaction: o rollback desfaz a criação do cliente', async () => {
+  it('forTransaction: o rollback desfaz a criação da empresa', async () => {
     const wanted = slug('tx');
     const boom = new ValidationError('abortar');
     await assert.rejects(
@@ -183,12 +183,12 @@ describe('findByWhatsappPhoneNumberId (spec 011)', () => {
   /** Número único por execução (1 a 32 dígitos), para não colidir com dados de outros testes. */
   const phoneId = (): string => `9${randomBytes(6).readUIntBE(0, 6).toString().padStart(15, '0')}`;
 
-  it('devolve o cliente dono do número e null para número desconhecido', async () => {
+  it('devolve a empresa dona do número e null para número desconhecido', async () => {
     const number = phoneId();
-    const client = await createTracked('wa-find');
-    await repo.update(client.id, { whatsappPhoneNumberId: number });
+    const company = await createTracked('wa-find');
+    await repo.update(company.id, { whatsappPhoneNumberId: number });
     const found = await repo.findByWhatsappPhoneNumberId(number);
-    assert.equal(found?.id, client.id);
+    assert.equal(found?.id, company.id);
     assert.equal(found.whatsappPhoneNumberId, number);
     assert.equal(await repo.findByWhatsappPhoneNumberId(phoneId()), null);
   });
@@ -199,7 +199,7 @@ describe('findByWhatsappPhoneNumberId (spec 011)', () => {
     }
   });
 
-  it('não devolve cliente removido, e remover libera o número para outro cliente', async () => {
+  it('não devolve empresa removida, e remover libera o número para outra empresa', async () => {
     const number = phoneId();
     const removed = await createTracked('wa-removed');
     await repo.update(removed.id, { whatsappPhoneNumberId: number });
@@ -212,19 +212,19 @@ describe('findByWhatsappPhoneNumberId (spec 011)', () => {
     assert.equal((await repo.findByWhatsappPhoneNumberId(number))?.id, next.id);
   });
 
-  it('mesmo se um cliente removido ainda guardasse o número, ele não seria devolvido (filtro de removidos)', async () => {
+  it('mesmo se uma empresa removida ainda guardasse o número, ele não seria devolvido (filtro de removidos)', async () => {
     const number = phoneId();
-    const client = await createTracked('wa-ghost');
-    await repo.update(client.id, { whatsappPhoneNumberId: number });
+    const company = await createTracked('wa-ghost');
+    await repo.update(company.id, { whatsappPhoneNumberId: number });
     // Soft delete "à mão", sem liberar o número: o filtro do repositório é a barreira.
-    await database.prisma.client.updateMany({
-      where: { id: client.id },
+    await database.prisma.company.updateMany({
+      where: { id: company.id },
       data: { deletedAt: new Date() },
     });
     assert.equal(await repo.findByWhatsappPhoneNumberId(number), null);
   });
 
-  it('dois clientes não podem ter o mesmo número (ConflictError); null libera e vários podem não ter', async () => {
+  it('duas empresas não podem ter o mesmo número (ConflictError); null libera e vários podem não ter', async () => {
     const number = phoneId();
     const first = await createTracked('wa-dup-1');
     const second = await createTracked('wa-dup-2');
@@ -238,7 +238,7 @@ describe('findByWhatsappPhoneNumberId (spec 011)', () => {
     const cleared = await repo.update(first.id, { whatsappPhoneNumberId: null });
     assert.equal(cleared.whatsappPhoneNumberId, null);
     assert.equal(await repo.findByWhatsappPhoneNumberId(number), null);
-    // Vários clientes sem número convivem (NULL não colide).
+    // Várias empresas sem número convivem (NULL não colide).
     const third = await createTracked('wa-null-1');
     const fourth = await createTracked('wa-null-2');
     assert.equal(third.whatsappPhoneNumberId, null);
@@ -246,11 +246,11 @@ describe('findByWhatsappPhoneNumberId (spec 011)', () => {
   });
 
   it('SQL cru: o banco recusa número com formato inválido (CHECK)', async () => {
-    const client = await createTracked('wa-check');
+    const company = await createTracked('wa-check');
     for (const invalid of ['abc', '', '1'.repeat(33), '+5511999999999']) {
       await assert.rejects(
         database.prisma
-          .$executeRaw`UPDATE clients SET whatsapp_phone_number_id = ${invalid} WHERE id = ${client.id}::uuid`,
+          .$executeRaw`UPDATE companies SET whatsapp_phone_number_id = ${invalid} WHERE id = ${company.id}::uuid`,
         /format_check|check/i,
         invalid,
       );

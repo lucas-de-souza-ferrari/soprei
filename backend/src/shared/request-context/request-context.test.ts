@@ -4,9 +4,9 @@ import {
   createRequestContext,
   getContext,
   runWithContext,
-  setClientId,
+  setCompanyId,
   setOperation,
-  setUserId,
+  setActorId,
 } from './index.js';
 
 const sleep = (ms: number): Promise<void> =>
@@ -18,8 +18,8 @@ describe('request-context', () => {
   it('fora de uma requisição, getContext devolve undefined e os setters são no-op', () => {
     assert.equal(getContext(), undefined);
     assert.doesNotThrow(() => {
-      setClientId('c1');
-      setUserId('u1');
+      setCompanyId('c1');
+      setActorId('u1');
       setOperation('GET /x');
     });
     assert.equal(getContext(), undefined);
@@ -28,12 +28,12 @@ describe('request-context', () => {
   it('os setters alteram o contexto da requisição atual', () => {
     runWithContext(createRequestContext('req-1'), () => {
       assert.deepEqual({ ...getContext() }, { requestId: 'req-1' });
-      setClientId('c1');
-      setUserId('u1');
+      setCompanyId('c1');
+      setActorId('u1');
       setOperation('GET /x');
       assert.deepEqual(
         { ...getContext() },
-        { requestId: 'req-1', clientId: 'c1', userId: 'u1', operation: 'GET /x' },
+        { requestId: 'req-1', companyId: 'c1', actorId: 'u1', operation: 'GET /x' },
       );
     });
     assert.equal(getContext(), undefined);
@@ -44,14 +44,14 @@ describe('request-context', () => {
     const run = (id: string, delay: number): Promise<void> =>
       Promise.resolve(
         runWithContext(createRequestContext(id), async () => {
-          setClientId(`client-${id}`);
+          setCompanyId(`company-${id}`);
           await sleep(delay);
-          seen.push(`${id}:${getContext()?.clientId ?? '?'}`);
+          seen.push(`${id}:${getContext()?.companyId ?? '?'}`);
           await sleep(delay);
           seen.push(`${id}:${getContext()?.requestId ?? '?'}`);
         }),
       );
     await Promise.all([run('a', 20), run('b', 5)]);
-    assert.deepEqual([...seen].sort(), ['a:a', 'a:client-a', 'b:b', 'b:client-b']);
+    assert.deepEqual([...seen].sort(), ['a:a', 'a:company-a', 'b:b', 'b:company-b']);
   });
 });

@@ -110,7 +110,7 @@ const CATEGORY = {
  * Privacidade: o `ExternalServiceError` devolvido leva **só** `{ provider, status, errorType,
  * retryable }` e uma mensagem fixa por categoria. `message`, corpo, cabeçalhos e o objeto de erro do
  * SDK (que pode ecoar o pedido) nunca são copiados nem anexados como `cause`. A chave só vai ao SDK.
- * Sem estado entre chamadas: cada pedido leva só a persona, o histórico e a mensagem de um cliente.
+ * Sem estado entre chamadas: cada pedido leva só a persona, o histórico e a mensagem de uma empresa.
  */
 export class AnthropicLlmProvider implements LlmProvider {
   readonly name = 'anthropic';
@@ -186,7 +186,7 @@ export class AnthropicLlmProvider implements LlmProvider {
 }
 
 /**
- * O SDK lê `ANTHROPIC_CUSTOM_HEADERS` direto de `process.env` ao criar o cliente e o mescla nos
+ * O SDK lê `ANTHROPIC_CUSTOM_HEADERS` direto de `process.env` ao criar a empresa e o mescla nos
  * cabeçalhos de toda requisição: fora da nossa config e da validação. Aqui ele é ignorado (some só
  * durante a construção, e é restaurado em seguida).
  */
@@ -207,8 +207,8 @@ function withoutCustomHeadersEnv<T>(build: () => T): T {
  */
 function toMessages(input: LlmGenerateInput): Anthropic.MessageParam[] {
   const turns: LlmTurn[] = input.history.filter((turn) => turn.content.trim().length > 0);
-  const firstUser = turns.findIndex((turn) => turn.role === 'user');
-  const history = firstUser === -1 ? [] : turns.slice(firstUser);
+  const firstMembership = turns.findIndex((turn) => turn.role === 'user');
+  const history = firstMembership === -1 ? [] : turns.slice(firstMembership);
   return [
     ...history.map((turn) => ({ role: turn.role, content: turn.content })),
     { role: 'user' as const, content: input.userMessage },

@@ -1,5 +1,5 @@
 import type {
-  ClientId,
+  CompanyId,
   Conversation,
   ConversationRepository,
   ConversationUpdate,
@@ -18,7 +18,7 @@ function conversationOps(
     findFirst: (where) => db.conversation.findFirst({ where }),
     findMany: ({ where, orderBy, take }) => db.conversation.findMany({ where, orderBy, take }),
     create: (data) =>
-      db.conversation.create({ data: { clientId: data.clientId, contactRef: data.contactRef } }),
+      db.conversation.create({ data: { companyId: data.companyId, contactRef: data.contactRef } }),
     // Ainda não há campos editáveis: por ora, atualizar só marca o registro como alterado.
     updateMany: (where) => db.conversation.updateMany({ where, data: { updatedAt: new Date() } }),
     deleteMany: (where) => db.conversation.deleteMany({ where }),
@@ -38,23 +38,23 @@ export class PrismaConversationRepository
     return new PrismaConversationRepository(tx);
   }
 
-  findByContact(clientId: ClientId, contactRef: string): Promise<Conversation | null> {
+  findByContact(companyId: CompanyId, contactRef: string): Promise<Conversation | null> {
     return this.run('findByContact', async () => {
-      const row = await this.db.conversation.findFirst({ where: { clientId, contactRef } });
+      const row = await this.db.conversation.findFirst({ where: { companyId, contactRef } });
       return row === null ? null : toConversation(row);
     });
   }
 
-  findOrCreateByContact(clientId: ClientId, contactRef: string): Promise<Conversation> {
+  findOrCreateByContact(companyId: CompanyId, contactRef: string): Promise<Conversation> {
     return this.run('findOrCreateByContact', async () => {
-      const where = { clientId, contactRef };
+      const where = { companyId, contactRef };
       const existing = await this.db.conversation.findFirst({ where });
       if (existing !== null) return toConversation(existing);
       // `skipDuplicates` vira INSERT ... ON CONFLICT DO NOTHING: o pedido concorrente que
       // perde a corrida não falha (e, dentro de uma transação, não a deixa abortada); em
-      // seguida os dois leem a mesma linha, que a unicidade (clientId, contactRef) garante.
+      // seguida os dois leem a mesma linha, que a unicidade (companyId, contactRef) garante.
       await this.db.conversation.createMany({
-        data: [{ clientId, contactRef }],
+        data: [{ companyId, contactRef }],
         skipDuplicates: true,
       });
       const row = await this.db.conversation.findFirst({ where });

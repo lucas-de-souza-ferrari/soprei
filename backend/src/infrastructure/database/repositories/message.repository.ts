@@ -1,5 +1,5 @@
 import type {
-  ClientId,
+  CompanyId,
   ListOptions,
   Message,
   MessageRepository,
@@ -23,7 +23,7 @@ function messageOps(db: TenantScopedDb): TenantModelOps<MessageRow, NewMessage, 
     create: (data) =>
       db.message.create({
         data: {
-          clientId: data.clientId,
+          companyId: data.companyId,
           conversationId: data.conversationId,
           role: data.role,
           content: data.content,
@@ -33,7 +33,7 @@ function messageOps(db: TenantScopedDb): TenantModelOps<MessageRow, NewMessage, 
           ...(data.createdAt === undefined ? {} : { createdAt: data.createdAt }),
         },
       }),
-    // Mensagens são imutáveis: "atualizar" só confirma que a mensagem existe neste cliente.
+    // Mensagens são imutáveis: "atualizar" só confirma que a mensagem existe nesta empresa.
     updateMany: async (where) => ({ count: await db.message.count({ where }) }),
     deleteMany: (where) => db.message.deleteMany({ where }),
     count: (where) => db.message.count({ where }),
@@ -41,8 +41,8 @@ function messageOps(db: TenantScopedDb): TenantModelOps<MessageRow, NewMessage, 
 }
 
 /**
- * Repositório de `Message` sobre a base de tenant: o filtro por cliente é montado pela base
- * (`findById`, `list`, `create`...) e, nos métodos próprios, sempre com `clientId` no `where`
+ * Repositório de `Message` sobre a base de tenant: o filtro por empresa é montado pela base
+ * (`findById`, `list`, `create`...) e, nos métodos próprios, sempre com `companyId` no `where`
  * (a `tenant-scope` recusa qualquer consulta sem ele).
  */
 export class PrismaMessageRepository
@@ -57,32 +57,32 @@ export class PrismaMessageRepository
     return new PrismaMessageRepository(tx);
   }
 
-  findByExternalId(clientId: ClientId, externalId: string): Promise<Message | null> {
+  findByExternalId(companyId: CompanyId, externalId: string): Promise<Message | null> {
     return this.run('findByExternalId', async () => {
-      const row = await this.db.message.findFirst({ where: { clientId, externalId } });
+      const row = await this.db.message.findFirst({ where: { companyId, externalId } });
       return row === null ? null : toMessage(row);
     });
   }
 
-  findReplyTo(clientId: ClientId, messageId: string): Promise<Message | null> {
+  findReplyTo(companyId: CompanyId, messageId: string): Promise<Message | null> {
     return this.run('findReplyTo', async () => {
       if (!isUuid(messageId)) return null;
       const row = await this.db.message.findFirst({
-        where: { clientId, replyToId: messageId, role: 'ASSISTANT' },
+        where: { companyId, replyToId: messageId, role: 'ASSISTANT' },
       });
       return row === null ? null : toMessage(row);
     });
   }
 
   listRecent(
-    clientId: ClientId,
+    companyId: CompanyId,
     conversationId: string,
     limit: number,
   ): Promise<readonly Message[]> {
     return this.run('listRecent', async () => {
       if (!Number.isInteger(limit) || limit < 1 || !isUuid(conversationId)) return [];
       const rows = await this.db.message.findMany({
-        where: { clientId, conversationId },
+        where: { companyId, conversationId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
       });
@@ -91,7 +91,7 @@ export class PrismaMessageRepository
   }
 
   listBefore(
-    clientId: ClientId,
+    companyId: CompanyId,
     conversationId: string,
     messageId: string,
     limit: number,
@@ -100,14 +100,14 @@ export class PrismaMessageRepository
       if (!Number.isInteger(limit) || limit < 1 || !isUuid(conversationId) || !isUuid(messageId)) {
         return [];
       }
-      // A âncora precisa ser DESTA conversa e DESTE cliente; senão não há "anterior" a ela.
+      // A âncora precisa ser DESTA conversa e Desta empresa; senão não há "anterior" a ela.
       const anchor = await this.db.message.findFirst({
-        where: { clientId, conversationId, id: messageId },
+        where: { companyId, conversationId, id: messageId },
       });
       if (anchor === null) return [];
       const rows = await this.db.message.findMany({
         where: {
-          clientId,
+          companyId,
           conversationId,
           // Antes da âncora na ordem da conversa: `createdAt` e, no mesmo instante, `id`.
           OR: [
@@ -122,13 +122,13 @@ export class PrismaMessageRepository
     });
   }
 
-  markSent(clientId: ClientId, messageId: string, mark: MessageSentMark): Promise<boolean> {
+  markSent(companyId: CompanyId, messageId: string, mark: MessageSentMark): Promise<boolean> {
     return this.run('markSent', async () => {
       if (!isUuid(messageId)) return false;
-      // O `where` carrega o cliente, o papel e a ausência de marca: só a resposta do assistente
-      // deste cliente que ainda não foi marcada muda (idempotente; mensagem alheia é intocável).
+      // O `where` carrega a empresa, o papel e a ausência de marca: só a resposta do assistente
+      // desta empresa que ainda não foi marcada muda (idempotente; mensagem alheia é intocável).
       const { count } = await this.db.message.updateMany({
-        where: { clientId, id: messageId, role: 'ASSISTANT', sentAt: null },
+        where: { companyId, id: messageId, role: 'ASSISTANT', sentAt: null },
         data: { channelMessageId: mark.channelMessageId, sentAt: mark.sentAt },
       });
       return count > 0;
@@ -136,7 +136,7 @@ export class PrismaMessageRepository
   }
 
   listPending(
-    clientId: ClientId,
+    companyId: CompanyId,
     conversationId: string,
     limit: number,
   ): Promise<readonly Message[]> {
@@ -144,7 +144,7 @@ export class PrismaMessageRepository
       if (!Number.isInteger(limit) || limit < 1 || !isUuid(conversationId)) return [];
       const rows = await this.db.message.findMany({
         where: {
-          clientId,
+          companyId,
           conversationId,
           role: 'USER',
           answeredById: null,
@@ -159,18 +159,18 @@ export class PrismaMessageRepository
   }
 
   markAnswered(
-    clientId: ClientId,
+    companyId: CompanyId,
     messageIds: readonly string[],
     replyId: string,
   ): Promise<number> {
     return this.run('markAnswered', async () => {
       const ids = messageIds.filter(isUuid);
       if (ids.length === 0 || !isUuid(replyId)) return 0;
-      // O `where` carrega o cliente, o papel e a ausência de marca: só mensagem do contato deste
-      // cliente que ainda não foi atendida muda (idempotente; id de outro cliente é intocável). A
-      // chave estrangeira composta garante, no banco, que a resposta é do mesmo cliente.
+      // O `where` carrega a empresa, o papel e a ausência de marca: só mensagem do contato deste
+      // empresa que ainda não foi atendida muda (idempotente; id de outra empresa é intocável). A
+      // chave estrangeira composta garante, no banco, que a resposta é do mesma empresa.
       const { count } = await this.db.message.updateMany({
-        where: { clientId, id: { in: ids }, role: 'USER', answeredById: null },
+        where: { companyId, id: { in: ids }, role: 'USER', answeredById: null },
         data: { answeredById: replyId },
       });
       return count;
@@ -178,7 +178,7 @@ export class PrismaMessageRepository
   }
 
   listByConversation(
-    clientId: ClientId,
+    companyId: CompanyId,
     conversationId: string,
     options?: ListOptions,
   ): Promise<Page<Message>> {
@@ -188,7 +188,7 @@ export class PrismaMessageRepository
       }
       const { limit, take, after } = buildPageQuery(options);
       const rows = await this.db.message.findMany({
-        where: { clientId, conversationId, ...(after === undefined ? {} : { OR: after }) },
+        where: { companyId, conversationId, ...(after === undefined ? {} : { OR: after }) },
         orderBy: stableOrderBy(),
         take,
       });

@@ -48,11 +48,11 @@ describe('createMetrics', () => {
 
   it('db_query_duration_seconds é por model e operation', async () => {
     const metrics = createMetrics();
-    metrics.observeDbQuery({ model: 'Client', operation: 'create', durationSeconds: 0.003 });
-    metrics.observeDbQuery({ model: 'Client', operation: 'create', durationSeconds: 0.004 });
+    metrics.observeDbQuery({ model: 'Company', operation: 'create', durationSeconds: 0.003 });
+    metrics.observeDbQuery({ model: 'Company', operation: 'create', durationSeconds: 0.004 });
     metrics.observeDbQuery({ model: 'Conversation', operation: 'findMany', durationSeconds: 0.5 });
     const body = await metrics.render();
-    assert.match(body, /db_query_duration_seconds_count\{model="Client",operation="create"\} 2/);
+    assert.match(body, /db_query_duration_seconds_count\{model="Company",operation="create"\} 2/);
     assert.match(
       body,
       /db_query_duration_seconds_count\{model="Conversation",operation="findMany"\} 1/,
@@ -110,10 +110,10 @@ describe('createMetrics', () => {
     assert.match(body, /llm_requests_total{provider="mock",result="timeout"} 1/);
     assert.match(body, /llm_request_duration_seconds_count{provider="mock"} 4/);
     assert.match(body, /attendance_fallbacks_total 2/);
-    assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
+    assert.doesNotMatch(body, /companyId|membershipId|company_id|membership_id/i);
   });
 
-  it('registra tokens e os resultados refusal e truncated do LLM (spec 014), sem label de cliente', async () => {
+  it('registra tokens e os resultados refusal e truncated do LLM (spec 014), sem label de empresa', async () => {
     const metrics = createMetrics();
     metrics.observeLlmRequest({ provider: 'anthropic', result: 'refusal', durationSeconds: 0.2 });
     metrics.observeLlmRequest({ provider: 'anthropic', result: 'truncated', durationSeconds: 0.3 });
@@ -129,10 +129,10 @@ describe('createMetrics', () => {
     assert.match(body, /llm_tokens_total{provider="anthropic",type="input"} 120/);
     assert.match(body, /llm_tokens_total{provider="anthropic",type="output"} 30/);
     assert.doesNotMatch(body, /llm_tokens_total{provider="anthropic",type="cache_read"} [1-9]/);
-    assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
+    assert.doesNotMatch(body, /companyId|membershipId|company_id|membership_id/i);
   });
 
-  it('registra o tamanho e o resultado das respostas de lote (spec 013), sem label de cliente', async () => {
+  it('registra o tamanho e o resultado das respostas de lote (spec 013), sem label de empresa', async () => {
     const metrics = createMetrics();
     metrics.observeAttendanceBatch({ size: 1, result: 'answered' });
     metrics.observeAttendanceBatch({ size: 3, result: 'answered' });
@@ -154,10 +154,10 @@ describe('createMetrics', () => {
       assert.match(body, new RegExp(`attendance_batch_size_bucket{le="${bucket}"} `));
     }
     assert.match(body, /attendance_batch_size_bucket{le="3"} 2/);
-    assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
+    assert.doesNotMatch(body, /companyId|membershipId|company_id|membership_id/i);
   });
 
-  it('não cria labels de alta cardinalidade (clientId, userId)', async () => {
+  it('não cria labels de alta cardinalidade (companyId, membershipId)', async () => {
     const metrics = createMetrics();
     metrics.observeHttpRequest({
       method: 'GET',
@@ -165,9 +165,9 @@ describe('createMetrics', () => {
       statusCode: 200,
       durationSeconds: 0.1,
     });
-    metrics.observeDbQuery({ model: 'Client', operation: 'create', durationSeconds: 0.1 });
+    metrics.observeDbQuery({ model: 'Company', operation: 'create', durationSeconds: 0.1 });
     const body = await metrics.render();
-    assert.doesNotMatch(body, /clientId|userId|client_id|user_id/i);
+    assert.doesNotMatch(body, /companyId|membershipId|company_id|membership_id/i);
   });
 
   it('conta as recusas do rate limit por perfil e as falhas do store, sem IP nem chave em label', async () => {
@@ -180,7 +180,7 @@ describe('createMetrics', () => {
     assert.match(body, /rate_limit_rejected_total{profile="admin"} 2/);
     assert.match(body, /rate_limit_rejected_total{profile="webhook"} 1/);
     assert.match(body, /rate_limit_store_errors_total 1/);
-    assert.doesNotMatch(body, /\bip=|key=|clientId|userId/i);
+    assert.doesNotMatch(body, /\bip=|key=|companyId|membershipId/i);
   });
 
   it('métricas do canal (spec 011): webhook, entrada, status, envio e fila, só com labels fixos', async () => {
@@ -208,7 +208,7 @@ describe('createMetrics', () => {
     assert.match(body, /channel_send_duration_seconds_count{channel="whatsapp"} 2/);
     assert.match(body, /queue_jobs_total{queue="channel-inbound",result="completed"} 1/);
     assert.match(body, /queue_jobs_total{queue="channel-inbound",result="retried"} 1/);
-    assert.doesNotMatch(body, /clientId|userId|phone|contact|text=/i);
+    assert.doesNotMatch(body, /companyId|membershipId|phone|contact|text=/i);
   });
 
   it('métricas de conexão do canal (spec 015): conjuntos fixos de labels, sem ids nem token', async () => {
@@ -227,23 +227,23 @@ describe('createMetrics', () => {
     );
     assert.match(body, /channel_state_transitions_total{to="token_invalid"} 1/);
     assert.match(body, /channel_credential_errors_total{reason="tampered"} 1/);
-    assert.doesNotMatch(body, /clientId|waba|phone|token="/i);
+    assert.doesNotMatch(body, /companyId|waba|phone|token="/i);
   });
 
   it('métricas de autorização e de gestão de usuários (spec 008): só labels de conjunto fixo', async () => {
     const metrics = createMetrics();
-    metrics.countAuthzDenial('user:manage');
-    metrics.countAuthzDenial('user:manage');
+    metrics.countAuthzDenial('membership:manage');
+    metrics.countAuthzDenial('membership:manage');
     metrics.countAuthzDenial('conversation:simulate');
-    metrics.countUserAdminAction('USER_CREATED');
-    metrics.countUserAdminAction('USER_ROLE_CHANGED');
+    metrics.countMembershipAdminAction('MEMBERSHIP_CREATED');
+    metrics.countMembershipAdminAction('MEMBERSHIP_ROLE_CHANGED');
     const body = await metrics.render();
-    assert.match(body, /authz_denials_total{permission="user:manage"} 2/);
+    assert.match(body, /authz_denials_total{permission="membership:manage"} 2/);
     assert.match(body, /authz_denials_total{permission="conversation:simulate"} 1/);
-    assert.match(body, /user_admin_actions_total{action="USER_CREATED"} 1/);
-    assert.match(body, /user_admin_actions_total{action="USER_ROLE_CHANGED"} 1/);
+    assert.match(body, /membership_admin_actions_total{action="MEMBERSHIP_CREATED"} 1/);
+    assert.match(body, /membership_admin_actions_total{action="MEMBERSHIP_ROLE_CHANGED"} 1/);
     // Só nomes de label importam (a métrica account_password_reset_emails_total, spec 021, tem "emails" no nome).
-    assert.doesNotMatch(body, /{[^}]*(clientId|userId|actorUserId|email)/i);
+    assert.doesNotMatch(body, /{[^}]*(companyId|membershipId|actorMembershipId|email)/i);
   });
 });
 

@@ -11,8 +11,8 @@ import { toPlatformAdmin } from './mappers.js';
 import { withRepositoryErrors } from './repository-errors.js';
 
 /**
- * Operadores da plataforma (spec 007): model global, sem `clientId`. Só alcançam o CRUD de
- * clientes; o hash da senha sai apenas em `findCredentialsByEmail`.
+ * Operadores da plataforma (spec 007): model global, sem `companyId`. Só alcançam o CRUD de
+ * empresas; o hash da senha sai apenas em `findCredentialsByEmail`.
  */
 export class PrismaPlatformAdminRepository implements PlatformAdminRepository {
   constructor(private readonly db: TenantScopedDb) {}

@@ -2,17 +2,17 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
  * Contexto de uma requisição, lido pelo logger (mixin) para que todo log feito durante ela
- * saia com o mesmo `requestId` e, quando existirem, `clientId`, `userId` e `operation`.
+ * saia com o mesmo `requestId` e, quando existirem, `companyId`, `actorId` e `operation`.
  *
  * Os ids são `string` de propósito: `shared` não importa de `domain`, então os branded types
- * (`ClientId`...) não chegam aqui. O contexto serve a observabilidade e NÃO é fonte de
- * verdade de segurança: o `ClientId` das operações de dados segue passado explicitamente.
+ * (`CompanyId`...) não chegam aqui. O contexto serve a observabilidade e NÃO é fonte de
+ * verdade de segurança: o `CompanyId` das operações de dados segue passado explicitamente.
  */
 export interface RequestContext {
   readonly requestId: string;
-  readonly clientId?: string;
-  readonly userId?: string;
-  /** `"<MÉTODO> <padrão da rota>"`, ex.: `GET /admin/clients/:id`. */
+  readonly companyId?: string;
+  readonly actorId?: string;
+  /** `"<MÉTODO> <padrão da rota>"`, ex.: `GET /admin/companies/:id`. */
   readonly operation?: string;
 }
 
@@ -45,13 +45,13 @@ function update(patch: Partial<RequestContext>): void {
 }
 
 /** Preenchido pela autenticação (specs futuras). No-op fora de uma requisição. */
-export function setClientId(clientId: string): void {
-  update({ clientId });
+export function setCompanyId(companyId: string): void {
+  update({ companyId });
 }
 
 /** Preenchido pela autenticação (specs futuras). No-op fora de uma requisição. */
-export function setUserId(userId: string): void {
-  update({ userId });
+export function setActorId(actorId: string): void {
+  update({ actorId });
 }
 
 export function setOperation(operation: string): void {

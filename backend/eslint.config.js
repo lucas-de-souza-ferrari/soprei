@@ -4,7 +4,7 @@ import globals from 'globals';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
-// Isolamento entre clientes, terceira barreira (spec 003): o acesso ao Prisma e o SQL cru
+// Isolamento entre empresas, terceira barreira (spec 003): o acesso ao Prisma e o SQL cru
 // ficam só em src/infrastructure/database/**. Application, presentation e domain enxergam
 // interfaces do domínio, nunca o Prisma. Única exceção: a própria pasta database (inclui o
 // health check, que roda `SELECT 1` em database.ts). O teste src/eslint-rules.test.ts prova
@@ -65,7 +65,7 @@ const DOMAIN_PATTERNS = [
 
 const RAW_SQL_NAME = String.raw`^\$(query|execute)Raw(Unsafe|Typed)?$`;
 const RAW_SQL_MESSAGE =
-  'SQL cru só em src/infrastructure/database/**: ele não passa pelo filtro de cliente. Use o repositório do domínio.';
+  'SQL cru só em src/infrastructure/database/**: ele não passa pelo filtro de empresa. Use o repositório do domínio.';
 
 const RAW_SQL_SELECTORS = [
   { selector: `MemberExpression[property.name=/${RAW_SQL_NAME}/]`, message: RAW_SQL_MESSAGE },

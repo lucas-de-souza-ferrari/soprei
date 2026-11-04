@@ -11,7 +11,7 @@ import { Result, SecretString } from '../../shared/types/index.js';
 import { steppingClock } from '../../test-support/clock.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { ATTENDANCE_FALLBACK_TEXT, AttendanceService } from '../attendance/attendance.service.js';
@@ -29,7 +29,7 @@ import {
   type SendTextInput,
 } from '../ports/message-sender.js';
 import type { ChannelCredentials, ChannelCredentialsResult } from '../ports/channel-credentials.js';
-import type { ClientId } from '../../domain/index.js';
+import type { CompanyId } from '../../domain/index.js';
 import { CHANNEL_NOTICE_TEXTS } from './channel-texts.js';
 import {
   type ChannelBatchSettings,
@@ -66,35 +66,35 @@ class FakeSender implements MessageSender {
 }
 
 /**
- * Credenciais de mentira (spec 015): número do banco (o cliente em memória), token por cliente e a
- * marca `TOKEN_INVALID` que o processador grava ao receber 190. Registra as leituras por cliente.
+ * Credenciais de mentira (spec 015): número do banco (a empresa em memória), token por empresa e a
+ * marca `TOKEN_INVALID` que o processador grava ao receber 190. Registra as leituras por empresa.
  */
 class FakeCredentials implements ChannelCredentials {
   readonly invalid = new Set<string>();
-  readonly marks: { clientId: string; tokenVersion: number }[] = [];
+  readonly marks: { companyId: string; tokenVersion: number }[] = [];
   tokenVersion = 1;
 
-  constructor(private readonly clients: InMemoryClientRepository) {}
+  constructor(private readonly companies: InMemoryCompanyRepository) {}
 
-  tokenOf(clientId: string): string {
-    return `token-do-cliente-${clientId}`;
+  tokenOf(companyId: string): string {
+    return `token-do-empresa-${companyId}`;
   }
 
-  async forClient(clientId: ClientId): Promise<ChannelCredentialsResult> {
-    const client = await this.clients.findById(clientId);
-    if (client.whatsappPhoneNumberId === null) return { kind: 'none' };
-    if (this.invalid.has(clientId)) return { kind: 'token_invalid' };
+  async forCompany(companyId: CompanyId): Promise<ChannelCredentialsResult> {
+    const company = await this.companies.findById(companyId);
+    if (company.whatsappPhoneNumberId === null) return { kind: 'none' };
+    if (this.invalid.has(companyId)) return { kind: 'token_invalid' };
     return {
       kind: 'ready',
-      phoneNumberId: client.whatsappPhoneNumberId,
-      token: new SecretString(this.tokenOf(clientId)),
+      phoneNumberId: company.whatsappPhoneNumberId,
+      token: new SecretString(this.tokenOf(companyId)),
       tokenVersion: this.tokenVersion,
     };
   }
 
-  markTokenInvalid(clientId: ClientId, tokenVersion: number): Promise<boolean> {
-    this.marks.push({ clientId, tokenVersion });
-    this.invalid.add(clientId);
+  markTokenInvalid(companyId: CompanyId, tokenVersion: number): Promise<boolean> {
+    this.marks.push({ companyId, tokenVersion });
+    this.invalid.add(companyId);
     return Promise.resolve(true);
   }
 }
@@ -135,7 +135,7 @@ const permanent = (code = 190): MessageSendError =>
   });
 
 interface Harness {
-  readonly clients: InMemoryClientRepository;
+  readonly companies: InMemoryCompanyRepository;
   readonly store: InMemoryAttendanceStore;
   readonly llm: MockLlmProvider;
   readonly sender: FakeSender;
@@ -159,12 +159,12 @@ function setup(
   // depois da última mensagem e antes de qualquer outra).
   const step = steppingClock(10);
   const now = (): Date => new Date(step().getTime() + offset);
-  const clients = new InMemoryClientRepository();
+  const companies = new InMemoryCompanyRepository();
   const store = new InMemoryAttendanceStore(now);
   const llm = new MockLlmProvider({ recordCalls: true });
   const logs = captureLogs();
   const service = new AttendanceService({
-    clients,
+    companies,
     conversations: store.conversations,
     messages: store.messages,
     unitOfWork: store,
@@ -173,12 +173,12 @@ function setup(
     options: { llmTimeoutMs: 300, inFlightTimeoutMs: IN_FLIGHT_MS, now },
   });
   const sender = new FakeSender();
-  const credentials = new FakeCredentials(clients);
+  const credentials = new FakeCredentials(companies);
   const scheduler = new FakeScheduler();
   const processor = new ChannelInboundProcessor({
     attendance:
       overrides.attendance === undefined ? service : { ...bind(service), ...overrides.attendance },
-    clients,
+    companies,
     messages: { ...store.messages, ...overrides.messages },
     sender,
     credentials,
@@ -189,7 +189,7 @@ function setup(
     now,
   });
   return {
-    clients,
+    companies,
     store,
     llm,
     sender,
@@ -207,32 +207,33 @@ function setup(
 /** Os métodos do serviço de atendimento ligados à instância (para poder sobrescrever só alguns). */
 function bind(service: AttendanceService): InboundAttendance {
   return {
-    acceptInboundMessage: (clientId, input) => service.acceptInboundMessage(clientId, input),
-    respondToPending: (clientId, contactRef, limits, options) =>
-      service.respondToPending(clientId, contactRef, limits, options),
-    hasPendingMessages: (clientId, contactRef) => service.hasPendingMessages(clientId, contactRef),
+    acceptInboundMessage: (companyId, input) => service.acceptInboundMessage(companyId, input),
+    respondToPending: (companyId, contactRef, limits, options) =>
+      service.respondToPending(companyId, contactRef, limits, options),
+    hasPendingMessages: (companyId, contactRef) =>
+      service.hasPendingMessages(companyId, contactRef),
   };
 }
 
-/** Número do negócio com que cada cliente foi criado: o `phoneNumberId` que o job leva ao ser enfileirado. */
+/** Número do negócio com que cada empresa foi criado: o `phoneNumberId` que o job leva ao ser enfileirado. */
 const jobPhone = new Map<string, string>();
 
-async function newClient(h: Harness, slug: string, phoneNumberId: string | null = '1000') {
-  const created = await h.clients.create({ name: `Empresa ${slug}`, slug });
+async function newCompany(h: Harness, slug: string, phoneNumberId: string | null = '1000') {
+  const created = await h.companies.create({ name: `Empresa ${slug}`, slug });
   jobPhone.set(created.id, phoneNumberId ?? '1000');
-  return h.clients.update(created.id, {
+  return h.companies.update(created.id, {
     persona: `${PERSONA} ${slug}`,
     whatsappPhoneNumberId: phoneNumberId,
   });
 }
 
 const textJob = (
-  clientId: string,
+  companyId: string,
   overrides: Partial<Extract<InboundJob, { kind: 'text' }>> = {},
 ): Extract<InboundJob, { kind: 'text' }> => ({
   kind: 'text',
-  clientId,
-  phoneNumberId: jobPhone.get(clientId) ?? '1000',
+  companyId,
+  phoneNumberId: jobPhone.get(companyId) ?? '1000',
   contactRef: CONTACT,
   text: SECRET_TEXT,
   externalId: WAMID,
@@ -241,12 +242,12 @@ const textJob = (
 });
 
 const noticeJob = (
-  clientId: string,
+  companyId: string,
   reason: 'unsupported_type' | 'invalid_text' = 'unsupported_type',
 ): InboundJob => ({
   kind: 'notice',
-  clientId,
-  phoneNumberId: jobPhone.get(clientId) ?? '1000',
+  companyId,
+  phoneNumberId: jobPhone.get(companyId) ?? '1000',
   contactRef: CONTACT,
   externalId: WAMID,
   requestId: 'req-12345678',
@@ -256,7 +257,7 @@ const noticeJob = (
 /** O `flush` do contato que enviou este job de texto. */
 const flushOf = (job: Extract<InboundJob, { kind: 'text' }>): FlushJob => ({
   kind: 'flush',
-  clientId: job.clientId,
+  companyId: job.companyId,
   phoneNumberId: job.phoneNumberId,
   contactRef: job.contactRef,
   requestId: job.requestId,
@@ -286,11 +287,11 @@ const LAST: { finalAttempt: boolean } = { finalAttempt: true };
 const MORE: { finalAttempt: boolean } = { finalAttempt: false };
 
 describe('ChannelInboundProcessor: job de texto', () => {
-  it('atende, envia a resposta pelo número do cliente no banco e grava a marca de envio', async () => {
+  it('atende, envia a resposta pelo número da empresa no banco e grava a marca de envio', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
 
-    const outcome = await flow(h, textJob(client.id), MORE);
+    const outcome = await flow(h, textJob(company.id), MORE);
 
     assert.equal(outcome, 'done');
     assert.equal(h.sender.calls.length, 1);
@@ -307,13 +308,13 @@ describe('ChannelInboundProcessor: job de texto', () => {
 
   it('retentativa depois de envio concluído não envia de novo nem chama o LLM', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
 
-    await flow(h, textJob(client.id), MORE);
+    await flow(h, textJob(company.id), MORE);
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.llm.calls.length, 1);
 
-    const again = await flow(h, textJob(client.id), MORE);
+    const again = await flow(h, textJob(company.id), MORE);
     assert.equal(again, 'done');
     assert.equal(h.sender.calls.length, 1, 'não reenvia');
     assert.equal(h.llm.calls.length, 1, 'não chama o LLM de novo');
@@ -322,9 +323,9 @@ describe('ChannelInboundProcessor: job de texto', () => {
 
   it('o número do envio é o do banco: campos extras de um job adulterado (número, destinatário) são ignorados', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
     const forged = {
-      ...textJob(client.id),
+      ...textJob(company.id),
       phone_number_id: '999999',
       sendFrom: '999999',
       to: '5500000000000',
@@ -336,12 +337,12 @@ describe('ChannelInboundProcessor: job de texto', () => {
     assert.equal(h.sender.calls[0].to, CONTACT);
   });
 
-  it('job cujo phoneNumberId não é o do cliente no banco (adulterado): erro permanente, nada é enviado, log sem conteúdo', async () => {
+  it('job cujo phoneNumberId não é o da empresa no banco (adulterado): erro permanente, nada é enviado, log sem conteúdo', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
-    const other = await newClient(h, 'beta', '555002');
+    const company = await newCompany(h, 'alfa', '555001');
+    const other = await newCompany(h, 'beta', '555002');
 
-    for (const job of [textJob(client.id, { phoneNumberId: '555002' }), noticeJob(client.id)]) {
+    for (const job of [textJob(company.id, { phoneNumberId: '555002' }), noticeJob(company.id)]) {
       const forged = { ...job, phoneNumberId: other.whatsappPhoneNumberId ?? '' };
       await assert.rejects(
         run(h, forged, MORE),
@@ -351,13 +352,13 @@ describe('ChannelInboundProcessor: job de texto', () => {
     assert.equal(
       h.sender.calls.length,
       0,
-      'nada sai, nem pelo número do job nem pelo do outro cliente',
+      'nada sai, nem pelo número do job nem pelo do outra empresa',
     );
     const line = h.logs
       .lines()
-      .find((entry) => String(entry.msg).includes('o número do cliente mudou'));
+      .find((entry) => String(entry.msg).includes('o número da empresa mudou'));
     assert.equal(line?.level, 50);
-    assert.equal(line.clientId, client.id);
+    assert.equal(line.companyId, company.id);
     const raw = h.logs.raw();
     for (const secret of ['555001', '555002', CONTACT, SECRET_TEXT, WAMID]) {
       assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
@@ -366,11 +367,11 @@ describe('ChannelInboundProcessor: job de texto', () => {
 
   it('número trocado entre enfileirar e processar: texto e aviso não enviam (nem o texto padrão)', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
-    const text = textJob(client.id);
-    const notice = noticeJob(client.id);
-    // O dono troca o número do cliente depois de a mensagem entrar na fila.
-    await h.clients.update(client.id, { whatsappPhoneNumberId: '555777' });
+    const company = await newCompany(h, 'alfa', '555001');
+    const text = textJob(company.id);
+    const notice = noticeJob(company.id);
+    // O dono troca o número da empresa depois de a mensagem entrar na fila.
+    await h.companies.update(company.id, { whatsappPhoneNumberId: '555777' });
 
     await assert.rejects(
       run(h, text, MORE),
@@ -386,21 +387,21 @@ describe('ChannelInboundProcessor: job de texto', () => {
     assert.equal(reply?.sentAt, null);
   });
 
-  it('cliente sem número no banco: descarta com log, sem enviar; a resposta fica gravada sem envio', async () => {
+  it('empresa sem número no banco: descarta com log, sem enviar; a resposta fica gravada sem envio', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', null);
+    const company = await newCompany(h, 'alfa', null);
 
-    const outcome = await flow(h, textJob(client.id), MORE);
+    const outcome = await flow(h, textJob(company.id), MORE);
 
     assert.equal(outcome, 'discarded');
     assert.equal(h.sender.calls.length, 0);
     const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
     assert.equal(reply?.sentAt, null);
     const line = h.logs.lines().find((entry) => String(entry.msg).includes('sem número'));
-    assert.equal(line?.clientId, client.id);
+    assert.equal(line?.companyId, company.id);
   });
 
-  it('clientId malformado no job é erro permanente', async () => {
+  it('companyId malformado no job é erro permanente', async () => {
     const h = setup();
     await assert.rejects(
       flow(h, textJob('nao-e-uuid'), MORE),
@@ -414,8 +415,8 @@ describe('ChannelInboundProcessor: job de texto', () => {
     t.after(release);
     for (const marker of ['[[mock:fail]]', '[[mock:hang]]']) {
       const h = setup();
-      const client = await newClient(h, 'alfa');
-      await flow(h, textJob(client.id, { text: `oi ${marker}` }), MORE);
+      const company = await newCompany(h, 'alfa');
+      await flow(h, textJob(company.id, { text: `oi ${marker}` }), MORE);
       assert.equal(h.sender.calls.length, 1, marker);
       assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
       const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
@@ -428,11 +429,11 @@ describe('ChannelInboundProcessor: job de texto', () => {
 describe('ChannelInboundProcessor: falhas de envio', () => {
   it('falha transitória: relança o mesmo erro (a fila retenta); nada de fallback; resposta gravada sem envio', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     const failure = retryable();
     h.sender.script(Result.err(failure));
 
-    await assert.rejects(flow(h, textJob(client.id), MORE), (error: unknown) => {
+    await assert.rejects(flow(h, textJob(company.id), MORE), (error: unknown) => {
       return error === failure;
     });
     assert.equal(h.sender.calls.length, 1, 'só a tentativa da resposta, sem fallback');
@@ -440,7 +441,7 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
     assert.equal(reply?.sentAt, null);
 
     // A retentativa envia a MESMA resposta (sem novo LLM) e confirma o envio.
-    const outcome = await flow(h, textJob(client.id), MORE);
+    const outcome = await flow(h, textJob(company.id), MORE);
     assert.equal(outcome, 'done');
     assert.equal(h.llm.calls.length, 1);
     assert.equal(h.sender.calls.length, 2);
@@ -449,13 +450,13 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
     assert.ok(h.store.allMessages().find((m) => m.role === 'ASSISTANT')?.sentAt instanceof Date);
   });
 
-  it('falha permanente: NonRetryableJobError, sem fallback, resposta sem envio, log error com clientId e código', async () => {
+  it('falha permanente: NonRetryableJobError, sem fallback, resposta sem envio, log error com companyId e código', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     h.sender.script(Result.err(permanent(131047)));
 
     await assert.rejects(
-      flow(h, textJob(client.id), MORE),
+      flow(h, textJob(company.id), MORE),
       (error: unknown) => error instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 1, 'sem fallback quando a resposta já existe');
@@ -463,16 +464,16 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
     assert.equal(reply?.sentAt, null);
     const line = h.logs.lines().find((entry) => String(entry.msg).includes('envio recusado'));
     assert.equal(line?.level, 50);
-    assert.equal(line.clientId, client.id);
+    assert.equal(line.companyId, company.id);
     assert.equal(line.providerCode, 131047);
     assert.equal(typeof line.flushRef, 'string');
   });
 
   it('falha transitória na última tentativa também não manda fallback (a resposta existe)', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     h.sender.script(Result.err(retryable()));
-    await assert.rejects(flow(h, textJob(client.id), LAST));
+    await assert.rejects(flow(h, textJob(company.id), LAST));
     assert.equal(h.sender.calls.length, 1);
   });
 
@@ -482,15 +483,15 @@ describe('ChannelInboundProcessor: falhas de envio', () => {
         markSent: () => Promise.reject(new DatabaseError('banco caiu na marca')),
       },
     });
-    const client = await newClient(failingMark, 'alfa');
-    const outcome = await flow(failingMark, textJob(client.id), MORE);
+    const company = await newCompany(failingMark, 'alfa');
+    const outcome = await flow(failingMark, textJob(company.id), MORE);
     assert.equal(outcome, 'done');
     assert.equal(failingMark.sender.calls.length, 1);
     const line = failingMark.logs
       .lines()
       .find((entry) => String(entry.msg).includes('marca de envio'));
     assert.equal(line?.level, 50);
-    assert.equal(line.clientId, client.id);
+    assert.equal(line.companyId, company.id);
   });
 });
 
@@ -502,20 +503,20 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
   it('transitória com tentativas restantes: relança sem enviar nada', async () => {
     const error = new DatabaseError('indisponível');
     const h = setup({ attendance: failing(error) });
-    const client = await newClient(h, 'alfa');
-    await assert.rejects(flow(h, textJob(client.id), MORE), (e: unknown) => e === error);
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(flow(h, textJob(company.id), MORE), (e: unknown) => e === error);
     assert.equal(h.sender.calls.length, 0);
   });
 
   it('na última tentativa: envia o texto padrão ao contato e relança o erro', async () => {
     const error = new DatabaseError('indisponível');
     const h = setup({ attendance: failing(error) });
-    const client = await newClient(h, 'alfa', '555009');
-    await assert.rejects(flow(h, textJob(client.id), LAST), (e: unknown) => e === error);
+    const company = await newCompany(h, 'alfa', '555009');
+    await assert.rejects(flow(h, textJob(company.id), LAST), (e: unknown) => e === error);
     assert.equal(h.sender.calls.length, 1);
     assert.deepEqual(h.sender.calls[0], {
       phoneNumberId: '555009',
-      accessToken: new SecretString(h.credentials.tokenOf(client.id)),
+      accessToken: new SecretString(h.credentials.tokenOf(company.id)),
       to: CONTACT,
       text: ATTENDANCE_FALLBACK_TEXT,
     });
@@ -524,9 +525,9 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
   it('se o envio do texto padrão também falha, só loga (o erro original segue)', async () => {
     const error = new DatabaseError('indisponível');
     const h = setup({ attendance: failing(error) });
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     h.sender.script(Result.err(permanent()));
-    await assert.rejects(flow(h, textJob(client.id), LAST), (e: unknown) => e === error);
+    await assert.rejects(flow(h, textJob(company.id), LAST), (e: unknown) => e === error);
     assert.equal(h.sender.calls.length, 1, 'uma única tentativa');
     const warn = h.logs
       .lines()
@@ -536,21 +537,21 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
 
   it('erro permanente que não é suspensão (entrada inválida): sem retentativa, com o texto padrão (inalterado)', async () => {
     const h = setup({ attendance: failing(new ValidationError('entrada inválida')) });
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     await assert.rejects(
-      flow(h, textJob(client.id), MORE),
+      flow(h, textJob(company.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
   });
 
-  it('cliente removido depois de enfileirar: permanente, e sem número não há por onde responder', async () => {
+  it('empresa removida depois de enfileirar: permanente, e sem número não há por onde responder', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await h.clients.delete(client.id);
+    const company = await newCompany(h, 'alfa');
+    await h.companies.delete(company.id);
     await assert.rejects(
-      flow(h, textJob(client.id), MORE),
+      flow(h, textJob(company.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 0);
@@ -558,33 +559,33 @@ describe('ChannelInboundProcessor: falha do atendimento antes de existir respost
 
   it('queda entre gravar a mensagem e agendar o flush: a retentativa do job text agenda de novo e a mensagem é respondida uma vez', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     h.scheduler.failWith = new ExternalServiceError('Redis fora');
 
-    await assert.rejects(h.processor.process(textJob(client.id), MORE), ExternalServiceError);
+    await assert.rejects(h.processor.process(textJob(company.id), MORE), ExternalServiceError);
     // A mensagem ficou gravada e pendente, sem LLM nem envio.
     assert.equal(h.store.allMessages().length, 1);
     assert.equal(h.llm.calls.length, 0);
 
     h.scheduler.failWith = undefined;
-    assert.equal(await h.processor.process(textJob(client.id), MORE), 'done');
+    assert.equal(await h.processor.process(textJob(company.id), MORE), 'done');
     const last = h.scheduler.calls.at(-1);
     assert.equal(last?.schedule.mode, 'ensure', 'a retentativa só garante o flush');
     assert.equal(h.store.allMessages().length, 1, 'sem segunda gravação');
 
-    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
     assert.equal(h.llm.calls.length, 1);
     assert.equal(h.sender.calls.length, 1);
   });
 });
 
 describe('ChannelInboundProcessor: job de aviso', () => {
-  it('envia o texto constante pelo número do cliente, sem gravar mensagem nem chamar o LLM', async () => {
+  it('envia o texto constante pelo número da empresa, sem gravar mensagem nem chamar o LLM', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
 
     for (const reason of ['unsupported_type', 'invalid_text'] as const) {
-      assert.equal(await h.processor.process(noticeJob(client.id, reason), MORE), 'done');
+      assert.equal(await h.processor.process(noticeJob(company.id, reason), MORE), 'done');
     }
 
     assert.deepEqual(
@@ -601,21 +602,21 @@ describe('ChannelInboundProcessor: job de aviso', () => {
 
   it('segue as mesmas regras de erro: transitório relança, permanente não retenta, sem número descarta', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     const failure = retryable();
     h.sender.script(Result.err(failure), Result.err(permanent()));
     await assert.rejects(
-      h.processor.process(noticeJob(client.id), MORE),
+      h.processor.process(noticeJob(company.id), MORE),
       (e: unknown) => e === failure,
     );
     await assert.rejects(
-      h.processor.process(noticeJob(client.id), MORE),
+      h.processor.process(noticeJob(company.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     // Aviso nunca dispara o texto padrão (não há atendimento).
     assert.equal(h.sender.calls.length, 2);
 
-    const noNumber = await newClient(h, 'beta', null);
+    const noNumber = await newCompany(h, 'beta', null);
     assert.equal(await h.processor.process(noticeJob(noNumber.id), MORE), 'discarded');
     assert.equal(h.sender.calls.length, 2);
   });
@@ -624,64 +625,64 @@ describe('ChannelInboundProcessor: job de aviso', () => {
 describe('ChannelInboundProcessor: job que falhou sem passar pelo handler (parado)', () => {
   it('sem resposta gravada: envia o texto padrão pelo número do banco, uma vez', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
 
-    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    await h.processor.handleUnprocessedFailure(textJob(company.id));
 
     assert.deepEqual(h.sender.calls, [
       {
         phoneNumberId: '555001',
-        accessToken: new SecretString(h.credentials.tokenOf(client.id)),
+        accessToken: new SecretString(h.credentials.tokenOf(company.id)),
         to: CONTACT,
         text: ATTENDANCE_FALLBACK_TEXT,
       },
     ]);
     const line = h.logs.lines().find((entry) => String(entry.msg).includes('sem resposta gravada'));
     assert.equal(line?.level, 50);
-    assert.equal(line.clientId, client.id);
+    assert.equal(line.companyId, company.id);
   });
 
   it('mensagem gravada mas ainda sem resposta (caiu no meio do LLM): também envia o texto padrão', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    const conversation = await h.store.conversations.findOrCreateByContact(client.id, CONTACT);
-    await h.store.messages.create(client.id, {
+    const company = await newCompany(h, 'alfa');
+    const conversation = await h.store.conversations.findOrCreateByContact(company.id, CONTACT);
+    await h.store.messages.create(company.id, {
       conversationId: conversation.id,
       role: 'USER',
       content: SECRET_TEXT,
       externalId: WAMID,
     });
-    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    await h.processor.handleUnprocessedFailure(textJob(company.id));
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
   });
 
   it('com resposta já gravada (enviada ou não): nada é enviado; fica visível na API administrativa', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     h.sender.script(Result.err(permanent()));
-    await flow(h, textJob(client.id), MORE).catch(() => undefined);
+    await flow(h, textJob(company.id), MORE).catch(() => undefined);
     assert.equal(h.sender.calls.length, 1);
 
-    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    await h.processor.handleUnprocessedFailure(textJob(company.id));
     assert.equal(h.sender.calls.length, 1, 'sem texto padrão');
     assert.ok(h.logs.lines().some((entry) => String(entry.msg).includes('já há resposta gravada')));
   });
 
   it('job de aviso não envia nada; falha do envio do texto padrão e erro do banco só geram log, sem lançar', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await h.processor.handleUnprocessedFailure(noticeJob(client.id));
+    const company = await newCompany(h, 'alfa');
+    await h.processor.handleUnprocessedFailure(noticeJob(company.id));
     assert.equal(h.sender.calls.length, 0);
 
     h.sender.script(Result.err(permanent()));
-    await h.processor.handleUnprocessedFailure(textJob(client.id));
+    await h.processor.handleUnprocessedFailure(textJob(company.id));
     assert.equal(h.sender.calls.length, 1);
 
     const broken = setup({
       messages: { findByExternalId: () => Promise.reject(new DatabaseError('banco fora')) },
     });
-    const other = await newClient(broken, 'beta');
+    const other = await newCompany(broken, 'beta');
     await broken.processor.handleUnprocessedFailure(textJob(other.id));
     assert.equal(broken.sender.calls.length, 0);
     assert.ok(broken.logs.lines().some((entry) => Number(entry.level) >= 50));
@@ -690,9 +691,9 @@ describe('ChannelInboundProcessor: job que falhou sem passar pelo handler (parad
 
   it('número trocado desde o enfileiramento: nem o texto padrão sai; e nada vaza em log', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
-    const job = textJob(client.id);
-    await h.clients.update(client.id, { whatsappPhoneNumberId: '555777' });
+    const company = await newCompany(h, 'alfa', '555001');
+    const job = textJob(company.id);
+    await h.companies.update(company.id, { whatsappPhoneNumberId: '555777' });
     await h.processor.handleUnprocessedFailure(job);
     assert.equal(h.sender.calls.length, 0);
     const raw = h.logs.raw();
@@ -702,26 +703,26 @@ describe('ChannelInboundProcessor: job que falhou sem passar pelo handler (parad
   });
 });
 
-describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão do dono, 2026-10-28)', () => {
+describe('ChannelInboundProcessor: empresa suspensa não recebe nada (decisão do dono, 2026-10-28)', () => {
   async function suspended(h: Harness, slug: string) {
-    const client = await newClient(h, slug, '555001');
-    await h.clients.update(client.id, { status: 'SUSPENDED' });
-    return client;
+    const company = await newCompany(h, slug, '555001');
+    await h.companies.update(company.id, { status: 'SUSPENDED' });
+    return company;
   }
 
-  it('texto: o atendimento recusa o cliente suspenso e o job é descartado sem enviar NADA (nem o texto padrão), sem gravar mensagem', async () => {
+  it('texto: o atendimento recusa a empresa suspensa e o job é descartado sem enviar NADA (nem o texto padrão), sem gravar mensagem', async () => {
     const h = setup();
-    const client = await suspended(h, 'alfa');
+    const company = await suspended(h, 'alfa');
 
-    const outcome = await flow(h, textJob(client.id), LAST);
+    const outcome = await flow(h, textJob(company.id), LAST);
 
     assert.equal(outcome, 'discarded');
     assert.equal(h.sender.calls.length, 0);
     assert.equal(h.llm.calls.length, 0);
     assert.equal(h.store.allMessages().length, 0);
-    const line = h.logs.lines().find((entry) => String(entry.msg).includes('cliente suspenso'));
+    const line = h.logs.lines().find((entry) => String(entry.msg).includes('empresa suspensa'));
     assert.equal(line?.level, 40);
-    assert.equal(line.clientId, client.id);
+    assert.equal(line.companyId, company.id);
     assert.equal(typeof line.messageRef, 'string');
     const raw = h.logs.raw();
     for (const secret of [SECRET_TEXT, CONTACT, WAMID, '555001']) {
@@ -733,54 +734,54 @@ describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão d
     const h = setup({
       attendance: { acceptInboundMessage: () => Promise.reject(new ForbiddenError('suspenso')) },
     });
-    const client = await newClient(h, 'alfa');
-    assert.equal(await flow(h, textJob(client.id), LAST), 'discarded');
-    assert.equal(await flow(h, textJob(client.id), MORE), 'discarded');
+    const company = await newCompany(h, 'alfa');
+    assert.equal(await flow(h, textJob(company.id), LAST), 'discarded');
+    assert.equal(await flow(h, textJob(company.id), MORE), 'discarded');
     assert.equal(h.sender.calls.length, 0);
   });
 
-  it('aviso (notice) de cliente suspenso não é enviado: descartado', async () => {
+  it('aviso (notice) de empresa suspensa não é enviado: descartado', async () => {
     const h = setup();
-    const client = await suspended(h, 'alfa');
+    const company = await suspended(h, 'alfa');
     for (const reason of ['unsupported_type', 'invalid_text'] as const) {
-      assert.equal(await h.processor.process(noticeJob(client.id, reason), MORE), 'discarded');
+      assert.equal(await h.processor.process(noticeJob(company.id, reason), MORE), 'discarded');
     }
     assert.equal(h.sender.calls.length, 0);
   });
 
-  it('cliente suspenso depois que a resposta foi gravada: a retentativa descarta; a resposta fica gravada sem envio', async () => {
+  it('empresa suspensa depois que a resposta foi gravada: a retentativa descarta; a resposta fica gravada sem envio', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
     h.sender.script(Result.err(retryable()));
-    await flow(h, textJob(client.id), MORE).catch(() => undefined);
-    await h.clients.update(client.id, { status: 'SUSPENDED' });
+    await flow(h, textJob(company.id), MORE).catch(() => undefined);
+    await h.companies.update(company.id, { status: 'SUSPENDED' });
 
-    assert.equal(await flow(h, textJob(client.id), MORE), 'discarded');
+    assert.equal(await flow(h, textJob(company.id), MORE), 'discarded');
     assert.equal(h.sender.calls.length, 1, 'só a tentativa de antes da suspensão');
     const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
     assert.equal(reply?.sentAt, null);
   });
 
-  it('falha final sem handler (handleUnprocessedFailure): nem o texto padrão sai para cliente suspenso', async () => {
+  it('falha final sem handler (handleUnprocessedFailure): nem o texto padrão sai para empresa suspensa', async () => {
     const h = setup();
-    const client = await suspended(h, 'alfa');
-    await h.processor.handleUnprocessedFailure(textJob(client.id));
-    await h.processor.handleUnprocessedFailure(noticeJob(client.id));
+    const company = await suspended(h, 'alfa');
+    await h.processor.handleUnprocessedFailure(textJob(company.id));
+    await h.processor.handleUnprocessedFailure(noticeJob(company.id));
     assert.equal(h.sender.calls.length, 0);
-    assert.ok(h.logs.lines().some((entry) => String(entry.msg).includes('cliente suspenso')));
+    assert.ok(h.logs.lines().some((entry) => String(entry.msg).includes('empresa suspensa')));
   });
 
-  it('cliente removido continua sem envio (permanente) e cliente ativo segue como antes', async () => {
+  it('empresa removida continua sem envio (permanente) e empresa ativa segue como antes', async () => {
     const h = setup();
-    const removed = await newClient(h, 'removido');
-    await h.clients.delete(removed.id);
+    const removed = await newCompany(h, 'removido');
+    await h.companies.delete(removed.id);
     await assert.rejects(
       h.processor.process(noticeJob(removed.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 0);
 
-    const active = await newClient(h, 'ativo', '555002');
+    const active = await newCompany(h, 'ativo', '555002');
     assert.equal(await h.processor.process(noticeJob(active.id), MORE), 'done');
     assert.equal(await flow(h, textJob(active.id), MORE), 'done');
     assert.equal(h.sender.calls.length, 2);
@@ -788,20 +789,20 @@ describe('ChannelInboundProcessor: cliente suspenso não recebe nada (decisão d
   });
 });
 
-describe('ChannelInboundProcessor: isolamento entre clientes', () => {
-  it('o mesmo contato e o mesmo wamid em dois clientes: conversas, histórico, persona e número separados', async () => {
+describe('ChannelInboundProcessor: isolamento entre empresas', () => {
+  it('o mesmo contato e o mesmo wamid em duas empresas: conversas, histórico, persona e número separados', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', '111111');
-    const b = await newClient(h, 'beta', '222222');
+    const a = await newCompany(h, 'alfa', '111111');
+    const b = await newCompany(h, 'beta', '222222');
 
-    // Jobs intercalados dos dois clientes, com o MESMO contato e o MESMO wamid.
+    // Jobs intercalados das duas empresas, com o MESMO contato e o MESMO wamid.
     await flow(h, textJob(a.id, { text: 'primeira de A', externalId: 'wamid.mesmo' }), MORE);
     await flow(h, textJob(b.id, { text: 'primeira de B', externalId: 'wamid.mesmo' }), MORE);
     await flow(h, textJob(a.id, { text: 'segunda de A', externalId: 'wamid.dois' }), MORE);
     await flow(h, textJob(b.id, { text: 'segunda de B', externalId: 'wamid.dois' }), MORE);
 
     assert.equal(h.store.allConversations().length, 2);
-    // Cada envio saiu pelo número do seu cliente.
+    // Cada envio saiu pelo número da sua empresa.
     assert.deepEqual(
       h.sender.calls.map((call) => [
         call.phoneNumberId,
@@ -814,7 +815,7 @@ describe('ChannelInboundProcessor: isolamento entre clientes', () => {
         ['222222', false],
       ],
     );
-    // O histórico enviado ao LLM nunca mistura clientes e a persona é a do dono da conversa.
+    // O histórico enviado ao LLM nunca mistura empresas e a persona é a do dono da conversa.
     const secondOfA = h.llm.calls[2];
     const secondOfB = h.llm.calls[3];
     assert.ok(secondOfA !== undefined && secondOfB !== undefined);
@@ -828,22 +829,22 @@ describe('ChannelInboundProcessor: isolamento entre clientes', () => {
     assert.ok(!secondOfA.systemPrompt.includes('beta'));
     assert.ok(secondOfB.systemPrompt.includes(`${PERSONA} beta`));
     assert.ok(!secondOfB.systemPrompt.includes('alfa'));
-    // O mesmo wamid não colidiu: duas respostas por cliente, cada uma com a sua marca.
+    // O mesmo wamid não colidiu: duas respostas por empresa, cada uma com a sua marca.
     assert.equal(
       h.store.allMessages().filter((m) => m.role === 'ASSISTANT' && m.sentAt !== null).length,
       4,
     );
   });
 
-  it('jobs de dois clientes em sequência: cada linha de log do processador leva o clientId certo', async () => {
+  it('jobs de duas empresas em sequência: cada linha de log do processador leva o companyId certo', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', '1001');
-    const b = await newClient(h, 'beta', '1002');
+    const a = await newCompany(h, 'alfa', '1001');
+    const b = await newCompany(h, 'beta', '1002');
     await flow(h, textJob(a.id, { externalId: 'wamid.a1' }), MORE);
     await flow(h, textJob(b.id, { externalId: 'wamid.b1' }), MORE);
     const sent = h.logs.lines().filter((entry) => entry.msg === 'resposta enviada ao contato');
     assert.deepEqual(
-      sent.map((entry) => entry.clientId),
+      sent.map((entry) => entry.companyId),
       [a.id, b.id],
     );
   });
@@ -854,34 +855,34 @@ describe('ChannelInboundProcessor: privacidade nos logs', () => {
     const release = keepEventLoopAlive();
     t.after(release);
     const h = setup();
-    const client = await newClient(h, 'alfa', '777888');
+    const company = await newCompany(h, 'alfa', '777888');
 
     // Sucesso, retentativa (já enviada), falha transitória, permanente, fallback, aviso e timeout.
-    await flow(h, textJob(client.id), MORE);
-    await flow(h, textJob(client.id), MORE);
+    await flow(h, textJob(company.id), MORE);
+    await flow(h, textJob(company.id), MORE);
     h.sender.script(Result.err(retryable()));
-    await flow(h, textJob(client.id, { externalId: 'wamid.x2' }), MORE).catch(() => undefined);
+    await flow(h, textJob(company.id, { externalId: 'wamid.x2' }), MORE).catch(() => undefined);
     h.sender.script(Result.err(permanent(131047)));
-    await flow(h, textJob(client.id, { externalId: 'wamid.x3' }), MORE).catch(() => undefined);
+    await flow(h, textJob(company.id, { externalId: 'wamid.x3' }), MORE).catch(() => undefined);
     await flow(
       h,
-      textJob(client.id, { text: `${SECRET_TEXT} [[mock:fail]]`, externalId: 'wamid.x4' }),
+      textJob(company.id, { text: `${SECRET_TEXT} [[mock:fail]]`, externalId: 'wamid.x4' }),
       MORE,
     );
     await flow(
       h,
-      textJob(client.id, { text: `${SECRET_TEXT} [[mock:hang]]`, externalId: 'wamid.x5' }),
+      textJob(company.id, { text: `${SECRET_TEXT} [[mock:hang]]`, externalId: 'wamid.x5' }),
       MORE,
     );
-    await h.processor.process(noticeJob(client.id), MORE);
+    await h.processor.process(noticeJob(company.id), MORE);
     h.sender.script(Result.err(permanent()));
-    await h.processor.process(noticeJob(client.id), MORE).catch(() => undefined);
+    await h.processor.process(noticeJob(company.id), MORE).catch(() => undefined);
 
     // Falha do atendimento com envio do texto padrão (e falha dele).
     const failing = setup({
       attendance: { acceptInboundMessage: () => Promise.reject(new DatabaseError('banco fora')) },
     });
-    const other = await newClient(failing, 'beta', '777999');
+    const other = await newCompany(failing, 'beta', '777999');
     failing.sender.script(Result.err(permanent()));
     await flow(failing, textJob(other.id), LAST).catch(() => undefined);
 
@@ -903,19 +904,19 @@ describe('ChannelInboundProcessor: privacidade nos logs', () => {
 describe('ChannelInboundProcessor: erro de serviço externo sem classificação', () => {
   it('um ExternalServiceError que não é MessageSendError é tratado como transitório', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     const failure = new ExternalServiceError('falha genérica do canal');
     h.sender.script(Result.err(failure));
-    await assert.rejects(flow(h, textJob(client.id), MORE), (e: unknown) => e === failure);
+    await assert.rejects(flow(h, textJob(company.id), MORE), (e: unknown) => e === failure);
   });
 });
 
 describe('ChannelInboundProcessor: etapa aceitar e agendamento do flush (spec 013)', () => {
   it('o job text só grava e agenda: nada de LLM nem envio; o flush não leva texto e agenda a janela deslizante', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
 
-    assert.equal(await h.processor.process(textJob(client.id), MORE), 'done');
+    assert.equal(await h.processor.process(textJob(company.id), MORE), 'done');
 
     assert.equal(h.llm.calls.length, 0);
     assert.equal(h.sender.calls.length, 0);
@@ -924,7 +925,7 @@ describe('ChannelInboundProcessor: etapa aceitar e agendamento do flush (spec 01
     const [call] = h.scheduler.calls;
     assert.deepEqual(call?.schedule, { delayMs: 5_000, mode: 'slide' });
     assert.deepEqual(Object.keys(call.job).sort(), [
-      'clientId',
+      'companyId',
       'contactRef',
       'kind',
       'phoneNumberId',
@@ -937,9 +938,9 @@ describe('ChannelInboundProcessor: etapa aceitar e agendamento do flush (spec 01
   it('o teto de espera encurta o atraso: nunca passa de maxWait desde a mais antiga pendente', async () => {
     // Relógio com 10 ms por leitura; teto curto força o corte depois de poucas mensagens.
     const h = setup({ batch: { windowMs: 5_000, maxWaitMs: 60 } });
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     for (let i = 0; i < 12; i += 1) {
-      await h.processor.process(textJob(client.id, { externalId: `wamid.t${String(i)}` }), MORE);
+      await h.processor.process(textJob(company.id, { externalId: `wamid.t${String(i)}` }), MORE);
     }
     const delays = h.scheduler.calls.map((call) => call.schedule.delayMs);
     assert.equal(delays[0], 60, 'a primeira espera no máximo o teto');
@@ -949,25 +950,25 @@ describe('ChannelInboundProcessor: etapa aceitar e agendamento do flush (spec 01
 
   it('janela zero agenda com atraso zero', async () => {
     const h = setup({ batch: { windowMs: 0 } });
-    const client = await newClient(h, 'alfa');
-    await h.processor.process(textJob(client.id), MORE);
+    const company = await newCompany(h, 'alfa');
+    await h.processor.process(textJob(company.id), MORE);
     assert.equal(h.scheduler.calls[0]?.schedule.delayMs, 0);
   });
 
   it('reentrega de mensagem pendente só garante o flush (ensure); de mensagem já respondida não grava nem agenda', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await h.processor.process(textJob(client.id), MORE);
-    await h.processor.process(textJob(client.id), MORE);
+    const company = await newCompany(h, 'alfa');
+    await h.processor.process(textJob(company.id), MORE);
+    await h.processor.process(textJob(company.id), MORE);
     assert.deepEqual(
       h.scheduler.calls.map((call) => call.schedule.mode),
       ['slide', 'ensure'],
     );
     assert.equal(h.store.allMessages().length, 1);
 
-    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
     h.scheduler.calls.length = 0;
-    assert.equal(await h.processor.process(textJob(client.id), MORE), 'done');
+    assert.equal(await h.processor.process(textJob(company.id), MORE), 'done');
     assert.equal(h.scheduler.calls.length, 0);
     assert.equal(h.llm.calls.length, 1);
     assert.equal(h.sender.calls.length, 1);
@@ -975,9 +976,9 @@ describe('ChannelInboundProcessor: etapa aceitar e agendamento do flush (spec 01
 
   it('o aviso (notice) segue imediato: nada é agendado e nada entra no lote', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await h.processor.process(textJob(client.id), MORE);
-    assert.equal(await h.processor.process(noticeJob(client.id), MORE), 'done');
+    const company = await newCompany(h, 'alfa');
+    await h.processor.process(textJob(company.id), MORE);
+    assert.equal(await h.processor.process(noticeJob(company.id), MORE), 'done');
     assert.equal(h.scheduler.calls.length, 1, 'só o agendamento do texto');
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.sender.calls[0]?.text, CHANNEL_NOTICE_TEXTS.unsupported_type);
@@ -986,28 +987,28 @@ describe('ChannelInboundProcessor: etapa aceitar e agendamento do flush (spec 01
 
   it('falha ao agendar (Redis fora) é retentada e, na última tentativa, o contato recebe o texto padrão', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     h.scheduler.failWith = new ExternalServiceError('Redis fora');
-    await assert.rejects(h.processor.process(textJob(client.id), MORE), ExternalServiceError);
+    await assert.rejects(h.processor.process(textJob(company.id), MORE), ExternalServiceError);
     assert.equal(h.sender.calls.length, 0);
-    await assert.rejects(h.processor.process(textJob(client.id), LAST), ExternalServiceError);
+    await assert.rejects(h.processor.process(textJob(company.id), LAST), ExternalServiceError);
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
   });
 });
 
 describe('ChannelInboundProcessor: job flush (spec 013)', () => {
-  const textOf = (h: Harness, clientId: string, text: string, id: string) =>
-    h.processor.process(textJob(clientId, { text, externalId: id }), MORE);
+  const textOf = (h: Harness, companyId: string, text: string, id: string) =>
+    h.processor.process(textJob(companyId, { text, externalId: id }), MORE);
 
   it('três mensagens, um flush: uma chamada ao LLM, uma resposta enviada, o lote inteiro respondido', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
-    await textOf(h, client.id, 'um', 'wamid.1');
-    await textOf(h, client.id, 'dois', 'wamid.2');
-    await textOf(h, client.id, 'tres', 'wamid.3');
+    const company = await newCompany(h, 'alfa', '555001');
+    await textOf(h, company.id, 'um', 'wamid.1');
+    await textOf(h, company.id, 'dois', 'wamid.2');
+    await textOf(h, company.id, 'tres', 'wamid.3');
 
-    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
 
     assert.equal(h.llm.calls.length, 1);
     assert.equal(h.llm.calls[0]?.userMessage, 'um\ndois\ntres');
@@ -1021,20 +1022,20 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
 
   it('sobrou pendente (limite do lote): agenda o próximo flush sem nova espera e o próximo responde o resto', async () => {
     const h = setup({ batch: { maxMessages: 2 } });
-    const client = await newClient(h, 'alfa');
+    const company = await newCompany(h, 'alfa');
     for (let i = 1; i <= 3; i += 1) {
-      await textOf(h, client.id, `m${String(i)}`, `wamid.${String(i)}`);
+      await textOf(h, company.id, `m${String(i)}`, `wamid.${String(i)}`);
     }
     h.scheduler.calls.length = 0;
 
-    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
     assert.equal(h.llm.calls[0]?.userMessage, 'm1\nm2');
     assert.deepEqual(
       h.scheduler.calls.map((call) => call.schedule),
       [{ delayMs: 0, mode: 'ensure' }],
     );
 
-    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
     assert.equal(h.llm.calls[1]?.userMessage, 'm3');
     assert.equal(h.scheduler.calls.length, 1, 'o último turno não agenda mais nada');
     assert.equal(h.sender.calls.length, 2);
@@ -1042,31 +1043,31 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
 
   it('flush repetido depois da resposta gravada e antes do sentAt só reenvia, sem novo LLM; depois do sentAt não envia', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await textOf(h, client.id, 'oi', 'wamid.1');
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'oi', 'wamid.1');
     h.sender.script(Result.err(permanent(131047)));
     await assert.rejects(
-      h.processor.process(flushOf(textJob(client.id)), MORE),
+      h.processor.process(flushOf(textJob(company.id)), MORE),
       NonRetryableJobError,
     );
     assert.equal(h.llm.calls.length, 1);
 
-    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
     assert.equal(h.llm.calls.length, 1, 'sem nova chamada ao LLM');
     assert.equal(h.sender.calls.length, 2);
     assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
 
-    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
     assert.equal(h.sender.calls.length, 2, 'depois do sentAt não envia de novo');
   });
 
   it('falha do LLM no lote: um fallback marca todas e é enviado uma vez', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await textOf(h, client.id, 'um', 'wamid.1');
-    await textOf(h, client.id, 'dois [[mock:fail]]', 'wamid.2');
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.1');
+    await textOf(h, company.id, 'dois [[mock:fail]]', 'wamid.2');
 
-    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
 
     assert.deepEqual(
       h.sender.calls.map((call) => call.text),
@@ -1079,21 +1080,21 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
 
   it('erro transitório no envio é retentado: a retentativa reenvia a MESMA resposta antes de responder o excedente, sem novo LLM', async () => {
     const h = setup({ batch: { maxMessages: 1 } });
-    const client = await newClient(h, 'alfa');
-    await textOf(h, client.id, 'a', 'wamid.1');
-    await textOf(h, client.id, 'b', 'wamid.2');
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'a', 'wamid.1');
+    await textOf(h, company.id, 'b', 'wamid.2');
     const failure = retryable();
     h.sender.script(Result.err(failure));
 
     await assert.rejects(
-      h.processor.process(flushOf(textJob(client.id)), { attempt: 1, finalAttempt: false }),
+      h.processor.process(flushOf(textJob(company.id)), { attempt: 1, finalAttempt: false }),
       (error: unknown) => error === failure,
     );
     assert.equal(h.llm.calls.length, 1);
 
     // Retentativa: reenvia a resposta de `a` (não responde `b` ainda) e agenda o próximo turno.
     h.scheduler.calls.length = 0;
-    await h.processor.process(flushOf(textJob(client.id)), { attempt: 2, finalAttempt: false });
+    await h.processor.process(flushOf(textJob(company.id)), { attempt: 2, finalAttempt: false });
     assert.equal(h.llm.calls.length, 1, 'sem nova chamada ao LLM');
     assert.equal(h.sender.calls.length, 2);
     assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
@@ -1105,14 +1106,14 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
 
   it('erro permanente no envio com excedente: o próximo turno é agendado mesmo assim', async () => {
     const h = setup({ batch: { maxMessages: 1 } });
-    const client = await newClient(h, 'alfa');
-    await textOf(h, client.id, 'a', 'wamid.1');
-    await textOf(h, client.id, 'b', 'wamid.2');
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'a', 'wamid.1');
+    await textOf(h, company.id, 'b', 'wamid.2');
     h.scheduler.calls.length = 0;
     h.sender.script(Result.err(permanent(131047)));
 
     await assert.rejects(
-      h.processor.process(flushOf(textJob(client.id)), MORE),
+      h.processor.process(flushOf(textJob(company.id)), MORE),
       NonRetryableJobError,
     );
 
@@ -1121,31 +1122,31 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
 
   it('nada pendente: não faz nada', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    assert.equal(await h.processor.process(flushOf(textJob(client.id)), MORE), 'done');
+    const company = await newCompany(h, 'alfa');
+    assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
     assert.equal(h.sender.calls.length, 0);
     assert.equal(h.llm.calls.length, 0);
   });
 
-  it('cliente suspenso: o flush é descartado sem enviar nada; removido e número trocado descartam sem envio', async () => {
+  it('empresa suspensa: o flush é descartado sem enviar nada; removido e número trocado descartam sem envio', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
-    await textOf(h, client.id, 'oi', 'wamid.1');
-    const flush = flushOf(textJob(client.id));
+    const company = await newCompany(h, 'alfa', '555001');
+    await textOf(h, company.id, 'oi', 'wamid.1');
+    const flush = flushOf(textJob(company.id));
 
-    await h.clients.update(client.id, { status: 'SUSPENDED' });
+    await h.companies.update(company.id, { status: 'SUSPENDED' });
     assert.equal(await h.processor.process(flush, LAST), 'discarded');
     assert.equal(h.sender.calls.length, 0);
     assert.equal(h.llm.calls.length, 0);
 
-    await h.clients.update(client.id, { status: 'ACTIVE', whatsappPhoneNumberId: '555777' });
+    await h.companies.update(company.id, { status: 'ACTIVE', whatsappPhoneNumberId: '555777' });
     await assert.rejects(h.processor.process(flush, MORE), NonRetryableJobError);
     assert.equal(h.sender.calls.length, 0);
 
-    const removed = await newClient(h, 'beta', '555002');
+    const removed = await newCompany(h, 'beta', '555002');
     await textOf(h, removed.id, 'oi', 'wamid.9');
     const removedFlush = flushOf(textJob(removed.id));
-    await h.clients.delete(removed.id);
+    await h.companies.delete(removed.id);
     await assert.rejects(h.processor.process(removedFlush, MORE), NonRetryableJobError);
     assert.equal(h.sender.calls.length, 0);
   });
@@ -1153,15 +1154,15 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
   it('falha do atendimento na última tentativa do flush: texto padrão ao contato; nas anteriores, nada', async () => {
     const error = new DatabaseError('indisponível');
     const h = setup({ attendance: { respondToPending: () => Promise.reject(error) } });
-    const client = await newClient(h, 'alfa', '555009');
-    const flush = flushOf(textJob(client.id));
+    const company = await newCompany(h, 'alfa', '555009');
+    const flush = flushOf(textJob(company.id));
     await assert.rejects(h.processor.process(flush, MORE), (e: unknown) => e === error);
     assert.equal(h.sender.calls.length, 0);
     await assert.rejects(h.processor.process(flush, LAST), (e: unknown) => e === error);
     assert.deepEqual(h.sender.calls, [
       {
         phoneNumberId: '555009',
-        accessToken: new SecretString(h.credentials.tokenOf(client.id)),
+        accessToken: new SecretString(h.credentials.tokenOf(company.id)),
         to: CONTACT,
         text: ATTENDANCE_FALLBACK_TEXT,
       },
@@ -1170,19 +1171,19 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
 
   it('flush que falhou sem handler: texto padrão só se há pendente', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa');
-    await h.processor.handleUnprocessedFailure(flushOf(textJob(client.id)));
+    const company = await newCompany(h, 'alfa');
+    await h.processor.handleUnprocessedFailure(flushOf(textJob(company.id)));
     assert.equal(h.sender.calls.length, 0, 'nada pendente');
-    await textOf(h, client.id, 'oi', 'wamid.1');
-    await h.processor.handleUnprocessedFailure(flushOf(textJob(client.id)));
+    await textOf(h, company.id, 'oi', 'wamid.1');
+    await h.processor.handleUnprocessedFailure(flushOf(textJob(company.id)));
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
   });
 
-  it('isolamento: o mesmo contato em dois clientes tem lotes, números e chave do flush separados', async () => {
+  it('isolamento: o mesmo contato em duas empresas tem lotes, números e chave do flush separados', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', '111111');
-    const b = await newClient(h, 'beta', '222222');
+    const a = await newCompany(h, 'alfa', '111111');
+    const b = await newCompany(h, 'beta', '222222');
     await textOf(h, a.id, 'a1', 'wamid.a1');
     await textOf(h, b.id, 'b1', 'wamid.b1');
     await textOf(h, a.id, 'a2', 'wamid.a2');
@@ -1204,34 +1205,34 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
     const keyA = flushKey(first.job);
     const keyB = flushKey(second.job);
     assert.ok(keyA.includes(a.id) && keyB.includes(b.id));
-    assert.notEqual(keyA, keyB, 'o mesmo contato em dois clientes não colide');
+    assert.notEqual(keyA, keyB, 'o mesmo contato em duas empresas não colide');
     assert.ok(!keyA.includes(CONTACT), 'o telefone não aparece na chave');
   });
 
-  it('privacidade: texto, contato e persona não aparecem em log em todo o fluxo; o log leva clientId', async () => {
+  it('privacidade: texto, contato e persona não aparecem em log em todo o fluxo; o log leva companyId', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '777888');
-    await textOf(h, client.id, SECRET_TEXT, 'wamid.1');
-    await textOf(h, client.id, `${SECRET_TEXT} [[mock:fail]]`, 'wamid.2');
+    const company = await newCompany(h, 'alfa', '777888');
+    await textOf(h, company.id, SECRET_TEXT, 'wamid.1');
+    await textOf(h, company.id, `${SECRET_TEXT} [[mock:fail]]`, 'wamid.2');
     h.sender.script(Result.err(permanent(131047)));
-    await h.processor.process(flushOf(textJob(client.id)), MORE).catch(() => undefined);
-    await h.processor.process(flushOf(textJob(client.id)), MORE);
+    await h.processor.process(flushOf(textJob(company.id)), MORE).catch(() => undefined);
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
 
     const raw = h.logs.raw();
     for (const secret of [SECRET_TEXT, CONTACT, WAMID, PERSONA, '777888']) {
       assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
     }
     const lines = h.logs.lines().filter((entry) => entry.msg === 'resposta enviada ao contato');
-    assert.ok(lines.every((entry) => entry.clientId === client.id));
+    assert.ok(lines.every((entry) => entry.companyId === company.id));
     assert.ok(lines.length >= 1);
   });
 });
 
-describe('ChannelInboundProcessor: credencial por cliente (spec 015)', () => {
-  it('cada cliente envia com o token e o número dele, mesmo com mensagens dos dois seguidas', async () => {
+describe('ChannelInboundProcessor: credencial por empresa (spec 015)', () => {
+  it('cada empresa envia com o token e o número dele, mesmo com mensagens dos dois seguidas', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', '555001');
-    const b = await newClient(h, 'beta', '555002');
+    const a = await newCompany(h, 'alfa', '555001');
+    const b = await newCompany(h, 'beta', '555002');
 
     await flow(h, textJob(a.id, { externalId: 'wamid.A' }), MORE);
     await flow(h, textJob(b.id, { externalId: 'wamid.B' }), MORE);
@@ -1247,23 +1248,23 @@ describe('ChannelInboundProcessor: credencial por cliente (spec 015)', () => {
   it('190 marca TOKEN_INVALID (com a versão), é permanente e não tenta o texto padrão', async () => {
     const h = setup();
     h.credentials.tokenVersion = 3;
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
     h.sender.script(Result.err(permanent(190)));
 
     await assert.rejects(
-      flow(h, textJob(client.id), MORE),
+      flow(h, textJob(company.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
 
-    assert.deepEqual(h.credentials.marks, [{ clientId: client.id, tokenVersion: 3 }]);
+    assert.deepEqual(h.credentials.marks, [{ companyId: company.id, tokenVersion: 3 }]);
     assert.equal(h.sender.calls.length, 1, 'sem texto padrão: o token é o mesmo');
-    assert.ok(!h.logs.raw().includes(h.credentials.tokenOf(client.id)));
+    assert.ok(!h.logs.raw().includes(h.credentials.tokenOf(company.id)));
   });
 
-  it('o flush seguinte de um cliente TOKEN_INVALID é descartado sem LLM e sem envio; o outro cliente segue', async () => {
+  it('o flush seguinte de uma empresa TOKEN_INVALID é descartado sem LLM e sem envio; o outra empresa segue', async () => {
     const h = setup();
-    const a = await newClient(h, 'alfa', '555001');
-    const b = await newClient(h, 'beta', '555002');
+    const a = await newCompany(h, 'alfa', '555001');
+    const b = await newCompany(h, 'beta', '555002');
     h.credentials.invalid.add(a.id);
 
     await h.processor.process(textJob(a.id), MORE);
@@ -1280,20 +1281,20 @@ describe('ChannelInboundProcessor: credencial por cliente (spec 015)', () => {
     assert.equal(h.llm.calls.length, 2);
   });
 
-  it('aviso para cliente TOKEN_INVALID é descartado sem enviar', async () => {
+  it('aviso para empresa TOKEN_INVALID é descartado sem enviar', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
-    h.credentials.invalid.add(client.id);
-    assert.equal(await h.processor.process(noticeJob(client.id), MORE), 'discarded');
+    const company = await newCompany(h, 'alfa', '555001');
+    h.credentials.invalid.add(company.id);
+    assert.equal(await h.processor.process(noticeJob(company.id), MORE), 'discarded');
     assert.equal(h.sender.calls.length, 0);
   });
 
   it('outro código permanente (janela de 24 h) não muda o estado', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
     h.sender.script(Result.err(permanent(131047)));
     await assert.rejects(
-      flow(h, textJob(client.id), MORE),
+      flow(h, textJob(company.id), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     assert.deepEqual(h.credentials.marks, []);
@@ -1301,15 +1302,15 @@ describe('ChannelInboundProcessor: credencial por cliente (spec 015)', () => {
 
   it('texto cifrado que não decifra: permanente, sem envio e sem marcar TOKEN_INVALID', async () => {
     const h = setup();
-    const client = await newClient(h, 'alfa', '555001');
+    const company = await newCompany(h, 'alfa', '555001');
     const failure = new CredentialDecryptionError('tampered');
-    const original = h.credentials.forClient.bind(h.credentials);
+    const original = h.credentials.forCompany.bind(h.credentials);
     let broken = false;
-    h.credentials.forClient = (id) => (broken ? Promise.reject(failure) : original(id));
-    await h.processor.process(textJob(client.id), MORE);
+    h.credentials.forCompany = (id) => (broken ? Promise.reject(failure) : original(id));
+    await h.processor.process(textJob(company.id), MORE);
     broken = true;
     await assert.rejects(
-      h.processor.process(flushOf(textJob(client.id)), MORE),
+      h.processor.process(flushOf(textJob(company.id)), MORE),
       (e: unknown) => e instanceof NonRetryableJobError,
     );
     assert.equal(h.sender.calls.length, 0);

@@ -28,7 +28,7 @@ beforeEach(() => {
   graph.reset();
 });
 
-function makeClient(
+function makeCompany(
   overrides: Partial<WhatsappCloudApiClientOptions> = {},
 ): WhatsappCloudApiClient {
   return new WhatsappCloudApiClient({
@@ -55,7 +55,7 @@ async function expectFailure(client: WhatsappCloudApiClient): Promise<MessageSen
 
 describe('WhatsappCloudApiClient: requisição', () => {
   it('envia POST /<versão>/<phone_number_id>/messages com Bearer e o corpo de texto, e devolve o wamid', async () => {
-    const result = await makeClient().sendText(input);
+    const result = await makeCompany().sendText(input);
 
     assert.ok(result.ok);
     assert.match(result.value.channelMessageId, /^wamid\.FAKE\d+$/);
@@ -76,20 +76,20 @@ describe('WhatsappCloudApiClient: requisição', () => {
   });
 
   it('aceita a URL base com barra no fim e a versão configurada', async () => {
-    const client = makeClient({ baseUrl: `${graph.baseUrl}///`, graphApiVersion: 'v24.0' });
+    const client = makeCompany({ baseUrl: `${graph.baseUrl}///`, graphApiVersion: 'v24.0' });
     assert.ok((await client.sendText(input)).ok);
     assert.equal(graph.requests[0]?.path, `/v24.0/${PHONE_NUMBER_ID}/messages`);
   });
 
   it('o phone_number_id vai codificado no caminho (nunca injeta segmentos)', async () => {
-    const client = makeClient();
+    const client = makeCompany();
     await client.sendText({ ...input, phoneNumberId: '1/../x?y=1' });
     assert.equal(graph.requests[0]?.path, '/v26.0/1%2F..%2Fx%3Fy%3D1/messages');
   });
 
   it('registra métrica de envio ok e error, sem dado do contato', async () => {
     const metrics = createMetrics();
-    const client = makeClient({ metrics });
+    const client = makeCompany({ metrics });
     assert.ok((await client.sendText(input)).ok);
     graph.failNext(1, graphError(401, 190));
     assert.equal((await client.sendText(input)).ok, false);
@@ -102,7 +102,7 @@ describe('WhatsappCloudApiClient: requisição', () => {
   });
 
   it('métrica que lança não derruba o envio', async () => {
-    const client = makeClient({
+    const client = makeCompany({
       metrics: {
         observeChannelSend() {
           throw new Error('métrica quebrada');
@@ -122,7 +122,7 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
       [408, undefined],
     ] as const) {
       graph.failNext(1, { kind: 'respond', status, body });
-      const error = await expectFailure(makeClient());
+      const error = await expectFailure(makeCompany());
       assert.equal(error.retryable, true, `HTTP ${String(status)}`);
       assert.equal(error.httpStatus, status);
       assert.equal(error.reason, 'http_error');
@@ -132,7 +132,7 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
   it('códigos de limite de taxa da Meta são retentáveis mesmo com status 4xx', async () => {
     for (const code of [4, 80007, 130429, 131056, 17, 32, 613, 2, 131016, 133004, 131000]) {
       graph.failNext(1, graphError(400, code));
-      const error = await expectFailure(makeClient());
+      const error = await expectFailure(makeCompany());
       assert.equal(error.retryable, true, `código ${String(code)}`);
       assert.equal(error.providerCode, code);
       assert.equal(error.providerType, 'OAuthException');
@@ -156,7 +156,7 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
       [400, 368],
     ] as const) {
       graph.failNext(1, graphError(status, code));
-      const error = await expectFailure(makeClient());
+      const error = await expectFailure(makeCompany());
       assert.equal(error.retryable, false, `HTTP ${String(status)} código ${String(code)}`);
       assert.equal(error.httpStatus, status);
       assert.equal(error.providerCode, code);
@@ -165,9 +165,9 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
 
   it('4xx sem corpo JSON utilizável é permanente; 3xx não é seguido (permanente)', async () => {
     graph.failNext(1, { kind: 'respond', status: 404 });
-    assert.equal((await expectFailure(makeClient())).retryable, false);
+    assert.equal((await expectFailure(makeCompany())).retryable, false);
     graph.failNext(1, { kind: 'respond', status: 302, body: { location: 'x' } });
-    const redirected = await expectFailure(makeClient());
+    const redirected = await expectFailure(makeCompany());
     assert.equal(redirected.retryable, false);
     assert.equal(redirected.httpStatus, 302);
   });
@@ -175,7 +175,7 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
   it('2xx sem wamid (corpo inesperado) é permanente: a Meta pode ter enviado, então nada de reenviar', async () => {
     for (const body of [{}, { messages: [] }, { messages: [{ id: '' }] }, undefined]) {
       graph.failNext(1, { kind: 'respond', status: 200, body });
-      const error = await expectFailure(makeClient());
+      const error = await expectFailure(makeCompany());
       assert.equal(error.reason, 'invalid_response');
       assert.equal(error.retryable, false);
     }
@@ -185,12 +185,12 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
     const release = keepEventLoopAlive();
     try {
       graph.failNext(1, { kind: 'hang' });
-      const timedOut = await expectFailure(makeClient({ timeoutMs: 150 }));
+      const timedOut = await expectFailure(makeCompany({ timeoutMs: 150 }));
       assert.equal(timedOut.reason, 'timeout');
       assert.equal(timedOut.retryable, true);
 
       graph.failNext(1, { kind: 'drop' });
-      const dropped = await expectFailure(makeClient());
+      const dropped = await expectFailure(makeCompany());
       assert.equal(dropped.reason, 'network');
       assert.equal(dropped.retryable, true);
     } finally {
@@ -199,7 +199,7 @@ describe('WhatsappCloudApiClient: classificação dos erros', () => {
   });
 
   it('servidor inalcançável é erro de rede retentável', async () => {
-    const error = await expectFailure(makeClient({ baseUrl: 'http://127.0.0.1:1' }));
+    const error = await expectFailure(makeCompany({ baseUrl: 'http://127.0.0.1:1' }));
     assert.equal(error.reason, 'network');
     assert.equal(error.retryable, true);
   });
@@ -216,7 +216,7 @@ describe('WhatsappCloudApiClient: corpo da resposta com teto', () => {
   async function floodedFailure(status: number): Promise<MessageSendError> {
     graph.failNext(1, { kind: 'flood', status });
     const begin = Date.now();
-    const error = await expectFailure(makeClient({ timeoutMs: 5_000 }));
+    const error = await expectFailure(makeCompany({ timeoutMs: 5_000 }));
     assert.ok(Date.now() - begin < 3_000, 'não esperou o corpo sem fim');
     return error;
   }
@@ -226,7 +226,7 @@ describe('WhatsappCloudApiClient: corpo da resposta com teto', () => {
     while (!graph.floodClosedByClient && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    assert.equal(graph.floodClosedByClient, true, 'o cliente cancelou a conexão');
+    assert.equal(graph.floodClosedByClient, true, 'a empresa cancelou a conexão');
     // Leu só até o teto (64 KiB) mais o que já estava em trânsito: nada perto de "o corpo inteiro".
     assert.ok(
       graph.floodBytesWritten < 16 * 1024 * 1024,
@@ -256,7 +256,7 @@ describe('WhatsappCloudApiClient: corpo da resposta com teto', () => {
   });
 
   it('resposta de sucesso normal (poucos bytes) continua sendo lida por inteiro', async () => {
-    const result = await makeClient().sendText(input);
+    const result = await makeCompany().sendText(input);
     assert.ok(result.ok);
     assert.match(result.value.channelMessageId, /^wamid\.FAKE\d+$/);
   });
@@ -265,7 +265,7 @@ describe('WhatsappCloudApiClient: corpo da resposta com teto', () => {
 describe('WhatsappCloudApiClient: privacidade do erro', () => {
   it('o erro leva só status, code, type e retentável: nunca token, texto, destinatário nem a mensagem da Meta', async () => {
     graph.failNext(1, graphError(400, 131047));
-    const error = await expectFailure(makeClient());
+    const error = await expectFailure(makeCompany());
     assert.deepEqual(error.context, {
       reason: 'http_error',
       retryable: false,
@@ -289,7 +289,7 @@ describe('WhatsappCloudApiClient: privacidade do erro', () => {
     const release = keepEventLoopAlive();
     try {
       graph.failNext(1, { kind: 'hang' });
-      const error = await expectFailure(makeClient({ timeoutMs: 100 }));
+      const error = await expectFailure(makeCompany({ timeoutMs: 100 }));
       const everything = JSON.stringify({ m: error.message, c: error.context, s: error.stack });
       for (const secret of [TOKEN, SECRET_TEXT, CONTACT]) {
         assert.ok(!everything.includes(secret), `vazou: ${secret}`);

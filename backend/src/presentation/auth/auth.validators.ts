@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  clientSlugSchema,
+  companySlugSchema,
   emailSchema,
   loginPasswordSchema,
   newPasswordSchema,
@@ -11,7 +11,7 @@ import {
  * trazem só o caminho e o motivo): senha, e-mail e token nunca voltam nem vão ao log por aqui.
  */
 export const loginBodySchema = z
-  .object({ clientSlug: clientSlugSchema, email: emailSchema, password: loginPasswordSchema })
+  .object({ companySlug: companySlugSchema, email: emailSchema, password: loginPasswordSchema })
   .strict();
 
 export const platformLoginBodySchema = z

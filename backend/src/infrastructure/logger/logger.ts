@@ -30,7 +30,7 @@ const REDACTED_KEYS = [
   'WHATSAPP_APP_SECRET',
   'WHATSAPP_VERIFY_TOKEN',
   'WHATSAPP_ACCESS_TOKEN',
-  // Credenciais por cliente (spec 015): token cifrado, chaves de cifra, code do Embedded Signup.
+  // Credenciais por empresa (spec 015): token cifrado, chaves de cifra, code do Embedded Signup.
   'tokenCiphertext',
   'clientSecret',
   // `oauthCode` (não `code`, que mascararia códigos de erro úteis): code do Embedded Signup e o PIN
@@ -70,15 +70,15 @@ function loggerBindsRequestId(logger: Logger): boolean {
 /**
  * Contexto da requisição atual (AsyncLocalStorage) para o log. Assim, qualquer log feito
  * durante a requisição, inclusive de um service que usa o logger raiz e não `request.log`,
- * sai com `requestId`, `clientId`, `userId` e `operation`. Fora de requisição: `{}`.
+ * sai com `requestId`, `companyId`, `actorId` e `operation`. Fora de requisição: `{}`.
  */
 function contextMixin(_mergeObject: object, _level: number, logger: Logger): object {
   const context = getContext();
   if (context === undefined) return {};
   return {
     ...(loggerBindsRequestId(logger) ? {} : { requestId: context.requestId }),
-    ...(context.clientId === undefined ? {} : { clientId: context.clientId }),
-    ...(context.userId === undefined ? {} : { userId: context.userId }),
+    ...(context.companyId === undefined ? {} : { companyId: context.companyId }),
+    ...(context.actorId === undefined ? {} : { actorId: context.actorId }),
     ...(context.operation === undefined ? {} : { operation: context.operation }),
   };
 }

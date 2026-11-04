@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CLIENT_SLUG_PATTERN, EMAIL_MAX_LENGTH } from '../../domain/index.js';
+import { COMPANY_SLUG_PATTERN, EMAIL_MAX_LENGTH } from '../../domain/index.js';
 
 /** Política de senha (NIST SP 800-63B): só tamanho, sem regras de composição. */
 export const PASSWORD_MIN_LENGTH = 12;
@@ -44,9 +44,9 @@ export const accountPasswordSchema = passwordBase().pipe(
  */
 export const loginPasswordSchema = passwordBase().pipe(z.string().min(1).max(PASSWORD_MAX_LENGTH));
 
-export const clientSlugSchema = z
+export const companySlugSchema = z
   .string()
-  .regex(CLIENT_SLUG_PATTERN, 'de 3 a 63 caracteres: minúsculas, dígitos e hífen');
+  .regex(COMPANY_SLUG_PATTERN, 'de 3 a 63 caracteres: minúsculas, dígitos e hífen');
 
 /** Normaliza um e-mail já validado (para quem não passa pelo Zod). */
 export function normalizeEmail(value: string): string {

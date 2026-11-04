@@ -15,7 +15,7 @@ import {
 } from '../../application/channel/channel-inbound.processor.js';
 import { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import { CHANNEL_NOTICE_TEXTS } from '../../application/channel/channel-texts.js';
-import type { Client } from '../../domain/index.js';
+import type { Company } from '../../domain/index.js';
 import { DatabaseError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import { FakeGraphApi, graphError } from '../../test-support/fake-graph-api.js';
@@ -37,7 +37,7 @@ import {
   createDatabase,
   type Database,
   PrismaAttendanceUnitOfWork,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
 } from '../database/index.js';
@@ -145,10 +145,10 @@ async function start(setup: Setup = {}): Promise<Harness> {
   });
   const llm = new MockLlmProvider({ recordCalls: true });
   const { prisma } = database;
-  const clients = new PrismaClientRepository(prisma);
+  const companies = new PrismaCompanyRepository(prisma);
   const messages = new PrismaMessageRepository(prisma);
   const attendance = new AttendanceService({
-    clients,
+    companies,
     conversations: new PrismaConversationRepository(prisma),
     messages,
     unitOfWork: new PrismaAttendanceUnitOfWork(prisma),
@@ -158,11 +158,11 @@ async function start(setup: Setup = {}): Promise<Harness> {
     options: { llmTimeoutMs: LLM_TIMEOUT_MS, inFlightTimeoutMs: IN_FLIGHT_MS },
   });
   const attendance_: InboundAttendance = {
-    acceptInboundMessage: (clientId, input) => attendance.acceptInboundMessage(clientId, input),
-    respondToPending: (clientId, contactRef, limits, options) =>
-      attendance.respondToPending(clientId, contactRef, limits, options),
-    hasPendingMessages: (clientId, contactRef) =>
-      attendance.hasPendingMessages(clientId, contactRef),
+    acceptInboundMessage: (companyId, input) => attendance.acceptInboundMessage(companyId, input),
+    respondToPending: (companyId, contactRef, limits, options) =>
+      attendance.respondToPending(companyId, contactRef, limits, options),
+    hasPendingMessages: (companyId, contactRef) =>
+      attendance.hasPendingMessages(companyId, contactRef),
   };
   const stack = buildChannelCredentials(prisma, { legacyToken: ACCESS_TOKEN, metrics });
   const processor = new ChannelInboundProcessor({
@@ -170,9 +170,9 @@ async function start(setup: Setup = {}): Promise<Harness> {
     queue: queue.queue,
     // Sem espera: o comportamento de uma resposta por mensagem da 011 (a janela tem os seus testes).
     batch: { windowMs: 0, maxWaitMs: 0, maxMessages: 10, maxChars: 8_000 },
-    clients,
+    companies,
     messages,
-    // Clientes de teste só têm número (sem conexão): são `LEGACY` e usam o token global.
+    // Empresas de teste só têm número (sem conexão): são `LEGACY` e usam o token global.
     credentials: stack.credentials,
     connections: stack.connections,
     sender: new WhatsappCloudApiClient({
@@ -202,7 +202,7 @@ async function start(setup: Setup = {}): Promise<Harness> {
       appSecret: APP_SECRET,
       verifyToken: VERIFY_TOKEN,
       intake: new ChannelIntakeService({
-        clients,
+        companies,
         queue: queue.queue,
         logger: logs.logger,
         metrics,
@@ -255,14 +255,17 @@ async function withHarness(fn: (h: Harness) => Promise<void>, setup: Setup = {})
   }
 }
 
-/** Cliente com número do canal e persona própria. */
-async function newClient(label: string, number: string | null = phoneNumberId()): Promise<Client> {
-  const client = await tenants.createClient(label, number ?? undefined);
-  await fixturesDb.prisma.client.updateMany({
-    where: { id: client.id },
+/** Empresa com número do canal e persona própria. */
+async function newCompany(
+  label: string,
+  number: string | null = phoneNumberId(),
+): Promise<Company> {
+  const company = await tenants.createCompany(label, number ?? undefined);
+  await fixturesDb.prisma.company.updateMany({
+    where: { id: company.id },
     data: { persona: `${PERSONA} ${label}` },
   });
-  return client;
+  return company;
 }
 
 async function deliver(
@@ -306,14 +309,14 @@ async function waitFor(
   throw new Error(`tempo esgotado esperando: ${label}`);
 }
 
-/** Mensagens gravadas de (cliente, contato), em ordem cronológica. */
-async function stored(client: Client, contact: string) {
+/** Mensagens gravadas de (empresa, contato), em ordem cronológica. */
+async function stored(company: Company, contact: string) {
   const conversation = await fixturesDb.prisma.conversation.findFirst({
-    where: { clientId: client.id, contactRef: contact },
+    where: { companyId: company.id, contactRef: contact },
   });
   if (conversation === null) return [];
   return fixturesDb.prisma.message.findMany({
-    where: { clientId: client.id, conversationId: conversation.id },
+    where: { companyId: company.id, conversationId: conversation.id },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
 }
@@ -334,7 +337,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
   it('o servidor Graph recebe o envio certo; a conversa tem pergunta e resposta; a resposta fica com sentAt e channelMessageId', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('e2e-ok', number);
+      const company = await newCompany('e2e-ok', number);
       const contact = contactNumber();
       const { id, payload } = textEvent(number, contact, 'Qual o horário?');
 
@@ -342,7 +345,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
       assert.equal(response.statusCode, 200);
 
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'resposta enviada',
       );
       assert.equal(graph.requests.length, 1);
@@ -354,7 +357,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
       assert.equal((request.body as { type: string }).type, 'text');
       assert.match(bodyText(request), /^\[mock\] Recebi: Qual o horário\?/);
 
-      const messages = await stored(client, contact);
+      const messages = await stored(company, contact);
       assert.equal(messages.length, 2);
       const [user, reply] = messages;
       assert.equal(user?.role, 'USER');
@@ -371,7 +374,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
   it('a resposta HTTP não espera o LLM: com o provider bloqueado em hold(), o webhook responde 200 e a resposta só sai depois', async (t) => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('e2e-hold', number);
+      const company = await newCompany('e2e-hold', number);
       const contact = contactNumber();
       const release = h.llm.hold();
       t.after(release);
@@ -385,7 +388,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
       assert.equal(graph.requests.length, 0, 'nada enviado enquanto o LLM está bloqueado');
       release();
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'resposta enviada',
       );
     });
@@ -394,7 +397,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
   it('reentrega do mesmo evento (mesmo wamid) não gera segundo job nem segunda resposta', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('e2e-dup', number);
+      const company = await newCompany('e2e-dup', number);
       const contact = contactNumber();
       const { payload } = textEvent(number, contact, 'uma vez só');
 
@@ -402,26 +405,26 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
       assert.equal((await deliver(h, payload)).statusCode, 200);
       assert.equal((await deliver(h, payload)).statusCode, 200);
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'resposta enviada',
       );
       await sleep(300);
 
       assert.equal(graph.requests.length, 1, 'um só envio');
       assert.equal(h.llm.calls.length, 1, 'um só atendimento');
-      assert.equal((await stored(client, contact)).length, 2);
+      assert.equal((await stored(company, contact)).length, 2);
     });
   });
 
   it('retentativa depois de envio concluído (job reexecutado com outro jobId) não envia de novo', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('e2e-rerun', number);
+      const company = await newCompany('e2e-rerun', number);
       const contact = contactNumber();
       const { id, payload } = textEvent(number, contact, 'reexecuta');
       await deliver(h, payload);
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'resposta enviada',
       );
 
@@ -432,7 +435,7 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
           'text',
           {
             kind: 'text',
-            clientId: client.id,
+            companyId: company.id,
             phoneNumberId: number,
             contactRef: contact,
             text: 'reexecuta',
@@ -456,12 +459,12 @@ describe('canal WhatsApp: de ponta a ponta (webhook assinado, fila real, worker,
 });
 
 describe('canal WhatsApp: entrada e roteamento', () => {
-  it('lote com vários números e clientes, e o MESMO contato escrevendo para dois clientes: conversas, histórico, persona e número separados', async () => {
+  it('lote com vários números e empresas, e o MESMO contato escrevendo para duas empresas: conversas, histórico, persona e número separados', async () => {
     await withHarness(async (h) => {
       const numberA = phoneNumberId();
       const numberB = phoneNumberId();
-      const a = await newClient('iso-a', numberA);
-      const b = await newClient('iso-b', numberB);
+      const a = await newCompany('iso-a', numberA);
+      const b = await newCompany('iso-b', numberB);
       const contact = contactNumber();
 
       // Primeira rodada: um só lote com os dois números; depois mensagens intercaladas.
@@ -493,7 +496,7 @@ describe('canal WhatsApp: entrada e roteamento', () => {
         'marcas de envio',
       );
 
-      // Cada resposta saiu pelo número do seu cliente (par número/destinatário do servidor falso).
+      // Cada resposta saiu pelo número da sua empresa (par número/destinatário do servidor falso).
       const pairs = graph.requests.map((request) => [
         request.phoneNumberId,
         bodyText(request).includes('de A'),
@@ -505,8 +508,8 @@ describe('canal WhatsApp: entrada e roteamento', () => {
         [numberA, true],
       ]);
       // Conversas distintas, sem mistura.
-      const convA = await fixturesDb.prisma.conversation.findMany({ where: { clientId: a.id } });
-      const convB = await fixturesDb.prisma.conversation.findMany({ where: { clientId: b.id } });
+      const convA = await fixturesDb.prisma.conversation.findMany({ where: { companyId: a.id } });
+      const convB = await fixturesDb.prisma.conversation.findMany({ where: { companyId: b.id } });
       assert.equal(convA.length, 1);
       assert.equal(convB.length, 1);
       assert.notEqual(convA[0]?.id, convB[0]?.id);
@@ -527,12 +530,12 @@ describe('canal WhatsApp: entrada e roteamento', () => {
     });
   });
 
-  it('o mesmo wamid em dois clientes não colide (jobId e externalId são por cliente)', async () => {
+  it('o mesmo wamid em duas empresas não colide (jobId e externalId são por empresa)', async () => {
     await withHarness(async (h) => {
       const numberA = phoneNumberId();
       const numberB = phoneNumberId();
-      const a = await newClient('wamid-a', numberA);
-      const b = await newClient('wamid-b', numberB);
+      const a = await newCompany('wamid-a', numberA);
+      const b = await newCompany('wamid-b', numberB);
       const contact = contactNumber();
       const sameId = fakeWamid(contact, `-igual-${randomUUID()}`);
       const payload = webhookPayload([
@@ -558,17 +561,17 @@ describe('canal WhatsApp: entrada e roteamento', () => {
     });
   });
 
-  it('número desconhecido, cliente removido e cliente suspenso: 200, nada enfileirado, nada enviado, métrica e log warn', async () => {
+  it('número desconhecido, empresa removida e empresa suspensa: 200, nada enfileirado, nada enviado, métrica e log warn', async () => {
     await withHarness(async (h) => {
       const suspendedNumber = phoneNumberId();
       const removedNumber = phoneNumberId();
-      const suspended = await newClient('susp', suspendedNumber);
-      await fixturesDb.prisma.client.updateMany({
+      const suspended = await newCompany('susp', suspendedNumber);
+      await fixturesDb.prisma.company.updateMany({
         where: { id: suspended.id },
         data: { status: 'SUSPENDED' },
       });
-      const removed = await newClient('removido', removedNumber);
-      await fixturesDb.prisma.client.updateMany({
+      const removed = await newCompany('removido', removedNumber);
+      await fixturesDb.prisma.company.updateMany({
         where: { id: removed.id },
         data: { deletedAt: new Date() },
       });
@@ -606,7 +609,7 @@ describe('canal WhatsApp: entrada e roteamento', () => {
       );
       assert.match(
         body,
-        /channel_inbound_messages_total\{channel="whatsapp",result="client_unavailable"\} 1/,
+        /channel_inbound_messages_total\{channel="whatsapp",result="company_unavailable"\} 1/,
       );
       assert.equal(h.logs.lines().filter((line) => line.level === 40).length >= 3, true);
     });
@@ -615,7 +618,7 @@ describe('canal WhatsApp: entrada e roteamento', () => {
   it('mensagem não textual e texto inválido: o contato recebe o texto constante; nada é gravado nem chama o LLM', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('notice', number);
+      const company = await newCompany('notice', number);
       const contact = contactNumber();
       const payload = webhookPayload([
         {
@@ -636,7 +639,7 @@ describe('canal WhatsApp: entrada e roteamento', () => {
         CHANNEL_NOTICE_TEXTS.invalid_text,
       ]);
       assert.ok(graph.requests.every((request) => request.phoneNumberId === number));
-      assert.equal((await stored(client, contact)).length, 0);
+      assert.equal((await stored(company, contact)).length, 0);
       assert.equal(h.llm.calls.length, 0);
     });
   });
@@ -644,7 +647,7 @@ describe('canal WhatsApp: entrada e roteamento', () => {
   it('reação e evento system não geram job nem envio; áudio e imagem seguem gerando o aviso', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('ignored', number);
+      const company = await newCompany('ignored', number);
       const contact = contactNumber();
       const ignoredPayload = webhookPayload([
         {
@@ -670,7 +673,7 @@ describe('canal WhatsApp: entrada e roteamento', () => {
       assert.equal((counts.waiting ?? 0) + (counts.completed ?? 0) + (counts.failed ?? 0), 0);
       assert.equal(graph.requests.length, 0);
       assert.equal(h.llm.calls.length, 0);
-      assert.equal((await stored(client, contact)).length, 0);
+      assert.equal((await stored(company, contact)).length, 0);
       assert.match(
         await metricsBody(h),
         /channel_inbound_messages_total\{channel="whatsapp",result="ignored_type"\} 2/,
@@ -698,7 +701,7 @@ describe('canal WhatsApp: entrada e roteamento', () => {
   it('statuses não geram job nem resposta; failed loga warn e só conta', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      await newClient('status', number);
+      await newCompany('status', number);
       const contact = contactNumber();
       const payload = webhookPayload([
         {
@@ -723,21 +726,21 @@ describe('canal WhatsApp: entrada e roteamento', () => {
     });
   });
 
-  it('o clientId nunca vem de fora: cabeçalho, query e corpo apontando para outro cliente são ignorados', async () => {
+  it('o companyId nunca vem de fora: cabeçalho, query e corpo apontando para outra empresa são ignorados', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const owner = await newClient('dono', number);
-      const other = await newClient('outro');
+      const owner = await newCompany('dono', number);
+      const other = await newCompany('outro');
       const contact = contactNumber();
       const { payload } = textEvent(number, contact, 'quem sou eu');
-      const body = JSON.stringify({ ...payload, clientId: other.id });
+      const body = JSON.stringify({ ...payload, companyId: other.id });
       const response = await h.app.inject({
         method: 'POST',
-        url: `/webhooks/whatsapp?clientId=${other.id}`,
+        url: `/webhooks/whatsapp?companyId=${other.id}`,
         headers: {
           'content-type': 'application/json',
           'x-hub-signature-256': signWebhookBody(body, APP_SECRET),
-          'x-client-id': other.id,
+          'x-company-id': other.id,
         },
         payload: body,
       });
@@ -758,7 +761,7 @@ describe('canal WhatsApp: falhas e retentativas', () => {
     t.after(release);
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('retry', number);
+      const company = await newCompany('retry', number);
       const contact = contactNumber();
       graph.script(
         { kind: 'respond', status: 500, body: { error: { code: 1, type: 'OAuthException' } } },
@@ -768,7 +771,7 @@ describe('canal WhatsApp: falhas e retentativas', () => {
 
       await deliver(h, textEvent(number, contact, 'tente de novo').payload);
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'envio concluído',
         20_000,
       );
@@ -776,7 +779,7 @@ describe('canal WhatsApp: falhas e retentativas', () => {
       assert.equal(graph.requests.length, 4, 'três falhas e um sucesso');
       assert.equal(graph.successCount, 1, 'um só envio bem-sucedido');
       assert.equal(h.llm.calls.length, 1, 'o LLM foi chamado uma vez');
-      const messages = await stored(client, contact);
+      const messages = await stored(company, contact);
       assert.equal(messages.length, 2, 'uma só resposta gravada');
       assert.equal(messages[1]?.channelMessageId, 'wamid.FAKE1');
       assert.ok(
@@ -796,12 +799,15 @@ describe('canal WhatsApp: falhas e retentativas', () => {
       for (const code of [190, 131047]) {
         graph.reset();
         const number = phoneNumberId();
-        const client = await newClient(`perm-${String(code)}`, number);
+        const company = await newCompany(`perm-${String(code)}`, number);
         const contact = contactNumber();
         graph.always(graphError(code === 190 ? 401 : 400, code));
 
         await deliver(h, textEvent(number, contact, 'permanente').payload);
-        await waitFor(async () => (await stored(client, contact)).length === 2, 'resposta gravada');
+        await waitFor(
+          async () => (await stored(company, contact)).length === 2,
+          'resposta gravada',
+        );
         await waitFor(
           async () => (await h.queue.jobCounts()).failed === (code === 190 ? 1 : 2),
           'job falho',
@@ -809,7 +815,7 @@ describe('canal WhatsApp: falhas e retentativas', () => {
         await sleep(350);
 
         assert.equal(graph.requests.length, 1, `código ${String(code)}: uma só tentativa`);
-        const messages = await stored(client, contact);
+        const messages = await stored(company, contact);
         assert.equal(messages[1]?.sentAt, null);
         assert.equal(messages[1].channelMessageId, null);
         const line = h.logs
@@ -819,7 +825,7 @@ describe('canal WhatsApp: falhas e retentativas', () => {
               entry.providerCode === code &&
               entry.msg === 'envio recusado de forma permanente; sem retentativa',
           );
-        assert.equal(line?.clientId, client.id);
+        assert.equal(line?.companyId, company.id);
       }
       assert.match(
         await metricsBody(h),
@@ -832,7 +838,7 @@ describe('canal WhatsApp: falhas e retentativas', () => {
     await withHarness(
       async (h) => {
         const number = phoneNumberId();
-        const client = await newClient('db-down', number);
+        const company = await newCompany('db-down', number);
         const contact = contactNumber();
 
         await deliver(h, textEvent(number, contact, 'FALHA-BANCO simulada').payload);
@@ -841,7 +847,7 @@ describe('canal WhatsApp: falhas e retentativas', () => {
         assert.equal(graph.requests[0]?.phoneNumberId, number);
         await waitFor(async () => (await h.queue.jobCounts()).failed === 1, 'job falho');
         assert.equal(h.llm.calls.length, 0);
-        assert.equal((await stored(client, contact)).length, 0, 'nada gravado');
+        assert.equal((await stored(company, contact)).length, 0, 'nada gravado');
 
         // Segundo contato: o envio do texto padrão também falha (permanente) e só gera log.
         graph.reset();
@@ -860,10 +866,10 @@ describe('canal WhatsApp: falhas e retentativas', () => {
       },
       {
         wrapAttendance: (real) => ({
-          acceptInboundMessage: (clientId, input) =>
+          acceptInboundMessage: (companyId, input) =>
             input.text.includes('FALHA-BANCO')
               ? Promise.reject(new DatabaseError('banco indisponível simulado'))
-              : real.acceptInboundMessage(clientId, input),
+              : real.acceptInboundMessage(companyId, input),
         }),
       },
     );
@@ -874,18 +880,18 @@ describe('canal WhatsApp: falhas e retentativas', () => {
     t.after(release);
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('llm-fail', number);
+      const company = await newCompany('llm-fail', number);
       for (const marker of [MOCK_FAIL_MARKER, MOCK_HANG_MARKER]) {
         graph.reset();
         const contact = contactNumber();
         await deliver(h, textEvent(number, contact, `oi ${marker}`).payload);
         await waitFor(
-          async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+          async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
           `fallback enviado (${marker})`,
         );
         assert.equal(graph.requests.length, 1);
         assert.equal(bodyText(graph.requests[0] ?? { body: {} }), ATTENDANCE_FALLBACK_TEXT);
-        const messages = await stored(client, contact);
+        const messages = await stored(company, contact);
         assert.equal(messages[1]?.isFallback, true);
       }
     });
@@ -894,16 +900,16 @@ describe('canal WhatsApp: falhas e retentativas', () => {
   it('queda entre gravar a mensagem e agendar o flush: a mensagem já gravada e pendente é agendada pela entrega seguinte e respondida uma só vez', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('pendente', number);
+      const company = await newCompany('pendente', number);
       const contact = contactNumber();
       const { id, payload } = textEvent(number, contact, 'gravada antes da queda');
       // Como se o job text tivesse gravado a mensagem e caído antes de agendar o flush.
       const conversation = await fixturesDb.prisma.conversation.create({
-        data: { clientId: client.id, contactRef: contact },
+        data: { companyId: company.id, contactRef: contact },
       });
       await fixturesDb.prisma.message.create({
         data: {
-          clientId: client.id,
+          companyId: company.id,
           conversationId: conversation.id,
           role: 'USER',
           content: 'gravada antes da queda',
@@ -913,28 +919,28 @@ describe('canal WhatsApp: falhas e retentativas', () => {
 
       await deliver(h, payload);
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'mensagem respondida',
       );
       assert.equal(h.llm.calls.length, 1, 'uma só chamada ao LLM');
       assert.equal(graph.requests.length, 1);
-      assert.equal((await stored(client, contact)).length, 2, 'sem segunda gravação');
+      assert.equal((await stored(company, contact)).length, 2, 'sem segunda gravação');
     });
   });
 
-  it('job adulterado: o envio usa o número do cliente no banco, não o do payload do job', async () => {
+  it('job adulterado: o envio usa o número da empresa no banco, não o do payload do job', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
       const otherNumber = phoneNumberId();
-      const client = await newClient('forged', number);
-      await newClient('forged-other', otherNumber);
+      const company = await newCompany('forged', number);
+      await newCompany('forged-other', otherNumber);
       const contact = contactNumber();
       const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
       const raw = new Queue(INBOUND_QUEUE_NAME, { connection, prefix: h.prefix });
       try {
         await raw.add('text', {
           kind: 'text',
-          clientId: client.id,
+          companyId: company.id,
           phoneNumberId: number,
           contactRef: contact,
           text: 'job adulterado',
@@ -945,11 +951,11 @@ describe('canal WhatsApp: falhas e retentativas', () => {
           sendFrom: otherNumber,
         });
         await waitFor(() => graph.requests.length === 1, 'envio');
-        // Job cujo phoneNumberId não é o do cliente no banco: descartado, nada sai por número algum.
+        // Job cujo phoneNumberId não é o da empresa no banco: descartado, nada sai por número algum.
         const before = graph.requests.length;
         await raw.add('text', {
           kind: 'text',
-          clientId: client.id,
+          companyId: company.id,
           phoneNumberId: otherNumber,
           contactRef: contact,
           text: 'job com outro número',
@@ -968,23 +974,23 @@ describe('canal WhatsApp: falhas e retentativas', () => {
   });
 });
 
-describe('canal WhatsApp: cliente suspenso não recebe nada (decisão do dono, 2026-10-28)', () => {
-  it('cliente suspenso entre o enfileiramento e o processamento: nem a resposta, nem o aviso, nem o texto padrão; zero requisições ao Graph e nada de texto ou contato em log', async () => {
+describe('canal WhatsApp: empresa suspensa não recebe nada (decisão do dono, 2026-10-28)', () => {
+  it('empresa suspensa entre o enfileiramento e o processamento: nem a resposta, nem o aviso, nem o texto padrão; zero requisições ao Graph e nada de texto ou contato em log', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('susp-e2e', number);
+      const company = await newCompany('susp-e2e', number);
       const contact = contactNumber();
       const secretText = 'texto-secreto-do-suspenso-6a4';
-      await fixturesDb.prisma.client.updateMany({
-        where: { id: client.id },
+      await fixturesDb.prisma.company.updateMany({
+        where: { id: company.id },
         data: { status: 'SUSPENDED' },
       });
 
-      // Jobs que entraram quando o cliente ainda estava ativo e só agora são processados.
+      // Jobs que entraram quando a empresa ainda estava ativo e só agora são processados.
       const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
       const raw = new Queue(INBOUND_QUEUE_NAME, { connection, prefix: h.prefix });
       const base = {
-        clientId: client.id,
+        companyId: company.id,
         phoneNumberId: number,
         contactRef: contact,
         requestId: 'req-suspenso-1234',
@@ -1011,16 +1017,16 @@ describe('canal WhatsApp: cliente suspenso não recebe nada (decisão do dono, 2
 
       assert.equal(graph.requests.length, 0, 'zero requisições ao Graph');
       assert.equal(h.llm.calls.length, 0);
-      assert.equal((await stored(client, contact)).length, 0);
+      assert.equal((await stored(company, contact)).length, 0);
       const counts = await h.queue.jobCounts();
       assert.equal(counts.failed, 0, 'descartado, não falho');
       assert.match(
         await metricsBody(h),
         /queue_jobs_total\{queue="channel-inbound",result="discarded"\} 2/,
       );
-      const warns = h.logs.lines().filter((line) => String(line.msg).includes('cliente suspenso'));
+      const warns = h.logs.lines().filter((line) => String(line.msg).includes('empresa suspensa'));
       assert.ok(warns.length >= 2);
-      assert.ok(warns.every((line) => line.level === 40 && line.clientId === client.id));
+      assert.ok(warns.every((line) => line.level === 40 && line.companyId === company.id));
       const rawLog = h.logs.raw();
       for (const secret of [secretText, contact, number, fakeWamid(contact, '-susp-texto')]) {
         assert.ok(!rawLog.includes(secret), `vazou em log: ${secret}`);
@@ -1028,13 +1034,13 @@ describe('canal WhatsApp: cliente suspenso não recebe nada (decisão do dono, 2
     });
   });
 
-  it('webhook de cliente já suspenso: 200, nada enfileirado nem enviado (intake descarta); reativado, volta a atender', async () => {
+  it('webhook de empresa já suspenso: 200, nada enfileirado nem enviado (intake descarta); reativado, volta a atender', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('susp-intake', number);
+      const company = await newCompany('susp-intake', number);
       const contact = contactNumber();
-      await fixturesDb.prisma.client.updateMany({
-        where: { id: client.id },
+      await fixturesDb.prisma.company.updateMany({
+        where: { id: company.id },
         data: { status: 'SUSPENDED' },
       });
       assert.equal(
@@ -1044,15 +1050,15 @@ describe('canal WhatsApp: cliente suspenso não recebe nada (decisão do dono, 2
       await sleep(250);
       assert.equal(graph.requests.length, 0);
 
-      await fixturesDb.prisma.client.updateMany({
-        where: { id: client.id },
+      await fixturesDb.prisma.company.updateMany({
+        where: { id: company.id },
         data: { status: 'ACTIVE' },
       });
       assert.equal(
         (await deliver(h, textEvent(number, contact, 'reativado').payload)).statusCode,
         200,
       );
-      await waitFor(() => graph.requests.length === 1, 'resposta do cliente reativado');
+      await waitFor(() => graph.requests.length === 1, 'resposta da empresa reativado');
       assert.equal(graph.requests[0]?.phoneNumberId, number);
     });
   });
@@ -1063,7 +1069,7 @@ describe('canal WhatsApp: Redis fora e encerramento', () => {
     const release = keepEventLoopAlive();
     t.after(release);
     const number = phoneNumberId();
-    const client = await newClient('redis-down', number);
+    const company = await newCompany('redis-down', number);
     const contact = contactNumber();
     const { payload } = textEvent(number, contact, 'redis fora');
 
@@ -1073,7 +1079,7 @@ describe('canal WhatsApp: Redis fora e encerramento', () => {
       assert.equal(response.statusCode, 500);
       assert.equal(response.json<{ error: { code: string } }>().error.code, 'ENQUEUE_FAILED');
       assert.equal(graph.requests.length, 0);
-      assert.equal((await stored(client, contact)).length, 0);
+      assert.equal((await stored(company, contact)).length, 0);
       assert.match(
         await metricsBody(down),
         /webhook_requests_total\{channel="whatsapp",result="enqueue_failed"\} 1/,
@@ -1085,7 +1091,7 @@ describe('canal WhatsApp: Redis fora e encerramento', () => {
     await withHarness(async (h) => {
       assert.equal((await deliver(h, payload)).statusCode, 200);
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'resposta',
       );
       assert.equal(graph.requests.length, 1);
@@ -1096,7 +1102,7 @@ describe('canal WhatsApp: Redis fora e encerramento', () => {
     const h = await start();
     try {
       const number = phoneNumberId();
-      const client = await newClient('shutdown', number);
+      const company = await newCompany('shutdown', number);
       const contact = contactNumber();
       graph.always({
         kind: 'respond',
@@ -1111,7 +1117,7 @@ describe('canal WhatsApp: Redis fora e encerramento', () => {
       // Encerra enquanto o envio ainda não respondeu: o job está ativo.
       await h.stop();
 
-      const messages = await stored(client, contact);
+      const messages = await stored(company, contact);
       const reply = messages.find((m) => m.role === 'ASSISTANT');
       assert.ok(
         reply?.sentAt instanceof Date,
@@ -1134,7 +1140,7 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
     await withHarness(
       async (h) => {
         const number = phoneNumberId();
-        await newClient('rl', number);
+        await newCompany('rl', number);
         const unsigned = (): Promise<{ statusCode: number }> =>
           h.app.inject({
             method: 'POST',
@@ -1159,14 +1165,14 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
     );
   });
 
-  it('as métricas do canal aparecem em /metrics, sem clientId, telefone nem texto em label', async () => {
+  it('as métricas do canal aparecem em /metrics, sem companyId, telefone nem texto em label', async () => {
     await withHarness(async (h) => {
       const number = phoneNumberId();
-      const client = await newClient('metrics', number);
+      const company = await newCompany('metrics', number);
       const contact = contactNumber();
       await deliver(h, textEvent(number, contact, SECRET_FOR_METRICS).payload);
       await waitFor(
-        async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
         'resposta',
       );
       await deliver(
@@ -1188,7 +1194,7 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
       ]) {
         assert.ok(body.includes(name), `ausente em /metrics: ${name}`);
       }
-      for (const secret of [client.id, number, contact, SECRET_FOR_METRICS]) {
+      for (const secret of [company.id, number, contact, SECRET_FOR_METRICS]) {
         assert.ok(!body.includes(secret), `vazou em /metrics: ${secret}`);
       }
     });
@@ -1200,7 +1206,7 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
     await withHarness(
       async (h) => {
         const number = phoneNumberId();
-        const client = await newClient('privacy', number);
+        const company = await newCompany('privacy', number);
         const contact = contactNumber();
         const secretText = 'texto-secreto-do-e2e-31c';
         const ids: string[] = [];
@@ -1213,7 +1219,7 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
         // Sucesso.
         await send(secretText);
         await waitFor(
-          async () => (await stored(client, contact)).some((m) => m.sentAt !== null),
+          async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
           'sucesso',
         );
         // Falha transitória seguida de sucesso.
@@ -1278,30 +1284,30 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
         ]) {
           assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
         }
-        // Todo log do worker leva o clientId do job (contexto aberto pelo worker).
+        // Todo log do worker leva o companyId do job (contexto aberto pelo worker).
         const attendance = h.logs
           .lines()
           .filter((line) => line.msg === 'lote de mensagens atendido');
         assert.ok(attendance.length >= 1);
-        assert.ok(attendance.every((line) => line.clientId === client.id));
+        assert.ok(attendance.every((line) => line.companyId === company.id));
       },
       {
         wrapAttendance: (real) => ({
-          acceptInboundMessage: (clientId, input) =>
+          acceptInboundMessage: (companyId, input) =>
             input.text.includes('FALHA-BANCO')
               ? Promise.reject(new DatabaseError('banco indisponível simulado'))
-              : real.acceptInboundMessage(clientId, input),
+              : real.acceptInboundMessage(companyId, input),
         }),
       },
     );
   });
 
-  it('jobs de dois clientes em sequência mantêm cada um o seu clientId nos logs do worker', async () => {
+  it('jobs de duas empresas em sequência mantêm cada um o seu companyId nos logs do worker', async () => {
     await withHarness(async (h) => {
       const numberA = phoneNumberId();
       const numberB = phoneNumberId();
-      const a = await newClient('log-a', numberA);
-      const b = await newClient('log-b', numberB);
+      const a = await newCompany('log-a', numberA);
+      const b = await newCompany('log-b', numberB);
       const contact = contactNumber();
       const payload = webhookPayload([
         {
@@ -1323,12 +1329,12 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
       );
       const sent = h.logs.lines().filter((line) => line.msg === 'resposta enviada ao contato');
       assert.deepEqual(
-        sent.map((line) => line.clientId),
+        sent.map((line) => line.companyId),
         [a.id, b.id],
       );
       const attended = h.logs.lines().filter((line) => line.msg === 'lote de mensagens atendido');
       assert.deepEqual(
-        attended.map((line) => line.clientId),
+        attended.map((line) => line.companyId),
         [a.id, b.id],
       );
     });

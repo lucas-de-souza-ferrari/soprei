@@ -8,11 +8,11 @@ import {
   type ListOptions,
   type Page,
   type Permission,
-  type User,
-  type UserCredentials,
-  type UserRepository,
-  type UserRole,
-  type UserStatus,
+  type Membership,
+  type MembershipCredentials,
+  type MembershipRepository,
+  type MembershipRole,
+  type AccessStatus,
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import {
@@ -24,49 +24,49 @@ import {
 } from '../../shared/errors/index.js';
 import { loginLockKey } from '../auth/auth.service.js';
 import { normalizeEmail } from '../auth/credentials.js';
-import type { UserIdentity } from '../auth/identity.js';
+import type { MembershipIdentity } from '../auth/identity.js';
 import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { SessionStore } from '../ports/session-store.js';
 import type {
-  UserAdminTransaction,
-  UserAdminUnitOfWork,
-} from '../ports/user-admin-unit-of-work.js';
+  MembershipAdminTransaction,
+  MembershipAdminUnitOfWork,
+} from '../ports/membership-admin-unit-of-work.js';
 
 /** Hashes desta classe usam a fila de administração do hasher (teto menor; não esgotam o login). */
 const ADMIN_LANE = { lane: 'admin' } as const;
 
-/** Código do `ConflictError` quando a operação deixaria o cliente sem `OWNER` ativo. */
+/** Código do `ConflictError` quando a operação deixaria a empresa sem `OWNER` ativo. */
 export const LAST_OWNER_CODE = 'LAST_OWNER';
 
 /** O que a API devolve de um usuário: nunca o hash da senha. */
-export interface UserView {
+export interface MembershipView {
   readonly id: string;
   readonly email: string;
-  readonly role: UserRole;
-  readonly status: UserStatus;
+  readonly role: MembershipRole;
+  readonly status: AccessStatus;
   readonly createdAt: Date;
 }
 
-export interface CreateUserInput {
+export interface CreateMembershipInput {
   /** Já validado e normalizado; o service normaliza de novo por segurança. */
   readonly email: string;
   /** Já validada pela política (12 a 128, NFKC, sem NUL). */
   readonly password: string;
-  readonly role: UserRole;
+  readonly role: MembershipRole;
 }
 
-export interface UpdateUserInput {
-  readonly role?: UserRole;
-  readonly status?: UserStatus;
+export interface UpdateMembershipInput {
+  readonly role?: MembershipRole;
+  readonly status?: AccessStatus;
 }
 
-type AdminMetrics = Pick<Metrics, 'countUserAdminAction'>;
+type AdminMetrics = Pick<Metrics, 'countMembershipAdminAction'>;
 
-export interface UserAdminServiceDeps {
+export interface MembershipAdminServiceDeps {
   /** Leituras fora de transação (listagem). As escritas passam sempre pela `unitOfWork`. */
-  readonly users: UserRepository;
+  readonly memberships: MembershipRepository;
   readonly audit: AuditRepository;
-  readonly unitOfWork: UserAdminUnitOfWork;
+  readonly unitOfWork: MembershipAdminUnitOfWork;
   readonly hasher: PasswordHasher;
   readonly sessions: SessionStore;
   readonly logger: FastifyBaseLogger;
@@ -75,26 +75,26 @@ export interface UserAdminServiceDeps {
   readonly loginLockSecret: string | Buffer;
 }
 
-function toView(user: User): UserView {
+function toView(membership: Membership): MembershipView {
   return {
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    status: user.status,
-    createdAt: user.createdAt,
+    id: membership.id,
+    email: membership.email,
+    role: membership.role,
+    status: membership.status,
+    createdAt: membership.createdAt,
   };
 }
 
-/** Evento a gravar (sem `clientId`: vem do ator). */
+/** Evento a gravar (sem `companyId`: vem do ator). */
 interface PendingAudit {
   readonly action: AuditAction;
-  readonly targetUserId: string;
-  readonly fromRole?: UserRole | null;
-  readonly toRole?: UserRole | null;
+  readonly targetMembershipId: string;
+  readonly fromRole?: MembershipRole | null;
+  readonly toRole?: MembershipRole | null;
 }
 
 /**
- * Gestão de usuários do próprio cliente, troca da própria senha e leitura da auditoria (spec 008).
+ * Gestão de usuários da própria empresa, troca da própria senha e leitura da auditoria (spec 008).
  *
  * Regras que **este service** reaplica (o hook `requirePermission` sozinho não as expressa):
  * - permissão pelo papel do ator; nas operações de escrita, o papel e o estado do ator são
@@ -102,28 +102,28 @@ interface PendingAudit {
  *   rebaixado ou desativado (a revogação de sessões falhou) não age com o papel antigo;
  * - hierarquia (`canManageRole`) sobre o papel atual do alvo **e** sobre o papel a atribuir;
  * - ninguém altera o próprio papel, estado nem a senha por aqui;
- * - nenhuma operação deixa o cliente sem `OWNER` ativo: a checagem e a escrita acontecem na mesma
- *   transação, com a linha do cliente travada (`lockClient`), senão dois `OWNER` se rebaixando ao
+ * - nenhuma operação deixa a empresa sem `OWNER` ativo: a checagem e a escrita acontecem na mesma
+ *   transação, com a linha da empresa travada (`lockCompany`), senão dois `OWNER` se rebaixando ao
  *   mesmo tempo passariam cada um pela checagem sozinho;
  * - a auditoria é gravada **na mesma transação** da mudança.
  *
  * Depois do commit (banco primeiro, revogação depois) as sessões do alvo são revogadas; se o Redis
  * falhar, o erro (`ServiceUnavailableError`, 503) sobe com a mudança e a auditoria já gravadas, e
- * repetir o pedido refaz a revogação. O `ClientId` vem sempre do ator (token). **Nunca** loga
+ * repetir o pedido refaz a revogação. O `CompanyId` vem sempre do ator (token). **Nunca** loga
  * e-mail, senha, hash nem token: só ids, papéis e a ação.
  */
-export class UserAdminService {
-  private readonly users: UserRepository;
+export class MembershipAdminService {
+  private readonly memberships: MembershipRepository;
   private readonly audit: AuditRepository;
-  private readonly unitOfWork: UserAdminUnitOfWork;
+  private readonly unitOfWork: MembershipAdminUnitOfWork;
   private readonly hasher: PasswordHasher;
   private readonly sessions: SessionStore;
   private readonly logger: FastifyBaseLogger;
   private readonly metrics: AdminMetrics | undefined;
   private readonly loginLockSecret: string | Buffer;
 
-  constructor(deps: UserAdminServiceDeps) {
-    this.users = deps.users;
+  constructor(deps: MembershipAdminServiceDeps) {
+    this.memberships = deps.memberships;
     this.audit = deps.audit;
     this.unitOfWork = deps.unitOfWork;
     this.hasher = deps.hasher;
@@ -133,18 +133,24 @@ export class UserAdminService {
     this.loginLockSecret = deps.loginLockSecret;
   }
 
-  async listUsers(actor: UserIdentity, options?: ListOptions): Promise<Page<UserView>> {
-    this.requirePermission(actor, 'user:read');
-    const page = await this.users.list(actor.clientId, options);
+  async listMemberships(
+    actor: MembershipIdentity,
+    options?: ListOptions,
+  ): Promise<Page<MembershipView>> {
+    this.requirePermission(actor, 'membership:read');
+    const page = await this.memberships.list(actor.companyId, options);
     return { items: page.items.map(toView), nextCursor: page.nextCursor };
   }
 
-  listAuditEvents(actor: UserIdentity, options?: ListOptions): Promise<Page<AuditEvent>> {
+  listAuditEvents(actor: MembershipIdentity, options?: ListOptions): Promise<Page<AuditEvent>> {
     this.requirePermission(actor, 'audit:read');
-    return this.audit.list(actor.clientId, options);
+    return this.audit.list(actor.companyId, options);
   }
 
-  async createUser(actor: UserIdentity, input: CreateUserInput): Promise<UserView> {
+  async createMembership(
+    actor: MembershipIdentity,
+    input: CreateMembershipInput,
+  ): Promise<MembershipView> {
     // Cheque barato, pelo papel do token, antes de gastar um hash; a decisão final é a de dentro
     // da transação (papel relido do banco).
     this.requireManage(actor, input.role);
@@ -152,38 +158,38 @@ export class UserAdminService {
     const passwordHash = await this.hasher.hash(input.password, ADMIN_LANE);
 
     const created = await this.unitOfWork.run(async (tx) => {
-      await tx.lockClient(actor.clientId);
+      await tx.lockCompany(actor.companyId);
       const current = await this.loadManager(tx, actor);
       this.requireHierarchy(actor, current.role, input.role, 'create');
-      const user = await tx.users.create(actor.clientId, {
+      const membership = await tx.memberships.create(actor.companyId, {
         email,
         passwordHash,
         role: input.role,
       });
       await this.record(tx, actor, {
-        action: 'USER_CREATED',
-        targetUserId: user.id,
-        toRole: user.role,
+        action: 'MEMBERSHIP_CREATED',
+        targetMembershipId: membership.id,
+        toRole: membership.role,
       });
-      return user;
+      return membership;
     });
     this.afterCommit(actor, [
-      { action: 'USER_CREATED', targetUserId: created.id, toRole: created.role },
+      { action: 'MEMBERSHIP_CREATED', targetMembershipId: created.id, toRole: created.role },
     ]);
     return toView(created);
   }
 
-  async updateUser(
-    actor: UserIdentity,
+  async updateMembership(
+    actor: MembershipIdentity,
     targetId: string,
-    patch: UpdateUserInput,
-  ): Promise<UserView> {
-    this.requirePermission(actor, 'user:manage');
+    patch: UpdateMembershipInput,
+  ): Promise<MembershipView> {
+    this.requirePermission(actor, 'membership:manage');
 
     const outcome = await this.unitOfWork.run(async (tx) => {
-      await tx.lockClient(actor.clientId);
+      await tx.lockCompany(actor.companyId);
       const current = await this.loadManager(tx, actor);
-      const target = await tx.users.findById(actor.clientId, targetId);
+      const target = await tx.memberships.findById(actor.companyId, targetId);
       this.requireNotSelf(actor, target, 'update');
       this.requireHierarchy(actor, current.role, target.role, 'update');
 
@@ -196,12 +202,16 @@ export class UserAdminService {
         target.role === 'OWNER' &&
         target.status === 'ACTIVE' &&
         ((roleChanges && patch.role !== 'OWNER') || (statusChanges && patch.status === 'DISABLED'));
-      if (stopsBeingOwner && (await tx.users.countActiveOwners(actor.clientId)) <= 1) {
+      if (stopsBeingOwner && (await tx.memberships.countActiveOwners(actor.companyId)) <= 1) {
         this.logger.warn(
-          { actorUserId: actor.userId, targetUserId: target.id, reason: 'last_owner' },
-          'operação recusada: o cliente ficaria sem proprietário ativo',
+          {
+            actorMembershipId: actor.membershipId,
+            targetMembershipId: target.id,
+            reason: 'last_owner',
+          },
+          'operação recusada: a empresa ficaria sem proprietário ativo',
         );
-        throw new ConflictError('O cliente precisa ter ao menos um proprietário ativo', {
+        throw new ConflictError('A empresa precisa ter ao menos um proprietário ativo', {
           code: LAST_OWNER_CODE,
           context: { reason: 'last_owner' },
         });
@@ -210,57 +220,64 @@ export class UserAdminService {
       const events: PendingAudit[] = [];
       if (roleChanges) {
         events.push({
-          action: 'USER_ROLE_CHANGED',
-          targetUserId: target.id,
+          action: 'MEMBERSHIP_ROLE_CHANGED',
+          targetMembershipId: target.id,
           fromRole: target.role,
           toRole: patch.role ?? null,
         });
       }
       if (statusChanges) {
         events.push({
-          action: patch.status === 'DISABLED' ? 'USER_DISABLED' : 'USER_ENABLED',
-          targetUserId: target.id,
+          action: patch.status === 'DISABLED' ? 'MEMBERSHIP_DISABLED' : 'MEMBERSHIP_ENABLED',
+          targetMembershipId: target.id,
         });
       }
 
-      let user = target;
+      let membership = target;
       if (events.length > 0) {
-        user = await tx.users.update(actor.clientId, target.id, {
+        membership = await tx.memberships.update(actor.companyId, target.id, {
           ...(roleChanges ? { role: patch.role } : {}),
           ...(statusChanges ? { status: patch.status } : {}),
         });
         for (const event of events) await this.record(tx, actor, event);
       }
-      return { user, events };
+      return { membership, events };
     });
 
     this.afterCommit(actor, outcome.events);
     // Papel novo e desativação derrubam as sessões do alvo (ele refaz o login com o papel novo).
     // O pedido repetido, já aplicado, ainda refaz a revogação (idempotente) caso a primeira tenha
     // parado no Redis; reativar não precisa revogar.
-    await this.revokeSessions(actor, outcome.user.id, {
+    await this.revokeSessions(actor, outcome.membership.id, {
       when: patch.role !== undefined || patch.status === 'DISABLED',
     });
-    return toView(outcome.user);
+    return toView(outcome.membership);
   }
 
-  async resetPassword(actor: UserIdentity, targetId: string, newPassword: string): Promise<void> {
-    this.requirePermission(actor, 'user:manage');
+  async resetPassword(
+    actor: MembershipIdentity,
+    targetId: string,
+    newPassword: string,
+  ): Promise<void> {
+    this.requirePermission(actor, 'membership:manage');
     const passwordHash = await this.hasher.hash(newPassword, ADMIN_LANE);
 
-    const targetUserId = await this.unitOfWork.run(async (tx) => {
-      await tx.lockClient(actor.clientId);
+    const targetMembershipId = await this.unitOfWork.run(async (tx) => {
+      await tx.lockCompany(actor.companyId);
       const current = await this.loadManager(tx, actor);
-      const target = await tx.users.findById(actor.clientId, targetId);
+      const target = await tx.memberships.findById(actor.companyId, targetId);
       // A própria senha só pela rota de troca (exige a senha atual).
       this.requireNotSelf(actor, target, 'reset_password');
       this.requireHierarchy(actor, current.role, target.role, 'reset_password');
-      await tx.users.updatePassword(actor.clientId, target.id, passwordHash);
-      await this.record(tx, actor, { action: 'USER_PASSWORD_RESET', targetUserId: target.id });
+      await tx.memberships.updatePassword(actor.companyId, target.id, passwordHash);
+      await this.record(tx, actor, {
+        action: 'MEMBERSHIP_PASSWORD_RESET',
+        targetMembershipId: target.id,
+      });
       return target.id;
     });
-    this.afterCommit(actor, [{ action: 'USER_PASSWORD_RESET', targetUserId }]);
-    await this.revokeSessions(actor, targetUserId);
+    this.afterCommit(actor, [{ action: 'MEMBERSHIP_PASSWORD_RESET', targetMembershipId }]);
+    await this.revokeSessions(actor, targetMembershipId);
   }
 
   /**
@@ -269,24 +286,24 @@ export class UserAdminService {
    * da pessoa, inclusive a atual (a pessoa faz login de novo). Senha nova igual à atual é aceita.
    */
   async changeOwnPassword(
-    actor: UserIdentity,
+    actor: MembershipIdentity,
     input: { readonly currentPassword: string; readonly newPassword: string },
   ): Promise<void> {
-    const lockKey = loginLockKey(this.loginLockSecret, ['pw', actor.clientId, actor.userId]);
+    const lockKey = loginLockKey(this.loginLockSecret, ['pw', actor.companyId, actor.membershipId]);
     const lock = await this.sessions.loginLockState(lockKey);
     if (lock.locked) {
       this.logger.warn({ reason: 'password_change_locked' }, 'troca de senha bloqueada');
       throw new RateLimitError(lock.retryAfterSeconds);
     }
 
-    let credentials: UserCredentials;
+    let credentials: MembershipCredentials;
     try {
-      credentials = await this.users.findCredentialsById(actor.clientId, actor.userId);
+      credentials = await this.memberships.findCredentialsById(actor.companyId, actor.membershipId);
     } catch (error) {
       if (error instanceof NotFoundError) throw new UnauthorizedError();
       throw error;
     }
-    if (credentials.user.status !== 'ACTIVE') throw new UnauthorizedError();
+    if (credentials.membership.status !== 'ACTIVE') throw new UnauthorizedError();
 
     const matches = await this.hasher.verify(
       input.currentPassword,
@@ -302,56 +319,61 @@ export class UserAdminService {
 
     const passwordHash = await this.hasher.hash(input.newPassword, ADMIN_LANE);
     await this.unitOfWork.run(async (tx) => {
-      await tx.users.updatePassword(actor.clientId, actor.userId, passwordHash);
+      await tx.memberships.updatePassword(actor.companyId, actor.membershipId, passwordHash);
       await this.record(tx, actor, {
-        action: 'USER_PASSWORD_CHANGED',
-        targetUserId: actor.userId,
+        action: 'MEMBERSHIP_PASSWORD_CHANGED',
+        targetMembershipId: actor.membershipId,
       });
     });
-    this.afterCommit(actor, [{ action: 'USER_PASSWORD_CHANGED', targetUserId: actor.userId }]);
-    await this.revokeSessions(actor, actor.userId);
+    this.afterCommit(actor, [
+      { action: 'MEMBERSHIP_PASSWORD_CHANGED', targetMembershipId: actor.membershipId },
+    ]);
+    await this.revokeSessions(actor, actor.membershipId);
   }
 
   // --- regras ---
 
   /** Permissão pelo papel do token (hook já checou; aqui é a defesa em profundidade). */
-  private requirePermission(actor: UserIdentity, permission: Permission): void {
+  private requirePermission(actor: MembershipIdentity, permission: Permission): void {
     if (hasPermission(actor.role, permission)) return;
     this.deny(actor, 'permission', actor.role);
   }
 
-  /** Cheque barato antes do hash: `user:manage` e o papel a atribuir, pelo papel do token. */
-  private requireManage(actor: UserIdentity, assigned: UserRole): void {
-    this.requirePermission(actor, 'user:manage');
+  /** Cheque barato antes do hash: `membership:manage` e o papel a atribuir, pelo papel do token. */
+  private requireManage(actor: MembershipIdentity, assigned: MembershipRole): void {
+    this.requirePermission(actor, 'membership:manage');
     this.requireHierarchy(actor, actor.role, assigned, 'create');
   }
 
   /**
    * O ator, com papel e estado **do banco** (não do token): precisa estar ativo e ter
-   * `user:manage`. Ausente, desativado ou sem permissão = 403.
+   * `membership:manage`. Ausente, desativado ou sem permissão = 403.
    */
-  private async loadManager(tx: UserAdminTransaction, actor: UserIdentity): Promise<User> {
-    let current: User;
+  private async loadManager(
+    tx: MembershipAdminTransaction,
+    actor: MembershipIdentity,
+  ): Promise<Membership> {
+    let current: Membership;
     try {
-      current = await tx.users.findById(actor.clientId, actor.userId);
+      current = await tx.memberships.findById(actor.companyId, actor.membershipId);
     } catch (error) {
       if (error instanceof NotFoundError) return this.deny(actor, 'actor_missing', actor.role);
       throw error;
     }
-    if (current.status !== 'ACTIVE' || !hasPermission(current.role, 'user:manage')) {
+    if (current.status !== 'ACTIVE' || !hasPermission(current.role, 'membership:manage')) {
       return this.deny(actor, 'actor_not_allowed', current.role);
     }
     return current;
   }
 
-  private requireNotSelf(actor: UserIdentity, target: User, operation: string): void {
-    if (target.id === actor.userId) this.deny(actor, `self_${operation}`, actor.role);
+  private requireNotSelf(actor: MembershipIdentity, target: Membership, operation: string): void {
+    if (target.id === actor.membershipId) this.deny(actor, `self_${operation}`, actor.role);
   }
 
   private requireHierarchy(
-    actor: UserIdentity,
-    actorRole: UserRole,
-    subjectRole: UserRole | undefined,
+    actor: MembershipIdentity,
+    actorRole: MembershipRole,
+    subjectRole: MembershipRole | undefined,
     operation: string,
   ): void {
     if (!canManageRole(actorRole, subjectRole)) {
@@ -359,9 +381,9 @@ export class UserAdminService {
     }
   }
 
-  private deny(actor: UserIdentity, reason: string, role: UserRole): never {
+  private deny(actor: MembershipIdentity, reason: string, role: MembershipRole): never {
     this.logger.warn(
-      { actorUserId: actor.userId, role, reason },
+      { actorMembershipId: actor.membershipId, role, reason },
       'operação de usuário negada pela permissão ou hierarquia',
     );
     throw new ForbiddenError();
@@ -371,36 +393,36 @@ export class UserAdminService {
 
   /** Grava o evento na transação da mudança (sem e-mail, senha nem texto livre). */
   private async record(
-    tx: UserAdminTransaction,
-    actor: UserIdentity,
+    tx: MembershipAdminTransaction,
+    actor: MembershipIdentity,
     event: PendingAudit,
   ): Promise<void> {
-    await tx.audit.create(actor.clientId, {
+    await tx.audit.create(actor.companyId, {
       action: event.action,
-      actorUserId: actor.userId,
-      targetUserId: event.targetUserId,
+      actorMembershipId: actor.membershipId,
+      targetMembershipId: event.targetMembershipId,
       fromRole: event.fromRole ?? null,
       toRole: event.toRole ?? null,
     });
   }
 
   /** Log `audit` e métrica, só depois do commit (nada é logado de transação desfeita). */
-  private afterCommit(actor: UserIdentity, events: readonly PendingAudit[]): void {
+  private afterCommit(actor: MembershipIdentity, events: readonly PendingAudit[]): void {
     for (const event of events) {
       this.logger.info(
         {
           event: 'audit',
           action: event.action,
-          clientId: actor.clientId,
-          actorUserId: actor.userId,
-          targetUserId: event.targetUserId,
+          companyId: actor.companyId,
+          actorMembershipId: actor.membershipId,
+          targetMembershipId: event.targetMembershipId,
           fromRole: event.fromRole ?? null,
           toRole: event.toRole ?? null,
         },
         'audit',
       );
       try {
-        this.metrics?.countUserAdminAction(event.action);
+        this.metrics?.countMembershipAdminAction(event.action);
       } catch (error) {
         this.logger.warn({ err: error }, 'falha ao registrar métrica de gestão de usuários');
       }
@@ -412,16 +434,16 @@ export class UserAdminService {
    * gravada (a tentativa seguinte, idempotente, refaz a revogação).
    */
   private async revokeSessions(
-    actor: UserIdentity,
-    targetUserId: string,
+    actor: MembershipIdentity,
+    targetMembershipId: string,
     options: { readonly when?: boolean } = {},
   ): Promise<void> {
     if (options.when === false) return;
     try {
-      await this.sessions.revokeAllSessions(actor.clientId, targetUserId);
+      await this.sessions.revokeAllSessions(actor.companyId, targetMembershipId);
     } catch (error) {
       this.logger.error(
-        { targetUserId, reason: 'revocation_failed' },
+        { targetMembershipId, reason: 'revocation_failed' },
         'mudança gravada, mas a revogação das sessões falhou (repita o pedido)',
       );
       throw error;

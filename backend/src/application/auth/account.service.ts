@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import {
   AccountId,
-  ClientId,
+  CompanyId,
   type Account,
   type AccountRepository,
   type ResetFailureOutcome,
@@ -17,7 +17,7 @@ import {
 import type { SessionStore } from '../ports/session-store.js';
 import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { AccountMailer, AccountSessionStore } from '../ports/account-session.js';
-import type { UserIdentity } from './identity.js';
+import type { MembershipIdentity } from './identity.js';
 import { normalizeEmail } from './credentials.js';
 import { deriveResetKey, resetDigest } from './reset-code.js';
 import {
@@ -351,7 +351,7 @@ export class AccountService {
 
   async me(secret: string) {
     const { account, session } = await this.session(secret);
-    return { id: account.id, email: account.email, selectedClientId: session.clientId };
+    return { id: account.id, email: account.email, selectedCompanyId: session.companyId };
   }
   async companies(secret: string) {
     const { account } = await this.session(secret);
@@ -363,23 +363,23 @@ export class AccountService {
   }
   async selectCompany(secret: string, id: string): Promise<void> {
     const { account } = await this.session(secret);
-    const clientId = ClientId.parse(id);
-    if ((await this.deps.accounts.membership(account.id, clientId)) === null)
+    const companyId = CompanyId.parse(id);
+    if ((await this.deps.accounts.membership(account.id, companyId)) === null)
       throw new NotFoundError('Empresa não encontrada');
-    await this.deps.sessions.select(secret, clientId);
+    await this.deps.sessions.select(secret, companyId);
   }
-  async tenantIdentity(secret: string): Promise<UserIdentity | null> {
+  async tenantIdentity(secret: string): Promise<MembershipIdentity | null> {
     const { account, session } = await this.session(secret);
-    if (session.clientId === null) return null;
+    if (session.companyId === null) return null;
     const member = await this.deps.accounts.membership(
       account.id,
-      ClientId.parse(session.clientId),
+      CompanyId.parse(session.companyId),
     );
     if (member === null) throw new UnauthorizedError();
     return {
-      kind: 'user',
-      clientId: member.clientId,
-      userId: member.userId,
+      kind: 'membership',
+      companyId: member.companyId,
+      membershipId: member.membershipId,
       role: member.role,
       sessionId: session.id,
     };

@@ -1,7 +1,7 @@
-import type { ClientId } from '../value-objects/client-id.js';
-import type { UserId } from '../value-objects/user-id.js';
-import type { AccountId } from '../value-objects/user-id.js';
-import type { UserRole } from '../entities/user.js';
+import type { CompanyId } from '../value-objects/company-id.js';
+import type { MembershipId } from '../value-objects/membership-id.js';
+import type { AccountId } from '../value-objects/account-id.js';
+import type { MembershipRole } from '../entities/membership.js';
 
 export interface Account {
   readonly id: AccountId;
@@ -12,10 +12,10 @@ export interface Account {
 }
 
 export interface AccountMembership {
-  readonly clientId: ClientId;
-  readonly userId: UserId;
+  readonly companyId: CompanyId;
+  readonly membershipId: MembershipId;
   readonly name: string;
-  readonly role: UserRole;
+  readonly role: MembershipRole;
 }
 
 /** Erros seguidos que matam o código vigente (spec 020). */
@@ -38,7 +38,7 @@ export type ResetFailureOutcome = 'wrong' | 'exhausted' | 'unavailable';
 
 /**
  * Resultado de uma tentativa de confirmar o e-mail. Só métrica e log interno: a resposta ao
- * cliente é uma só. `unavailable`: sem código vigente (ausente, vencido, esgotado, conta já
+ * empresa é uma só. `unavailable`: sem código vigente (ausente, vencido, esgotado, conta já
  * confirmada ou inativa).
  */
 export type VerifyOutcome = 'verified' | 'wrong' | 'exhausted' | 'unavailable';
@@ -112,14 +112,14 @@ export interface AccountRepository {
   /** Descarta o código que não chegou a sair (falha de envio), liberando novo pedido já. */
   clearResetCode(id: string, hash: string): Promise<void>;
   listMemberships(accountId: string): Promise<readonly AccountMembership[]>;
-  membership(accountId: string, clientId: ClientId): Promise<AccountMembership | null>;
+  membership(accountId: string, companyId: CompanyId): Promise<AccountMembership | null>;
   createCompany(accountId: string, name: string): Promise<AccountMembership>;
 }
 
 /** Expurgo de contas nunca confirmadas (spec 021). */
 export interface UnverifiedAccountPurgeRepository {
   /**
-   * Apaga até `batchSize` contas **não confirmadas**, sem nenhum vínculo (`User`) e com
+   * Apaga até `batchSize` contas **não confirmadas**, sem nenhum vínculo (`Membership`) e com
    * `updated_at` anterior a `cutoff`. O predicado é repetido no DELETE sob lock, então conta
    * confirmada ou com vínculo nunca é apagada. Devolve só a contagem.
    */

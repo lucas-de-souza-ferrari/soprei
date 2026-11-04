@@ -3,22 +3,22 @@ import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
-import { ClientId } from '../../domain/index.js';
-import { ClientService } from '../../application/clients/client.service.js';
+import { CompanyId } from '../../domain/index.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { buildServer } from '../../infrastructure/http/server.js';
 import { steppingClock } from '../../test-support/clock.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { Result } from '../../shared/types/index.js';
 
-// `auth`: administrador da plataforma (CRUD de clientes). Cada cliente criado ganha um usuário
-// próprio (`as(clientId)`), que é quem usa o simulador e lê conversas (spec 007).
+// `auth`: administrador da plataforma (CRUD de empresas). Cada empresa criada ganha um usuário
+// próprio (`as(companyId)`), que é quem usa o simulador e lê conversas (spec 007).
 let auth: { authorization: string };
 
-interface ClientBody {
+interface CompanyBody {
   id: string;
 }
 interface ReplyBody {
@@ -44,24 +44,25 @@ interface ErrorBody {
   error: { code: string; message: string };
 }
 
-describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
+describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
   let app: FastifyInstance;
   let store: InMemoryAttendanceStore;
   const logs = captureLogs();
-  const userHeaders = new Map<string, { authorization: string }>();
-  let anyUser: { authorization: string };
-  let createUser: (clientId: string) => Promise<{ authorization: string }>;
-  /** Token do usuário do cliente; cliente desconhecido usa o de outro cliente. */
-  const as = (clientId: string): { authorization: string } => userHeaders.get(clientId) ?? anyUser;
+  const membershipHeaders = new Map<string, { authorization: string }>();
+  let anyMembership: { authorization: string };
+  let createMembership: (companyId: string) => Promise<{ authorization: string }>;
+  /** Token do usuário da empresa; empresa desconhecido usa o de outra empresa. */
+  const as = (companyId: string): { authorization: string } =>
+    membershipHeaders.get(companyId) ?? anyMembership;
   const llm = new MockLlmProvider({ recordCalls: true });
 
   before(async () => {
-    const clients = new InMemoryClientRepository();
-    const testAuth = buildTestAuth({ logger: logs.logger, clients });
-    userHeaders.clear();
+    const companies = new InMemoryCompanyRepository();
+    const testAuth = buildTestAuth({ logger: logs.logger, companies });
+    membershipHeaders.clear();
     const authTokens = testAuth;
-    createUser = async (clientId) =>
-      bearer((await authTokens.userToken(ClientId.parse(clientId))).accessToken);
+    createMembership = async (companyId) =>
+      bearer((await authTokens.membershipToken(CompanyId.parse(companyId))).accessToken);
     // Relógio determinístico: com o real, dois pedidos no mesmo milissegundo invertem a ordem
     // da resposta e da pergunta seguinte (falhou no CI, ora no Node 22, ora na LTS).
     const clock = steppingClock();
@@ -74,9 +75,9 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
       },
       auth: testAuth.service,
       admin: {
-        clients: new ClientService(clients),
+        companies: new CompanyService(companies),
         attendance: new AttendanceService({
-          clients,
+          companies,
           conversations: store.conversations,
           messages: store.messages,
           unitOfWork: store,
@@ -88,42 +89,42 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
     });
     await app.ready();
     auth = bearer((await testAuth.platformToken()).accessToken);
-    const seed = await clients.create({ name: 'Cliente base', slug: 'cliente-base' });
-    anyUser = await createUser(seed.id);
+    const seed = await companies.create({ name: 'Empresa base', slug: 'empresa-base' });
+    anyMembership = await createMembership(seed.id);
   });
   after(async () => {
     await app.close();
   });
 
-  async function createClient(slug: string): Promise<string> {
+  async function createCompany(slug: string): Promise<string> {
     const response = await app.inject({
       method: 'POST',
-      url: '/admin/clients',
+      url: '/admin/companies',
       headers: auth,
-      payload: { name: `Cliente ${slug}`, slug },
+      payload: { name: `Empresa ${slug}`, slug },
     });
     assert.equal(response.statusCode, 201);
-    const { id } = response.json<ClientBody>();
-    userHeaders.set(id, await createUser(id));
+    const { id } = response.json<CompanyBody>();
+    membershipHeaders.set(id, await createMembership(id));
     return id;
   }
 
   const send = (
-    clientId: string,
+    companyId: string,
     payload: unknown,
-    headers: Record<string, string> = as(clientId),
+    headers: Record<string, string> = as(companyId),
   ) =>
     app.inject({
       method: 'POST',
-      url: `/admin/clients/${clientId}/messages`,
+      url: `/admin/companies/${companyId}/messages`,
       headers,
       payload: payload as object,
     });
 
-  describe('POST /admin/clients/:clientId/messages', () => {
+  describe('POST /admin/companies/:companyId/messages', () => {
     it('201 com a resposta; a segunda mensagem reaproveita a conversa', async () => {
-      const clientId = await createClient('post-ok');
-      const first = await send(clientId, { contactRef: 'c1', text: 'Olá' });
+      const companyId = await createCompany('post-ok');
+      const first = await send(companyId, { contactRef: 'c1', text: 'Olá' });
       assert.equal(first.statusCode, 201);
       const body = first.json<ReplyBody>();
       assert.equal(body.duplicate, false);
@@ -136,30 +137,30 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
         'reply',
       ]);
 
-      const second = await send(clientId, { contactRef: 'c1', text: 'De novo' });
+      const second = await send(companyId, { contactRef: 'c1', text: 'De novo' });
       assert.equal(second.statusCode, 201);
       assert.equal(second.json<ReplyBody>().conversationId, body.conversationId);
     });
 
-    it('persona do cliente chega ao provider (PATCH /admin/clients/:id)', async () => {
-      const clientId = await createClient('post-persona');
+    it('persona da empresa chega ao provider (PATCH /admin/companies/:id)', async () => {
+      const companyId = await createCompany('post-persona');
       const patched = await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${clientId}`,
+        url: `/admin/companies/${companyId}`,
         headers: auth,
         payload: { persona: 'Persona-Rota-123' },
       });
       assert.equal(patched.statusCode, 200);
       const before = llm.calls.length;
-      await send(clientId, { contactRef: 'c1', text: 'oi' });
+      await send(companyId, { contactRef: 'c1', text: 'oi' });
       assert.ok(llm.calls[before]?.systemPrompt.startsWith('Persona-Rota-123\n\n'));
     });
 
     it('externalId repetido: 200 com a mesma resposta e duplicate=true', async () => {
-      const clientId = await createClient('post-dup');
+      const companyId = await createCompany('post-dup');
       const payload = { contactRef: 'c1', text: 'oi', externalId: 'ext-1' };
-      const first = await send(clientId, payload);
-      const again = await send(clientId, payload);
+      const first = await send(companyId, payload);
+      const again = await send(companyId, payload);
       assert.equal(first.statusCode, 201);
       assert.equal(again.statusCode, 200);
       assert.equal(again.json<ReplyBody>().duplicate, true);
@@ -167,27 +168,27 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
     });
 
     it('falha do provider: 201 com o fallback educado', async () => {
-      const clientId = await createClient('post-fallback');
-      const response = await send(clientId, { contactRef: 'c1', text: 'oi [[mock:fail]]' });
+      const companyId = await createCompany('post-fallback');
+      const response = await send(companyId, { contactRef: 'c1', text: 'oi [[mock:fail]]' });
       assert.equal(response.statusCode, 201);
       const body = response.json<ReplyBody>();
       assert.equal(body.reply.isFallback, true);
       assert.match(body.reply.text, /^Desculpe/);
     });
 
-    it('cliente inexistente: 404; removido: 404; suspenso: 403 (nada é gravado)', async () => {
+    it('empresa inexistente: 404; removido: 404; suspenso: 403 (nada é gravado)', async () => {
       const ghost = await send(randomUUID(), { contactRef: 'c1', text: 'oi' });
       assert.equal(ghost.statusCode, 404);
       assert.equal(ghost.json<ErrorBody>().error.code, 'NOT_FOUND');
 
-      const removed = await createClient('post-removed');
-      await app.inject({ method: 'DELETE', url: `/admin/clients/${removed}`, headers: auth });
+      const removed = await createCompany('post-removed');
+      await app.inject({ method: 'DELETE', url: `/admin/companies/${removed}`, headers: auth });
       assert.equal((await send(removed, { contactRef: 'c1', text: 'oi' })).statusCode, 404);
 
-      const suspended = await createClient('post-suspended');
+      const suspended = await createCompany('post-suspended');
       await app.inject({
         method: 'PATCH',
-        url: `/admin/clients/${suspended}`,
+        url: `/admin/companies/${suspended}`,
         headers: auth,
         payload: { status: 'SUSPENDED' },
       });
@@ -196,15 +197,15 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
       assert.equal(blocked.json<ErrorBody>().error.code, 'FORBIDDEN');
       const conversations = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${suspended}/conversations`,
+        url: `/admin/companies/${suspended}/conversations`,
         headers: as(suspended),
       });
       assert.equal(conversations.statusCode, 200);
       assert.deepEqual(conversations.json<PageBody<unknown>>().items, []);
     });
 
-    it('entrada inválida: 400 (texto vazio ou só espaços, > 4000, contactRef ruim, clientId malformado)', async () => {
-      const clientId = await createClient('post-400');
+    it('entrada inválida: 400 (texto vazio ou só espaços, > 4000, contactRef ruim, companyId malformado)', async () => {
+      const companyId = await createCompany('post-400');
       for (const payload of [
         { contactRef: 'c', text: '' },
         { contactRef: 'c', text: '   ' },
@@ -214,30 +215,30 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
         { contactRef: 'c', text: 'oi\u0000' },
         { contactRef: 'c'.repeat(129), text: 'oi' },
         { contactRef: 'c', text: 'oi', externalId: 'e'.repeat(129) },
-        { contactRef: 'c', text: 'oi', clientId: randomUUID() },
+        { contactRef: 'c', text: 'oi', companyId: randomUUID() },
         { text: 'oi' },
         {},
       ]) {
-        const response = await send(clientId, payload);
+        const response = await send(companyId, payload);
         assert.equal(response.statusCode, 400, JSON.stringify(payload).slice(0, 80));
         assert.equal(response.json<ErrorBody>().error.code, 'VALIDATION_ERROR');
       }
-      // `:clientId` que não é o do token (inclusive malformado) é 404, igual a cliente inexistente.
+      // `:companyId` que não é o do token (inclusive malformado) é 404, igual a empresa inexistente.
       assert.equal((await send('nao-e-uuid', { contactRef: 'c', text: 'oi' })).statusCode, 404);
       const noBody = await app.inject({
         method: 'POST',
-        url: `/admin/clients/${clientId}/messages`,
-        headers: as(clientId),
+        url: `/admin/companies/${companyId}/messages`,
+        headers: as(companyId),
       });
       assert.equal(noBody.statusCode, 400);
     });
 
     it('JSON malformado: 400 e o conteúdo enviado não vai para o log', async () => {
-      const clientId = await createClient('post-badjson');
+      const companyId = await createCompany('post-badjson');
       const response = await app.inject({
         method: 'POST',
-        url: `/admin/clients/${clientId}/messages`,
-        headers: { ...as(clientId), 'content-type': 'application/json' },
+        url: `/admin/companies/${companyId}/messages`,
+        headers: { ...as(companyId), 'content-type': 'application/json' },
         payload: '{"contactRef":"c","text":"SEGREDO-JSON-QUEBRADO',
       });
       assert.equal(response.statusCode, 400);
@@ -245,11 +246,11 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
     });
 
     it('sem token ou com token inválido: 401; token de administrador da plataforma: 403', async () => {
-      const clientId = await createClient('post-401');
+      const companyId = await createCompany('post-401');
       const calls: readonly [string, string][] = [
-        ['POST', `/admin/clients/${clientId}/messages`],
-        ['GET', `/admin/clients/${clientId}/conversations`],
-        ['GET', `/admin/clients/${clientId}/conversations/${randomUUID()}/messages`],
+        ['POST', `/admin/companies/${companyId}/messages`],
+        ['GET', `/admin/companies/${companyId}/conversations`],
+        ['GET', `/admin/companies/${companyId}/conversations/${randomUUID()}/messages`],
       ];
       for (const [method, url] of calls) {
         const platform = auth;
@@ -268,15 +269,15 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
 
   describe('GET conversations e messages', () => {
     it('expõe sentAt: nulo na resposta não enviada (simulador) e ISO depois da marca de envio', async () => {
-      const clientId = await createClient('get-sent');
-      const first = await send(clientId, { contactRef: 'c1', text: 'um' });
+      const companyId = await createCompany('get-sent');
+      const first = await send(companyId, { contactRef: 'c1', text: 'um' });
       const { conversationId } = first.json<ReplyBody>();
       const list = async () =>
         (
           await app.inject({
             method: 'GET',
-            url: `/admin/clients/${clientId}/conversations/${conversationId}/messages`,
-            headers: as(clientId),
+            url: `/admin/companies/${companyId}/conversations/${conversationId}/messages`,
+            headers: as(companyId),
           })
         ).json<PageBody<MessageBody>>().items;
 
@@ -289,7 +290,7 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
       const reply = before[1];
       assert.ok(reply !== undefined);
       const sentAt = new Date('2026-10-28T12:00:00.000Z');
-      const marked = await store.messages.markSent(ClientId.parse(clientId), reply.id, {
+      const marked = await store.messages.markSent(CompanyId.parse(companyId), reply.id, {
         channelMessageId: 'wamid.out',
         sentAt,
       });
@@ -300,16 +301,16 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
     });
 
     it('lista conversas e o histórico em ordem cronológica, com paginação', async () => {
-      const clientId = await createClient('get-ok');
-      const first = await send(clientId, { contactRef: 'c1', text: 'um', externalId: 'e1' });
-      await send(clientId, { contactRef: 'c1', text: 'dois' });
-      await send(clientId, { contactRef: 'c2', text: 'tres' });
+      const companyId = await createCompany('get-ok');
+      const first = await send(companyId, { contactRef: 'c1', text: 'um', externalId: 'e1' });
+      await send(companyId, { contactRef: 'c1', text: 'dois' });
+      await send(companyId, { contactRef: 'c2', text: 'tres' });
       const { conversationId } = first.json<ReplyBody>();
 
       const conversations = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${clientId}/conversations?limit=1`,
-        headers: as(clientId),
+        url: `/admin/companies/${companyId}/conversations?limit=1`,
+        headers: as(companyId),
       });
       assert.equal(conversations.statusCode, 200);
       const page = conversations.json<PageBody<{ id: string; contactRef: string }>>();
@@ -319,15 +320,15 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
       assert.notEqual(page.nextCursor, null);
       const next = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${clientId}/conversations?limit=1&cursor=${page.nextCursor ?? ''}`,
-        headers: as(clientId),
+        url: `/admin/companies/${companyId}/conversations?limit=1&cursor=${page.nextCursor ?? ''}`,
+        headers: as(companyId),
       });
       assert.equal(next.json<PageBody<{ contactRef: string }>>().items[0]?.contactRef, 'c2');
 
       const messages = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${clientId}/conversations/${conversationId}/messages`,
-        headers: as(clientId),
+        url: `/admin/companies/${companyId}/conversations/${conversationId}/messages`,
+        headers: as(companyId),
       });
       assert.equal(messages.statusCode, 200);
       const items = messages.json<PageBody<MessageBody>>().items;
@@ -351,23 +352,23 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
 
       const paged = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${clientId}/conversations/${conversationId}/messages?limit=3`,
-        headers: as(clientId),
+        url: `/admin/companies/${companyId}/conversations/${conversationId}/messages?limit=3`,
+        headers: as(companyId),
       });
       assert.equal(paged.json<PageBody<MessageBody>>().items.length, 3);
       assert.notEqual(paged.json<PageBody<MessageBody>>().nextCursor, null);
     });
 
-    it('conversa de outro cliente: 404; conversationId malformado: 400; :clientId diferente do token: 404', async () => {
-      const a = await createClient('get-iso-a');
-      const b = await createClient('get-iso-b');
+    it('conversa de outra empresa: 404; conversationId malformado: 400; :companyId diferente do token: 404', async () => {
+      const a = await createCompany('get-iso-a');
+      const b = await createCompany('get-iso-b');
       const sentB = await send(b, { contactRef: 'mesmo', text: 'segredo-do-B' });
       await send(a, { contactRef: 'mesmo', text: 'texto-do-A' });
       const conversationB = sentB.json<ReplyBody>().conversationId;
 
       const cross = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${a}/conversations/${conversationB}/messages`,
+        url: `/admin/companies/${a}/conversations/${conversationB}/messages`,
         headers: as(a),
       });
       assert.equal(cross.statusCode, 404);
@@ -375,25 +376,25 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
 
       const listA = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${a}/conversations`,
+        url: `/admin/companies/${a}/conversations`,
         headers: as(a),
       });
       assert.ok(!listA.body.includes(conversationB));
 
       for (const url of [
-        `/admin/clients/${a}/conversations/nao-uuid/messages`,
-        `/admin/clients/${a}/conversations?limit=0`,
-        `/admin/clients/${a}/conversations?limit=201`,
-        `/admin/clients/${a}/conversations?cursor=lixo`,
+        `/admin/companies/${a}/conversations/nao-uuid/messages`,
+        `/admin/companies/${a}/conversations?limit=0`,
+        `/admin/companies/${a}/conversations?limit=201`,
+        `/admin/companies/${a}/conversations?cursor=lixo`,
       ]) {
         const response = await app.inject({ method: 'GET', url, headers: as(a) });
         assert.equal(response.statusCode, 400, url);
       }
-      // `:clientId` que não é o do token: 404 (também para id malformado), sem tocar em dados.
+      // `:companyId` que não é o do token: 404 (também para id malformado), sem tocar em dados.
       for (const other of [randomUUID(), 'nao-uuid', b]) {
         const ghost = await app.inject({
           method: 'GET',
-          url: `/admin/clients/${other}/conversations`,
+          url: `/admin/companies/${other}/conversations`,
           headers: as(a),
         });
         assert.equal(ghost.statusCode, 404, other);
@@ -403,9 +404,9 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
   });
 
   describe('contexto de log', () => {
-    it('as linhas do log da requisição levam o clientId do path', async () => {
-      const clientId = await createClient('log-ctx');
-      const response = await send(clientId, { contactRef: 'c1', text: 'oi' });
+    it('as linhas do log da requisição levam o companyId do path', async () => {
+      const companyId = await createCompany('log-ctx');
+      const response = await send(companyId, { contactRef: 'c1', text: 'oi' });
       const requestId = response.headers['x-request-id'];
       const mine = logs.lines().filter((line) => line.requestId === requestId);
       // Se falhar (já aconteceu só no Node 22 do CI), a mensagem lista todas as linhas do pedido
@@ -416,13 +417,13 @@ describe('rotas de atendimento (/admin/clients/:clientId/...)', () => {
           level: line.level,
           statusCode: line.statusCode,
           operation: line.operation,
-          clientId: line.clientId,
+          companyId: line.companyId,
           keys: Object.keys(line).sort(),
         })),
       );
       assert.ok(mine.length >= 2, `log do atendimento e log da requisição: ${diagnosis}`);
       for (const line of mine) {
-        assert.equal(line.clientId, clientId, `linha sem o clientId do path: ${diagnosis}`);
+        assert.equal(line.companyId, companyId, `linha sem o companyId do path: ${diagnosis}`);
       }
       assert.ok(
         mine.some((line) => line.msg === 'requisição concluída'),

@@ -33,19 +33,19 @@ describe('migration da spec 008 (RBAC e auditoria)', () => {
       assert.doesNotMatch(statements, forbidden);
     }
     // O que ela faz: dois valores novos no enum, o tipo e a tabela de auditoria, o índice único
-    // de users e as chaves estrangeiras compostas.
-    assert.match(statements, /ALTER TYPE "user_role" ADD VALUE IF NOT EXISTS 'ADMIN'/);
-    assert.match(statements, /ALTER TYPE "user_role" ADD VALUE IF NOT EXISTS 'VIEWER'/);
+    // de memberships e as chaves estrangeiras compostas.
+    assert.match(statements, /ALTER TYPE "membership_role" ADD VALUE IF NOT EXISTS 'ADMIN'/);
+    assert.match(statements, /ALTER TYPE "membership_role" ADD VALUE IF NOT EXISTS 'VIEWER'/);
     assert.match(statements, /CREATE TYPE "audit_action"/);
     assert.match(statements, /CREATE TABLE "audit_events"/);
     assert.match(statements, /CREATE UNIQUE INDEX "users_id_client_id_key"/);
     assert.match(
       statements,
-      /FOREIGN KEY \("actor_user_id", "client_id"\) REFERENCES "users"\("id", "client_id"\) ON DELETE RESTRICT/,
+      /FOREIGN KEY \("actor_membership_id", "company_id"\) REFERENCES "memberships"\("id", "company_id"\) ON DELETE RESTRICT/,
     );
     assert.match(
       statements,
-      /FOREIGN KEY \("target_user_id", "client_id"\) REFERENCES "users"\("id", "client_id"\) ON DELETE RESTRICT/,
+      /FOREIGN KEY \("target_membership_id", "company_id"\) REFERENCES "memberships"\("id", "company_id"\) ON DELETE RESTRICT/,
     );
   });
 
@@ -78,9 +78,9 @@ describe('migration da spec 015 (conexão do canal)', () => {
     assert.match(statements, /CREATE TABLE "channel_connections"/);
     assert.match(statements, /CREATE UNIQUE INDEX "channel_connections_client_id_key"/);
     assert.match(statements, /ADD VALUE IF NOT EXISTS 'CHANNEL_CONNECTED'/);
-    assert.match(statements, /ALTER COLUMN "target_user_id" DROP NOT NULL/);
+    assert.match(statements, /ALTER COLUMN "target_membership_id" DROP NOT NULL/);
     assert.match(statements, /audit_events_target_by_action_check/);
     // Nenhum token é cifrado (nem tocado) pela migration.
-    assert.doesNotMatch(statements, /UPDATE\s+"clients"|whatsapp_phone_number_id/);
+    assert.doesNotMatch(statements, /UPDATE\s+"companies"|whatsapp_phone_number_id/);
   });
 });

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
-import { ClientService } from '../../application/clients/client.service.js';
-import type { ClientId } from '../../domain/index.js';
+import { CompanyService } from '../../application/companies/company.service.js';
+import type { CompanyId } from '../../domain/index.js';
 import { buildServer } from '../../infrastructure/http/server.js';
 import { createMetrics, type Metrics } from '../../infrastructure/metrics/index.js';
 import { ServiceUnavailableError } from '../../shared/errors/index.js';
@@ -48,7 +48,7 @@ interface Env {
   logs: LogCapture;
   metrics: Metrics;
   store: InMemorySessionStore;
-  clientId: ClientId;
+  companyId: CompanyId;
 }
 
 async function setup(maxFailures = 3): Promise<Env> {
@@ -56,8 +56,8 @@ async function setup(maxFailures = 3): Promise<Env> {
   const metrics = createMetrics();
   const store = new InMemorySessionStore({ maxFailures, lockSeconds: 900 });
   const auth = buildTestAuth({ logger: logs.logger, metrics, sessions: store, maxFailures });
-  const client = await auth.clients.create({ name: 'Cliente A', slug: 'cliente-a' });
-  await auth.users.create(client.id, {
+  const company = await auth.companies.create({ name: 'Empresa A', slug: 'empresa-a' });
+  await auth.memberships.create(company.id, {
     email: EMAIL,
     passwordHash: await auth.hasher.hash(TEST_PASSWORD),
     role: 'OWNER',
@@ -67,15 +67,15 @@ async function setup(maxFailures = 3): Promise<Env> {
     readiness: ALL_UP,
     metrics,
     auth: auth.service,
-    admin: { clients: new ClientService(auth.clients) },
+    admin: { companies: new CompanyService(auth.companies) },
   });
   await app.ready();
-  return { app, auth, logs, metrics, store, clientId: client.id };
+  return { app, auth, logs, metrics, store, companyId: company.id };
 }
 
 const login = (env: Env, body: unknown) =>
   env.app.inject({ method: 'POST', url: '/auth/login', payload: body as object });
-const goodLogin = { clientSlug: 'cliente-a', email: EMAIL, password: TEST_PASSWORD };
+const goodLogin = { companySlug: 'empresa-a', email: EMAIL, password: TEST_PASSWORD };
 
 describe('POST /auth/login e /auth/platform/login', () => {
   let env: Env;
@@ -123,7 +123,7 @@ describe('POST /auth/login e /auth/platform/login', () => {
 
   it('todas as recusas: mesmo 401, mesmo código, mesma mensagem e mesmo corpo', async () => {
     const wrongs = [
-      { ...goodLogin, clientSlug: 'nao-existe' },
+      { ...goodLogin, companySlug: 'nao-existe' },
       { ...goodLogin, email: 'ninguem@exemplo.test' },
       { ...goodLogin, password: 'senha-errada-qualquer' },
     ];
@@ -148,13 +148,13 @@ describe('POST /auth/login e /auth/platform/login', () => {
     const secret = 'valor-secreto-no-corpo-invalido';
     for (const body of [
       {},
-      { clientSlug: 'x', email: secret, password: TEST_PASSWORD },
+      { companySlug: 'x', email: secret, password: TEST_PASSWORD },
       { ...goodLogin, password: '' },
       { ...goodLogin, password: 'a'.repeat(129) },
       { ...goodLogin, password: 'com\u0000nul' },
-      { ...goodLogin, clientSlug: 'Maiúsculas Com Espaço' },
+      { ...goodLogin, companySlug: 'Maiúsculas Com Espaço' },
       { ...goodLogin, extra: secret },
-      { clientSlug: 'cliente-a', email: 'x@y.test' },
+      { companySlug: 'empresa-a', email: 'x@y.test' },
     ]) {
       const response = await login(env, body);
       assert.equal(response.statusCode, 400, JSON.stringify(body).slice(0, 60));
@@ -270,20 +270,20 @@ describe('POST /auth/refresh, /auth/logout e /auth/logout-all', () => {
     }
   });
 
-  it('GET /auth/me: identidade de User e de PlatformAdmin, nunca o hash', async () => {
-    const user = (await login(env, goodLogin)).json<TokensBody>();
+  it('GET /auth/me: identidade de Membership e de PlatformAdmin, nunca o hash', async () => {
+    const membership = (await login(env, goodLogin)).json<TokensBody>();
     const me = await env.app.inject({
       method: 'GET',
       url: '/auth/me',
-      headers: bearer(user.accessToken),
+      headers: bearer(membership.accessToken),
     });
     assert.equal(me.statusCode, 200);
     assert.deepEqual(me.json<Record<string, unknown>>(), {
-      kind: 'user',
+      kind: 'membership',
       id: me.json<{ id: string }>().id,
       email: EMAIL,
       role: 'OWNER',
-      client: { id: env.clientId, name: 'Cliente A', slug: 'cliente-a' },
+      company: { id: env.companyId, name: 'Empresa A', slug: 'empresa-a' },
     });
     assert.ok(
       !me.body.includes('assword') && !me.body.includes('scrypt') && !me.body.includes('fake$'),
@@ -297,7 +297,7 @@ describe('POST /auth/refresh, /auth/logout e /auth/logout-all', () => {
     });
     assert.deepEqual(adminMe.json<Record<string, unknown>>(), {
       kind: 'platform',
-      id: admin.userId,
+      id: admin.membershipId,
       email: 'plataforma@exemplo.test',
     });
   });
@@ -335,8 +335,8 @@ describe('hook authenticate', () => {
     return forgeJwt({
       header: { alg: options.alg ?? 'HS256', typ: options.typ ?? 'at+jwt' },
       payload: {
-        kind: options.kind ?? 'user',
-        cid: env.clientId,
+        kind: options.kind ?? 'membership',
+        cid: env.companyId,
         role: options.role ?? 'OWNER',
         sid: randomUUID(),
         iss: options.iss ?? 'soprei',
@@ -398,14 +398,14 @@ describe('hook authenticate', () => {
     }
   });
 
-  it('authenticate preenche userId e clientId no contexto: o log da requisição os traz', async () => {
+  it('authenticate preenche membershipId e companyId no contexto: o log da requisição os traz', async () => {
     const response = await me({ ...bearer(valid), 'x-request-id': 'req-auth-ctx-001' });
     assert.equal(response.statusCode, 200);
     const lines = env.logs.lines().filter((line) => line.requestId === 'req-auth-ctx-001');
     assert.ok(lines.length > 0);
     for (const line of lines) {
-      assert.equal(line.clientId, env.clientId);
-      assert.equal(typeof line.userId, 'string');
+      assert.equal(line.companyId, env.companyId);
+      assert.equal(typeof line.membershipId, 'string');
     }
     const end = lines.find((line) => line.msg === 'requisição concluída');
     assert.ok(end);

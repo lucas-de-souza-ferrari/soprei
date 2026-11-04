@@ -54,6 +54,8 @@ test('preflight da migration recusa colisão de e-mail sem escolher senha ou uni
     await client.query('BEGIN');
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET LOCAL search_path TO "${schema}", public`);
+    // O schema temporário reproduz o formato anterior à spec 022 (o enum `user_status` virou `access_status`).
+    await client.query("CREATE TYPE user_status AS ENUM ('ACTIVE', 'DISABLED')");
     await client.query(
       'CREATE TABLE users (id uuid PRIMARY KEY, client_id uuid NOT NULL, email text, password_hash text, status user_status, created_at timestamp(3), updated_at timestamp(3), UNIQUE (id, client_id))',
     );
@@ -133,6 +135,8 @@ test('migration da 020 é aditiva: zera só os códigos pendentes, preserva as c
     await client.query('BEGIN');
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET LOCAL search_path TO "${schema}", public`);
+    // O schema temporário reproduz o formato anterior à spec 022 (o enum `user_status` virou `access_status`).
+    await client.query("CREATE TYPE user_status AS ENUM ('ACTIVE', 'DISABLED')");
     await client.query(definition);
     const pendingId = randomUUID();
     const confirmedId = randomUUID();

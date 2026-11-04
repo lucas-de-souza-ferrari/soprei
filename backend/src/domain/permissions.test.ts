@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { USER_ROLES } from './entities/user.js';
+import { MEMBERSHIP_ROLES } from './entities/membership.js';
 import { canManageRole, hasPermission, PERMISSIONS, ROLE_PERMISSIONS } from './permissions.js';
 
 describe('matriz papel -> permissão (snapshot da spec 008)', () => {
@@ -9,8 +9,8 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
       OWNER: [
         'conversation:read',
         'conversation:simulate',
-        'user:read',
-        'user:manage',
+        'membership:read',
+        'membership:manage',
         'audit:read',
         'channel:read',
         'channel:manage',
@@ -18,8 +18,8 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
       ADMIN: [
         'conversation:read',
         'conversation:simulate',
-        'user:read',
-        'user:manage',
+        'membership:read',
+        'membership:manage',
         'audit:read',
         'channel:read',
         'channel:manage',
@@ -27,8 +27,8 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
       AGENT: ['conversation:read', 'conversation:simulate'],
       VIEWER: ['conversation:read'],
     });
-    assert.deepEqual([...USER_ROLES], ['OWNER', 'ADMIN', 'AGENT', 'VIEWER']);
-    assert.deepEqual(Object.keys(ROLE_PERMISSIONS).sort(), [...USER_ROLES].sort());
+    assert.deepEqual([...MEMBERSHIP_ROLES], ['OWNER', 'ADMIN', 'AGENT', 'VIEWER']);
+    assert.deepEqual(Object.keys(ROLE_PERMISSIONS).sort(), [...MEMBERSHIP_ROLES].sort());
   });
 
   it('toda permissão listada em PERMISSIONS é de algum papel e nenhuma sobra no mapa', () => {
@@ -37,7 +37,7 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
   });
 
   it('hasPermission confere a matriz inteira', () => {
-    for (const role of USER_ROLES) {
+    for (const role of MEMBERSHIP_ROLES) {
       for (const permission of PERMISSIONS) {
         assert.equal(
           hasPermission(role, permission),
@@ -48,7 +48,7 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
     }
   });
 
-  it('papel fora de USER_ROLES nunca concede nada (inclusive nomes do protótipo do objeto)', () => {
+  it('papel fora de MEMBERSHIP_ROLES nunca concede nada (inclusive nomes do protótipo do objeto)', () => {
     for (const role of [
       'SUPERADMIN',
       'owner',

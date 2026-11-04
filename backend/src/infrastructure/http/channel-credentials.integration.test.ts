@@ -9,7 +9,7 @@ import type {
   InboundJobQueue,
 } from '../../application/ports/inbound-job-queue.js';
 import { NonRetryableJobError } from '../../application/ports/inbound-job-queue.js';
-import type { Client } from '../../domain/index.js';
+import type { Company } from '../../domain/index.js';
 import { Result, SecretString } from '../../shared/types/index.js';
 import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
 import { FakeGraphApi, graphError } from '../../test-support/fake-graph-api.js';
@@ -20,7 +20,7 @@ import {
   createDatabase,
   type Database,
   PrismaAttendanceUnitOfWork,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
 } from '../database/index.js';
@@ -66,11 +66,11 @@ function setup(options: { legacyToken?: string } = {}): Harness {
   const logs = captureLogs();
   const metrics = createMetrics();
   const { prisma } = database;
-  const clients = new PrismaClientRepository(prisma);
+  const companies = new PrismaCompanyRepository(prisma);
   const messages = new PrismaMessageRepository(prisma);
   const llm = new MockLlmProvider({ recordCalls: true });
   const attendance = new AttendanceService({
-    clients,
+    companies,
     conversations: new PrismaConversationRepository(prisma),
     messages,
     unitOfWork: new PrismaAttendanceUnitOfWork(prisma),
@@ -88,7 +88,7 @@ function setup(options: { legacyToken?: string } = {}): Harness {
   };
   const processor = new ChannelInboundProcessor({
     attendance,
-    clients,
+    companies,
     messages,
     credentials: stack.credentials,
     connections: stack.connections,
@@ -106,35 +106,35 @@ function setup(options: { legacyToken?: string } = {}): Harness {
   return { processor, stack, llm, logs, metrics };
 }
 
-/** Cliente com número e, se `token` for dado, conexão própria (token cifrado pelo cliente dono). */
-async function connectedClient(
+/** Empresa com número e, se `token` for dado, conexão própria (token cifrado pela empresa dona). */
+async function connectedCompany(
   h: Harness,
   label: string,
   token: string | null,
-): Promise<{ client: Client; phoneNumberId: string }> {
+): Promise<{ company: Company; phoneNumberId: string }> {
   const phoneNumberId = digits();
-  const client = await tenants.createClient(label, phoneNumberId);
+  const company = await tenants.createCompany(label, phoneNumberId);
   if (token !== null) {
-    await h.stack.connections.save(client.id, {
+    await h.stack.connections.save(company.id, {
       wabaId: digits(),
-      tokenCiphertext: h.stack.cipher.encrypt(client.id, new SecretString(token)),
+      tokenCiphertext: h.stack.cipher.encrypt(company.id, new SecretString(token)),
       tokenExpiresAt: null,
     });
   }
-  return { client, phoneNumberId };
+  return { company, phoneNumberId };
 }
 
 const contact = (): string => `5511${randomBytes(4).readUInt32BE(0).toString().padStart(10, '0')}`;
 
 function textJob(
-  clientId: string,
+  companyId: string,
   phoneNumberId: string,
   contactRef: string,
   text = SECRET_TEXT,
 ): Extract<InboundJob, { kind: 'text' }> {
   return {
     kind: 'text',
-    clientId,
+    companyId,
     phoneNumberId,
     contactRef,
     text,
@@ -145,7 +145,7 @@ function textJob(
 
 const flushOf = (job: Extract<InboundJob, { kind: 'text' }>): FlushJob => ({
   kind: 'flush',
-  clientId: job.clientId,
+  companyId: job.companyId,
   phoneNumberId: job.phoneNumberId,
   contactRef: job.contactRef,
   requestId: job.requestId,
@@ -158,19 +158,19 @@ async function converse(h: Harness, job: Extract<InboundJob, { kind: 'text' }>) 
   return h.processor.process(flushOf(job), MORE);
 }
 
-describe('envio com o token do cliente do job (spec 015, Postgres real, Graph falso)', () => {
+describe('envio com o token da empresa do job (spec 015, Postgres real, Graph falso)', () => {
   it('A e B com tokens e números diferentes: o par (token, número) nunca se cruza', async () => {
     const h = setup();
     const tokenA = `EAAG-A-${randomUUID()}`;
     const tokenB = `EAAG-B-${randomUUID()}`;
-    const a = await connectedClient(h, 'send-a', tokenA);
-    const b = await connectedClient(h, 'send-b', tokenB);
+    const a = await connectedCompany(h, 'send-a', tokenA);
+    const b = await connectedCompany(h, 'send-b', tokenB);
     const [contactA, contactB] = [contact(), contact()];
 
-    await h.processor.process(textJob(a.client.id, a.phoneNumberId, contactA), MORE);
-    await h.processor.process(textJob(b.client.id, b.phoneNumberId, contactB), MORE);
-    await h.processor.process(flushOf(textJob(a.client.id, a.phoneNumberId, contactA)), MORE);
-    await h.processor.process(flushOf(textJob(b.client.id, b.phoneNumberId, contactB)), MORE);
+    await h.processor.process(textJob(a.company.id, a.phoneNumberId, contactA), MORE);
+    await h.processor.process(textJob(b.company.id, b.phoneNumberId, contactB), MORE);
+    await h.processor.process(flushOf(textJob(a.company.id, a.phoneNumberId, contactA)), MORE);
+    await h.processor.process(flushOf(textJob(b.company.id, b.phoneNumberId, contactB)), MORE);
 
     assert.deepEqual(
       graph
@@ -189,11 +189,11 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
     }
   });
 
-  it('job adulterado (número de B com o cliente A) é descartado sem enviar', async () => {
+  it('job adulterado (número de B com a empresa A) é descartado sem enviar', async () => {
     const h = setup();
-    const a = await connectedClient(h, 'forge-a', `EAAG-A-${randomUUID()}`);
-    const b = await connectedClient(h, 'forge-b', `EAAG-B-${randomUUID()}`);
-    const forged = textJob(a.client.id, b.phoneNumberId, contact());
+    const a = await connectedCompany(h, 'forge-a', `EAAG-A-${randomUUID()}`);
+    const b = await connectedCompany(h, 'forge-b', `EAAG-B-${randomUUID()}`);
+    const forged = textJob(a.company.id, b.phoneNumberId, contact());
     await h.processor.process(forged, MORE);
     await assert.rejects(
       h.processor.process(flushOf(forged), MORE),
@@ -205,17 +205,17 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
   it('texto cifrado copiado de A para B: o envio de B falha (tampered), sem enviar e sem marcar TOKEN_INVALID', async () => {
     const h = setup();
     const tokenA = `EAAG-A-${randomUUID()}`;
-    const a = await connectedClient(h, 'swap-a', tokenA);
-    const b = await connectedClient(h, 'swap-b', `EAAG-B-${randomUUID()}`);
+    const a = await connectedCompany(h, 'swap-a', tokenA);
+    const b = await connectedCompany(h, 'swap-b', `EAAG-B-${randomUUID()}`);
     const rowA = await database.prisma.channelConnection.findFirst({
-      where: { clientId: a.client.id },
+      where: { companyId: a.company.id },
     });
     assert.ok(rowA !== null);
     await database.prisma.channelConnection.updateMany({
-      where: { clientId: b.client.id },
+      where: { companyId: b.company.id },
       data: { tokenCiphertext: rowA.tokenCiphertext },
     });
-    const job = textJob(b.client.id, b.phoneNumberId, contact());
+    const job = textJob(b.company.id, b.phoneNumberId, contact());
     await h.processor.process(job, MORE);
 
     await assert.rejects(
@@ -225,7 +225,7 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
 
     assert.equal(graph.sendPairs().length, 0);
     const rowB = await database.prisma.channelConnection.findFirst({
-      where: { clientId: b.client.id },
+      where: { companyId: b.company.id },
     });
     assert.equal(rowB?.status, 'CONNECTED');
     assert.match(
@@ -239,11 +239,11 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
   it('190: marca TOKEN_INVALID, sem texto padrão; o próximo flush é descartado sem LLM; o PUT novo reabre e responde o lote', async () => {
     const h = setup();
     const token = `EAAG-A-${randomUUID()}`;
-    const a = await connectedClient(h, 'inval-a', token);
-    const b = await connectedClient(h, 'inval-b', `EAAG-B-${randomUUID()}`);
+    const a = await connectedCompany(h, 'inval-a', token);
+    const b = await connectedCompany(h, 'inval-b', `EAAG-B-${randomUUID()}`);
     const contactRef = contact();
     graph.failOperation('messages', graphError(401, 190));
-    const first = textJob(a.client.id, a.phoneNumberId, contactRef, 'primeira');
+    const first = textJob(a.company.id, a.phoneNumberId, contactRef, 'primeira');
     await h.processor.process(first, MORE);
 
     await assert.rejects(
@@ -252,7 +252,7 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
     );
 
     const marked = await database.prisma.channelConnection.findFirst({
-      where: { clientId: a.client.id },
+      where: { companyId: a.company.id },
     });
     assert.equal(marked?.status, 'TOKEN_INVALID');
     assert.notEqual(marked.tokenInvalidAt, null);
@@ -263,32 +263,32 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
 
     // Próxima mensagem: descartada sem chamar o LLM.
     const llmBefore = h.llm.calls.length;
-    const second = textJob(a.client.id, a.phoneNumberId, contactRef, 'segunda');
+    const second = textJob(a.company.id, a.phoneNumberId, contactRef, 'segunda');
     await h.processor.process(second, MORE);
     assert.equal(await h.processor.process(flushOf(second), MORE), 'discarded');
     assert.equal(h.llm.calls.length, llmBefore);
     assert.equal(graph.sendPairs().length, 1);
 
     // O estado de A não afeta B.
-    assert.equal(await converse(h, textJob(b.client.id, b.phoneNumberId, contact())), 'done');
+    assert.equal(await converse(h, textJob(b.company.id, b.phoneNumberId, contact())), 'done');
 
     // Um 190 de versão antiga não invalida o token novo.
     const oldVersion = marked.tokenVersion;
-    await h.stack.connections.save(a.client.id, {
+    await h.stack.connections.save(a.company.id, {
       wabaId: marked.wabaId,
       tokenCiphertext: h.stack.cipher.encrypt(
-        a.client.id,
+        a.company.id,
         new SecretString(`EAAG-novo-${randomUUID()}`),
       ),
       tokenExpiresAt: null,
     });
     assert.equal(
-      await h.stack.connections.markTokenInvalid(a.client.id, oldVersion, new Date()),
+      await h.stack.connections.markTokenInvalid(a.company.id, oldVersion, new Date()),
       false,
     );
 
     // Token novo: o próximo flush responde as duas mensagens pendentes de uma vez.
-    const third = textJob(a.client.id, a.phoneNumberId, contactRef, 'terceira');
+    const third = textJob(a.company.id, a.phoneNumberId, contactRef, 'terceira');
     await h.processor.process(third, MORE);
     assert.equal(await h.processor.process(flushOf(third), MORE), 'done');
     const last = h.llm.calls[h.llm.calls.length - 1];
@@ -301,23 +301,23 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
 
   it('outro código permanente (131047) não muda o estado', async () => {
     const h = setup();
-    const a = await connectedClient(h, 'perm-a', `EAAG-A-${randomUUID()}`);
+    const a = await connectedCompany(h, 'perm-a', `EAAG-A-${randomUUID()}`);
     graph.failOperation('messages', graphError(400, 131047));
-    const job = textJob(a.client.id, a.phoneNumberId, contact());
+    const job = textJob(a.company.id, a.phoneNumberId, contact());
     await h.processor.process(job, MORE);
     await assert.rejects(h.processor.process(flushOf(job), MORE), NonRetryableJobError);
     const row = await database.prisma.channelConnection.findFirst({
-      where: { clientId: a.client.id },
+      where: { companyId: a.company.id },
     });
     assert.equal(row?.status, 'CONNECTED');
   });
 
   it('LEGACY: usa o token global se existe; sem ele não envia e loga erro; com conexão nunca usa o global', async () => {
     const withLegacy = setup({ legacyToken: LEGACY_TOKEN });
-    const legacy = await connectedClient(withLegacy, 'legacy', null);
-    const own = await connectedClient(withLegacy, 'own', `EAAG-proprio-${randomUUID()}`);
-    await converse(withLegacy, textJob(legacy.client.id, legacy.phoneNumberId, contact()));
-    await converse(withLegacy, textJob(own.client.id, own.phoneNumberId, contact()));
+    const legacy = await connectedCompany(withLegacy, 'legacy', null);
+    const own = await connectedCompany(withLegacy, 'own', `EAAG-proprio-${randomUUID()}`);
+    await converse(withLegacy, textJob(legacy.company.id, legacy.phoneNumberId, contact()));
+    await converse(withLegacy, textJob(own.company.id, own.phoneNumberId, contact()));
     const pairs = graph.sendPairs();
     assert.equal(pairs.length, 2);
     assert.equal(
@@ -331,8 +331,8 @@ describe('envio com o token do cliente do job (spec 015, Postgres real, Graph fa
     assert.ok(!withLegacy.logs.raw().includes(LEGACY_TOKEN));
 
     const noLegacy = setup();
-    const orphan = await connectedClient(noLegacy, 'orphan', null);
-    await converse(noLegacy, textJob(orphan.client.id, orphan.phoneNumberId, contact()));
+    const orphan = await connectedCompany(noLegacy, 'orphan', null);
+    await converse(noLegacy, textJob(orphan.company.id, orphan.phoneNumberId, contact()));
     assert.equal(graph.sendPairs().length, 0);
     assert.ok(noLegacy.logs.lines().some((line) => line.level === 50));
   });

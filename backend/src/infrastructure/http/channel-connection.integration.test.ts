@@ -3,8 +3,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { after, afterEach, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
-import { ClientService } from '../../application/clients/client.service.js';
-import type { Client, UserRole } from '../../domain/index.js';
+import { CompanyService } from '../../application/companies/company.service.js';
+import type { Company, MembershipRole } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
 import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
 import { FakeGraphApi, FULL_SCOPES, graphError } from '../../test-support/fake-graph-api.js';
@@ -21,7 +21,7 @@ import {
   createDatabase,
   type Database,
   PrismaChannelUnitOfWork,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
 } from '../database/index.js';
 import { WhatsappGraphAdminClient } from '../external-apis/whatsapp/whatsapp-graph-admin.client.js';
 import { createMetrics, type Metrics } from '../metrics/index.js';
@@ -102,10 +102,10 @@ async function createHarness(options: { withChannel?: boolean } = {}): Promise<H
     metrics,
     hasher,
   });
-  const clients = new PrismaClientRepository(database.prisma);
+  const companies = new PrismaCompanyRepository(database.prisma);
   const stack = buildChannelCredentials(database.prisma);
   const channel = new ChannelConnectionService({
-    clients,
+    companies,
     connections: stack.connections,
     unitOfWork: new PrismaChannelUnitOfWork(database.prisma),
     cipher: stack.cipher,
@@ -129,9 +129,9 @@ async function createHarness(options: { withChannel?: boolean } = {}): Promise<H
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
     auth: auth.service,
-    userAdmin: auth.userAdmin,
+    membershipAdmin: auth.membershipAdmin,
     admin: {
-      clients: new ClientService(clients),
+      companies: new CompanyService(companies),
       ...(options.withChannel === false ? {} : { channel }),
     },
   });
@@ -169,9 +169,9 @@ interface Person {
   accessToken: string;
 }
 
-async function enroll(h: Harness, client: Client, role: UserRole): Promise<Person> {
+async function enroll(h: Harness, company: Company, role: MembershipRole): Promise<Person> {
   const email = emailFor(role.toLowerCase());
-  const user = await h.auth.users.create(client.id, {
+  const membership = await h.auth.memberships.create(company.id, {
     email,
     passwordHash: await h.auth.hasher.hash(PASSWORD),
     role,
@@ -179,23 +179,23 @@ async function enroll(h: Harness, client: Client, role: UserRole): Promise<Perso
   const response = await h.app.inject({
     method: 'POST',
     url: '/auth/login',
-    payload: { clientSlug: client.slug, email, password: PASSWORD },
+    payload: { companySlug: company.slug, email, password: PASSWORD },
     remoteAddress: '203.0.113.10',
   });
   assert.equal(response.statusCode, 200, response.body);
-  return { id: user.id, accessToken: response.json<{ accessToken: string }>().accessToken };
+  return { id: membership.id, accessToken: response.json<{ accessToken: string }>().accessToken };
 }
 
 const as = (
   h: Harness,
   who: Person,
   method: 'GET' | 'PUT' | 'DELETE',
-  clientId: string,
+  companyId: string,
   payload?: object,
 ) =>
   h.app.inject({
     method,
-    url: `/admin/clients/${clientId}/channel`,
+    url: `/admin/companies/${companyId}/channel`,
     headers: bearer(who.accessToken),
     remoteAddress: '203.0.113.10',
     ...(payload === undefined ? {} : { payload }),
@@ -216,25 +216,25 @@ interface ErrorBody {
 const errorCode = (response: LightMyRequestResponse): string =>
   response.json<ErrorBody>().error.code;
 
-async function dbState(clientId: string) {
-  const [client, connection, events] = await Promise.all([
-    database.prisma.client.findFirst({ where: { id: clientId } }),
-    database.prisma.channelConnection.findFirst({ where: { clientId } }),
-    database.prisma.auditEvent.findMany({ where: { clientId }, orderBy: { createdAt: 'asc' } }),
+async function dbState(companyId: string) {
+  const [company, connection, events] = await Promise.all([
+    database.prisma.company.findFirst({ where: { id: companyId } }),
+    database.prisma.channelConnection.findFirst({ where: { companyId } }),
+    database.prisma.auditEvent.findMany({ where: { companyId }, orderBy: { createdAt: 'asc' } }),
   ]);
-  return { number: client?.whatsappPhoneNumberId ?? null, connection, events };
+  return { number: company?.whatsappPhoneNumberId ?? null, connection, events };
 }
 
-describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Graph falso)', () => {
+describe('canal da empresa: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Graph falso)', () => {
   it('PUT feliz: conecta, cifra o token, assina o app, audita na mesma transação e não vaza o token', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('chan-ok');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('chan-ok');
+      const owner = await enroll(h, company, 'OWNER');
       const number = digits();
       const waba = digits();
       const token = givenWaba(waba, [number, digits()]);
 
-      const put = await as(h, owner, 'PUT', client.id, {
+      const put = await as(h, owner, 'PUT', company.id, {
         phoneNumberId: number,
         wabaId: waba,
         accessToken: token,
@@ -247,28 +247,28 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
       assert.equal(body.wabaId, waba);
       assert.equal(body.tokenExpiresAt, null);
       assert.deepEqual(
-        (await as(h, owner, 'GET', client.id)).json<ChannelBody>(),
+        (await as(h, owner, 'GET', company.id)).json<ChannelBody>(),
         body,
         'o GET devolve o mesmo corpo',
       );
 
-      const stored = await dbState(client.id);
+      const stored = await dbState(company.id);
       assert.equal(stored.number, number);
       assert.ok(stored.connection !== null);
       assert.notEqual(stored.connection.tokenCiphertext, token);
       assert.ok(!stored.connection.tokenCiphertext.includes(token));
       assert.equal(
-        h.stack.cipher.decrypt(client.id, stored.connection.tokenCiphertext).reveal(),
+        h.stack.cipher.decrypt(company.id, stored.connection.tokenCiphertext).reveal(),
         token,
       );
       assert.equal(stored.connection.tokenVersion, 1);
       assert.equal(stored.events.length, 1);
       assert.equal(stored.events[0]?.action, 'CHANNEL_CONNECTED');
-      assert.equal(stored.events[0].actorUserId, owner.id);
-      assert.equal(stored.events[0].targetUserId, null);
+      assert.equal(stored.events[0].actorMembershipId, owner.id);
+      assert.equal(stored.events[0].targetMembershipId, null);
       assert.ok(graph.subscribed.has(waba));
 
-      // O debug_token vai com o token de app em cabeçalho; as demais, com o token do cliente.
+      // O debug_token vai com o token de app em cabeçalho; as demais, com o token da empresa.
       const [inspect] = graph.ofOperation('debug_token');
       assert.equal(inspect?.headers.authorization, `Bearer ${APP_ID}|${APP_SECRET}`);
       for (const operation of ['phone_numbers', 'subscribe'] as const) {
@@ -294,8 +294,8 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
 
   it('PUT recusado: nada é gravado (nem número, nem conexão, nem auditoria) e a Meta nunca vaza', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('chan-refused');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('chan-refused');
+      const owner = await enroll(h, company, 'OWNER');
       const number = digits();
       const waba = digits();
       const good = givenWaba(waba, [number]);
@@ -320,7 +320,7 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
       });
 
       const attempt = async (accessToken: string, phone = number, wabaId = waba) =>
-        as(h, owner, 'PUT', client.id, { phoneNumberId: phone, wabaId, accessToken });
+        as(h, owner, 'PUT', company.id, { phoneNumberId: phone, wabaId, accessToken });
       const cases: [string, LightMyRequestResponse, number, string][] = [
         ['desconhecido', await attempt(newToken()), 400, 'CHANNEL_TOKEN_REJECTED'],
         ['outro app', await attempt(otherApp), 400, 'CHANNEL_WRONG_APP'],
@@ -369,12 +369,12 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
         { phoneNumberId: number, wabaId: waba, accessToken: `${secretValue} com espaco` },
         { phoneNumberId: number, wabaId: waba, accessToken: 'curto' },
       ]) {
-        const response = await as(h, owner, 'PUT', client.id, payload);
+        const response = await as(h, owner, 'PUT', company.id, payload);
         assert.equal(response.statusCode, 400, response.body);
         assert.ok(!response.body.includes(secretValue));
       }
 
-      const stored = await dbState(client.id);
+      const stored = await dbState(company.id);
       assert.equal(stored.number, null);
       assert.equal(stored.connection, null);
       assert.deepEqual(stored.events, []);
@@ -388,8 +388,8 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
 
   it('posse do número: B com token de outra WABA não conecta o número de A; B com WABA compartilhada recebe 409 sem revelar A', async () => {
     await withHarness(async (h) => {
-      const a = await tenants.createClient('chan-a');
-      const b = await tenants.createClient('chan-b');
+      const a = await tenants.createCompany('chan-a');
+      const b = await tenants.createCompany('chan-b');
       const ownerA = await enroll(h, a, 'OWNER');
       const ownerB = await enroll(h, b, 'OWNER');
       const number = digits();
@@ -441,11 +441,11 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
     });
   });
 
-  it('corrida: dois clientes conectam o mesmo número ao mesmo tempo; exatamente um vence', async () => {
+  it('corrida: duas empresas conectam o mesmo número ao mesmo tempo; exatamente um vence', async () => {
     await withHarness(async (h) => {
       for (let round = 0; round < 8; round += 1) {
-        const a = await tenants.createClient('chan-race-a');
-        const b = await tenants.createClient('chan-race-b');
+        const a = await tenants.createCompany('chan-race-a');
+        const b = await tenants.createCompany('chan-race-b');
         const ownerA = await enroll(h, a, 'OWNER');
         const ownerB = await enroll(h, b, 'OWNER');
         const number = digits();
@@ -476,8 +476,8 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
 
   it('trocar o token sobe a versão, volta a CONNECTED e audita; trocar de número libera o antigo', async () => {
     await withHarness(async (h) => {
-      const a = await tenants.createClient('chan-swap-a');
-      const b = await tenants.createClient('chan-swap-b');
+      const a = await tenants.createCompany('chan-swap-a');
+      const b = await tenants.createCompany('chan-swap-b');
       const ownerA = await enroll(h, a, 'ADMIN');
       const ownerB = await enroll(h, b, 'OWNER');
       const n1 = digits();
@@ -511,7 +511,7 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
       );
       assert.equal(second.number, n2);
 
-      // O número antigo foi liberado: outro cliente consegue conectá-lo.
+      // O número antigo foi liberado: outra empresa consegue conectá-lo.
       const tokenB = newToken();
       graph.addToken(tokenB, { appId: APP_ID, scopes: FULL_SCOPES, wabaIds: [waba] });
       const taken = await as(h, ownerB, 'PUT', b.id, {
@@ -525,40 +525,40 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
 
   it('DELETE: apaga a conexão, limpa o número, audita, desassina depois do commit e é idempotente', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('chan-del');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('chan-del');
+      const owner = await enroll(h, company, 'OWNER');
       const number = digits();
       const waba = digits();
       const token = givenWaba(waba, [number]);
-      await as(h, owner, 'PUT', client.id, {
+      await as(h, owner, 'PUT', company.id, {
         phoneNumberId: number,
         wabaId: waba,
         accessToken: token,
       });
-      const clients = new PrismaClientRepository(database.prisma);
-      assert.ok((await clients.findByWhatsappPhoneNumberId(number)) !== null);
+      const companies = new PrismaCompanyRepository(database.prisma);
+      assert.ok((await companies.findByWhatsappPhoneNumberId(number)) !== null);
 
-      const del = await as(h, owner, 'DELETE', client.id);
+      const del = await as(h, owner, 'DELETE', company.id);
       assert.equal(del.statusCode, 204);
-      const stored = await dbState(client.id);
+      const stored = await dbState(company.id);
       assert.equal(stored.connection, null, 'nenhum texto cifrado resta');
       assert.equal(stored.number, null);
       assert.deepEqual(
         stored.events.map((event) => event.action),
         ['CHANNEL_CONNECTED', 'CHANNEL_DISCONNECTED'],
       );
-      assert.equal(await clients.findByWhatsappPhoneNumberId(number), null);
+      assert.equal(await companies.findByWhatsappPhoneNumberId(number), null);
       const [unsubscribe] = graph.ofOperation('unsubscribe');
       assert.equal(unsubscribe?.headers.authorization, `Bearer ${token}`);
       assert.ok(!graph.subscribed.has(waba));
       assert.equal(
-        (await as(h, owner, 'GET', client.id)).json<ChannelBody>().state,
+        (await as(h, owner, 'GET', company.id)).json<ChannelBody>().state,
         'NOT_CONNECTED',
       );
 
-      const again = await as(h, owner, 'DELETE', client.id);
+      const again = await as(h, owner, 'DELETE', company.id);
       assert.equal(again.statusCode, 204);
-      assert.equal((await dbState(client.id)).events.length, 2, 'sem novo evento');
+      assert.equal((await dbState(company.id)).events.length, 2, 'sem novo evento');
       assert.equal(graph.ofOperation('unsubscribe').length, 1);
       assert.ok(!h.logs.raw().includes(token));
     });
@@ -566,22 +566,22 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
 
   it('DELETE com falha no unsubscribe: segue 204, nada é desfeito e só há log warn e métrica', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('chan-del-fail');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('chan-del-fail');
+      const owner = await enroll(h, company, 'OWNER');
       const number = digits();
       const waba = digits();
       const token = givenWaba(waba, [number]);
-      await as(h, owner, 'PUT', client.id, {
+      await as(h, owner, 'PUT', company.id, {
         phoneNumberId: number,
         wabaId: waba,
         accessToken: token,
       });
       graph.failOperation('unsubscribe', graphError(500, 1));
 
-      const del = await as(h, owner, 'DELETE', client.id);
+      const del = await as(h, owner, 'DELETE', company.id);
 
       assert.equal(del.statusCode, 204);
-      const stored = await dbState(client.id);
+      const stored = await dbState(company.id);
       assert.equal(stored.connection, null);
       assert.equal(stored.number, null);
       assert.match(await h.metrics.render(), /action="disconnect",result="unsubscribe_failed"} 1/);
@@ -590,46 +590,46 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
     });
   });
 
-  it('cliente LEGACY (número sem conexão): GET mostra LEGACY e o DELETE só limpa o número', async () => {
+  it('empresa LEGACY (número sem conexão): GET mostra LEGACY e o DELETE só limpa o número', async () => {
     await withHarness(async (h) => {
       const number = digits();
-      const client = await tenants.createClient('chan-legacy', number);
-      const owner = await enroll(h, client, 'OWNER');
-      const state = (await as(h, owner, 'GET', client.id)).json<ChannelBody>();
+      const company = await tenants.createCompany('chan-legacy', number);
+      const owner = await enroll(h, company, 'OWNER');
+      const state = (await as(h, owner, 'GET', company.id)).json<ChannelBody>();
       assert.equal(state.state, 'LEGACY');
       assert.equal(state.phoneNumberId, number);
       assert.equal(state.wabaId, null);
-      assert.equal((await as(h, owner, 'DELETE', client.id)).statusCode, 204);
-      assert.equal((await dbState(client.id)).number, null);
+      assert.equal((await as(h, owner, 'DELETE', company.id)).statusCode, 204);
+      assert.equal((await dbState(company.id)).number, null);
       assert.equal(graph.ofOperation('unsubscribe').length, 0);
     });
   });
 
-  it('remover o cliente apaga a conexão na mesma transação (nenhum texto cifrado permanece)', async () => {
+  it('remover a empresa apaga a conexão na mesma transação (nenhum texto cifrado permanece)', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('chan-removed');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('chan-removed');
+      const owner = await enroll(h, company, 'OWNER');
       const number = digits();
       const waba = digits();
-      await as(h, owner, 'PUT', client.id, {
+      await as(h, owner, 'PUT', company.id, {
         phoneNumberId: number,
         wabaId: waba,
         accessToken: givenWaba(waba, [number]),
       });
-      assert.ok((await dbState(client.id)).connection !== null);
+      assert.ok((await dbState(company.id)).connection !== null);
 
-      await new PrismaClientRepository(database.prisma).delete(client.id);
+      await new PrismaCompanyRepository(database.prisma).delete(company.id);
 
-      const stored = await dbState(client.id);
+      const stored = await dbState(company.id);
       assert.equal(stored.connection, null);
       assert.equal(stored.number, null);
     });
   });
 
-  it('permissões: AGENT e VIEWER 403, PlatformAdmin 403, :clientId alheio 404 antes da permissão, sem token 401', async () => {
+  it('permissões: AGENT e VIEWER 403, PlatformAdmin 403, :companyId alheio 404 antes da permissão, sem token 401', async () => {
     await withHarness(async (h) => {
-      const a = await tenants.createClient('chan-perm-a');
-      const b = await tenants.createClient('chan-perm-b');
+      const a = await tenants.createCompany('chan-perm-a');
+      const b = await tenants.createCompany('chan-perm-b');
       const roles: Record<string, Person> = {};
       for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const) {
         roles[role] = await enroll(h, a, role);
@@ -640,7 +640,7 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
         assert.equal((await as(h, who, 'GET', a.id)).statusCode, 403, role);
         assert.equal((await as(h, who, 'PUT', a.id, body)).statusCode, 403, role);
         assert.equal((await as(h, who, 'DELETE', a.id)).statusCode, 403, role);
-        // O 404 do cliente alheio vem antes da permissão.
+        // O 404 da empresa alheia vem antes da permissão.
         assert.equal((await as(h, who, 'GET', b.id)).statusCode, 404, role);
       }
       const owner = roles.OWNER as Person;
@@ -657,7 +657,7 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
       );
       const anonymous = await h.app.inject({
         method: 'GET',
-        url: `/admin/clients/${a.id}/channel`,
+        url: `/admin/companies/${a.id}/channel`,
       });
       assert.equal(anonymous.statusCode, 401);
     });
@@ -665,7 +665,7 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
 
   it('PlatformAdmin recebe 403 nas rotas do canal', async () => {
     await withHarness(async (h) => {
-      const client = await tenants.createClient('chan-platform');
+      const company = await tenants.createCompany('chan-platform');
       const email = emailFor('platform');
       await h.auth.platformAdmins.create({
         email,
@@ -682,7 +682,7 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
       for (const method of ['GET', 'PUT', 'DELETE'] as const) {
         const response = await h.app.inject({
           method,
-          url: `/admin/clients/${client.id}/channel`,
+          url: `/admin/companies/${company.id}/channel`,
           headers: bearer(token),
           remoteAddress: '203.0.113.10',
           ...(method === 'PUT'
@@ -694,10 +694,10 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
     });
   });
 
-  it('auditoria: GET audit-events lista só os eventos do próprio cliente, com targetUserId nulo nos de canal', async () => {
+  it('auditoria: GET audit-events lista só os eventos da própria empresa, com targetMembershipId nulo nos de canal', async () => {
     await withHarness(async (h) => {
-      const a = await tenants.createClient('chan-audit-a');
-      const b = await tenants.createClient('chan-audit-b');
+      const a = await tenants.createCompany('chan-audit-a');
+      const b = await tenants.createCompany('chan-audit-b');
       const ownerA = await enroll(h, a, 'OWNER');
       const ownerB = await enroll(h, b, 'OWNER');
       const [numberA, wabaA, numberB, wabaB] = [digits(), digits(), digits(), digits()];
@@ -714,18 +714,20 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
 
       const list = await h.app.inject({
         method: 'GET',
-        url: `/admin/clients/${a.id}/audit-events`,
+        url: `/admin/companies/${a.id}/audit-events`,
         headers: bearer(ownerA.accessToken),
         remoteAddress: '203.0.113.10',
       });
       assert.equal(list.statusCode, 200, list.body);
       const { items } = list.json<{
-        items: { action: string; actorUserId: string; targetUserId: string | null }[];
+        items: { action: string; actorMembershipId: string; targetMembershipId: string | null }[];
       }>();
       assert.ok(
-        items.some((item) => item.action === 'CHANNEL_CONNECTED' && item.targetUserId === null),
+        items.some(
+          (item) => item.action === 'CHANNEL_CONNECTED' && item.targetMembershipId === null,
+        ),
       );
-      assert.ok(items.every((item) => item.actorUserId !== ownerB.id));
+      assert.ok(items.every((item) => item.actorMembershipId !== ownerB.id));
       assert.ok(!list.body.includes(numberA) && !list.body.includes(wabaA));
     });
   });
@@ -733,11 +735,11 @@ describe('canal do cliente: PUT/GET/DELETE (spec 015, Postgres e Redis reais, Gr
   it('sem canal habilitado (sem o serviço) as rotas não existem: 404', async () => {
     await withHarness(
       async (h) => {
-        const client = await tenants.createClient('chan-off');
-        const owner = await enroll(h, client, 'OWNER');
-        assert.equal((await as(h, owner, 'GET', client.id)).statusCode, 404);
-        assert.equal((await as(h, owner, 'PUT', client.id, {})).statusCode, 404);
-        assert.equal((await as(h, owner, 'DELETE', client.id)).statusCode, 404);
+        const company = await tenants.createCompany('chan-off');
+        const owner = await enroll(h, company, 'OWNER');
+        assert.equal((await as(h, owner, 'GET', company.id)).statusCode, 404);
+        assert.equal((await as(h, owner, 'PUT', company.id, {})).statusCode, 404);
+        assert.equal((await as(h, owner, 'DELETE', company.id)).statusCode, 404);
       },
       { withChannel: false },
     );

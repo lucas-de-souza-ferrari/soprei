@@ -1,7 +1,7 @@
 // A URL do banco é lida de DATABASE_URL em prisma.config.ts (Prisma 7).
 //
-// Isolamento entre clientes: todo model é de TENANT (tem `clientId`) ou GLOBAL (sem
-// `clientId`) e precisa estar classificado em src/infrastructure/database/extensions/tenant-scope.ts;
+// Isolamento entre empresas: todo model é de TENANT (tem `companyId`) ou GLOBAL (sem
+// `companyId`) e precisa estar classificado em src/infrastructure/database/extensions/tenant-scope.ts;
 // um teste lê este schema e falha se algum model ficar sem classificação.
 
 generator client {
@@ -13,36 +13,36 @@ datasource db {
   provider = "postgresql"
 }
 
-enum ClientStatus {
+enum CompanyStatus {
   ACTIVE
   SUSPENDED
 
-  @@map("client_status")
+  @@map("company_status")
 }
 
-/// Raiz do tenant (GLOBAL: não é filtrado por clientId). Soft delete por `deletedAt`;
+/// Raiz do tenant (GLOBAL: não é filtrado por companyId). Soft delete por `deletedAt`;
 /// o slug segue único mesmo depois da remoção (fica reservado).
-model Client {
-  id                    String       @id @default(uuid(7)) @db.Uuid
+model Company {
+  id                    String        @id @default(uuid(7)) @db.Uuid
   name                  String
-  slug                  String       @unique
-  status                ClientStatus @default(ACTIVE)
-  createdAt             DateTime     @default(now()) @map("created_at")
-  updatedAt             DateTime     @updatedAt @map("updated_at")
-  deletedAt             DateTime?    @map("deleted_at")
+  slug                  String        @unique
+  status                CompanyStatus @default(ACTIVE)
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+  deletedAt             DateTime?     @map("deleted_at")
   /// Persona do assistente (até 4000 caracteres; nulo = persona padrão). Nunca vai para log.
   persona               String?
-  /// phone_number_id do número do WhatsApp (Cloud API da Meta) deste cliente: 1 a 32 dígitos, único.
-  /// Único ponto do sistema que leva de um identificador externo ao cliente (spec 011).
-  whatsappPhoneNumberId String?      @unique @map("whatsapp_phone_number_id")
+  /// phone_number_id do número do WhatsApp (Cloud API da Meta) desta empresa: 1 a 32 dígitos, único.
+  /// Único ponto do sistema que leva de um identificador externo à empresa (spec 011).
+  whatsappPhoneNumberId String?       @unique @map("whatsapp_phone_number_id")
 
   conversations     Conversation[]
   messages          Message[]
-  users             User[]
+  memberships       Membership[]
   auditEvents       AuditEvent[]
   channelConnection ChannelConnection?
 
-  @@map("clients")
+  @@map("companies")
 }
 
 enum MessageRole {
@@ -52,37 +52,37 @@ enum MessageRole {
   @@map("message_role")
 }
 
-/// Conversa de um contato com o assistente de um cliente. `contactRef` é o identificador do
+/// Conversa de um contato com o assistente de uma empresa. `contactRef` é o identificador do
 /// contato definido pelo canal (texto livre). (TENANT)
 model Conversation {
   id         String   @id @default(uuid(7)) @db.Uuid
-  clientId   String   @map("client_id") @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
   contactRef String   @map("contact_ref")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  client   Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   messages Message[]
 
-  // `[id, clientId]` existe só para as chaves estrangeiras compostas de Message.
-  @@unique([id, clientId])
-  @@unique([clientId, contactRef])
-  @@index([clientId, createdAt, id])
+  // `[id, companyId]` existe só para as chaves estrangeiras compostas de Message.
+  @@unique([id, companyId])
+  @@unique([companyId, contactRef])
+  @@index([companyId, createdAt, id])
   @@map("conversations")
 }
 
 /// Mensagem de uma conversa (do contato ou do assistente). (TENANT)
-/// Integridade entre clientes no banco: as chaves estrangeiras são COMPOSTAS com `clientId`,
-/// então uma mensagem nunca aponta para conversa nem para outra mensagem de outro cliente.
+/// Integridade entre empresas no banco: as chaves estrangeiras são COMPOSTAS com `companyId`,
+/// então uma mensagem nunca aponta para conversa nem para outra mensagem de outra empresa.
 /// `content` nunca vai para log nem para label de métrica.
 model Message {
   id               String      @id @default(uuid(7)) @db.Uuid
-  clientId         String      @map("client_id") @db.Uuid
+  companyId        String      @map("company_id") @db.Uuid
   conversationId   String      @map("conversation_id") @db.Uuid
   role             MessageRole
   content          String
   isFallback       Boolean     @default(false) @map("is_fallback")
-  /// Id da mensagem no canal, para idempotência (único por cliente quando presente).
+  /// Id da mensagem no canal, para idempotência (único por empresa quando presente).
   externalId       String?     @map("external_id")
   /// Na resposta do assistente, a mensagem do contato a que ela responde.
   replyToId        String?     @map("reply_to_id") @db.Uuid
@@ -95,95 +95,95 @@ model Message {
   /// Várias mensagens do mesmo lote apontam para a mesma resposta. Só mensagem USER tem o campo (CHECK).
   answeredById     String?     @map("answered_by_id") @db.Uuid
 
-  client       Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  conversation Conversation @relation(fields: [conversationId, clientId], references: [id, clientId], onDelete: NoAction)
-  replyTo      Message?     @relation("MessageReply", fields: [replyToId, clientId], references: [id, clientId], onDelete: NoAction)
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  conversation Conversation @relation(fields: [conversationId, companyId], references: [id, companyId], onDelete: NoAction)
+  replyTo      Message?     @relation("MessageReply", fields: [replyToId, companyId], references: [id, companyId], onDelete: NoAction)
   replies      Message[]    @relation("MessageReply")
-  answeredBy   Message?     @relation("MessageAnswer", fields: [answeredById, clientId], references: [id, clientId], onDelete: NoAction)
+  answeredBy   Message?     @relation("MessageAnswer", fields: [answeredById, companyId], references: [id, companyId], onDelete: NoAction)
   answers      Message[]    @relation("MessageAnswer")
 
-  @@unique([id, clientId])
-  @@unique([clientId, externalId])
+  @@unique([id, companyId])
+  @@unique([companyId, externalId])
   // No máximo uma resposta por mensagem do contato (a retentativa concorrente não duplica).
-  @@unique([clientId, replyToId])
-  @@index([clientId, conversationId, createdAt, id])
+  @@unique([companyId, replyToId])
+  @@index([companyId, conversationId, createdAt, id])
   @@map("messages")
 }
 
-enum UserRole {
+enum MembershipRole {
   OWNER
   ADMIN
   AGENT
   VIEWER
 
-  @@map("user_role")
+  @@map("membership_role")
 }
 
-enum UserStatus {
+enum AccessStatus {
   ACTIVE
   DISABLED
 
-  @@map("user_status")
+  @@map("access_status")
 }
 
-/// Pessoa de um cliente (TENANT). E-mail normalizado (NFKC, trim, minúsculas), único POR cliente.
+/// Vínculo de uma conta com uma empresa (TENANT), com papel e estado. E-mail legado normalizado (NFKC, trim, minúsculas), único POR empresa.
 /// `passwordHash` (scrypt) nunca vai a log, resposta nem métrica. E-mail também é dado pessoal.
-model User {
-  id           String     @id @default(uuid(7)) @db.Uuid
-  clientId     String     @map("client_id") @db.Uuid
+model Membership {
+  id           String         @id @default(uuid(7)) @db.Uuid
+  companyId    String         @map("company_id") @db.Uuid
   email        String
-  passwordHash String     @map("password_hash")
-  role         UserRole   @default(AGENT)
-  status       UserStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
-  accountId    String?    @map("account_id") @db.Uuid
-  account      Account?   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  passwordHash String         @map("password_hash")
+  role         MembershipRole @default(AGENT)
+  status       AccessStatus   @default(ACTIVE)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  accountId    String?        @map("account_id") @db.Uuid
+  account      Account?       @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
-  client        Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  company       Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
   auditAsActor  AuditEvent[] @relation("AuditActor")
   auditAsTarget AuditEvent[] @relation("AuditTarget")
 
-  // `[id, clientId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
-  @@unique([id, clientId])
-  @@unique([clientId, email])
-  @@unique([clientId, accountId])
-  @@index([clientId, createdAt, id])
-  @@map("users")
+  // `[id, companyId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
+  @@unique([id, companyId])
+  @@unique([companyId, email])
+  @@unique([companyId, accountId])
+  @@index([companyId, createdAt, id])
+  @@map("memberships")
 }
 
-/// Identidade global da pessoa. O User existente passa a representar sua participação no tenant.
+/// Identidade global da pessoa. O Membership representa a participação dela numa empresa (tenant).
 model Account {
-  id                        String     @id @default(uuid(7)) @db.Uuid
-  email                     String     @unique
-  passwordHash              String     @map("password_hash")
-  status                    UserStatus @default(ACTIVE)
-  emailVerifiedAt           DateTime?  @map("email_verified_at") @db.Timestamptz(6)
-  verificationHash          String?    @map("verification_hash")
-  verificationExpiresAt     DateTime?  @map("verification_expires_at") @db.Timestamptz(6)
-  verificationAttempts      Int        @default(0) @map("verification_attempts") @db.SmallInt
-  verificationFailuresDay   Int        @default(0) @map("verification_failures_day") @db.SmallInt
-  verificationFailuresSince DateTime?  @map("verification_failures_since") @db.Timestamptz(6)
+  id                        String       @id @default(uuid(7)) @db.Uuid
+  email                     String       @unique
+  passwordHash              String       @map("password_hash")
+  status                    AccessStatus @default(ACTIVE)
+  emailVerifiedAt           DateTime?    @map("email_verified_at") @db.Timestamptz(6)
+  verificationHash          String?      @map("verification_hash")
+  verificationExpiresAt     DateTime?    @map("verification_expires_at") @db.Timestamptz(6)
+  verificationAttempts      Int          @default(0) @map("verification_attempts") @db.SmallInt
+  verificationFailuresDay   Int          @default(0) @map("verification_failures_day") @db.SmallInt
+  verificationFailuresSince DateTime?    @map("verification_failures_since") @db.Timestamptz(6)
   /// Código de recuperação de senha (HMAC, spec 021); nunca em log, resposta nem métrica.
-  resetHash                 String?    @map("reset_hash")
-  resetExpiresAt            DateTime?  @map("reset_expires_at") @db.Timestamptz(6)
-  resetAttempts             Int        @default(0) @map("reset_attempts") @db.SmallInt
-  resetFailuresDay          Int        @default(0) @map("reset_failures_day") @db.SmallInt
-  resetFailuresSince        DateTime?  @map("reset_failures_since") @db.Timestamptz(6)
-  createdAt                 DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  memberships               User[]
+  resetHash                 String?      @map("reset_hash")
+  resetExpiresAt            DateTime?    @map("reset_expires_at") @db.Timestamptz(6)
+  resetAttempts             Int          @default(0) @map("reset_attempts") @db.SmallInt
+  resetFailuresDay          Int          @default(0) @map("reset_failures_day") @db.SmallInt
+  resetFailuresSince        DateTime?    @map("reset_failures_since") @db.Timestamptz(6)
+  createdAt                 DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  memberships               Membership[]
 
   @@map("accounts")
 }
 
 enum AuditAction {
-  USER_CREATED
-  USER_ROLE_CHANGED
-  USER_DISABLED
-  USER_ENABLED
-  USER_PASSWORD_RESET
-  USER_PASSWORD_CHANGED
+  MEMBERSHIP_CREATED
+  MEMBERSHIP_ROLE_CHANGED
+  MEMBERSHIP_DISABLED
+  MEMBERSHIP_ENABLED
+  MEMBERSHIP_PASSWORD_RESET
+  MEMBERSHIP_PASSWORD_CHANGED
   CHANNEL_CONNECTED
   CHANNEL_TOKEN_REPLACED
   CHANNEL_DISCONNECTED
@@ -192,35 +192,35 @@ enum AuditAction {
 }
 
 /// Trilha de auditoria imutável (TENANT, spec 008). Sem texto livre, sem e-mail, sem IP: só ids e
-/// valores de enum. As chaves estrangeiras são COMPOSTAS com `clientId`: um evento nunca aponta para
-/// usuário de outro cliente. A API não atualiza nem apaga eventos; usuário nunca é apagado (Restrict).
+/// valores de enum. As chaves estrangeiras são COMPOSTAS com `companyId`: um evento nunca aponta para
+/// vínculo de outra empresa. A API não atualiza nem apaga eventos; vínculo nunca é apagado (Restrict).
 model AuditEvent {
-  id           String      @id @default(uuid(7)) @db.Uuid
-  clientId     String      @map("client_id") @db.Uuid
-  action       AuditAction
-  actorUserId  String      @map("actor_user_id") @db.Uuid
-  /// Nulo nas ações CHANNEL_* (spec 015); CHECK no banco: USER_* exige alvo, CHANNEL_* exige nulo.
-  targetUserId String?     @map("target_user_id") @db.Uuid
-  fromRole     UserRole?   @map("from_role")
-  toRole       UserRole?   @map("to_role")
-  createdAt    DateTime    @default(now()) @map("created_at")
+  id                 String          @id @default(uuid(7)) @db.Uuid
+  companyId          String          @map("company_id") @db.Uuid
+  action             AuditAction
+  actorMembershipId  String          @map("actor_membership_id") @db.Uuid
+  /// Nulo nas ações CHANNEL_* (spec 015); CHECK no banco: MEMBERSHIP_* exige alvo, CHANNEL_* exige nulo.
+  targetMembershipId String?         @map("target_membership_id") @db.Uuid
+  fromRole           MembershipRole? @map("from_role")
+  toRole             MembershipRole? @map("to_role")
+  createdAt          DateTime        @default(now()) @map("created_at")
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  actor  User   @relation("AuditActor", fields: [actorUserId, clientId], references: [id, clientId], onDelete: Restrict)
-  target User?  @relation("AuditTarget", fields: [targetUserId, clientId], references: [id, clientId], onDelete: Restrict)
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  actor   Membership  @relation("AuditActor", fields: [actorMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  target  Membership? @relation("AuditTarget", fields: [targetMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
 
-  @@index([clientId, createdAt, id])
+  @@index([companyId, createdAt, id])
   @@map("audit_events")
 }
 
-/// Operador da plataforma (GLOBAL: não pertence a cliente algum). E-mail único global.
+/// Operador da plataforma (GLOBAL: não pertence a empresa alguma). E-mail único global.
 model PlatformAdmin {
-  id           String     @id @default(uuid(7)) @db.Uuid
-  email        String     @unique
-  passwordHash String     @map("password_hash")
-  status       UserStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  id           String       @id @default(uuid(7)) @db.Uuid
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  status       AccessStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
   @@map("platform_admins")
 }
@@ -232,12 +232,12 @@ enum ChannelConnectionStatus {
   @@map("channel_connection_status")
 }
 
-/// Credencial do canal WhatsApp de um cliente (TENANT, spec 015): no máximo uma por cliente. O token
-/// fica CIFRADO (AES-256-GCM, AAD ligada ao clientId); nunca em claro no banco, em log, resposta nem
-/// métrica. O número continua só em `Client.whatsappPhoneNumberId`.
+/// Credencial do canal WhatsApp de uma empresa (TENANT, spec 015): no máximo uma por empresa. O token
+/// fica CIFRADO (AES-256-GCM, AAD ligada ao companyId); nunca em claro no banco, em log, resposta nem
+/// métrica. O número continua só em `Company.whatsappPhoneNumberId`.
 model ChannelConnection {
   id                        String                  @id @default(uuid(7)) @db.Uuid
-  clientId                  String                  @unique @map("client_id") @db.Uuid
+  companyId                 String                  @unique @map("company_id") @db.Uuid
   wabaId                    String                  @map("waba_id")
   tokenCiphertext           String                  @map("token_ciphertext")
   /// PIN de 6 dígitos do registro do número (Embedded Signup), CIFRADO como o token; nunca em claro,
@@ -250,7 +250,7 @@ model ChannelConnection {
   createdAt                 DateTime                @default(now()) @map("created_at")
   updatedAt                 DateTime                @updatedAt @map("updated_at")
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@map("channel_connections")
 }

@@ -1,5 +1,5 @@
-import type { WithoutClientId } from '../repositories/tenant.repository.js';
-import type { ClientId } from '../value-objects/client-id.js';
+import type { WithoutCompanyId } from '../repositories/tenant.repository.js';
+import type { CompanyId } from '../value-objects/company-id.js';
 
 export const MESSAGE_ROLES = ['USER', 'ASSISTANT'] as const;
 export type MessageRole = (typeof MESSAGE_ROLES)[number];
@@ -15,13 +15,13 @@ export const EXTERNAL_ID_MAX_LENGTH = 128;
  */
 export interface Message {
   readonly id: string;
-  readonly clientId: ClientId;
+  readonly companyId: CompanyId;
   readonly conversationId: string;
   readonly role: MessageRole;
   readonly content: string;
   /** Verdadeiro só em resposta do assistente que é o texto padrão de falha. */
   readonly isFallback: boolean;
-  /** Id da mensagem no canal; único por cliente quando presente (idempotência). */
+  /** Id da mensagem no canal; único por empresa quando presente (idempotência). */
   readonly externalId: string | null;
   /** Na resposta do assistente, o id da mensagem do contato a que ela responde. */
   readonly replyToId: string | null;
@@ -45,8 +45,8 @@ export interface MessageSentMark {
   readonly sentAt: Date;
 }
 
-/** Dados de criação. Não há `clientId` aqui: ele vem sempre do parâmetro do repositório. */
-export interface NewMessage extends WithoutClientId {
+/** Dados de criação. Não há `companyId` aqui: ele vem sempre do parâmetro do repositório. */
+export interface NewMessage extends WithoutCompanyId {
   readonly conversationId: string;
   readonly role: MessageRole;
   readonly content: string;

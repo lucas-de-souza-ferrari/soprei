@@ -59,7 +59,7 @@ export interface TokenInspection {
 }
 
 /**
- * Chamadas de administração ao Graph para conectar um cliente (spec 015). O token do cliente vai em
+ * Chamadas de administração ao Graph para conectar uma empresa (spec 015). O token da empresa vai em
  * `Authorization: Bearer`; erros esperados voltam como `Result.err`.
  */
 export interface ChannelProvisioner {

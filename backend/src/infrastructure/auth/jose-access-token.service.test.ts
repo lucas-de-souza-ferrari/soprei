@@ -3,17 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { SignJWT } from 'jose';
 import type { AuthIdentity } from '../../application/auth/identity.js';
-import { ClientId, PlatformAdminId, UserId } from '../../domain/index.js';
+import { CompanyId, PlatformAdminId, MembershipId } from '../../domain/index.js';
 import { ACCESS_TOKEN_TYP, JoseAccessTokenService } from './jose-access-token.service.js';
 
 const SECRET = 'segredo-de-teste-com-mais-de-32-caracteres-0123456789';
 const KEY = new TextEncoder().encode(SECRET);
 const T0 = Date.UTC(2026, 5, 1, 12, 0, 0);
 
-const user: AuthIdentity = {
-  kind: 'user',
-  userId: UserId.parse(randomUUID()),
-  clientId: ClientId.parse(randomUUID()),
+const membership: AuthIdentity = {
+  kind: 'membership',
+  membershipId: MembershipId.parse(randomUUID()),
+  companyId: CompanyId.parse(randomUUID()),
   role: 'AGENT',
   sessionId: randomUUID(),
 };
@@ -50,10 +50,10 @@ interface Overrides {
 async function craft(overrides: Overrides = {}): Promise<string> {
   const iat = Math.floor(T0 / 1000);
   const claims = overrides.claims ?? {
-    kind: 'user',
-    cid: user.kind === 'user' ? user.clientId : '',
+    kind: 'membership',
+    cid: membership.kind === 'membership' ? membership.companyId : '',
     role: 'AGENT',
-    sid: user.sessionId,
+    sid: membership.sessionId,
   };
   let jwt = new SignJWT(claims)
     .setProtectedHeader({
@@ -63,7 +63,8 @@ async function craft(overrides: Overrides = {}): Promise<string> {
     .setIssuer(overrides.iss ?? 'soprei')
     .setAudience(overrides.aud ?? 'soprei-api')
     .setExpirationTime(overrides.exp ?? iat + 900);
-  if (!('sub' in overrides)) jwt = jwt.setSubject(user.kind === 'user' ? user.userId : '');
+  if (!('sub' in overrides))
+    jwt = jwt.setSubject(membership.kind === 'membership' ? membership.membershipId : '');
   else if (overrides.sub !== undefined) jwt = jwt.setSubject(overrides.sub);
   if (!('iat' in overrides)) jwt = jwt.setIssuedAt(iat);
   else if (overrides.iat !== undefined) jwt = jwt.setIssuedAt(overrides.iat);
@@ -78,11 +79,11 @@ function unsigned(): string {
   return `${encode({ alg: 'none', typ: ACCESS_TOKEN_TYP })}.${encode({
     iss: 'soprei',
     aud: 'soprei-api',
-    sub: user.kind === 'user' ? user.userId : '',
+    sub: membership.kind === 'membership' ? membership.membershipId : '',
     iat,
     exp: iat + 900,
-    kind: 'user',
-    sid: user.sessionId,
+    kind: 'membership',
+    sid: membership.sessionId,
   })}.`;
 }
 
@@ -91,9 +92,9 @@ describe('JoseAccessTokenService: papéis (spec 008)', () => {
     const tokens = service();
     for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const) {
       const identity: AuthIdentity = {
-        kind: 'user',
-        userId: UserId.parse(randomUUID()),
-        clientId: ClientId.parse(randomUUID()),
+        kind: 'membership',
+        membershipId: MembershipId.parse(randomUUID()),
+        companyId: CompanyId.parse(randomUUID()),
         role,
         sessionId: randomUUID(),
       };
@@ -107,10 +108,10 @@ describe('JoseAccessTokenService: papéis (spec 008)', () => {
     const verified = await service().verify(
       await craft({
         claims: {
-          kind: 'user',
+          kind: 'membership',
           cid: randomUUID(),
           role: 'SUPERADMIN',
-          sid: user.sessionId,
+          sid: membership.sessionId,
         },
       }),
     );
@@ -120,9 +121,9 @@ describe('JoseAccessTokenService: papéis (spec 008)', () => {
 });
 
 describe('JoseAccessTokenService', () => {
-  it('emite e verifica o token de User e o de PlatformAdmin, com o expiresIn configurado', async () => {
+  it('emite e verifica o token de Membership e o de PlatformAdmin, com o expiresIn configurado', async () => {
     const tokens = service();
-    for (const identity of [user, platform]) {
+    for (const identity of [membership, platform]) {
       const issued = await tokens.issue(identity);
       assert.equal(issued.expiresIn, 900);
       const verified = await tokens.verify(issued.token);
@@ -133,7 +134,7 @@ describe('JoseAccessTokenService', () => {
   });
 
   it('cabeçalho HS256 com typ at+jwt e claims iss, aud, iat, exp, sub, kind, cid, role e sid', async () => {
-    const { token } = await service().issue(user);
+    const { token } = await service().issue(membership);
     const [header, payload] = token
       .split('.')
       .slice(0, 2)
@@ -203,9 +204,9 @@ describe('JoseAccessTokenService', () => {
       ['sem sid', await craft({ claims: { kind: 'platform' }, sub: randomUUID() }), 'invalid'],
       ['sub que não é UUID', await craft({ sub: 'nao-e-uuid' }), 'invalid'],
       [
-        'user sem cid',
+        'membership sem cid',
         await craft({
-          claims: { kind: 'user', role: 'OWNER', sid: randomUUID() },
+          claims: { kind: 'membership', role: 'OWNER', sid: randomUUID() },
           sub: randomUUID(),
         }),
         'invalid',
@@ -213,7 +214,7 @@ describe('JoseAccessTokenService', () => {
       [
         'papel desconhecido',
         await craft({
-          claims: { kind: 'user', cid: randomUUID(), role: 'ROOT', sid: randomUUID() },
+          claims: { kind: 'membership', cid: randomUUID(), role: 'ROOT', sid: randomUUID() },
           sub: randomUUID(),
         }),
         'invalid',
@@ -238,7 +239,7 @@ describe('JoseAccessTokenService', () => {
   });
 
   it('adulterar o payload invalida a assinatura', async () => {
-    const { token } = await service().issue(user);
+    const { token } = await service().issue(membership);
     const [header, , signature] = token.split('.');
     const forged = Buffer.from(
       JSON.stringify({
@@ -256,7 +257,7 @@ describe('JoseAccessTokenService', () => {
   });
 
   it('clockTolerance aceita token expirado há menos que a tolerância e recusa além dela', async () => {
-    const { token } = await service({ ttl: 60 }).issue(user);
+    const { token } = await service({ ttl: 60 }).issue(membership);
     const expiresAt = T0 + 60_000;
     const at = (ms: number) => service({ now: () => new Date(ms), tolerance: 5 });
     assert.ok((await at(expiresAt - 1_000).verify(token)).ok, 'ainda válido');

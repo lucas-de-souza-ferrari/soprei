@@ -45,7 +45,7 @@ export interface WhatsappWebhookControllerOptions {
   readonly appSecret: string;
   /** `WHATSAPP_VERIFY_TOKEN`: só o handshake de verificação. */
   readonly verifyToken: string;
-  /** Entrada do canal: resolve o cliente pelo número do negócio e enfileira. */
+  /** Entrada do canal: resolve a empresa pelo número do negócio e enfileira. */
   readonly intake: Pick<ChannelIntakeService, 'accept'>;
   readonly metrics?: WebhookMetrics;
 }
@@ -69,7 +69,7 @@ const verificationQuerySchema = z.object({
  * - `POST`: corpo lido cru (parser de JSON encapsulado só aqui, Buffer, 3 MiB), assinatura
  *   HMAC-SHA256 em tempo constante **antes** de interpretar o corpo, schema tolerante, e resposta
  *   200 logo depois de enfileirar: nada de LLM nem de chamada ao canal no fluxo síncrono. O
- *   `clientId` nunca vem de cabeçalho, query ou corpo: nasce da resolução do número do negócio no
+ *   `companyId` nunca vem de cabeçalho, query ou corpo: nasce da resolução do número do negócio no
  *   banco, dentro do `intake`.
  */
 export const whatsappWebhookController: FastifyPluginCallback<WhatsappWebhookControllerOptions> = (

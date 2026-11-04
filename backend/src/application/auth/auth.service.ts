@@ -1,14 +1,14 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import {
-  type Client,
-  ClientId,
-  type ClientRepository,
+  type Company,
+  CompanyId,
+  type CompanyRepository,
   PlatformAdminId,
   type PlatformAdminRepository,
-  UserId,
-  type UserRepository,
-  type UserRole,
+  MembershipId,
+  type MembershipRepository,
+  type MembershipRole,
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import {
@@ -27,7 +27,7 @@ import {
   type PlatformIdentity,
   scopeOf,
   subjectIdOf,
-  type UserIdentity,
+  type MembershipIdentity,
 } from './identity.js';
 
 export interface AuthTokens {
@@ -61,19 +61,19 @@ export interface LogoutFailure {
 
 export type MeResponse =
   | {
-      readonly kind: 'user';
+      readonly kind: 'membership';
       readonly id: string;
       readonly email: string;
-      readonly role: UserRole;
-      readonly client: { readonly id: string; readonly name: string; readonly slug: string };
+      readonly role: MembershipRole;
+      readonly company: { readonly id: string; readonly name: string; readonly slug: string };
     }
   | { readonly kind: 'platform'; readonly id: string; readonly email: string };
 
 type AuthMetrics = Pick<Metrics, 'countAuthLogin' | 'countAuthRefresh' | 'countAuthLogout'>;
 
 export interface AuthServiceDeps {
-  readonly clients: ClientRepository;
-  readonly users: UserRepository;
+  readonly companies: CompanyRepository;
+  readonly memberships: MembershipRepository;
   readonly platformAdmins: PlatformAdminRepository;
   readonly hasher: PasswordHasher;
   readonly tokens: AccessTokenService;
@@ -118,8 +118,8 @@ function sha256Hex(value: string): string {
 
 /**
  * Identidade do pedido para o bloqueio por conta (exceção declarada à regra "chave deriva do
- * `ClientId`": vale antes de existir `ClientId` e também para contas inexistentes). Só o hash sai
- * daqui; o prefixo `c`/`p` impede colisão entre um cliente de slug `platform` e o administrador.
+ * `CompanyId`": vale antes de existir `CompanyId` e também para contas inexistentes). Só o hash sai
+ * daqui; o prefixo `c`/`p` impede colisão entre uma empresa de slug `platform` e o administrador.
  */
 export function loginLockKey(secret: string | Buffer, parts: readonly string[]): string {
   return createHmac('sha256', secret).update(parts.join('\u0000')).digest('hex');
@@ -128,7 +128,7 @@ export function loginLockKey(secret: string | Buffer, parts: readonly string[]):
 interface LoginAccount {
   readonly passwordHash: string;
   readonly active: boolean;
-  readonly identity: UserIdentity | PlatformIdentity;
+  readonly identity: MembershipIdentity | PlatformIdentity;
 }
 
 /**
@@ -137,8 +137,8 @@ interface LoginAccount {
  * token, e-mail nem slug: só ids e resultados.
  */
 export class AuthService {
-  private readonly clients: ClientRepository;
-  private readonly users: UserRepository;
+  private readonly companies: CompanyRepository;
+  private readonly memberships: MembershipRepository;
   private readonly platformAdmins: PlatformAdminRepository;
   private readonly hasher: PasswordHasher;
   private readonly tokens: AccessTokenService;
@@ -149,8 +149,8 @@ export class AuthService {
 
   constructor(deps: AuthServiceDeps) {
     this.loginLockSecret = deps.loginLockSecret;
-    this.clients = deps.clients;
-    this.users = deps.users;
+    this.companies = deps.companies;
+    this.memberships = deps.memberships;
     this.platformAdmins = deps.platformAdmins;
     this.hasher = deps.hasher;
     this.tokens = deps.tokens;
@@ -159,29 +159,29 @@ export class AuthService {
     this.metrics = deps.metrics;
   }
 
-  /** Login de usuário de um cliente: `clientSlug` + e-mail (já normalizado) + senha (já normalizada). */
+  /** Login de usuário de uma empresa: `companySlug` + e-mail (já normalizado) + senha (já normalizada). */
   login(input: {
-    readonly clientSlug: string;
+    readonly companySlug: string;
     readonly email: string;
     readonly password: string;
   }): Promise<Result<AuthTokens, LoginFailure>> {
     return this.loginFlow(
-      'user',
-      loginLockKey(this.loginLockSecret, ['c', input.clientSlug, input.email]),
+      'membership',
+      loginLockKey(this.loginLockSecret, ['c', input.companySlug, input.email]),
       input.password,
       async () => {
-        const client = await this.findClient(input.clientSlug);
-        if (client?.status !== 'ACTIVE') return undefined;
-        const found = await this.users.findCredentialsByEmail(client.id, input.email);
+        const company = await this.findCompany(input.companySlug);
+        if (company?.status !== 'ACTIVE') return undefined;
+        const found = await this.memberships.findCredentialsByEmail(company.id, input.email);
         if (found === null) return undefined;
         return {
           passwordHash: found.passwordHash,
-          active: found.user.status === 'ACTIVE',
+          active: found.membership.status === 'ACTIVE',
           identity: {
-            kind: 'user',
-            userId: found.user.id,
-            clientId: client.id,
-            role: found.user.role,
+            kind: 'membership',
+            membershipId: found.membership.id,
+            companyId: company.id,
+            role: found.membership.role,
             sessionId: '',
           },
         };
@@ -239,7 +239,7 @@ export class AuthService {
       }
       const identity = await this.resolveIdentity(scope, outcome.subjectId, sessionId);
       if (identity === undefined) {
-        // Usuário desativado, cliente suspenso ou removido: a sessão não continua.
+        // Usuário desativado, empresa suspensa ou removido: a sessão não continua.
         await this.sessions.revokeSession(scope, sessionId);
         this.metrics?.countAuthRefresh('invalid');
         return Result.err({ reason: 'invalid_refresh' });
@@ -325,16 +325,16 @@ export class AuthService {
         const admin = await this.platformAdmins.findById(identity.adminId);
         return { kind: 'platform', id: admin.id, email: admin.email };
       }
-      const [user, client] = await Promise.all([
-        this.users.findById(identity.clientId, identity.userId),
-        this.clients.findById(identity.clientId),
+      const [membership, company] = await Promise.all([
+        this.memberships.findById(identity.companyId, identity.membershipId),
+        this.companies.findById(identity.companyId),
       ]);
       return {
-        kind: 'user',
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        client: { id: client.id, name: client.name, slug: client.slug },
+        kind: 'membership',
+        id: membership.id,
+        email: membership.email,
+        role: membership.role,
+        company: { id: company.id, name: company.name, slug: company.slug },
       };
     } catch (error) {
       if (error instanceof NotFoundError) throw new UnauthorizedError();
@@ -342,9 +342,9 @@ export class AuthService {
     }
   }
 
-  private async findClient(slug: string): Promise<Client | undefined> {
+  private async findCompany(slug: string): Promise<Company | undefined> {
     try {
-      return await this.clients.findBySlug(slug);
+      return await this.companies.findBySlug(slug);
     } catch (error) {
       if (error instanceof NotFoundError) return undefined;
       throw error;
@@ -356,7 +356,7 @@ export class AuthService {
    * um hash fictício quando não há conta). Bloqueada, a conta responde 429 antes de gastar hash.
    */
   private async loginFlow(
-    kind: 'user' | 'platform',
+    kind: 'membership' | 'platform',
     lockKey: string,
     password: string,
     lookup: () => Promise<LoginAccount | undefined>,
@@ -397,7 +397,7 @@ export class AuthService {
           kind,
           sessionId,
           subjectId: subjectIdOf(identity),
-          ...(identity.kind === 'user' ? { clientId: identity.clientId } : {}),
+          ...(identity.kind === 'membership' ? { companyId: identity.companyId } : {}),
         },
         'login ok',
       );
@@ -425,13 +425,19 @@ export class AuthService {
         if (admin.status !== 'ACTIVE') return undefined;
         return { kind: 'platform', adminId: admin.id, sessionId };
       }
-      const clientId = ClientId.parse(scope);
-      const [client, user] = await Promise.all([
-        this.clients.findById(clientId),
-        this.users.findById(clientId, UserId.parse(subjectId)),
+      const companyId = CompanyId.parse(scope);
+      const [company, membership] = await Promise.all([
+        this.companies.findById(companyId),
+        this.memberships.findById(companyId, MembershipId.parse(subjectId)),
       ]);
-      if (client.status !== 'ACTIVE' || user.status !== 'ACTIVE') return undefined;
-      return { kind: 'user', userId: user.id, clientId, role: user.role, sessionId };
+      if (company.status !== 'ACTIVE' || membership.status !== 'ACTIVE') return undefined;
+      return {
+        kind: 'membership',
+        membershipId: membership.id,
+        companyId,
+        role: membership.role,
+        sessionId,
+      };
     } catch (error) {
       if (error instanceof NotFoundError) return undefined;
       throw error;

@@ -58,11 +58,11 @@ export class ConflictError extends BaseError {
 }
 
 /**
- * Operação de dado de tenant sem o filtro por cliente (ou proibida por não carregá-lo).
+ * Operação de dado de tenant sem o filtro por empresa (ou proibida por não carregá-lo).
  * É erro de programação, nunca de entrada do usuário: 500 e não operacional.
  */
 export class TenantScopeError extends BaseError {
-  constructor(message = 'Operação de tenant sem escopo de cliente', options: AppErrorOptions = {}) {
+  constructor(message = 'Operação de tenant sem escopo de empresa', options: AppErrorOptions = {}) {
     super({
       message,
       code: 'TENANT_SCOPE_ERROR',
@@ -102,7 +102,7 @@ export class RateLimitError extends BaseError {
 /**
  * Dependência de que a operação não pode prescindir está fora (ex.: o Redis das sessões, spec
  * 007): 503, operacional. É a falha **fechada** da autenticação: nada é aceito nem emitido. Não
- * anexe `cause` de cliente Redis (o erro do ioredis carrega `command.args`).
+ * anexe `cause` de empresa Redis (o erro do ioredis carrega `command.args`).
  */
 export class ServiceUnavailableError extends BaseError {
   constructor(message = 'Serviço temporariamente indisponível', options: AppErrorOptions = {}) {
@@ -114,8 +114,8 @@ export type CredentialDecryptionReason = 'malformed' | 'unknown_key' | 'tampered
 
 /**
  * Falha ao decifrar uma credencial guardada (spec 015): formato inválido, chave ausente ou tag que
- * não confere (inclui texto cifrado de outro cliente, pela AAD). Mensagem fixa; o `context` leva só
- * `reason`, **nunca** o texto cifrado, o `clientId` nem a chave. É falha nossa (não do cliente):
+ * não confere (inclui texto cifrado de outra empresa, pela AAD). Mensagem fixa; o `context` leva só
+ * `reason`, **nunca** o texto cifrado, o `companyId` nem a chave. É falha nossa (não da empresa):
  * 500 não operacional para quem chamar por HTTP, permanente no worker.
  */
 export class CredentialDecryptionError extends BaseError {

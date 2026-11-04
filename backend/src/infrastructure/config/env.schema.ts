@@ -156,12 +156,12 @@ export const envSchema = z
     WHATSAPP_ENABLED: z.preprocess(emptyAsUndefined, booleanLiteral(false)),
     WHATSAPP_APP_SECRET: optionalSecret,
     WHATSAPP_VERIFY_TOKEN: optionalSecret,
-    // Token global de transição (spec 015): só para clientes `LEGACY` (número gravado antes da 015 e
-    // sem conexão própria). Opcional; quando nenhum cliente estiver `LEGACY`, basta apagá-la.
+    // Token global de transição (spec 015): só para empresas `LEGACY` (número gravado antes da 015 e
+    // sem conexão própria). Opcional; quando nenhuma empresa estiver `LEGACY`, basta apagá-la.
     WHATSAPP_ACCESS_TOKEN: optionalSecret,
-    // `app_id` esperado no `debug_token` de todo token de cliente (spec 015); dígitos.
+    // `app_id` esperado no `debug_token` de todo token de empresa (spec 015); dígitos.
     WHATSAPP_APP_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
-    // Chaves de cifra das credenciais por cliente (spec 015): `keyId:<32 bytes base64url>,...`.
+    // Chaves de cifra das credenciais por empresa (spec 015): `keyId:<32 bytes base64url>,...`.
     CHANNEL_CREDENTIALS_KEYS: optionalSecret,
     CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
     WHATSAPP_API_BASE_URL: z.preprocess(
@@ -238,13 +238,13 @@ export const envSchema = z
         }
       }
     }
-    // `true` confia em toda a cadeia de X-Forwarded-For: o cliente escolhe o IP e escapa do limite.
+    // `true` confia em toda a cadeia de X-Forwarded-For: a empresa escolhe o IP e escapa do limite.
     if (env.NODE_ENV === 'production' && env.TRUST_PROXY === true) {
       ctx.addIssue({
         code: 'custom',
         path: ['TRUST_PROXY'],
         message:
-          'não pode ser "true" em produção (o cliente escolheria o próprio IP); liste os IPs/CIDRs dos proxies, ex.: 127.0.0.1,::1',
+          'não pode ser "true" em produção (a empresa escolheria o próprio IP); liste os IPs/CIDRs dos proxies, ex.: 127.0.0.1,::1',
       });
     }
     if (env.NODE_ENV === 'production' && !env.RATE_LIMIT_ENABLED) {

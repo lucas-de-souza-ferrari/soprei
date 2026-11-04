@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { ChannelCredentialsService } from '../application/channel/channel-credentials.service.js';
 import {
   PrismaChannelConnectionRepository,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   type TenantScopedPrisma,
 } from '../infrastructure/database/index.js';
 import type { Metrics } from '../infrastructure/metrics/index.js';
@@ -20,7 +20,7 @@ export function testCredentialCipher(): AesGcmCredentialCipher {
 
 /**
  * Credenciais do canal sobre o banco de testes (spec 015): repositório real, cifra descartável e o
- * token global de transição só se informado. Cliente com número e sem conexão é `LEGACY`.
+ * token global de transição só se informado. Empresa com número e sem conexão é `LEGACY`.
  */
 export function buildChannelCredentials(
   prisma: TenantScopedPrisma,
@@ -37,7 +37,7 @@ export function buildChannelCredentials(
   const cipher = options.cipher ?? testCredentialCipher();
   const connections = new PrismaChannelConnectionRepository(prisma);
   const credentials = new ChannelCredentialsService({
-    clients: new PrismaClientRepository(prisma),
+    companies: new PrismaCompanyRepository(prisma),
     connections,
     cipher,
     legacyToken: options.legacyToken,

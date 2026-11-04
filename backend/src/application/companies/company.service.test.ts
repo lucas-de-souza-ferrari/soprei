@@ -1,26 +1,26 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, it } from 'node:test';
-import { ClientId, type NewClient } from '../../domain/index.js';
+import { CompanyId, type NewCompany } from '../../domain/index.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
-import { ClientService } from './client.service.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
+import { CompanyService } from './company.service.js';
 
-let service: ClientService;
+let service: CompanyService;
 
 beforeEach(() => {
-  service = new ClientService(new InMemoryClientRepository());
+  service = new CompanyService(new InMemoryCompanyRepository());
 });
 
-const input = (slug = 'acme-corp'): NewClient => ({ name: 'Acme Corp', slug });
-const unknownId = (): ClientId => ClientId.parse(randomUUID());
+const input = (slug = 'acme-corp'): NewCompany => ({ name: 'Acme Corp', slug });
+const unknownId = (): CompanyId => CompanyId.parse(randomUUID());
 
-describe('ClientService', () => {
-  it('cria cliente ACTIVE por padrão, com nome aparado', async () => {
-    const client = await service.create({ name: '  Acme Corp  ', slug: 'acme-corp' });
-    assert.equal(client.name, 'Acme Corp');
-    assert.equal(client.status, 'ACTIVE');
-    assert.equal(client.slug, 'acme-corp');
+describe('CompanyService', () => {
+  it('cria empresa ACTIVE por padrão, com nome aparado', async () => {
+    const company = await service.create({ name: '  Acme Corp  ', slug: 'acme-corp' });
+    assert.equal(company.name, 'Acme Corp');
+    assert.equal(company.status, 'ACTIVE');
+    assert.equal(company.slug, 'acme-corp');
   });
 
   it('busca por id e por slug', async () => {

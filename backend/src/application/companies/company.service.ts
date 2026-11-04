@@ -1,39 +1,39 @@
 import {
-  CLIENT_SLUG_PATTERN,
-  CLIENT_STATUSES,
-  type Client,
-  type ClientId,
-  type ClientRepository,
-  type ClientUpdate,
+  COMPANY_SLUG_PATTERN,
+  COMPANY_STATUSES,
+  type Company,
+  type CompanyId,
+  type CompanyRepository,
+  type CompanyUpdate,
   type ListOptions,
-  type NewClient,
+  type NewCompany,
   PERSONA_MAX_LENGTH,
   type Page,
 } from '../../domain/index.js';
 import { ConflictError, ValidationError } from '../../shared/errors/index.js';
 
-export const CLIENT_NAME_MAX_LENGTH = 120;
+export const COMPANY_NAME_MAX_LENGTH = 120;
 
 /**
- * Casos de uso de `Client` (a raiz do tenant). Não conhece Fastify nem Prisma: recebe o
+ * Casos de uso de `Company` (a raiz do tenant). Não conhece Fastify nem Prisma: recebe o
  * repositório por injeção. Revalida o que recebe (o controller já validou com Zod) porque
  * o service também é chamado por outras camadas no futuro.
  */
-export class ClientService {
-  constructor(private readonly clients: ClientRepository) {}
+export class CompanyService {
+  constructor(private readonly companies: CompanyRepository) {}
 
-  async create(input: NewClient): Promise<Client> {
-    const data: NewClient = {
+  async create(input: NewCompany): Promise<Company> {
+    const data: NewCompany = {
       name: parseName(input.name),
       slug: parseSlug(input.slug),
       ...(input.status === undefined ? {} : { status: parseStatus(input.status) }),
     };
     try {
-      return await this.clients.create(data);
+      return await this.companies.create(data);
     } catch (error) {
       if (error instanceof ConflictError) {
-        // O slug é a única chave natural do cliente: dizer isso ao admin ajuda e não vaza nada.
-        throw new ConflictError('Já existe um cliente com este slug', {
+        // O slug é a única chave natural da empresa: dizer isso ao admin ajuda e não vaza nada.
+        throw new ConflictError('Já existe uma empresa com este slug', {
           cause: error,
           context: { slug: data.slug },
         });
@@ -42,45 +42,48 @@ export class ClientService {
     }
   }
 
-  getById(id: ClientId): Promise<Client> {
-    return this.clients.findById(id);
+  getById(id: CompanyId): Promise<Company> {
+    return this.companies.findById(id);
   }
 
-  async getBySlug(slug: string): Promise<Client> {
-    return await this.clients.findBySlug(parseSlug(slug));
+  async getBySlug(slug: string): Promise<Company> {
+    return await this.companies.findBySlug(parseSlug(slug));
   }
 
-  list(options?: ListOptions): Promise<Page<Client>> {
-    return this.clients.list(options);
+  list(options?: ListOptions): Promise<Page<Company>> {
+    return this.companies.list(options);
   }
 
   /**
    * Atualiza nome, status e/ou persona (`null` limpa a persona). O slug não muda: ele identifica o
-   * cliente para sempre. O número do WhatsApp **não** passa por aqui (spec 015): só o `OWNER`/`ADMIN`
-   * do cliente o liga, pelo `PUT /admin/clients/:clientId/channel`.
+   * empresa para sempre. O número do WhatsApp **não** passa por aqui (spec 015): só o `OWNER`/`ADMIN`
+   * da empresa o liga, pelo `PUT /admin/companies/:companyId/channel`.
    */
-  async update(id: ClientId, input: Omit<ClientUpdate, 'whatsappPhoneNumberId'>): Promise<Client> {
+  async update(
+    id: CompanyId,
+    input: Omit<CompanyUpdate, 'whatsappPhoneNumberId'>,
+  ): Promise<Company> {
     if (input.name === undefined && input.status === undefined && input.persona === undefined) {
       throw new ValidationError('Informe name, status ou persona');
     }
-    const data: Omit<ClientUpdate, 'whatsappPhoneNumberId'> = {
+    const data: Omit<CompanyUpdate, 'whatsappPhoneNumberId'> = {
       ...(input.name === undefined ? {} : { name: parseName(input.name) }),
       ...(input.status === undefined ? {} : { status: parseStatus(input.status) }),
       ...(input.persona === undefined ? {} : { persona: parsePersona(input.persona) }),
     };
-    return await this.clients.update(id, data);
+    return await this.companies.update(id, data);
   }
 
-  /** Soft delete: o cliente some das buscas, os dados e o slug permanecem. */
-  remove(id: ClientId): Promise<void> {
-    return this.clients.delete(id);
+  /** Soft delete: a empresa some das buscas, os dados e o slug permanecem. */
+  remove(id: CompanyId): Promise<void> {
+    return this.companies.delete(id);
   }
 }
 
 function parseName(value: string): string {
   const name = value.trim();
-  if (name.length === 0 || name.length > CLIENT_NAME_MAX_LENGTH) {
-    throw new ValidationError(`name deve ter de 1 a ${String(CLIENT_NAME_MAX_LENGTH)} caracteres`);
+  if (name.length === 0 || name.length > COMPANY_NAME_MAX_LENGTH) {
+    throw new ValidationError(`name deve ter de 1 a ${String(COMPANY_NAME_MAX_LENGTH)} caracteres`);
   }
   return name;
 }
@@ -98,7 +101,7 @@ function parsePersona(value: string | null): string | null {
 }
 
 function parseSlug(value: string): string {
-  if (!CLIENT_SLUG_PATTERN.test(value)) {
+  if (!COMPANY_SLUG_PATTERN.test(value)) {
     throw new ValidationError(
       'slug deve ter de 3 a 63 caracteres: letras minúsculas, dígitos e hífen',
     );
@@ -106,10 +109,10 @@ function parseSlug(value: string): string {
   return value;
 }
 
-function parseStatus(value: string): Client['status'] {
-  const status = CLIENT_STATUSES.find((candidate) => candidate === value);
+function parseStatus(value: string): Company['status'] {
+  const status = COMPANY_STATUSES.find((candidate) => candidate === value);
   if (status === undefined) {
-    throw new ValidationError(`status deve ser um de: ${CLIENT_STATUSES.join(', ')}`);
+    throw new ValidationError(`status deve ser um de: ${COMPANY_STATUSES.join(', ')}`);
   }
   return status;
 }

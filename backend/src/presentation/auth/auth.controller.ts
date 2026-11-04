@@ -11,8 +11,13 @@ import {
   ServiceUnavailableError,
   UnauthorizedError,
 } from '../../shared/errors/index.js';
-import type { UserAdminService } from '../../application/users/user-admin.service.js';
-import { authenticateHook, requestAuth, requireUser, userAuth } from '../common/auth.hooks.js';
+import type { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
+import {
+  authenticateHook,
+  requestAuth,
+  requireMembership,
+  membershipAuth,
+} from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import {
   changePasswordBodySchema,
@@ -26,7 +31,7 @@ export interface AuthControllerOptions {
   readonly auth: AuthService;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection'> | undefined;
   /** Troca da própria senha (spec 008). Sem isto `POST /auth/password` não existe. */
-  readonly userAdmin?: Pick<UserAdminService, 'changeOwnPassword'>;
+  readonly membershipAdmin?: Pick<MembershipAdminService, 'changeOwnPassword'>;
 }
 
 const INVALID_CREDENTIALS = 'Credenciais inválidas';
@@ -74,7 +79,7 @@ function refreshError(failure: RefreshFailure): Error {
  */
 export const authController: FastifyPluginCallback<AuthControllerOptions> = (
   app,
-  { auth, metrics, userAdmin, browserAccounts = false },
+  { auth, metrics, membershipAdmin, browserAccounts = false },
   done,
 ) => {
   const authenticate = authenticateHook({ auth, metrics });
@@ -122,16 +127,16 @@ export const authController: FastifyPluginCallback<AuthControllerOptions> = (
     },
   );
 
-  if (userAdmin !== undefined) {
+  if (membershipAdmin !== undefined) {
     // Perfil `login` (fail-closed: sem o Redis do limiter, 503 sem verificar a senha). Qualquer
-    // `User` autenticado troca a própria senha; `PlatformAdmin` recebe 403. Responde 204 e derruba
+    // `Membership` autenticado troca a própria senha; `PlatformAdmin` recebe 403. Responde 204 e derruba
     // todas as sessões da pessoa, inclusive a atual: ela faz login de novo.
     app.post(
       '/password',
-      { config: loginConfig, onRequest: [authenticate, requireUser()] },
+      { config: loginConfig, onRequest: [authenticate, requireMembership()] },
       async (request, reply) => {
         const body = changePasswordBodySchema.parse(request.body);
-        await userAdmin.changeOwnPassword(userAuth(request), body);
+        await membershipAdmin.changeOwnPassword(membershipAuth(request), body);
         return reply.status(204).send();
       },
     );

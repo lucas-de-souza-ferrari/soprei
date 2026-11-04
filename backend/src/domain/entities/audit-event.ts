@@ -1,15 +1,15 @@
-import type { WithoutClientId } from '../repositories/tenant.repository.js';
-import type { ClientId } from '../value-objects/client-id.js';
-import type { UserRole } from './user.js';
+import type { WithoutCompanyId } from '../repositories/tenant.repository.js';
+import type { CompanyId } from '../value-objects/company-id.js';
+import type { MembershipRole } from './membership.js';
 
-/** Ações auditadas (spec 008); o valor vira label da métrica `user_admin_actions_total`. */
+/** Ações auditadas (spec 008); o valor vira label da métrica `membership_admin_actions_total`. */
 export const AUDIT_ACTIONS = [
-  'USER_CREATED',
-  'USER_ROLE_CHANGED',
-  'USER_DISABLED',
-  'USER_ENABLED',
-  'USER_PASSWORD_RESET',
-  'USER_PASSWORD_CHANGED',
+  'MEMBERSHIP_CREATED',
+  'MEMBERSHIP_ROLE_CHANGED',
+  'MEMBERSHIP_DISABLED',
+  'MEMBERSHIP_ENABLED',
+  'MEMBERSHIP_PASSWORD_RESET',
+  'MEMBERSHIP_PASSWORD_CHANGED',
   'CHANNEL_CONNECTED',
   'CHANNEL_TOKEN_REPLACED',
   'CHANNEL_DISCONNECTED',
@@ -22,22 +22,22 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
  */
 export interface AuditEvent {
   readonly id: string;
-  readonly clientId: ClientId;
+  readonly companyId: CompanyId;
   readonly action: AuditAction;
-  readonly actorUserId: string;
+  readonly actorMembershipId: string;
   /** Nulo nas ações `CHANNEL_*` (spec 015). */
-  readonly targetUserId: string | null;
-  readonly fromRole: UserRole | null;
-  readonly toRole: UserRole | null;
+  readonly targetMembershipId: string | null;
+  readonly fromRole: MembershipRole | null;
+  readonly toRole: MembershipRole | null;
   readonly createdAt: Date;
 }
 
-/** Dados de criação. Sem `clientId` (vem do parâmetro do repositório). */
-export interface NewAuditEvent extends WithoutClientId {
+/** Dados de criação. Sem `companyId` (vem do parâmetro do repositório). */
+export interface NewAuditEvent extends WithoutCompanyId {
   readonly action: AuditAction;
-  readonly actorUserId: string;
-  /** Obrigatório nas ações `USER_*`; ausente nas `CHANNEL_*` (o banco confere com um CHECK). */
-  readonly targetUserId?: string | null;
-  readonly fromRole?: UserRole | null;
-  readonly toRole?: UserRole | null;
+  readonly actorMembershipId: string;
+  /** Obrigatório nas ações `MEMBERSHIP_*`; ausente nas `CHANNEL_*` (o banco confere com um CHECK). */
+  readonly targetMembershipId?: string | null;
+  readonly fromRole?: MembershipRole | null;
+  readonly toRole?: MembershipRole | null;
 }

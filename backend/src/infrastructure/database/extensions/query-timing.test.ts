@@ -53,14 +53,14 @@ describe('extensão de tempo das queries (sem banco)', () => {
     const samples: QueryTimingSample[] = [];
     const db = build(samples);
 
-    await assert.rejects(db.conversation.findMany({ where: { clientId: randomUUID() } }));
-    await assert.rejects(db.client.count());
+    await assert.rejects(db.conversation.findMany({ where: { companyId: randomUUID() } }));
+    await assert.rejects(db.company.count());
 
     assert.deepEqual(
       samples.map(({ model, operation }) => ({ model, operation })),
       [
         { model: 'Conversation', operation: 'findMany' },
-        { model: 'Client', operation: 'count' },
+        { model: 'Company', operation: 'count' },
       ],
     );
     for (const sample of samples) {

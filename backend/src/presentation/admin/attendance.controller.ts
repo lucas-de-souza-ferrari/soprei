@@ -3,7 +3,7 @@ import type { AttendanceService } from '../../application/attendance/attendance.
 import type { Conversation, Message, Permission } from '../../domain/index.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
-import { authenticateHook, requirePermission, userAuth } from '../common/auth.hooks.js';
+import { authenticateHook, requirePermission, membershipAuth } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { toListOptions } from './list-options.js';
 import {
@@ -57,10 +57,10 @@ function toMessageResponse(message: Message): {
 }
 
 /**
- * Simulador do canal e consulta de conversas (spec 010), só para `User` (spec 007). Registre com
- * `prefix: '/admin/clients'`. O `:clientId` do caminho é **conferido** contra o do token assinado
- * (`requireUser({ clientParam })`: divergência é 404, igual a cliente inexistente) e descartado; o
- * service sempre recebe o `clientId` do token. Rotas finas: validam com Zod, chamam o service e
+ * Simulador do canal e consulta de conversas (spec 010), só para `Membership` (spec 007). Registre com
+ * `prefix: '/admin/companies'`. O `:companyId` do caminho é **conferido** contra o do token assinado
+ * (`requireMembership({ companyParam })`: divergência é 404, igual a empresa inexistente) e descartado; o
+ * service sempre recebe o `companyId` do token. Rotas finas: validam com Zod, chamam o service e
  * deixam o erro subir ao handler central. O conteúdo das mensagens só trafega na resposta; nunca
  * vai a log.
  */
@@ -72,40 +72,40 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
   // Rate limit por perfil (spec 005): todas as rotas daqui são `admin`.
   const config = rateLimitProfile('admin');
-  // Permissão explícita em toda rota de tenant (spec 008); o `:clientId` é conferido contra o token.
+  // Permissão explícita em toda rota de tenant (spec 008); o `:companyId` é conferido contra o token.
   const guard = (permission: Permission): onRequestAsyncHookHandler =>
-    requirePermission(permission, { clientParam: 'clientId', metrics });
+    requirePermission(permission, { companyParam: 'companyId', metrics });
 
   app.post(
-    '/:clientId/messages',
+    '/:companyId/messages',
     { config, onRequest: guard('conversation:simulate') },
     async (request, reply) => {
-      const { clientId } = userAuth(request);
+      const { companyId } = membershipAuth(request);
       const body = inboundMessageBodySchema.parse(request.body);
-      const result = await attendance.handleInboundMessage(clientId, body);
+      const result = await attendance.handleInboundMessage(companyId, body);
       return reply.status(result.duplicate ? 200 : 201).send(result);
     },
   );
 
   app.get(
-    '/:clientId/conversations',
+    '/:companyId/conversations',
     { config, onRequest: guard('conversation:read') },
     async (request) => {
-      const { clientId } = userAuth(request);
+      const { companyId } = membershipAuth(request);
       const query = listQuerySchema.parse(request.query);
-      const page = await attendance.listConversations(clientId, toListOptions(query));
+      const page = await attendance.listConversations(companyId, toListOptions(query));
       return { items: page.items.map(toConversationResponse), nextCursor: page.nextCursor };
     },
   );
 
   app.get(
-    '/:clientId/conversations/:conversationId/messages',
+    '/:companyId/conversations/:conversationId/messages',
     { config, onRequest: guard('conversation:read') },
     async (request) => {
       const { conversationId } = conversationParamsSchema.parse(request.params);
-      const { clientId } = userAuth(request);
+      const { companyId } = membershipAuth(request);
       const query = listQuerySchema.parse(request.query);
-      const page = await attendance.listMessages(clientId, conversationId, toListOptions(query));
+      const page = await attendance.listMessages(companyId, conversationId, toListOptions(query));
       return { items: page.items.map(toMessageResponse), nextCursor: page.nextCursor };
     },
   );

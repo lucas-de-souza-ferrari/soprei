@@ -8,7 +8,7 @@ export interface LlmTurn {
 }
 
 export interface LlmGenerateInput {
-  /** Persona e regras do cliente. Só texto nosso: o texto do contato nunca entra aqui. */
+  /** Persona e regras da empresa. Só texto nosso: o texto do contato nunca entra aqui. */
   readonly systemPrompt: string;
   /** Mensagens anteriores da conversa, da mais antiga para a mais recente. */
   readonly history: readonly LlmTurn[];

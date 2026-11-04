@@ -45,7 +45,7 @@ test('logout só limpa o cookie depois de revogar; 503 mantém o cookie', async 
       payload: {},
       headers: {
         origin: 'http://localhost:5174',
-        'x-soprei-client': 'web',
+        'x-soprei-app': 'web',
         ...(cookie === undefined ? {} : { cookie }),
       },
     });
@@ -123,7 +123,7 @@ test('POST /auth/verify-email: formato inválido é 400 e nunca chega ao serviç
       method: 'POST',
       url: '/auth/verify-email',
       payload,
-      headers: { origin: 'http://localhost:5174', 'x-soprei-client': 'web' },
+      headers: { origin: 'http://localhost:5174', 'x-soprei-app': 'web' },
     });
   try {
     for (const payload of [

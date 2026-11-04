@@ -20,7 +20,7 @@ import { ExternalServiceError } from '../../shared/errors/index.js';
 import {
   createRequestContext,
   runWithContext,
-  setClientId,
+  setCompanyId,
   setOperation,
 } from '../../shared/request-context/index.js';
 import { Result } from '../../shared/types/index.js';
@@ -156,8 +156,8 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
     },
 
     /**
-     * Um `flush` por `(clientId, contactRef)`, pela deduplicação do BullMQ (id = `flushKey`, que
-     * inclui o `clientId`), com `keepLastIfActive`: se o `flush` do contato está rodando agora, o
+     * Um `flush` por `(companyId, contactRef)`, pela deduplicação do BullMQ (id = `flushKey`, que
+     * inclui o `companyId`), com `keepLastIfActive`: se o `flush` do contato está rodando agora, o
      * próximo é guardado em Redis e criado, de forma atômica, quando ele terminar. `slide` usa
      * `replace`: o `flush` que ainda espera (job atrasado) é removido e um novo, com a espera
      * inteira, o substitui (janela deslizante). O `jobId` é único por agendamento: com um `jobId`
@@ -215,7 +215,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
     const finalAttempt = attempt >= attempts;
 
     return runWithContext(createRequestContext(data.requestId), async () => {
-      setClientId(data.clientId);
+      setCompanyId(data.companyId);
       setOperation(`job ${INBOUND_QUEUE_NAME}/${data.kind}`);
       try {
         const outcome = await handler(data, { attempt, finalAttempt });
@@ -301,7 +301,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
         const onFailure = hooks.onUnhandledFailure;
         if (!parsed.success || onFailure === undefined) return;
         runWithContext(createRequestContext(parsed.data.requestId), () => {
-          setClientId(parsed.data.clientId);
+          setCompanyId(parsed.data.companyId);
           onFailure(parsed.data).catch((hookError: unknown) => {
             logger.error(describeError(hookError), 'falha ao tratar o job que falhou sem handler');
           });

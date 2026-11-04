@@ -3,9 +3,9 @@ import { describe, it } from 'node:test';
 import {
   createRequestContext,
   runWithContext,
-  setClientId,
+  setCompanyId,
   setOperation,
-  setUserId,
+  setActorId,
 } from '../../shared/request-context/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 
@@ -16,7 +16,7 @@ describe('createLogger', () => {
     const [line] = capture.lines();
     assert.ok(line);
     assert.equal(line.evento, 'boot');
-    for (const key of ['requestId', 'clientId', 'userId', 'operation']) {
+    for (const key of ['requestId', 'companyId', 'actorId', 'operation']) {
       assert.equal(Object.hasOwn(line, key), false, key);
     }
   });
@@ -25,8 +25,8 @@ describe('createLogger', () => {
     const capture = captureLogs();
     runWithContext(createRequestContext('req-1234567'), () => {
       capture.logger.info('só requestId');
-      setClientId('c1');
-      setUserId('u1');
+      setCompanyId('c1');
+      setActorId('u1');
       setOperation('GET /x');
       capture.logger.info('completo');
     });
@@ -34,10 +34,10 @@ describe('createLogger', () => {
     assert.ok(first);
     assert.ok(second);
     assert.equal(first.requestId, 'req-1234567');
-    assert.equal(Object.hasOwn(first, 'clientId'), false);
+    assert.equal(Object.hasOwn(first, 'companyId'), false);
     assert.equal(second.requestId, 'req-1234567');
-    assert.equal(second.clientId, 'c1');
-    assert.equal(second.userId, 'u1');
+    assert.equal(second.companyId, 'c1');
+    assert.equal(second.actorId, 'u1');
     assert.equal(second.operation, 'GET /x');
   });
 
@@ -45,12 +45,12 @@ describe('createLogger', () => {
     const capture = captureLogs();
     const child = capture.logger.child({ requestId: 'req-1234567' });
     runWithContext(createRequestContext('req-1234567'), () => {
-      setClientId('c1');
+      setCompanyId('c1');
       child.info('filho');
     });
     const raw = capture.raw();
     assert.equal(raw.split('"requestId"').length - 1, 1, raw);
-    assert.equal(capture.lines()[0]?.clientId, 'c1');
+    assert.equal(capture.lines()[0]?.companyId, 'c1');
   });
 
   it('o nível configurado é respeitado e o destino recebe só JSON', () => {

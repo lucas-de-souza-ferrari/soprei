@@ -4,7 +4,7 @@ import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm
 import { ExternalServiceError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
-import { InMemoryClientRepository } from '../../test-support/in-memory-client.repository.js';
+import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import {
@@ -59,12 +59,12 @@ class ScriptedProvider implements LlmProvider {
 }
 
 async function run(provider: LlmProvider, llmTimeoutMs = 1_000, text = 'oi') {
-  const clients = new InMemoryClientRepository();
+  const companies = new InMemoryCompanyRepository();
   const store = new InMemoryAttendanceStore(() => new Date());
   const metrics = new FakeMetrics();
   const logs = captureLogs();
   const service = new AttendanceService({
-    clients,
+    companies,
     conversations: store.conversations,
     messages: store.messages,
     unitOfWork: store,
@@ -73,8 +73,8 @@ async function run(provider: LlmProvider, llmTimeoutMs = 1_000, text = 'oi') {
     metrics,
     options: { llmTimeoutMs, inFlightTimeoutMs: 60_000 },
   });
-  const client = await clients.create({ name: 'Empresa', slug: 'empresa-llm' });
-  const result = await service.handleInboundMessage(client.id, { contactRef: 'c1', text });
+  const company = await companies.create({ name: 'Empresa', slug: 'empresa-llm' });
+  const result = await service.handleInboundMessage(company.id, { contactRef: 'c1', text });
   return { result, metrics, logs };
 }
 

@@ -10,7 +10,7 @@ import { ServiceUnavailableError, UnauthorizedError } from '../../shared/errors/
 const sessionSchema = z.object({
   accountId: z.uuid(),
   id: z.uuid(),
-  clientId: z.uuid().nullable(),
+  companyId: z.uuid().nullable(),
   createdAt: z.number(),
   expiresAt: z.number(),
   /** Geração da conta quando a sessão nasceu (spec 021); ausente nas sessões anteriores (= 0). */
@@ -23,7 +23,7 @@ const SESSION_IDLE_SECONDS = 7 * 86400;
 /** A geração vive um pouco mais que o teto absoluto, para nenhuma sessão antiga sobreviver a ela. */
 const GENERATION_TTL_SECONDS = 31 * 86400;
 
-// KEYS[1] = chave da sessão; ARGV[1] = TTL ocioso, ARGV[2] = clientId a selecionar ('' = nenhum),
+// KEYS[1] = chave da sessão; ARGV[1] = TTL ocioso, ARGV[2] = companyId a selecionar ('' = nenhum),
 // ARGV[3] = prefixo das chaves (para montar a chave da geração a partir de data.accountId).
 // A geração atual maior que a gravada na sessão = sessão revogada em massa: apaga e responde ausente.
 const READ = `
@@ -36,7 +36,7 @@ local time = redis.call('TIME')
 local now = tonumber(time[1])
 local ttl = math.min(tonumber(ARGV[1]), data.expiresAt - now)
 if ttl <= 0 then redis.call('DEL', KEYS[1]); return nil end
-if ARGV[2] ~= '' then data.clientId = ARGV[2]; value = cjson.encode(data) end
+if ARGV[2] ~= '' then data.companyId = ARGV[2]; value = cjson.encode(data) end
 redis.call('SET', KEYS[1], value, 'EX', ttl)
 return value
 `;
@@ -49,7 +49,7 @@ const CREATE = `
 local gen = tonumber(redis.call('GET', KEYS[2])) or 0
 local time = redis.call('TIME')
 local now = tonumber(time[1])
-local data = {accountId = ARGV[1], id = ARGV[2], clientId = cjson.null, createdAt = now, expiresAt = now + tonumber(ARGV[3]), gen = gen}
+local data = {accountId = ARGV[1], id = ARGV[2], companyId = cjson.null, createdAt = now, expiresAt = now + tonumber(ARGV[3]), gen = gen}
 redis.call('SET', KEYS[1], cjson.encode(data), 'EX', tonumber(ARGV[4]))
 return 1
 `;
@@ -110,11 +110,11 @@ export class RedisAccountSessionStore implements AccountSessionStore {
       throw new ServiceUnavailableError('Sessão indisponível');
     }
   }
-  async select(secret: string, clientId: string): Promise<void> {
+  async select(secret: string, companyId: string): Promise<void> {
     const key = this.key(secret);
     let result: unknown;
     try {
-      result = await this.redis.eval(READ, 1, key, SESSION_IDLE_SECONDS, clientId, this.prefix);
+      result = await this.redis.eval(READ, 1, key, SESSION_IDLE_SECONDS, companyId, this.prefix);
     } catch {
       throw new ServiceUnavailableError('Sessão indisponível');
     }

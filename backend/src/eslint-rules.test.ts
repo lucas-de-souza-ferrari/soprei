@@ -49,7 +49,7 @@ describe('lint: importar o Prisma fora de src/infrastructure/database', () => {
   const imports = [
     "import { PrismaClient } from '../generated/prisma/client.js';",
     "import { Prisma } from '../../generated/prisma/client.js';",
-    "import type { Client } from '../../generated/prisma/models.js';",
+    "import type { Company } from '../../generated/prisma/models.js';",
     "import { PrismaClient } from '@prisma/client';",
     "import { PrismaPg } from '@prisma/adapter-pg';",
     "import pg from 'pg';",
@@ -141,7 +141,7 @@ export {};
   it('domain não importa de infrastructure, application, presentation nem Fastify', async () => {
     for (const code of [
       "import { x } from '../infrastructure/config/index.js';",
-      "import { x } from '../application/client.service.js';",
+      "import { x } from '../application/company.service.js';",
       "import { x } from '../presentation/health.controller.js';",
       "import Fastify from 'fastify';",
     ]) {

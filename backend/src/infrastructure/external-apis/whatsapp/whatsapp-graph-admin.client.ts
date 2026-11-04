@@ -70,7 +70,7 @@ interface CallParams {
   readonly operation: ProvisionOperation;
   readonly method: 'GET' | 'POST' | 'DELETE';
   readonly path: string;
-  /** Valor de `Authorization: Bearer`; ausente na troca do `code` (autentica por client_id/secret). */
+  /** Valor de `Authorization: Bearer`; ausente na troca do `code` (autentica por company_id/secret). */
   readonly bearer?: string;
   readonly query?: Readonly<Record<string, string>>;
   /** Corpo JSON (só o `/register`). */
@@ -78,10 +78,10 @@ interface CallParams {
 }
 
 /**
- * Cliente Graph de administração do canal (spec 015): `debug_token`, lista de números da WABA e
+ * Empresa Graph de administração do canal (spec 015): `debug_token`, lista de números da WABA e
  * `subscribed_apps`. Mesmo padrão do `WhatsappCloudApiClient`: `fetch` nativo, `redirect: 'manual'`
  * (redirecionar levaria o token a outro host), prazo por `AbortSignal.timeout`, leitura com teto de
- * 64 KiB e schemas Zod tolerantes. O token do cliente e o token de app vão em `Authorization`; o
+ * 64 KiB e schemas Zod tolerantes. O token da empresa e o token de app vão em `Authorization`; o
  * único valor sensível em URL é o `input_token` do `debug_token` (a API da Meta só o aceita assim),
  * e a URL nunca é logada. O erro devolvido nunca carrega o corpo da Meta.
  */
@@ -95,7 +95,7 @@ export class WhatsappGraphAdminClient implements ChannelProvisioner {
   }
 
   /**
-   * `GET /oauth/access_token` com `client_id`, `client_secret` e `code` (como a documentação do
+   * `GET /oauth/access_token` com `company_id`, `client_secret` e `code` (como a documentação do
    * Embedded Signup descreve). Esses três vão na query string, que **nunca** é logada; o token
    * devolvido só existe como `SecretString`.
    */
@@ -105,7 +105,7 @@ export class WhatsappGraphAdminClient implements ChannelProvisioner {
       method: 'GET',
       path: 'oauth/access_token',
       query: {
-        client_id: this.options.appId,
+        company_id: this.options.appId,
         client_secret: this.options.appSecret,
         code: code.reveal(),
       },

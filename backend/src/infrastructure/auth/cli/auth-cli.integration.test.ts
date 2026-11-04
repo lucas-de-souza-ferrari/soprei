@@ -12,7 +12,7 @@ import { captureLogs } from '../../../test-support/log-capture.js';
 import { TestKeyspace } from '../../../test-support/test-keyspace.js';
 import { TestTenants } from '../../../test-support/tenant-fixtures.js';
 import { createRedis, type RedisHandle } from '../../cache/redis.client.js';
-import { createDatabase, type Database, PrismaClientRepository } from '../../database/index.js';
+import { createDatabase, type Database, PrismaCompanyRepository } from '../../database/index.js';
 import { createAuthRedis, type AuthRedisHandle } from '../auth-redis.js';
 import { createAuthComponents } from '../create-auth.js';
 import { ScryptPasswordHasher } from '../scrypt-password-hasher.js';
@@ -84,8 +84,8 @@ async function run(
   const prompts: string[] = [];
   const queue = [...secrets];
   const deps: AuthCliDeps = {
-    clients: new PrismaClientRepository(database.prisma),
-    users: components.users,
+    companies: new PrismaCompanyRepository(database.prisma),
+    memberships: components.memberships,
     platformAdmins: components.platformAdmins,
     hasher: components.hasher,
     sessions: components.sessions,
@@ -127,57 +127,65 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
   });
 
   it('create-user aceita os quatro papéis (ADMIN e VIEWER da spec 008) e recusa outro', async () => {
-    const client = await tenants.createClient('cli-roles');
+    const company = await tenants.createCompany('cli-roles');
     for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const) {
       const email = emailFor(role.toLowerCase());
       const created = await run(
-        ['create-user', '--client', client.slug, '--email', email, '--role', role],
+        ['create-user', '--company', company.slug, '--email', email, '--role', role],
         [PASSWORD, PASSWORD],
       );
       assert.equal(created.code, 0, role);
       assert.equal(
-        (await components.users.findCredentialsByEmail(client.id, email))?.user.role,
+        (await components.memberships.findCredentialsByEmail(company.id, email))?.membership.role,
         role,
       );
     }
     const refused = await run(
-      ['create-user', '--client', client.slug, '--email', emailFor('x'), '--role', 'SUPERADMIN'],
+      ['create-user', '--company', company.slug, '--email', emailFor('x'), '--role', 'SUPERADMIN'],
       [PASSWORD, PASSWORD],
     );
     assert.equal(refused.code, 1);
     assert.deepEqual(refused.out, []);
     // O CLI é a operação local do dono: não grava auditoria nem aplica a hierarquia da API.
-    assert.equal(await database.prisma.auditEvent.count({ where: { clientId: client.id } }), 0);
+    assert.equal(await database.prisma.auditEvent.count({ where: { companyId: company.id } }), 0);
   });
 
-  it('create-user grava no cliente certo, com o papel, e o mesmo e-mail em outro cliente não conflita', async () => {
-    const clientA = await tenants.createClient('cli-a');
-    const clientB = await tenants.createClient('cli-b');
+  it('create-user grava na empresa certa, com o papel, e o mesmo e-mail em outra empresa não conflita', async () => {
+    const companyA = await tenants.createCompany('cli-a');
+    const companyB = await tenants.createCompany('cli-b');
     const email = emailFor('pessoa');
     const created = await run(
-      ['create-user', '--client', clientA.slug, '--email', email, '--role', 'OWNER'],
+      ['create-user', '--company', companyA.slug, '--email', email, '--role', 'OWNER'],
       [PASSWORD, PASSWORD],
     );
     assert.equal(created.code, 0);
     const id = idOf(created.out[0]);
-    const user = await components.users.findCredentialsByEmail(clientA.id, email);
-    assert.equal(user?.user.id, id);
-    assert.equal(user.user.role, 'OWNER');
-    assert.equal(await components.users.findCredentialsByEmail(clientB.id, email), null);
-    assert.ok(!JSON.stringify(user).includes(PASSWORD));
+    const membership = await components.memberships.findCredentialsByEmail(companyA.id, email);
+    assert.equal(membership?.membership.id, id);
+    assert.equal(membership.membership.role, 'OWNER');
+    assert.equal(await components.memberships.findCredentialsByEmail(companyB.id, email), null);
+    assert.ok(!JSON.stringify(membership).includes(PASSWORD));
 
     const other = await run(
-      ['create-user', '--client', clientB.slug, '--email', email.toUpperCase(), '--role', 'AGENT'],
+      [
+        'create-user',
+        '--company',
+        companyB.slug,
+        '--email',
+        email.toUpperCase(),
+        '--role',
+        'AGENT',
+      ],
       [PASSWORD, PASSWORD],
     );
-    assert.equal(other.code, 0, 'o mesmo e-mail em outro cliente não conflita');
+    assert.equal(other.code, 0, 'o mesmo e-mail em outra empresa não conflita');
     assert.equal(
-      (await components.users.findCredentialsByEmail(clientB.id, email))?.user.role,
+      (await components.memberships.findCredentialsByEmail(companyB.id, email))?.membership.role,
       'AGENT',
     );
 
     const duplicate = await run(
-      ['create-user', '--client', clientA.slug, '--email', email, '--role', 'AGENT'],
+      ['create-user', '--company', companyA.slug, '--email', email, '--role', 'AGENT'],
       [PASSWORD, PASSWORD],
     );
     assert.equal(duplicate.code, 1);
@@ -186,7 +194,7 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
   });
 
   it('recusa --password (a senha nunca vem por argumento), opção desconhecida e argumentos faltando', async () => {
-    const clientA = await tenants.createClient('cli-args');
+    const companyA = await tenants.createCompany('cli-args');
     const email = emailFor('arg');
     const leaked = 'senha-por-argumento-nao-pode-1';
     for (const args of [
@@ -194,8 +202,8 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
       ['create-platform-admin', '--email', email, `--password=${leaked}`],
       [
         'create-user',
-        '--client',
-        clientA.slug,
+        '--company',
+        companyA.slug,
         '--email',
         email,
         '--role',
@@ -217,55 +225,55 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
     for (const args of [
       [],
       ['create-user'],
-      ['create-user', '--client', clientA.slug, '--email', email],
-      ['create-user', '--client', clientA.slug, '--email', email, '--role', 'ROOT'],
-      ['create-user', '--client', 'Slug Inválido!', '--email', email, '--role', 'OWNER'],
-      ['create-user', '--client', clientA.slug, '--email', 'nao-e-email', '--role', 'OWNER'],
+      ['create-user', '--company', companyA.slug, '--email', email],
+      ['create-user', '--company', companyA.slug, '--email', email, '--role', 'ROOT'],
+      ['create-user', '--company', 'Slug Inválido!', '--email', email, '--role', 'OWNER'],
+      ['create-user', '--company', companyA.slug, '--email', 'nao-e-email', '--role', 'OWNER'],
       ['create-platform-admin'],
-      ['create-platform-admin', '--email', email, '--client', clientA.slug],
+      ['create-platform-admin', '--email', email, '--company', companyA.slug],
       ['reset-password', '--email', email],
-      ['reset-password', '--platform-admin', '--client', clientA.slug, '--email', email],
+      ['reset-password', '--platform-admin', '--company', companyA.slug, '--email', email],
       ['inexistente', '--email', email],
     ]) {
       const result = await run(args, [PASSWORD, PASSWORD]);
       assert.notEqual(result.code, 0, args.join(' '));
       assert.deepEqual(result.out, []);
     }
-    const unknownClient = await run(
-      ['create-user', '--client', 'cliente-que-nao-existe', '--email', email, '--role', 'OWNER'],
+    const unknownCompany = await run(
+      ['create-user', '--company', 'empresa-que-nao-existe', '--email', email, '--role', 'OWNER'],
       [PASSWORD, PASSWORD],
     );
-    assert.equal(unknownClient.code, 1);
+    assert.equal(unknownCompany.code, 1);
   });
 
   it('senha fora da política (curta, longa, com NUL) e confirmação diferente são recusadas sem criar nada', async () => {
-    const clientA = await tenants.createClient('cli-pol');
+    const companyA = await tenants.createCompany('cli-pol');
     for (const bad of ['curta', 'a'.repeat(129), 'senha-com-nul\u0000-valida-1']) {
       const email = emailFor('pol');
       const result = await run(
-        ['create-user', '--client', clientA.slug, '--email', email, '--role', 'AGENT'],
+        ['create-user', '--company', companyA.slug, '--email', email, '--role', 'AGENT'],
         [bad, bad],
       );
       assert.equal(result.code, 1);
       assert.deepEqual(result.out, []);
-      assert.equal(await components.users.findCredentialsByEmail(clientA.id, email), null);
+      assert.equal(await components.memberships.findCredentialsByEmail(companyA.id, email), null);
       assert.ok(!result.err.join('\n').includes(bad.slice(0, 8)) || bad === 'curta');
     }
     const email = emailFor('conf');
     const mismatch = await run(
-      ['create-user', '--client', clientA.slug, '--email', email, '--role', 'AGENT'],
+      ['create-user', '--company', companyA.slug, '--email', email, '--role', 'AGENT'],
       [PASSWORD, `${PASSWORD}x`],
     );
     assert.equal(mismatch.code, 1);
-    assert.equal(await components.users.findCredentialsByEmail(clientA.id, email), null);
+    assert.equal(await components.memberships.findCredentialsByEmail(companyA.id, email), null);
     assert.ok(!mismatch.err.join('\n').includes(PASSWORD));
   });
 
   it('sem terminal: lê só a primeira senha (sem confirmação)', async () => {
-    const clientA = await tenants.createClient('cli-pipe');
+    const companyA = await tenants.createCompany('cli-pipe');
     const email = emailFor('pipe');
     const result = await run(
-      ['create-user', '--client', clientA.slug, '--email', email, '--role', 'AGENT'],
+      ['create-user', '--company', companyA.slug, '--email', email, '--role', 'AGENT'],
       [PASSWORD],
       false,
     );
@@ -274,50 +282,50 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
   });
 
   it('reset-password troca o hash e revoga todas as sessões (usuário e administrador)', async () => {
-    const clientA = await tenants.createClient('cli-reset');
+    const companyA = await tenants.createCompany('cli-reset');
     const email = emailFor('reset');
     const novaSenha = `${PASSWORD}-nova`;
     await run(
-      ['create-user', '--client', clientA.slug, '--email', email, '--role', 'OWNER'],
+      ['create-user', '--company', companyA.slug, '--email', email, '--role', 'OWNER'],
       [PASSWORD, PASSWORD],
     );
-    const user = await components.users.findCredentialsByEmail(clientA.id, email);
-    assert.ok(user);
-    const oldHash = user.passwordHash;
+    const membership = await components.memberships.findCredentialsByEmail(companyA.id, email);
+    assert.ok(membership);
+    const oldHash = membership.passwordHash;
 
     // Uma sessão viva do usuário, com a mesma conexão e prefixo do CLI.
     const sessionId = randomUUID();
     await components.sessions.createSession({
-      scope: clientA.id,
+      scope: companyA.id,
       sessionId,
-      subjectId: user.user.id,
+      subjectId: membership.membership.id,
       refreshHash: 'a'.repeat(64),
     });
     assert.equal(
       await components.sessions.checkAccess({
-        scope: clientA.id,
+        scope: companyA.id,
         sessionId,
-        subjectId: user.user.id,
+        subjectId: membership.membership.id,
         issuedAt: 1,
       }),
       'ok',
     );
 
     const result = await run(
-      ['reset-password', '--client', clientA.slug, '--email', email],
+      ['reset-password', '--company', companyA.slug, '--email', email],
       [novaSenha, novaSenha],
     );
     assert.equal(result.code, 0);
-    assert.equal(idOf(result.out[0]), user.user.id);
-    const after = await components.users.findCredentialsByEmail(clientA.id, email);
+    assert.equal(idOf(result.out[0]), membership.membership.id);
+    const after = await components.memberships.findCredentialsByEmail(companyA.id, email);
     assert.notEqual(after?.passwordHash, oldHash);
     assert.equal(await components.hasher.verify(novaSenha, after?.passwordHash ?? ''), true);
     assert.equal(await components.hasher.verify(PASSWORD, after?.passwordHash ?? ''), false);
     assert.equal(
       await components.sessions.checkAccess({
-        scope: clientA.id,
+        scope: companyA.id,
         sessionId,
-        subjectId: user.user.id,
+        subjectId: membership.membership.id,
         issuedAt: 1,
       }),
       'revoked',
@@ -351,7 +359,7 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
     );
 
     const ghost = await run(
-      ['reset-password', '--client', clientA.slug, '--email', emailFor('fantasma')],
+      ['reset-password', '--company', companyA.slug, '--email', emailFor('fantasma')],
       [novaSenha, novaSenha],
     );
     assert.equal(ghost.code, 1);

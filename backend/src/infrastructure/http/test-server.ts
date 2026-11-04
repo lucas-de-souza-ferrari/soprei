@@ -15,7 +15,7 @@ export function buildTestServer(
   admin?: AdminRoutesParams,
   extra: Pick<
     BuildServerParams,
-    'metrics' | 'metricsToken' | 'whatsapp' | 'auth' | 'userAdmin'
+    'metrics' | 'metricsToken' | 'whatsapp' | 'auth' | 'membershipAdmin'
   > = {},
 ): FastifyInstance {
   return buildServer({

@@ -60,7 +60,7 @@ export type WebhookRequestResult =
 export type ChannelInboundResult =
   | 'enqueued'
   | 'unknown_number'
-  | 'client_unavailable'
+  | 'company_unavailable'
   | 'unsupported_type'
   | 'invalid_text'
   | 'missing_sender'
@@ -100,7 +100,7 @@ export type ChannelStatusEvent = 'sent' | 'delivered' | 'read' | 'played' | 'fai
 
 /** Resultado de um login (spec 007): `ok`, `invalid` (qualquer credencial recusada) ou `locked`. */
 export type AuthLoginResult = 'ok' | 'invalid' | 'locked';
-export type AuthLoginKind = 'user' | 'platform';
+export type AuthLoginKind = 'membership' | 'platform';
 export type AuthRefreshResult = 'ok' | 'invalid' | 'reuse' | 'unavailable';
 export type AuthTokenRejectionReason =
   'missing' | 'malformed' | 'invalid' | 'expired' | 'revoked' | 'unavailable';
@@ -129,7 +129,7 @@ export interface DbQuerySample {
  * Métricas do processo. Há um `Registry` dedicado (não o global) para não vazar estado entre
  * testes; as próximas specs (rate limit, cache...) registram as suas métricas nele.
  *
- * Cardinalidade controlada: nenhum label com `clientId`, `userId`, id de recurso ou URL crua.
+ * Cardinalidade controlada: nenhum label com `companyId`, `membershipId`, id de recurso ou URL crua.
  */
 export interface Metrics {
   readonly registry: Registry;
@@ -138,13 +138,13 @@ export interface Metrics {
   render(): Promise<string>;
   observeHttpRequest(sample: HttpRequestSample): void;
   observeDbQuery(sample: DbQuerySample): void;
-  /** Uma chamada ao LLM terminou (spec 010). Sem `clientId` em label. */
+  /** Uma chamada ao LLM terminou (spec 010). Sem `companyId` em label. */
   observeLlmRequest(sample: LlmRequestSample): void;
-  /** Tokens de uma chamada ao LLM que respondeu (spec 014). Sem `clientId` nem texto em label. */
+  /** Tokens de uma chamada ao LLM que respondeu (spec 014). Sem `companyId` nem texto em label. */
   observeLlmTokens(sample: LlmTokensSample): void;
   /** O contato recebeu o texto padrão de falha em vez de uma resposta do modelo. */
   countAttendanceFallback(): void;
-  /** Uma resposta de lote terminou (spec 013). Sem `clientId`, telefone nem texto em label. */
+  /** Uma resposta de lote terminou (spec 013). Sem `companyId`, telefone nem texto em label. */
   observeAttendanceBatch(sample: BatchSample): void;
   /** Um turno saiu com a resposta do turno anterior ainda sem `sentAt` (spec 013). Sem labels. */
   countUnsentReply(): void;
@@ -156,9 +156,9 @@ export interface Metrics {
   countChannelStatus(channel: string, status: ChannelStatusEvent): void;
   /** Um envio de mensagem ao canal terminou. */
   observeChannelSend(sample: ChannelSendSample): void;
-  /** Uma operação de conexão do canal terminou (spec 015). Sem `clientId`, número, WABA nem token. */
+  /** Uma operação de conexão do canal terminou (spec 015). Sem `companyId`, número, WABA nem token. */
   countChannelConnection(action: ChannelConnectionAction, result: ChannelConnectionResult): void;
-  /** A conexão do cliente passou a `TOKEN_INVALID` (spec 015). */
+  /** A conexão da empresa passou a `TOKEN_INVALID` (spec 015). */
   countChannelStateTransition(to: 'token_invalid'): void;
   /** Falha ao decifrar uma credencial guardada (spec 015). */
   countChannelCredentialError(reason: ChannelCredentialErrorReason): void;
@@ -191,7 +191,7 @@ export interface Metrics {
   /** O hook `requirePermission` negou uma permissão (spec 008). `permission` é do conjunto fixo, nunca id. */
   countAuthzDenial(permission: Permission): void;
   /** Uma operação de gestão de usuários foi confirmada (spec 008). `action` é o `AuditAction`. */
-  countUserAdminAction(action: AuditAction): void;
+  countMembershipAdminAction(action: AuditAction): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
 }
@@ -357,7 +357,7 @@ export function createMetrics(): Metrics {
 
   const authLogins = new Counter({
     name: 'auth_logins_total',
-    help: 'Logins por tipo de identidade (user, platform) e resultado (ok, invalid, locked)',
+    help: 'Logins por tipo de identidade (membership, platform) e resultado (ok, invalid, locked)',
     labelNames: ['kind', 'result'] as const,
     registers: [registry],
   });
@@ -430,8 +430,8 @@ export function createMetrics(): Metrics {
     labelNames: ['permission'] as const,
     registers: [registry],
   });
-  const userAdminActions = new Counter({
-    name: 'user_admin_actions_total',
+  const membershipAdminActions = new Counter({
+    name: 'membership_admin_actions_total',
     help: 'Operações de gestão de usuários confirmadas, por ação de auditoria (conjunto fixo)',
     labelNames: ['action'] as const,
     registers: [registry],
@@ -549,8 +549,8 @@ export function createMetrics(): Metrics {
     countAuthzDenial(permission) {
       authzDenials.inc({ permission });
     },
-    countUserAdminAction(action) {
-      userAdminActions.inc({ action });
+    countMembershipAdminAction(action) {
+      membershipAdminActions.inc({ action });
     },
     bindPool(source) {
       poolSource = source;

@@ -5,7 +5,7 @@ import type { TrustProxySetting } from './trust-proxy.js';
 export interface WhatsappChannelConfig {
   readonly appSecret: string;
   readonly verifyToken: string;
-  /** Token global de transição, só para clientes `LEGACY` (spec 015); pode não existir. */
+  /** Token global de transição, só para empresas `LEGACY` (spec 015); pode não existir. */
   readonly legacyAccessToken: string | undefined;
   readonly appId: string;
   readonly credentialKeys: string;

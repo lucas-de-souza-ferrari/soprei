@@ -1,14 +1,14 @@
 export interface AccountSession {
   readonly accountId: string;
   readonly id: string;
-  readonly clientId: string | null;
+  readonly companyId: string | null;
   readonly createdAt: number;
 }
 
 export interface AccountSessionStore {
   create(accountId: string): Promise<string>;
   read(secret: string): Promise<AccountSession | null>;
-  select(secret: string, clientId: string): Promise<void>;
+  select(secret: string, companyId: string): Promise<void>;
   revoke(secret: string): Promise<void>;
   /**
    * Invalida todas as sessões da conta (spec 021): as criadas até agora deixam de valer e a leitura

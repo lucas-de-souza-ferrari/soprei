@@ -27,7 +27,7 @@ export interface PoolMetrics {
 }
 
 export interface Database {
-  /** Client do Prisma com a segunda barreira de isolamento entre clientes (tenant-scope). */
+  /** Client do Prisma com a segunda barreira de isolamento entre empresas (tenant-scope). */
   readonly prisma: TenantScopedPrisma;
   /** Verifica o banco com `SELECT 1`. Nunca lança: a falha volta como `DatabaseError`. */
   check(timeoutMs?: number): Promise<Result<void, DatabaseError>>;

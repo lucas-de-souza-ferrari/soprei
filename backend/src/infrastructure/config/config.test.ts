@@ -585,7 +585,7 @@ describe('parseConfig', () => {
       }
     });
 
-    it('WHATSAPP_ACCESS_TOKEN é opcional (só clientes LEGACY); se informado, mínimo 16', () => {
+    it('WHATSAPP_ACCESS_TOKEN é opcional (só empresas LEGACY); se informado, mínimo 16', () => {
       assert.ok(parseConfig(ENABLED).ok);
       assert.ok(parseConfig({ ...ENABLED, WHATSAPP_ACCESS_TOKEN: 'x'.repeat(16) }).ok);
       assert.equal(parseConfig({ ...ENABLED, WHATSAPP_ACCESS_TOKEN: 'curto' }).ok, false);

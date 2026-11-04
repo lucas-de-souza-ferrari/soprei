@@ -2,10 +2,10 @@ import type {
   NewPlatformAdmin,
   PlatformAdmin,
   PlatformAdminCredentials,
-} from '../entities/user.js';
-import type { PlatformAdminId } from '../value-objects/user-id.js';
+} from '../entities/membership.js';
+import type { PlatformAdminId } from '../value-objects/account-id.js';
 
-/** Repositório de `PlatformAdmin` (global, sem `ClientId`). E-mail único global. */
+/** Repositório de `PlatformAdmin` (global, sem `CompanyId`). E-mail único global. */
 export interface PlatformAdminRepository {
   findCredentialsByEmail(email: string): Promise<PlatformAdminCredentials | null>;
   /** Lança `NotFoundError` se não existe. */

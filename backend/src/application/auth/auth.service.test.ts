@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { beforeEach, describe, it } from 'node:test';
-import { type Client, type UserId } from '../../domain/index.js';
+import { type Company, type MembershipId } from '../../domain/index.js';
 import { createMetrics, type Metrics } from '../../infrastructure/metrics/index.js';
 import { ServiceUnavailableError } from '../../shared/errors/index.js';
 import {
@@ -22,8 +22,8 @@ interface Env {
   logs: LogCapture;
   metrics: Metrics;
   store: InMemorySessionStore;
-  clientA: Client;
-  clientB: Client;
+  companyA: Company;
+  companyB: Company;
 }
 
 async function setup(maxFailures = 3): Promise<Env> {
@@ -38,9 +38,9 @@ async function setup(maxFailures = 3): Promise<Env> {
     sessions: store,
     maxFailures,
   });
-  const clientA = await auth.clients.create({ name: 'Cliente A', slug: 'cliente-a' });
-  const clientB = await auth.clients.create({ name: 'Cliente B', slug: 'cliente-b' });
-  return { auth, logs, metrics, store, clientA, clientB };
+  const companyA = await auth.companies.create({ name: 'Empresa A', slug: 'empresa-a' });
+  const companyB = await auth.companies.create({ name: 'Empresa B', slug: 'empresa-b' });
+  return { auth, logs, metrics, store, companyA, companyB };
 }
 
 async function counter(metrics: Metrics, name: string, labels: string): Promise<number> {
@@ -57,27 +57,27 @@ describe('AuthService.login', () => {
     env = await setup();
   });
 
-  it('login válido de User e de PlatformAdmin devolve os dois tokens, tokenType e expiresIn', async () => {
-    const { auth, clientA } = env;
-    await auth.users.create(clientA.id, {
+  it('login válido de Membership e de PlatformAdmin devolve os dois tokens, tokenType e expiresIn', async () => {
+    const { auth, companyA } = env;
+    await auth.memberships.create(companyA.id, {
       email: SECRET_EMAIL,
       passwordHash: await auth.hasher.hash(TEST_PASSWORD),
     });
-    const user = await auth.service.login({
-      clientSlug: 'cliente-a',
+    const membership = await auth.service.login({
+      companySlug: 'empresa-a',
       email: SECRET_EMAIL,
       password: TEST_PASSWORD,
     });
-    assert.ok(user.ok);
-    assert.equal(user.value.tokenType, 'Bearer');
-    assert.equal(user.value.expiresIn, 900);
+    assert.ok(membership.ok);
+    assert.equal(membership.value.tokenType, 'Bearer');
+    assert.equal(membership.value.expiresIn, 900);
     assert.match(
-      user.value.refreshToken,
-      new RegExp(`^${clientA.id}\\.[0-9a-f-]{36}\\.[A-Za-z0-9_-]{64}$`),
+      membership.value.refreshToken,
+      new RegExp(`^${companyA.id}\\.[0-9a-f-]{36}\\.[A-Za-z0-9_-]{64}$`),
     );
-    const identity = await auth.service.authenticate(user.value.accessToken);
+    const identity = await auth.service.authenticate(membership.value.accessToken);
     assert.ok(identity.ok);
-    assert.equal(identity.value.kind, 'user');
+    assert.equal(identity.value.kind, 'membership');
 
     const admin = await auth.platformToken('admin@exemplo.test');
     assert.match(admin.refreshToken, /^platform\.[0-9a-f-]{36}\.[A-Za-z0-9_-]{64}$/);
@@ -85,55 +85,55 @@ describe('AuthService.login', () => {
     assert.ok(platform.ok && platform.value.kind === 'platform');
   });
 
-  it('o mesmo e-mail em dois clientes entra cada um no seu cliente, com o cid certo', async () => {
-    const { auth, clientA, clientB } = env;
-    for (const client of [clientA, clientB]) {
-      await auth.users.create(client.id, {
+  it('o mesmo e-mail em duas empresas entra cada uma na sua empresa, com o cid certo', async () => {
+    const { auth, companyA, companyB } = env;
+    for (const company of [companyA, companyB]) {
+      await auth.memberships.create(company.id, {
         email: SECRET_EMAIL,
         passwordHash: await auth.hasher.hash(TEST_PASSWORD),
       });
     }
-    for (const client of [clientA, clientB]) {
+    for (const company of [companyA, companyB]) {
       const result = await auth.service.login({
-        clientSlug: client.slug,
+        companySlug: company.slug,
         email: SECRET_EMAIL,
         password: TEST_PASSWORD,
       });
       assert.ok(result.ok);
       const identity = await auth.service.authenticate(result.value.accessToken);
-      assert.ok(identity.ok && identity.value.kind === 'user');
-      assert.equal(identity.value.clientId, client.id);
+      assert.ok(identity.ok && identity.value.kind === 'membership');
+      assert.equal(identity.value.companyId, company.id);
     }
   });
 
   it('todas as recusas devolvem o mesmo erro e chamam o verify exatamente uma vez', async () => {
-    const { auth, clientA, clientB } = env;
+    const { auth, companyA, companyB } = env;
     const hash = await auth.hasher.hash(TEST_PASSWORD);
-    await auth.users.create(clientA.id, { email: 'ativo@exemplo.test', passwordHash: hash });
-    await auth.users.create(clientA.id, {
+    await auth.memberships.create(companyA.id, { email: 'ativo@exemplo.test', passwordHash: hash });
+    await auth.memberships.create(companyA.id, {
       email: 'desativado@exemplo.test',
       passwordHash: hash,
       status: 'DISABLED',
     });
-    await auth.users.create(clientB.id, { email: 'ativo@exemplo.test', passwordHash: hash });
-    await auth.clients.update(clientB.id, { status: 'SUSPENDED' });
-    const removed = await auth.clients.create({ name: 'Removido', slug: 'cliente-removido' });
-    await auth.users.create(removed.id, { email: 'ativo@exemplo.test', passwordHash: hash });
-    await auth.clients.delete(removed.id);
+    await auth.memberships.create(companyB.id, { email: 'ativo@exemplo.test', passwordHash: hash });
+    await auth.companies.update(companyB.id, { status: 'SUSPENDED' });
+    const removed = await auth.companies.create({ name: 'Removido', slug: 'empresa-removido' });
+    await auth.memberships.create(removed.id, { email: 'ativo@exemplo.test', passwordHash: hash });
+    await auth.companies.delete(removed.id);
 
     const attempts: readonly (readonly [string, string, string, string])[] = [
       ['slug inexistente', 'nao-existe', 'ativo@exemplo.test', TEST_PASSWORD],
-      ['cliente removido', 'cliente-removido', 'ativo@exemplo.test', TEST_PASSWORD],
-      ['cliente suspenso', 'cliente-b', 'ativo@exemplo.test', TEST_PASSWORD],
-      ['e-mail inexistente', 'cliente-a', 'ninguem@exemplo.test', TEST_PASSWORD],
-      ['usuário desativado', 'cliente-a', 'desativado@exemplo.test', TEST_PASSWORD],
-      ['senha errada', 'cliente-a', 'ativo@exemplo.test', 'senha-errada-qualquer'],
+      ['empresa removida', 'empresa-removido', 'ativo@exemplo.test', TEST_PASSWORD],
+      ['empresa suspensa', 'empresa-b', 'ativo@exemplo.test', TEST_PASSWORD],
+      ['e-mail inexistente', 'empresa-a', 'ninguem@exemplo.test', TEST_PASSWORD],
+      ['usuário desativado', 'empresa-a', 'desativado@exemplo.test', TEST_PASSWORD],
+      ['senha errada', 'empresa-a', 'ativo@exemplo.test', 'senha-errada-qualquer'],
     ];
     const outcomes: unknown[] = [];
-    for (const [label, clientSlug, email, password] of attempts) {
+    for (const [label, companySlug, email, password] of attempts) {
       const before = auth.hasher.verifyCalls;
       // Cada tentativa com identidade própria no bloqueio (o teto de falhas é por conta).
-      const result = await auth.service.login({ clientSlug, email, password });
+      const result = await auth.service.login({ companySlug, email, password });
       assert.equal(result.ok, false, label);
       assert.equal(auth.hasher.verifyCalls - before, 1, `${label}: verify uma vez`);
       outcomes.push(result);
@@ -143,13 +143,13 @@ describe('AuthService.login', () => {
   });
 
   it('bloqueio por conta: após o limite de falhas nem a senha certa entra, sem gastar hash', async () => {
-    const { auth, clientA } = env;
-    await auth.users.create(clientA.id, {
+    const { auth, companyA } = env;
+    await auth.memberships.create(companyA.id, {
       email: SECRET_EMAIL,
       passwordHash: await auth.hasher.hash(TEST_PASSWORD),
     });
     const login = (password: string, email = SECRET_EMAIL) =>
-      auth.service.login({ clientSlug: 'cliente-a', email, password });
+      auth.service.login({ companySlug: 'empresa-a', email, password });
     for (let i = 0; i < 3; i += 1) {
       assert.deepEqual(await login('senha-errada-1234'), {
         ok: false,
@@ -165,17 +165,20 @@ describe('AuthService.login', () => {
     for (let i = 0; i < 3; i += 1) await login('x'.repeat(12), 'fantasma@exemplo.test');
     const ghost = await login('x'.repeat(12), 'fantasma@exemplo.test');
     assert.deepEqual(ghost, { ok: false, error: { reason: 'locked', retryAfterSeconds: 900 } });
-    assert.equal(await counter(env.metrics, 'auth_logins_total', 'kind="user",result="locked"'), 2);
+    assert.equal(
+      await counter(env.metrics, 'auth_logins_total', 'kind="membership",result="locked"'),
+      2,
+    );
   });
 
   it('sucesso antes do limite zera o contador', async () => {
-    const { auth, clientA } = env;
-    await auth.users.create(clientA.id, {
+    const { auth, companyA } = env;
+    await auth.memberships.create(companyA.id, {
       email: SECRET_EMAIL,
       passwordHash: await auth.hasher.hash(TEST_PASSWORD),
     });
     const login = (password: string) =>
-      auth.service.login({ clientSlug: 'cliente-a', email: SECRET_EMAIL, password });
+      auth.service.login({ companySlug: 'empresa-a', email: SECRET_EMAIL, password });
     for (let round = 0; round < 3; round += 1) {
       await login('errada-errada-1');
       await login('errada-errada-2');
@@ -183,25 +186,25 @@ describe('AuthService.login', () => {
     }
   });
 
-  it('o bloqueio de uma conta não afeta outra conta nem o mesmo e-mail em outro cliente', async () => {
-    const { auth, clientA, clientB } = env;
+  it('o bloqueio de uma conta não afeta outra conta nem o mesmo e-mail em outra empresa', async () => {
+    const { auth, companyA, companyB } = env;
     const hash = await auth.hasher.hash(TEST_PASSWORD);
-    await auth.users.create(clientA.id, { email: SECRET_EMAIL, passwordHash: hash });
-    await auth.users.create(clientB.id, { email: SECRET_EMAIL, passwordHash: hash });
+    await auth.memberships.create(companyA.id, { email: SECRET_EMAIL, passwordHash: hash });
+    await auth.memberships.create(companyB.id, { email: SECRET_EMAIL, passwordHash: hash });
     for (let i = 0; i < 3; i += 1) {
       await auth.service.login({
-        clientSlug: 'cliente-a',
+        companySlug: 'empresa-a',
         email: SECRET_EMAIL,
         password: 'errada-errada-9',
       });
     }
     const a = await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: SECRET_EMAIL,
       password: TEST_PASSWORD,
     });
     const b = await auth.service.login({
-      clientSlug: 'cliente-b',
+      companySlug: 'empresa-b',
       email: SECRET_EMAIL,
       password: TEST_PASSWORD,
     });
@@ -225,15 +228,15 @@ describe('AuthService.login', () => {
   });
 
   it('Redis (store) fora: unavailable, sem verificar senha nem emitir token', async () => {
-    const { auth, store, clientA } = env;
-    await auth.users.create(clientA.id, {
+    const { auth, store, companyA } = env;
+    await auth.memberships.create(companyA.id, {
       email: SECRET_EMAIL,
       passwordHash: await auth.hasher.hash(TEST_PASSWORD),
     });
     store.failWith = new ServiceUnavailableError();
     const before = auth.hasher.verifyCalls;
     const result = await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: SECRET_EMAIL,
       password: TEST_PASSWORD,
     });
@@ -247,38 +250,41 @@ describe('AuthService.login', () => {
   });
 
   it('métricas de login por kind e result, sem e-mail, slug nem id', async () => {
-    const { auth, clientA, metrics } = env;
-    await auth.users.create(clientA.id, {
+    const { auth, companyA, metrics } = env;
+    await auth.memberships.create(companyA.id, {
       email: SECRET_EMAIL,
       passwordHash: await auth.hasher.hash(TEST_PASSWORD),
     });
     await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: SECRET_EMAIL,
       password: TEST_PASSWORD,
     });
     await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: SECRET_EMAIL,
       password: 'errada-errada-1',
     });
-    assert.equal(await counter(metrics, 'auth_logins_total', 'kind="user",result="ok"'), 1);
-    assert.equal(await counter(metrics, 'auth_logins_total', 'kind="user",result="invalid"'), 1);
+    assert.equal(await counter(metrics, 'auth_logins_total', 'kind="membership",result="ok"'), 1);
+    assert.equal(
+      await counter(metrics, 'auth_logins_total', 'kind="membership",result="invalid"'),
+      1,
+    );
     const text = await metrics.render();
-    assert.ok(!text.includes(SECRET_EMAIL) && !text.includes('cliente-a'));
+    assert.ok(!text.includes(SECRET_EMAIL) && !text.includes('empresa-a'));
   });
 });
 
 describe('AuthService.refresh', () => {
   let env: Env;
-  let userId: UserId;
+  let membershipId: MembershipId;
   beforeEach(async () => {
     env = await setup();
   });
 
   async function login() {
-    const issued = await env.auth.userToken(env.clientA.id, { role: 'AGENT' });
-    userId = issued.userId as UserId;
+    const issued = await env.auth.membershipToken(env.companyA.id, { role: 'AGENT' });
+    membershipId = issued.membershipId as MembershipId;
     return issued;
   }
 
@@ -310,7 +316,7 @@ describe('AuthService.refresh', () => {
     const warn = env.logs.lines().find((line) => line.msg?.toString().includes('reuso de refresh'));
     assert.ok(warn);
     assert.equal(warn.level, 40);
-    assert.equal(warn.subjectId, userId);
+    assert.equal(warn.subjectId, membershipId);
   });
 
   it('segredo inventado com sessionId válido é 401 sem revogar a sessão', async () => {
@@ -327,14 +333,14 @@ describe('AuthService.refresh', () => {
     assert.ok((await env.auth.service.authenticate(issued.accessToken)).ok);
   });
 
-  it('escopo adulterado (ClientId de outro cliente) é 401 e não altera sessão alguma', async () => {
+  it('escopo adulterado (CompanyId de outra empresa) é 401 e não altera sessão alguma', async () => {
     const issued = await login();
-    const other = await env.auth.userToken(env.clientB.id);
+    const other = await env.auth.membershipToken(env.companyB.id);
     const mine = parseRefreshToken(issued.refreshToken);
     const theirs = parseRefreshToken(other.refreshToken);
     assert.ok(mine && theirs);
     for (const forged of [
-      `${env.clientB.id}.${mine.sessionId}.${mine.secret}`, // minha sessão, escopo do outro
+      `${env.companyB.id}.${mine.sessionId}.${mine.secret}`, // minha sessão, escopo do outro
       `${mine.scope}.${theirs.sessionId}.${theirs.secret}`, // sessão do outro, meu escopo
       `platform.${mine.sessionId}.${mine.secret}`,
     ]) {
@@ -353,7 +359,7 @@ describe('AuthService.refresh', () => {
       '',
       'a.b.c',
       'lixo',
-      `${env.clientA.id}.${randomUUID()}.curto`,
+      `${env.companyA.id}.${randomUUID()}.curto`,
       '.'.repeat(300),
     ]) {
       assert.deepEqual(await env.auth.service.refresh(value), {
@@ -363,9 +369,11 @@ describe('AuthService.refresh', () => {
     }
   });
 
-  it('usuário desativado, cliente suspenso ou removido: o refresh falha e a sessão cai', async () => {
+  it('usuário desativado, empresa suspensa ou removido: o refresh falha e a sessão cai', async () => {
     const disabled = await login();
-    await env.auth.users.update(env.clientA.id, disabled.userId, { status: 'DISABLED' });
+    await env.auth.memberships.update(env.companyA.id, disabled.membershipId, {
+      status: 'DISABLED',
+    });
     assert.deepEqual(await env.auth.service.refresh(disabled.refreshToken), {
       ok: false,
       error: { reason: 'invalid_refresh' },
@@ -375,26 +383,26 @@ describe('AuthService.refresh', () => {
       error: { reason: 'revoked' },
     });
 
-    const suspendedUser = await env.auth.userToken(env.clientB.id);
-    await env.auth.clients.update(env.clientB.id, { status: 'SUSPENDED' });
-    assert.equal((await env.auth.service.refresh(suspendedUser.refreshToken)).ok, false);
+    const suspendedMembership = await env.auth.membershipToken(env.companyB.id);
+    await env.auth.companies.update(env.companyB.id, { status: 'SUSPENDED' });
+    assert.equal((await env.auth.service.refresh(suspendedMembership.refreshToken)).ok, false);
 
-    const clientC = await env.auth.clients.create({ name: 'C', slug: 'cliente-c' });
-    const removedUser = await env.auth.userToken(clientC.id);
-    await env.auth.clients.delete(clientC.id);
-    assert.equal((await env.auth.service.refresh(removedUser.refreshToken)).ok, false);
+    const companyC = await env.auth.companies.create({ name: 'C', slug: 'empresa-c' });
+    const removedMembership = await env.auth.membershipToken(companyC.id);
+    await env.auth.companies.delete(companyC.id);
+    assert.equal((await env.auth.service.refresh(removedMembership.refreshToken)).ok, false);
   });
 
   it('o papel do novo access token é o atual do banco', async () => {
     const issued = await login();
     const before = await env.auth.service.authenticate(issued.accessToken);
-    assert.ok(before.ok && before.value.kind === 'user');
+    assert.ok(before.ok && before.value.kind === 'membership');
     assert.equal(before.value.role, 'AGENT');
-    await env.auth.users.update(env.clientA.id, issued.userId, { role: 'OWNER' });
+    await env.auth.memberships.update(env.companyA.id, issued.membershipId, { role: 'OWNER' });
     const refreshed = await env.auth.service.refresh(issued.refreshToken);
     assert.ok(refreshed.ok);
     const after = await env.auth.service.authenticate(refreshed.value.accessToken);
-    assert.ok(after.ok && after.value.kind === 'user');
+    assert.ok(after.ok && after.value.kind === 'membership');
     assert.equal(after.value.role, 'OWNER');
   });
 
@@ -402,7 +410,7 @@ describe('AuthService.refresh', () => {
     const admin = await env.auth.platformToken();
     const refreshed = await env.auth.service.refresh(admin.refreshToken);
     assert.ok(refreshed.ok);
-    env.auth.platformAdmins.setStatus(admin.userId as never, 'DISABLED');
+    env.auth.platformAdmins.setStatus(admin.membershipId as never, 'DISABLED');
     assert.equal((await env.auth.service.refresh(refreshed.value.refreshToken)).ok, false);
   });
 
@@ -424,10 +432,10 @@ describe('AuthService.logout, logout-all e authenticate', () => {
   });
 
   it('logout revoga a sessão (refresh e access falham), é idempotente e não afeta outras sessões', async () => {
-    const { auth, clientA } = env;
-    const first = await auth.userToken(clientA.id, { email: 'um@exemplo.test' });
+    const { auth, companyA } = env;
+    const first = await auth.membershipToken(companyA.id, { email: 'um@exemplo.test' });
     const login = await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: 'um@exemplo.test',
       password: TEST_PASSWORD,
     });
@@ -445,7 +453,7 @@ describe('AuthService.logout, logout-all e authenticate', () => {
     assert.deepEqual(await auth.service.logout('lixo'), { ok: true, value: undefined });
     assert.deepEqual(
       await auth.service.logout(
-        `${clientA.id}.${randomUUID()}.${randomBytes(48).toString('base64url')}`,
+        `${companyA.id}.${randomUUID()}.${randomBytes(48).toString('base64url')}`,
       ),
       { ok: true, value: undefined },
     );
@@ -455,7 +463,7 @@ describe('AuthService.logout, logout-all e authenticate', () => {
   });
 
   it('logout com segredo inventado não revoga a sessão alheia', async () => {
-    const issued = await env.auth.userToken(env.clientA.id);
+    const issued = await env.auth.membershipToken(env.companyA.id);
     const parsed = parseRefreshToken(issued.refreshToken);
     assert.ok(parsed);
     await env.auth.service.logout(
@@ -465,17 +473,17 @@ describe('AuthService.logout, logout-all e authenticate', () => {
   });
 
   it('logout-all revoga todas as sessões e todos os access tokens do usuário, sem afetar outros', async () => {
-    const { auth, clientA, clientB } = env;
-    const one = await auth.userToken(clientA.id, { email: 'um@exemplo.test' });
+    const { auth, companyA, companyB } = env;
+    const one = await auth.membershipToken(companyA.id, { email: 'um@exemplo.test' });
     clock += 2_000;
     const two = await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: 'um@exemplo.test',
       password: TEST_PASSWORD,
     });
     assert.ok(two.ok);
-    const otherUser = await auth.userToken(clientA.id);
-    const otherClient = await auth.userToken(clientB.id, { email: 'um@exemplo.test' });
+    const otherMembership = await auth.membershipToken(companyA.id);
+    const otherCompany = await auth.membershipToken(companyB.id, { email: 'um@exemplo.test' });
 
     clock += 2_000;
     const identity = await auth.service.authenticate(one.accessToken);
@@ -490,12 +498,12 @@ describe('AuthService.logout, logout-all e authenticate', () => {
     }
     assert.equal((await auth.service.refresh(one.refreshToken)).ok, false);
     assert.equal((await auth.service.refresh(two.value.refreshToken)).ok, false);
-    assert.ok((await auth.service.authenticate(otherUser.accessToken)).ok);
-    assert.ok((await auth.service.authenticate(otherClient.accessToken)).ok);
+    assert.ok((await auth.service.authenticate(otherMembership.accessToken)).ok);
+    assert.ok((await auth.service.authenticate(otherCompany.accessToken)).ok);
     // Um login novo, depois do logout-all, volta a valer.
     clock += 2_000;
     const fresh = await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: 'um@exemplo.test',
       password: TEST_PASSWORD,
     });
@@ -505,13 +513,13 @@ describe('AuthService.logout, logout-all e authenticate', () => {
   });
 
   it('iat anterior ao nbf derruba o access token ainda dentro do prazo (mesmo sem rsid)', async () => {
-    const { auth, store, clientA } = env;
-    const issued = await auth.userToken(clientA.id);
+    const { auth, store, companyA } = env;
+    const issued = await auth.membershipToken(companyA.id);
     const verified = await auth.service.authenticate(issued.accessToken);
-    assert.ok(verified.ok && verified.value.kind === 'user');
+    assert.ok(verified.ok && verified.value.kind === 'membership');
     clock += 3_000;
     // Só o `nbf`: outro sessionId no revokeAll não existe, então sobra apenas a regra do iat.
-    await store.revokeAllSessions(verified.value.clientId, verified.value.userId);
+    await store.revokeAllSessions(verified.value.companyId, verified.value.membershipId);
     assert.deepEqual(await auth.service.authenticate(issued.accessToken), {
       ok: false,
       error: { reason: 'revoked' },
@@ -519,7 +527,7 @@ describe('AuthService.logout, logout-all e authenticate', () => {
   });
 
   it('authenticate com o store fora: unavailable (fail-closed)', async () => {
-    const issued = await env.auth.userToken(env.clientA.id);
+    const issued = await env.auth.membershipToken(env.companyA.id);
     env.store.failWith = new ServiceUnavailableError();
     assert.deepEqual(await env.auth.service.authenticate(issued.accessToken), {
       ok: false,
@@ -533,20 +541,20 @@ describe('AuthService.logout, logout-all e authenticate', () => {
   });
 
   it('GET /auth/me: identidade do banco, nunca o hash; token de conta removida é 401', async () => {
-    const { auth, clientA } = env;
-    const issued = await auth.userToken(clientA.id, { email: SECRET_EMAIL, role: 'OWNER' });
+    const { auth, companyA } = env;
+    const issued = await auth.membershipToken(companyA.id, { email: SECRET_EMAIL, role: 'OWNER' });
     const identity = await auth.service.authenticate(issued.accessToken);
     assert.ok(identity.ok);
     const me = await auth.service.me(identity.value);
     assert.deepEqual(me, {
-      kind: 'user',
-      id: issued.userId,
+      kind: 'membership',
+      id: issued.membershipId,
       email: SECRET_EMAIL,
       role: 'OWNER',
-      client: { id: clientA.id, name: 'Cliente A', slug: 'cliente-a' },
+      company: { id: companyA.id, name: 'Empresa A', slug: 'empresa-a' },
     });
     assert.ok(!JSON.stringify(me).includes('hash'));
-    await auth.users.delete(clientA.id, issued.userId);
+    await auth.memberships.delete(companyA.id, issued.membershipId);
     await assert.rejects(auth.service.me(identity.value), { code: 'UNAUTHORIZED' });
   });
 });
@@ -554,14 +562,14 @@ describe('AuthService.logout, logout-all e authenticate', () => {
 describe('AuthService: privacidade dos logs', () => {
   it('login, recusa, bloqueio, refresh, reuso e logout não logam senha, e-mail, token nem hash', async () => {
     const env = await setup();
-    const { auth, logs, clientA } = env;
+    const { auth, logs, companyA } = env;
     const email = 'segredo-nao-logar@exemplo.test';
     const password = 'senha-secreta-nunca-no-log-1';
-    await auth.users.create(clientA.id, {
+    await auth.memberships.create(companyA.id, {
       email,
       passwordHash: await auth.hasher.hash(password),
     });
-    const ok = await auth.service.login({ clientSlug: 'cliente-a', email, password });
+    const ok = await auth.service.login({ companySlug: 'empresa-a', email, password });
     assert.ok(ok.ok);
     const refreshed = await auth.service.refresh(ok.value.refreshToken);
     assert.ok(refreshed.ok);
@@ -569,7 +577,7 @@ describe('AuthService: privacidade dos logs', () => {
     await auth.service.logout(refreshed.value.refreshToken);
     for (let i = 0; i < 4; i += 1) {
       await auth.service.login({
-        clientSlug: 'cliente-a',
+        companySlug: 'empresa-a',
         email,
         password: 'outra-senha-errada-1',
       });
@@ -586,7 +594,7 @@ describe('AuthService: privacidade dos logs', () => {
       refreshed.value.refreshToken,
       parseRefreshToken(ok.value.refreshToken)?.secret ?? 'x',
       await auth.hasher.hash(password),
-      'cliente-a',
+      'empresa-a',
     ];
     for (const secret of secrets) assert.ok(!raw.includes(secret), `vazou: ${secret.slice(0, 12)}`);
   });
@@ -603,9 +611,9 @@ describe('AuthService: chave do contador de falhas de login', () => {
     }
     const logs = captureLogs();
     const auth = buildTestAuth({ logger: logs.logger, sessions: new Spy() });
-    await auth.clients.create({ name: 'A', slug: 'cliente-a' });
+    await auth.companies.create({ name: 'A', slug: 'empresa-a' });
     await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: SECRET_EMAIL,
       password: TEST_PASSWORD,
     });
@@ -613,21 +621,21 @@ describe('AuthService: chave do contador de falhas de login', () => {
     assert.equal(seen.length, 2);
 
     const plain = createHash('sha256')
-      .update(['c', 'cliente-a', SECRET_EMAIL].join(' '))
+      .update(['c', 'empresa-a', SECRET_EMAIL].join(' '))
       .digest('hex');
     const secret = deriveLoginLockSecret('segredo-de-teste-com-mais-de-32-caracteres-0123456789');
     const expected = createHmac('sha256', secret)
-      .update(['c', 'cliente-a', SECRET_EMAIL].join(' '))
+      .update(['c', 'empresa-a', SECRET_EMAIL].join(' '))
       .digest('hex');
     assert.match(seen[0] ?? '', /^[0-9a-f]{64}$/);
     assert.notEqual(seen[0], plain, 'não é o SHA-256 simples');
     assert.equal(seen[0], expected);
-    // Outro segredo de JWT produz outra chave (a chave depende do segredo); plataforma != cliente.
+    // Outro segredo de JWT produz outra chave (a chave depende do segredo); plataforma != empresa.
     const other = createHmac(
       'sha256',
       deriveLoginLockSecret('outro-segredo-completamente-diferente-0000'),
     )
-      .update(['c', 'cliente-a', SECRET_EMAIL].join(' '))
+      .update(['c', 'empresa-a', SECRET_EMAIL].join(' '))
       .digest('hex');
     assert.notEqual(other, expected);
     assert.notEqual(seen[1], seen[0]);
@@ -638,8 +646,8 @@ describe('AuthService: chave do contador de falhas de login', () => {
 describe('AuthService.login com a fila do hasher cheia (spec 008)', () => {
   it('ServiceUnavailableError do hasher vira "unavailable" (503) e não conta como falha de senha', async () => {
     const env = await setup(2);
-    const { auth, clientA } = env;
-    await auth.users.create(clientA.id, {
+    const { auth, companyA } = env;
+    await auth.memberships.create(companyA.id, {
       email: SECRET_EMAIL,
       passwordHash: await auth.hasher.hash(TEST_PASSWORD),
     });
@@ -647,7 +655,7 @@ describe('AuthService.login com a fila do hasher cheia (spec 008)', () => {
     auth.hasher.verify = () => Promise.reject(new ServiceUnavailableError());
     for (let i = 0; i < 5; i += 1) {
       const result = await auth.service.login({
-        clientSlug: 'cliente-a',
+        companySlug: 'empresa-a',
         email: SECRET_EMAIL,
         password: TEST_PASSWORD,
       });
@@ -657,7 +665,7 @@ describe('AuthService.login com a fila do hasher cheia (spec 008)', () => {
     auth.hasher.verify = verify;
     // Nada foi contado como falha: o login certo ainda passa (o limite de 2 não foi atingido).
     const ok = await auth.service.login({
-      clientSlug: 'cliente-a',
+      companySlug: 'empresa-a',
       email: SECRET_EMAIL,
       password: TEST_PASSWORD,
     });

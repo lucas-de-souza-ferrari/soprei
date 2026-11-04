@@ -8,7 +8,7 @@ export interface HashOptions {
   /**
    * Fila de espera do pedido (spec 008). `auth` (padrão): login e refresh. `admin`: hashes pagos por
    * rotas de administração (criar usuário, redefinir e trocar senha), que têm um teto de espera
-   * menor e separado, para não esgotar as vagas do login de todos os clientes.
+   * menor e separado, para não esgotar as vagas do login de todos as empresas.
    */
   readonly lane?: HashLane;
 }

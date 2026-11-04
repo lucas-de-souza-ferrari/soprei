@@ -3,10 +3,10 @@ import { randomBytes } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import {
   type AuditRepository,
-  type Client,
-  ClientId,
-  type User,
-  type UserRepository,
+  type Company,
+  CompanyId,
+  type Membership,
+  type MembershipRepository,
 } from '../../../domain/index.js';
 import { DatabaseError, TenantScopeError, ValidationError } from '../../../shared/errors/index.js';
 import { loadIntegrationConfig } from '../../../test-support/integration-env.js';
@@ -14,20 +14,20 @@ import { TestTenants } from '../../../test-support/tenant-fixtures.js';
 import { createLogger } from '../../logger/logger.js';
 import { createDatabase, type Database } from '../database.js';
 import { PrismaAuditRepository } from './audit.repository.js';
-import { PrismaUserRepository } from './user.repository.js';
+import { PrismaMembershipRepository } from './membership.repository.js';
 
 const config = loadIntegrationConfig();
 const HASH = 'scrypt$1024$8$1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaA==';
 
 let database: Database;
 let tenants: TestTenants;
-let users: UserRepository;
+let memberships: MembershipRepository;
 let audit: AuditRepository;
-let clientA: Client;
-let clientB: Client;
-let ownerA: User;
-let agentA: User;
-let ownerB: User;
+let companyA: Company;
+let companyB: Company;
+let ownerA: Membership;
+let agentA: Membership;
+let ownerB: Membership;
 const email = (label: string): string => `${label}-${randomBytes(5).toString('hex')}@exemplo.test`;
 const pause = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -37,17 +37,17 @@ const pause = (ms: number): Promise<void> =>
 before(async () => {
   database = createDatabase(config, createLogger(config));
   tenants = new TestTenants(database.prisma);
-  users = new PrismaUserRepository(database.prisma);
+  memberships = new PrismaMembershipRepository(database.prisma);
   audit = new PrismaAuditRepository(database.prisma);
-  clientA = await tenants.createClient('aud-a');
-  clientB = await tenants.createClient('aud-b');
-  ownerA = await users.create(clientA.id, {
+  companyA = await tenants.createCompany('aud-a');
+  companyB = await tenants.createCompany('aud-b');
+  ownerA = await memberships.create(companyA.id, {
     email: email('oa'),
     passwordHash: HASH,
     role: 'OWNER',
   });
-  agentA = await users.create(clientA.id, { email: email('aa'), passwordHash: HASH });
-  ownerB = await users.create(clientB.id, {
+  agentA = await memberships.create(companyA.id, { email: email('aa'), passwordHash: HASH });
+  ownerB = await memberships.create(companyB.id, {
     email: email('ob'),
     passwordHash: HASH,
     role: 'OWNER',
@@ -62,7 +62,7 @@ after(async () => {
   }
 });
 
-describe('AuditRepository (isolamento entre clientes A e B)', () => {
+describe('AuditRepository (isolamento entre empresas A e B)', () => {
   it('não expõe update nem delete: a trilha é imutável pela API', () => {
     const methods = Object.getOwnPropertyNames(PrismaAuditRepository.prototype).sort();
     assert.deepEqual(methods, ['constructor', 'create', 'forTransaction', 'list']);
@@ -70,50 +70,50 @@ describe('AuditRepository (isolamento entre clientes A e B)', () => {
     assert.ok(!('delete' in audit));
   });
 
-  it('cria no cliente do parâmetro e cada cliente lista só os seus eventos, mais recentes primeiro', async () => {
-    const first = await audit.create(clientA.id, {
-      action: 'USER_CREATED',
-      actorUserId: ownerA.id,
-      targetUserId: agentA.id,
+  it('cria na empresa do parâmetro e cada empresa lista só os seus eventos, mais recentes primeiro', async () => {
+    const first = await audit.create(companyA.id, {
+      action: 'MEMBERSHIP_CREATED',
+      actorMembershipId: ownerA.id,
+      targetMembershipId: agentA.id,
       toRole: 'AGENT',
     });
     await pause(5);
-    const second = await audit.create(clientA.id, {
-      action: 'USER_ROLE_CHANGED',
-      actorUserId: ownerA.id,
-      targetUserId: agentA.id,
+    const second = await audit.create(companyA.id, {
+      action: 'MEMBERSHIP_ROLE_CHANGED',
+      actorMembershipId: ownerA.id,
+      targetMembershipId: agentA.id,
       fromRole: 'AGENT',
       toRole: 'ADMIN',
     });
-    const other = await audit.create(clientB.id, {
-      action: 'USER_DISABLED',
-      actorUserId: ownerB.id,
-      targetUserId: ownerB.id,
+    const other = await audit.create(companyB.id, {
+      action: 'MEMBERSHIP_DISABLED',
+      actorMembershipId: ownerB.id,
+      targetMembershipId: ownerB.id,
     });
 
-    assert.equal(first.clientId, clientA.id);
+    assert.equal(first.companyId, companyA.id);
     assert.equal(first.fromRole, null);
     assert.equal(first.toRole, 'AGENT');
-    const listedA = await audit.list(clientA.id);
+    const listedA = await audit.list(companyA.id);
     assert.deepEqual(
       listedA.items.map((event) => event.id),
       [second.id, first.id],
     );
-    const listedB = await audit.list(clientB.id);
+    const listedB = await audit.list(companyB.id);
     assert.deepEqual(
       listedB.items.map((event) => event.id),
       [other.id],
     );
     assert.ok(!listedA.items.some((event) => event.id === other.id));
-    assert.deepEqual(await audit.list(ClientId.parse('01900000-0000-7000-8000-000000000000')), {
+    assert.deepEqual(await audit.list(CompanyId.parse('01900000-0000-7000-8000-000000000000')), {
       items: [],
       nextCursor: null,
     });
   });
 
   it('pagina por cursor (decrescente), sem repetir nem perder evento; cursor inválido é 400', async () => {
-    const fresh = await tenants.createClient('aud-pag');
-    const owner = await users.create(fresh.id, {
+    const fresh = await tenants.createCompany('aud-pag');
+    const owner = await memberships.create(fresh.id, {
       email: email('pg'),
       passwordHash: HASH,
       role: 'OWNER',
@@ -121,9 +121,9 @@ describe('AuditRepository (isolamento entre clientes A e B)', () => {
     const created: string[] = [];
     for (let i = 0; i < 5; i += 1) {
       const event = await audit.create(fresh.id, {
-        action: 'USER_PASSWORD_RESET',
-        actorUserId: owner.id,
-        targetUserId: owner.id,
+        action: 'MEMBERSHIP_PASSWORD_RESET',
+        actorMembershipId: owner.id,
+        targetMembershipId: owner.id,
       });
       created.push(event.id);
       await pause(3);
@@ -144,63 +144,65 @@ describe('AuditRepository (isolamento entre clientes A e B)', () => {
     assert.deepEqual(seen, [...created].reverse());
     await assert.rejects(audit.list(fresh.id, { cursor: 'lixo' }), ValidationError);
     await assert.rejects(audit.list(fresh.id, { limit: 0 }), ValidationError);
-    // O cursor de um cliente não abre os eventos de outro: o filtro por cliente continua no where.
+    // O cursor de uma empresa não abre os eventos de outro: o filtro por empresa continua no where.
     const firstPage = await audit.list(fresh.id, { limit: 1 });
     assert.deepEqual(
       (
-        await audit.list(clientB.id, { limit: 50, cursor: firstPage.nextCursor ?? undefined })
-      ).items.every((event) => event.clientId === clientB.id),
+        await audit.list(companyB.id, { limit: 50, cursor: firstPage.nextCursor ?? undefined })
+      ).items.every((event) => event.companyId === companyB.id),
       true,
     );
   });
 
-  it('a chave estrangeira composta impede, no banco, evento do cliente A apontar para usuário de B', async () => {
+  it('a chave estrangeira composta impede, no banco, evento da empresa A apontar para usuário de B', async () => {
     await assert.rejects(
-      audit.create(clientA.id, {
-        action: 'USER_DISABLED',
-        actorUserId: ownerB.id,
-        targetUserId: agentA.id,
+      audit.create(companyA.id, {
+        action: 'MEMBERSHIP_DISABLED',
+        actorMembershipId: ownerB.id,
+        targetMembershipId: agentA.id,
       }),
       DatabaseError,
     );
     await assert.rejects(
-      audit.create(clientA.id, {
-        action: 'USER_DISABLED',
-        actorUserId: ownerA.id,
-        targetUserId: ownerB.id,
+      audit.create(companyA.id, {
+        action: 'MEMBERSHIP_DISABLED',
+        actorMembershipId: ownerA.id,
+        targetMembershipId: ownerB.id,
       }),
       DatabaseError,
     );
-    // Nada foi gravado em nenhum dos clientes por essas tentativas.
+    // Nada foi gravado em nenhum das empresas por essas tentativas.
     assert.ok(
-      !(await audit.list(clientA.id)).items.some((event) => event.action === 'USER_DISABLED'),
+      !(await audit.list(companyA.id)).items.some(
+        (event) => event.action === 'MEMBERSHIP_DISABLED',
+      ),
     );
     assert.ok(
-      !(await audit.list(clientB.id)).items.some(
-        (event) => event.actorUserId === ownerB.id && event.targetUserId === agentA.id,
+      !(await audit.list(companyB.id)).items.some(
+        (event) => event.actorMembershipId === ownerB.id && event.targetMembershipId === agentA.id,
       ),
     );
   });
 
   it('o usuário referenciado por evento não pode ser apagado (Restrict)', async () => {
-    await assert.rejects(users.delete(clientA.id, ownerA.id), DatabaseError);
+    await assert.rejects(memberships.delete(companyA.id, ownerA.id), DatabaseError);
   });
 
-  it('consulta de AuditEvent sem clientId lança TenantScopeError (segunda barreira)', async () => {
+  it('consulta de AuditEvent sem companyId lança TenantScopeError (segunda barreira)', async () => {
     const prisma = database.prisma;
     const attempts: readonly (() => Promise<unknown>)[] = [
       () => prisma.auditEvent.findMany({}),
-      () => prisma.auditEvent.findFirst({ where: { action: 'USER_CREATED' } }),
+      () => prisma.auditEvent.findFirst({ where: { action: 'MEMBERSHIP_CREATED' } }),
       () => prisma.auditEvent.count({}),
       () => prisma.auditEvent.deleteMany({}),
-      () => prisma.auditEvent.updateMany({ where: {}, data: { action: 'USER_ENABLED' } }),
+      () => prisma.auditEvent.updateMany({ where: {}, data: { action: 'MEMBERSHIP_ENABLED' } }),
       () => prisma.auditEvent.findUnique({ where: { id: '01900000-0000-7000-8000-000000000000' } }),
       () =>
         prisma.auditEvent.create({
           data: {
-            action: 'USER_CREATED',
-            actorUserId: ownerA.id,
-            targetUserId: agentA.id,
+            action: 'MEMBERSHIP_CREATED',
+            actorMembershipId: ownerA.id,
+            targetMembershipId: agentA.id,
           } as never,
         }),
     ];

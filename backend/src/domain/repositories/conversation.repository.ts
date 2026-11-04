@@ -3,7 +3,7 @@ import type {
   ConversationUpdate,
   NewConversation,
 } from '../entities/conversation.js';
-import type { ClientId } from '../value-objects/client-id.js';
+import type { CompanyId } from '../value-objects/company-id.js';
 import type { TenantRepository } from './tenant.repository.js';
 
 export interface ConversationRepository extends TenantRepository<
@@ -12,11 +12,11 @@ export interface ConversationRepository extends TenantRepository<
   ConversationUpdate
 > {
   /**
-   * A conversa deste contato (`contactRef`) neste cliente; cria se ainda não existe. Seguro
+   * A conversa deste contato (`contactRef`) nesta empresa; cria se ainda não existe. Seguro
    * contra concorrência: dois pedidos simultâneos para o mesmo contato recebem a mesma
-   * conversa (a unicidade `(clientId, contactRef)` é do banco).
+   * conversa (a unicidade `(companyId, contactRef)` é do banco).
    */
-  findOrCreateByContact(clientId: ClientId, contactRef: string): Promise<Conversation>;
-  /** A conversa deste contato neste cliente, ou `null` se ainda não existe (nunca cria). */
-  findByContact(clientId: ClientId, contactRef: string): Promise<Conversation | null>;
+  findOrCreateByContact(companyId: CompanyId, contactRef: string): Promise<Conversation>;
+  /** A conversa deste contato nesta empresa, ou `null` se ainda não existe (nunca cria). */
+  findByContact(companyId: CompanyId, contactRef: string): Promise<Conversation | null>;
 }

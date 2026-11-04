@@ -7,18 +7,18 @@ import {
   AttendanceService,
   ATTENDANCE_STYLE_INSTRUCTION,
 } from '../../application/attendance/attendance.service.js';
-import { ClientService } from '../../application/clients/client.service.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import type { LlmGenerateInput, LlmProvider } from '../../application/ports/llm-provider.js';
 import { Result } from '../../shared/types/index.js';
 import { bearer, buildTestAuth } from '../../test-support/in-memory-auth.js';
-import { ClientId } from '../../domain/index.js';
+import { CompanyId } from '../../domain/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import {
   createDatabase,
   PrismaAttendanceUnitOfWork,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
   type Database,
@@ -35,15 +35,16 @@ const config = loadIntegrationConfig();
 const logs = captureLogs();
 // Descartável, só deste arquivo (e só na memória do processo de teste).
 const METRICS_TOKEN = `it-${randomUUID()}-${randomUUID()}`;
-// `auth`: administrador da plataforma (CRUD de clientes); `as(clientId)`: o usuário do cliente, que
+// `auth`: administrador da plataforma (CRUD de empresas); `as(companyId)`: o usuário da empresa, que
 // é quem usa o simulador e lê conversas (spec 007).
 let auth: { authorization: string };
-let makeUser: (clientId: string) => Promise<{ authorization: string }>;
-const userHeaders = new Map<string, { authorization: string }>();
-let anyUser: { authorization: string };
-const as = (clientId: string): { authorization: string } => userHeaders.get(clientId) ?? anyUser;
+let makeMembership: (companyId: string) => Promise<{ authorization: string }>;
+const membershipHeaders = new Map<string, { authorization: string }>();
+let anyMembership: { authorization: string };
+const as = (companyId: string): { authorization: string } =>
+  membershipHeaders.get(companyId) ?? anyMembership;
 
-interface ClientBody {
+interface CompanyBody {
   id: string;
 }
 interface ReplyBody {
@@ -84,14 +85,14 @@ before(async () => {
   database = createDatabase(config, logs.logger);
   tenants = new TestTenants(database.prisma);
   mock = new MockLlmProvider({ recordCalls: true });
-  const clientRepository = new PrismaClientRepository(database.prisma);
+  const companyRepository = new PrismaCompanyRepository(database.prisma);
   const metrics = createMetrics();
-  const testAuth = buildTestAuth({ logger: logs.logger, clients: clientRepository });
+  const testAuth = buildTestAuth({ logger: logs.logger, companies: companyRepository });
   auth = bearer((await testAuth.platformToken()).accessToken);
-  makeUser = async (clientId) =>
-    bearer((await testAuth.userToken(ClientId.parse(clientId))).accessToken);
-  const seed = await tenants.createClient('base');
-  anyUser = await makeUser(seed.id);
+  makeMembership = async (companyId) =>
+    bearer((await testAuth.membershipToken(CompanyId.parse(companyId))).accessToken);
+  const seed = await tenants.createCompany('base');
+  anyMembership = await makeMembership(seed.id);
   app = buildServer({
     logger: logs.logger,
     metrics,
@@ -102,9 +103,9 @@ before(async () => {
     },
     auth: testAuth.service,
     admin: {
-      clients: new ClientService(clientRepository),
+      companies: new CompanyService(companyRepository),
       attendance: new AttendanceService({
-        clients: clientRepository,
+        companies: companyRepository,
         conversations: new PrismaConversationRepository(database.prisma),
         messages: new PrismaMessageRepository(database.prisma),
         unitOfWork: new PrismaAttendanceUnitOfWork(database.prisma),
@@ -127,21 +128,21 @@ after(async () => {
   }
 });
 
-async function createClient(label: string, persona?: string): Promise<string> {
+async function createCompany(label: string, persona?: string): Promise<string> {
   const created = await app.inject({
     method: 'POST',
-    url: '/admin/clients',
+    url: '/admin/companies',
     headers: auth,
     payload: { name: `Empresa ${label}`, slug: slug(label) },
   });
   assert.equal(created.statusCode, 201);
-  const { id } = created.json<ClientBody>();
+  const { id } = created.json<CompanyBody>();
   tenants.track(id);
-  userHeaders.set(id, await makeUser(id));
+  membershipHeaders.set(id, await makeMembership(id));
   if (persona !== undefined) {
     const patched = await app.inject({
       method: 'PATCH',
-      url: `/admin/clients/${id}`,
+      url: `/admin/companies/${id}`,
       headers: auth,
       payload: { persona },
     });
@@ -151,14 +152,14 @@ async function createClient(label: string, persona?: string): Promise<string> {
 }
 
 function send(
-  clientId: string,
+  companyId: string,
   payload: unknown,
   headers: Record<string, string> = {},
 ): Promise<LightMyRequestResponse> {
   return app.inject({
     method: 'POST',
-    url: `/admin/clients/${clientId}/messages`,
-    headers: { ...as(clientId), ...headers },
+    url: `/admin/companies/${companyId}/messages`,
+    headers: { ...as(companyId), ...headers },
     payload: payload as object,
   });
 }
@@ -177,10 +178,10 @@ function withStyle(persona: string): string {
   return `${persona}\n\n${ATTENDANCE_STYLE_INSTRUCTION}`;
 }
 
-describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes', () => {
+describe('POST /admin/companies/:companyId/messages contra o PostgreSQL de testes', () => {
   it('fluxo completo: persona definida por PATCH, duas mensagens, duplicata, histórico e listagens', async () => {
-    const clientId = await createClient('fluxo', 'Persona-Fluxo-HTTP');
-    const first = await send(clientId, {
+    const companyId = await createCompany('fluxo', 'Persona-Fluxo-HTTP');
+    const first = await send(companyId, {
       contactRef: 'tel-1',
       text: 'fluxo-um',
       externalId: 'e-1',
@@ -192,11 +193,11 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     // A ordem do histórico é por `createdAt` (ms): sem folga, a pergunta seguinte pode cair no
     // mesmo milissegundo da resposta anterior e inverter a ordem conferida mais abaixo.
     await sleep(5);
-    const second = await send(clientId, { contactRef: 'tel-1', text: 'fluxo-dois' });
+    const second = await send(companyId, { contactRef: 'tel-1', text: 'fluxo-dois' });
     assert.equal(second.statusCode, 201);
     assert.equal(second.json<ReplyBody>().conversationId, firstBody.conversationId);
 
-    const duplicate = await send(clientId, {
+    const duplicate = await send(companyId, {
       contactRef: 'tel-1',
       text: 'fluxo-um',
       externalId: 'e-1',
@@ -208,8 +209,8 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
 
     const history = await app.inject({
       method: 'GET',
-      url: `/admin/clients/${clientId}/conversations/${firstBody.conversationId}/messages`,
-      headers: as(clientId),
+      url: `/admin/companies/${companyId}/conversations/${firstBody.conversationId}/messages`,
+      headers: as(companyId),
     });
     assert.equal(history.statusCode, 200);
     assert.deepEqual(
@@ -223,15 +224,15 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     );
     const conversations = await app.inject({
       method: 'GET',
-      url: `/admin/clients/${clientId}/conversations`,
-      headers: as(clientId),
+      url: `/admin/companies/${companyId}/conversations`,
+      headers: as(companyId),
     });
     assert.equal(conversations.json<PageBody<unknown>>().items.length, 1);
   });
 
   it('falha forçada do mock: 201 com o fallback e métricas de LLM e de fallback em /metrics', async () => {
-    const clientId = await createClient('falha');
-    const response = await send(clientId, {
+    const companyId = await createCompany('falha');
+    const response = await send(companyId, {
       contactRef: 'tel-1',
       text: `falha ${MOCK_FAIL_MARKER}`,
     });
@@ -242,14 +243,14 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     assert.match(body, /llm_requests_total\{provider="mock",result="error"\} [1-9]/);
     assert.match(body, /llm_request_duration_seconds_count\{provider="mock"\} [1-9]/);
     assert.match(body, /attendance_fallbacks_total [1-9]/);
-    // Nenhum label com clientId/userId (o padrão da rota `:clientId` aparece só no label `route`).
-    assert.doesNotMatch(body, /[{,]s*(client_?id|user_?id)s*=/i);
-    assert.ok(!body.includes(clientId));
+    // Nenhum label com companyId/membershipId (o padrão da rota `:companyId` aparece só no label `route`).
+    assert.doesNotMatch(body, /[{,]s*(company_?id|membership_?id|actor_?id)s*=/i);
+    assert.ok(!body.includes(companyId));
   });
 
   it('provider que não responde: timeout vira fallback e a métrica registra "timeout"', async () => {
-    const clientId = await createClient('timeout');
-    const response = await send(clientId, {
+    const companyId = await createCompany('timeout');
+    const response = await send(companyId, {
       contactRef: 'tel-1',
       text: `espera ${MOCK_HANG_MARKER}`,
     });
@@ -261,23 +262,23 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     );
     const warn = logs
       .lines()
-      .find((line) => line.reason === 'timeout' && line.clientId === clientId);
-    assert.ok(warn, 'o timeout foi logado com o clientId');
+      .find((line) => line.reason === 'timeout' && line.companyId === companyId);
+    assert.ok(warn, 'o timeout foi logado com o companyId');
     assert.equal(typeof warn.requestId, 'string');
   });
 
-  it('cliente inexistente: 404; suspenso: 403; nada é gravado', async () => {
+  it('empresa inexistente: 404; suspenso: 403; nada é gravado', async () => {
     const ghost = await send(randomUUID(), { contactRef: 'c', text: 'oi-fantasma' });
     assert.equal(ghost.statusCode, 404);
 
-    const removed = await createClient('removido');
-    await app.inject({ method: 'DELETE', url: `/admin/clients/${removed}`, headers: auth });
+    const removed = await createCompany('removido');
+    await app.inject({ method: 'DELETE', url: `/admin/companies/${removed}`, headers: auth });
     assert.equal((await send(removed, { contactRef: 'c', text: 'oi-removido' })).statusCode, 404);
 
-    const suspended = await createClient('suspenso');
+    const suspended = await createCompany('suspenso');
     await app.inject({
       method: 'PATCH',
-      url: `/admin/clients/${suspended}`,
+      url: `/admin/companies/${suspended}`,
       headers: auth,
       payload: { status: 'SUSPENDED' },
     });
@@ -287,7 +288,7 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
     for (const id of [removed, suspended]) {
       const list = await app.inject({
         method: 'GET',
-        url: `/admin/clients/${id}/conversations`,
+        url: `/admin/companies/${id}/conversations`,
         headers: as(id),
       });
       if (id === suspended) assert.deepEqual(list.json<PageBody<unknown>>().items, []);
@@ -297,7 +298,7 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
   });
 
   it('entrada inválida: 400', async () => {
-    const clientId = await createClient('invalido');
+    const companyId = await createCompany('invalido');
     for (const payload of [
       { contactRef: 'c', text: '' },
       { contactRef: 'c', text: '   ' },
@@ -306,31 +307,31 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
       { contactRef: 'a\u0000b', text: 'oi' },
       { contactRef: 'c', text: 'oi\u0000' },
     ]) {
-      assert.equal((await send(clientId, payload)).statusCode, 400);
+      assert.equal((await send(companyId, payload)).statusCode, 400);
     }
     // Nada foi gravado (nem conversa): o NUL não chegou ao banco.
     const none = await app.inject({
       method: 'GET',
-      url: `/admin/clients/${clientId}/conversations`,
-      headers: as(clientId),
+      url: `/admin/companies/${companyId}/conversations`,
+      headers: as(companyId),
     });
     assert.deepEqual(none.json<PageBody<unknown>>().items, []);
     // Persona com NUL: 400, não 500.
     const patched = await app.inject({
       method: 'PATCH',
-      url: `/admin/clients/${clientId}`,
+      url: `/admin/companies/${companyId}`,
       headers: auth,
       payload: { persona: 'com\u0000nul' },
     });
     assert.equal(patched.statusCode, 400);
-    // `:clientId` diferente do token (inclusive malformado): 404, igual a cliente inexistente.
+    // `:companyId` diferente do token (inclusive malformado): 404, igual a empresa inexistente.
     assert.equal((await send('nao-uuid', { contactRef: 'c', text: 'oi' })).statusCode, 404);
   });
 
   it('dois pedidos simultâneos do mesmo externalId: um 201 e o outro 200 (mesma resposta) ou 409', async () => {
-    const clientId = await createClient('simultaneo');
+    const companyId = await createCompany('simultaneo');
     const payload = { contactRef: 'tel-1', text: 'simultaneo-unico', externalId: 'e-sim' };
-    const [one, two] = await Promise.all([send(clientId, payload), send(clientId, payload)]);
+    const [one, two] = await Promise.all([send(companyId, payload), send(companyId, payload)]);
     const statuses = [one.statusCode, two.statusCode].sort((x, y) => x - y);
     assert.ok(
       statuses[0] === 200 || statuses[0] === 201 || statuses[0] === 409,
@@ -349,10 +350,10 @@ describe('POST /admin/clients/:clientId/messages contra o PostgreSQL de testes',
   });
 });
 
-describe('isolamento via HTTP (clientes A e B)', () => {
+describe('isolamento via HTTP (empresas A e B)', () => {
   it('mesmo contactRef e mesmo externalId: conversas, respostas e persona independentes', async () => {
-    const a = await createClient('iso-a', 'Persona-A-HTTP');
-    const b = await createClient('iso-b', 'Persona-B-HTTP');
+    const a = await createCompany('iso-a', 'Persona-A-HTTP');
+    const b = await createCompany('iso-b', 'Persona-B-HTTP');
     const sentA = await send(a, { contactRef: 'mesmo', text: 'httpA-1', externalId: 'ext' });
     const sentB = await send(b, { contactRef: 'mesmo', text: 'httpB-1', externalId: 'ext' });
     assert.equal(sentA.statusCode, 201);
@@ -381,23 +382,23 @@ describe('isolamento via HTTP (clientes A e B)', () => {
       assert.ok(call.history.every((turn) => !turn.content.includes('httpA-')));
     }
 
-    // O conversationId de B com o clientId de A: 404 e nada de B na resposta.
+    // O conversationId de B com o companyId de A: 404 e nada de B na resposta.
     const cross = await app.inject({
       method: 'GET',
-      url: `/admin/clients/${a}/conversations/${replyB.conversationId}/messages`,
+      url: `/admin/companies/${a}/conversations/${replyB.conversationId}/messages`,
       headers: as(a),
     });
     assert.equal(cross.statusCode, 404);
     assert.ok(!cross.body.includes('httpB-'));
     const listA = await app.inject({
       method: 'GET',
-      url: `/admin/clients/${a}/conversations`,
+      url: `/admin/companies/${a}/conversations`,
       headers: as(a),
     });
     assert.ok(!listA.body.includes(replyB.conversationId));
     const historyA = await app.inject({
       method: 'GET',
-      url: `/admin/clients/${a}/conversations/${replyA.conversationId}/messages`,
+      url: `/admin/companies/${a}/conversations/${replyA.conversationId}/messages`,
       headers: as(a),
     });
     assert.ok(!historyA.body.includes('httpB-'));
@@ -405,18 +406,18 @@ describe('isolamento via HTTP (clientes A e B)', () => {
 });
 
 describe('contexto de log e privacidade', () => {
-  it('requisições simultâneas de clientes diferentes mantêm cada uma o seu clientId nos logs', async () => {
-    const clientIds = await Promise.all(
-      Array.from({ length: 4 }, (_, i) => createClient(`ctx-${String(i)}`)),
+  it('requisições simultâneas de empresas diferentes mantêm cada uma o seu companyId nos logs', async () => {
+    const companyIds = await Promise.all(
+      Array.from({ length: 4 }, (_, i) => createCompany(`ctx-${String(i)}`)),
     );
-    const requestIds = clientIds.map(
+    const requestIds = companyIds.map(
       (_, i) => `req-ctx-${randomBytes(6).toString('hex')}-${String(i)}`,
     );
     await Promise.all(
-      clientIds.map((clientId, i) =>
+      companyIds.map((companyId, i) =>
         Promise.all([
           send(
-            clientId,
+            companyId,
             { contactRef: 'tel-1', text: `ctx-${String(i)}-a` },
             { 'x-request-id': requestIds[i] ?? '' },
           ),
@@ -424,11 +425,15 @@ describe('contexto de log e privacidade', () => {
       ),
     );
 
-    for (const [i, clientId] of clientIds.entries()) {
+    for (const [i, companyId] of companyIds.entries()) {
       const lines = logs.lines().filter((line) => line.requestId === requestIds[i]);
       assert.ok(lines.length >= 2, 'log do atendimento e da requisição');
       for (const line of lines) {
-        assert.equal(line.clientId, clientId, `linha "${String(line.msg)}" com o clientId errado`);
+        assert.equal(
+          line.companyId,
+          companyId,
+          `linha "${String(line.msg)}" com o companyId errado`,
+        );
       }
       assert.ok(lines.some((line) => line.msg === 'mensagem atendida'));
       assert.ok(lines.some((line) => line.msg === 'requisição concluída'));
@@ -437,28 +442,28 @@ describe('contexto de log e privacidade', () => {
 
   it('o conteúdo das mensagens, a persona e o contactRef não aparecem em nenhuma linha de log', async () => {
     const persona = 'PERSONA-SECRETA-PRIV-77';
-    const clientId = await createClient('privacidade', persona);
+    const companyId = await createCompany('privacidade', persona);
     const secrets = ['TEXTO-SECRETO-PRIV-1', 'TEXTO-SECRETO-PRIV-2', 'TEXTO-SECRETO-PRIV-3'];
     const contact = 'TEL-5511988887777';
 
-    await send(clientId, { contactRef: contact, text: secrets[0] ?? '', externalId: 'p-1' });
-    await send(clientId, { contactRef: contact, text: secrets[0] ?? '', externalId: 'p-1' });
-    await send(clientId, { contactRef: contact, text: `${secrets[1] ?? ''} ${MOCK_FAIL_MARKER}` });
-    await send(clientId, { contactRef: contact, text: `${secrets[2] ?? ''} ${MOCK_HANG_MARKER}` });
+    await send(companyId, { contactRef: contact, text: secrets[0] ?? '', externalId: 'p-1' });
+    await send(companyId, { contactRef: contact, text: secrets[0] ?? '', externalId: 'p-1' });
+    await send(companyId, { contactRef: contact, text: `${secrets[1] ?? ''} ${MOCK_FAIL_MARKER}` });
+    await send(companyId, { contactRef: contact, text: `${secrets[2] ?? ''} ${MOCK_HANG_MARKER}` });
     // Entradas inválidas e corpo malformado também não podem ecoar o conteúdo.
-    await send(clientId, { contactRef: `${contact}\u0000`, text: secrets[0] ?? '' });
+    await send(companyId, { contactRef: `${contact}\u0000`, text: secrets[0] ?? '' });
     // Texto com NUL (400): o conteúdo também não pode ser ecoado no log.
-    await send(clientId, { contactRef: contact, text: `${secrets[2] ?? ''}\u0000` });
+    await send(companyId, { contactRef: contact, text: `${secrets[2] ?? ''}\u0000` });
     await app.inject({
       method: 'POST',
-      url: `/admin/clients/${clientId}/messages`,
-      headers: { ...as(clientId), 'content-type': 'application/json' },
+      url: `/admin/companies/${companyId}/messages`,
+      headers: { ...as(companyId), 'content-type': 'application/json' },
       payload: `{"contactRef":"${contact}","text":"${secrets[1] ?? ''}`,
     });
     await app.inject({
       method: 'GET',
-      url: `/admin/clients/${clientId}/conversations`,
-      headers: as(clientId),
+      url: `/admin/companies/${companyId}/conversations`,
+      headers: as(companyId),
     });
 
     const raw = logs.raw();

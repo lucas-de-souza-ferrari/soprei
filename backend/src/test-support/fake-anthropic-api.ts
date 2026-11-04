@@ -64,11 +64,11 @@ export const textMessage = (
 /**
  * Servidor falso da API de mensagens da Anthropic (`POST /v1/messages`), local (`node:http`, porta
  * 0): registra cada pedido, responde com sucesso por padrão e aceita comportamentos enfileirados
- * (`script`, `always`). Conta as conexões que o cliente encerrou antes da resposta (cancelamento).
+ * (`script`, `always`). Conta as conexões que a empresa encerrou antes da resposta (cancelamento).
  */
 export class FakeAnthropicApi {
   readonly requests: AnthropicRequest[] = [];
-  /** Quantas respostas o cliente deixou de esperar (conexão fechada antes do fim da resposta). */
+  /** Quantas respostas a empresa deixou de esperar (conexão fechada antes do fim da resposta). */
   clientClosedCount = 0;
   private server: Server | undefined;
   private scripted: AnthropicBehavior[] = [];
@@ -149,7 +149,7 @@ export class FakeAnthropicApi {
     this.clientClosedCount = 0;
   }
 
-  /** Espera (com prazo) até o cliente ter fechado pelo menos `count` conexões antes da resposta. */
+  /** Espera (com prazo) até a empresa ter fechado pelo menos `count` conexões antes da resposta. */
   async waitForClientClose(count = 1, timeoutMs = 5_000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (this.clientClosedCount < count) {

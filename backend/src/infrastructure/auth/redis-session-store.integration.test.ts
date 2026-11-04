@@ -161,9 +161,9 @@ describe('RedisSessionStore: rotação, reuso e revogação (Redis real)', () =>
     }
   });
 
-  it('o refresh adulterado (escopo de outro cliente) não toca em sessão alguma', async () => {
+  it('o refresh adulterado (escopo de outra empresa) não toca em sessão alguma', async () => {
     const { store } = await createStore();
-    const [clientA, clientB, sidA, sidB, userA, userB] = [
+    const [companyA, companyB, sidA, sidB, membershipA, membershipB] = [
       scope(),
       scope(),
       randomUUID(),
@@ -174,20 +174,20 @@ describe('RedisSessionStore: rotação, reuso e revogação (Redis real)', () =>
     const hashA = newHash();
     const hashB = newHash();
     await store.createSession({
-      scope: clientA,
+      scope: companyA,
       sessionId: sidA,
-      subjectId: userA,
+      subjectId: membershipA,
       refreshHash: hashA,
     });
     await store.createSession({
-      scope: clientB,
+      scope: companyB,
       sessionId: sidB,
-      subjectId: userB,
+      subjectId: membershipB,
       refreshHash: hashB,
     });
     for (const attempt of [
-      { scope: clientB, sessionId: sidA, presentedHash: hashA },
-      { scope: clientA, sessionId: sidB, presentedHash: hashB },
+      { scope: companyB, sessionId: sidA, presentedHash: hashA },
+      { scope: companyA, sessionId: sidB, presentedHash: hashB },
       { scope: 'platform', sessionId: sidA, presentedHash: hashA },
     ]) {
       assert.deepEqual(await store.rotate({ ...attempt, newHash: newHash() }), {
@@ -196,8 +196,8 @@ describe('RedisSessionStore: rotação, reuso e revogação (Redis real)', () =>
       assert.equal(await store.revokeByRefresh(attempt), false);
     }
     for (const [s, sid, u, h] of [
-      [clientA, sidA, userA, hashA],
-      [clientB, sidB, userB, hashB],
+      [companyA, sidA, membershipA, hashA],
+      [companyB, sidB, membershipB, hashB],
     ] as const) {
       assert.equal(
         await store.checkAccess({ scope: s, sessionId: sid, subjectId: u, issuedAt: 1 }),
@@ -242,11 +242,11 @@ describe('RedisSessionStore: rotação, reuso e revogação (Redis real)', () =>
     );
   });
 
-  it('logout-all revoga as sessões e corta os access tokens (nbf) do usuário, sem afetar outro usuário nem cliente', async () => {
+  it('logout-all revoga as sessões e corta os access tokens (nbf) do usuário, sem afetar outro usuário nem empresa', async () => {
     const t0 = Date.UTC(2026, 5, 1, 12, 0, 0);
     let clock = t0;
     const { store } = await createStore({ now: () => new Date(clock) });
-    const [clientA, clientB, userA, userA2, userB] = [
+    const [companyA, companyB, membershipA, membershipA2, membershipB] = [
       scope(),
       scope(),
       randomUUID(),
@@ -254,30 +254,30 @@ describe('RedisSessionStore: rotação, reuso e revogação (Redis real)', () =>
       randomUUID(),
     ];
     const sessions = [
-      { scope: clientA, sid: randomUUID(), user: userA },
-      { scope: clientA, sid: randomUUID(), user: userA },
-      { scope: clientA, sid: randomUUID(), user: userA2 },
-      { scope: clientB, sid: randomUUID(), user: userB },
+      { scope: companyA, sid: randomUUID(), membership: membershipA },
+      { scope: companyA, sid: randomUUID(), membership: membershipA },
+      { scope: companyA, sid: randomUUID(), membership: membershipA2 },
+      { scope: companyB, sid: randomUUID(), membership: membershipB },
     ];
     const hashes = sessions.map(() => newHash());
     for (const [index, session] of sessions.entries()) {
       await store.createSession({
         scope: session.scope,
         sessionId: session.sid,
-        subjectId: session.user,
+        subjectId: session.membership,
         refreshHash: hashes[index] ?? '',
       });
     }
     const iat = Math.floor(t0 / 1000);
     clock += 5_000;
-    await store.revokeAllSessions(clientA, userA);
+    await store.revokeAllSessions(companyA, membershipA);
     const check = (index: number, issuedAt = iat) => {
       const session = sessions[index];
       assert.ok(session);
       return store.checkAccess({
         scope: session.scope,
         sessionId: session.sid,
-        subjectId: session.user,
+        subjectId: session.membership,
         issuedAt,
       });
     };
@@ -288,31 +288,31 @@ describe('RedisSessionStore: rotação, reuso e revogação (Redis real)', () =>
     // Um token novo (iat depois do nbf) de uma sessão nova do mesmo usuário vale.
     const fresh = randomUUID();
     await store.createSession({
-      scope: clientA,
+      scope: companyA,
       sessionId: fresh,
-      subjectId: userA,
+      subjectId: membershipA,
       refreshHash: newHash(),
     });
     assert.equal(
       await store.checkAccess({
-        scope: clientA,
+        scope: companyA,
         sessionId: fresh,
-        subjectId: userA,
+        subjectId: membershipA,
         issuedAt: iat + 5,
       }),
       'ok',
     );
     assert.equal(
       await store.checkAccess({
-        scope: clientA,
+        scope: companyA,
         sessionId: fresh,
-        subjectId: userA,
+        subjectId: membershipA,
         issuedAt: iat + 4,
       }),
       'revoked',
       'iat anterior ao nbf cai mesmo numa sessão sem marca de revogação',
     );
-    // Os refresh das sessões revogadas falham; os do outro usuário e do outro cliente continuam.
+    // Os refresh das sessões revogadas falham; os do outro usuário e do outra empresa continuam.
     for (const index of [0, 1]) {
       const session = sessions[index];
       assert.ok(session);
@@ -463,10 +463,10 @@ describe('RedisSessionStore: chaves, TTL e o que fica no Redis', () => {
     assert.ok(dump.includes(sha(secret2)), 'o hash do refresh vigente está lá');
   });
 
-  it('toda chave de sessão começa por <prefixo><ClientId|platform>: (login-fail é a exceção declarada)', async () => {
+  it('toda chave de sessão começa por <prefixo><CompanyId|platform>: (login-fail é a exceção declarada)', async () => {
     const env = await createStore();
-    const clientId = scope();
-    for (const entityScope of [clientId, 'platform']) {
+    const companyId = scope();
+    for (const entityScope of [companyId, 'platform']) {
       const [sid, uid] = [randomUUID(), randomUUID()];
       const h1 = newHash();
       await env.store.createSession({
@@ -488,12 +488,12 @@ describe('RedisSessionStore: chaves, TTL e o que fica no Redis', () => {
     const keys = await env.keys();
     assert.ok(keys.length > 8);
     const pattern = new RegExp(
-      `^${env.prefix}(?:${clientId}|platform):(?:sess|used|usess|rsid|nbf):[0-9a-f-]{36}$`,
+      `^${env.prefix}(?:${companyId}|platform):(?:sess|used|usess|rsid|nbf):[0-9a-f-]{36}$`,
     );
     const others = keys.filter((key) => !pattern.test(key));
     assert.deepEqual(others, [`${env.prefix}login-fail:${sha('conta')}`]);
     assert.ok(keys.some((key) => key.startsWith(`${env.prefix}platform:`)));
-    assert.ok(keys.some((key) => key.startsWith(`${env.prefix}${clientId}:`)));
+    assert.ok(keys.some((key) => key.startsWith(`${env.prefix}${companyId}:`)));
   });
 
   it('escopo, sessão ou hash fora do formato são recusados antes de ir ao Redis', async () => {

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { ClientService } from '../../application/clients/client.service.js';
-import type { Client, UserRole } from '../../domain/index.js';
+import { CompanyService } from '../../application/companies/company.service.js';
+import type { Company, MembershipRole } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
 import { bearer } from '../../test-support/in-memory-auth.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
@@ -16,7 +16,7 @@ import { type AuthComponents, createAuthComponents } from '../auth/create-auth.j
 import { ScryptPasswordHasher } from '../auth/scrypt-password-hasher.js';
 import { createRedis, type RedisHandle } from '../cache/redis.client.js';
 import { createRateLimitRedis, type RateLimitRedisHandle } from '../cache/rate-limit-redis.js';
-import { createDatabase, type Database, PrismaClientRepository } from '../database/index.js';
+import { createDatabase, type Database, PrismaCompanyRepository } from '../database/index.js';
 import { createMetrics, type Metrics } from '../metrics/index.js';
 import { type RateLimitProfiles } from './rate-limit/rate-limit.js';
 import { buildServer } from './server.js';
@@ -121,8 +121,8 @@ async function createHarness(
     },
     metrics,
     auth: auth.service,
-    userAdmin: auth.userAdmin,
-    admin: { clients: new ClientService(new PrismaClientRepository(database.prisma)) },
+    membershipAdmin: auth.membershipAdmin,
+    admin: { companies: new CompanyService(new PrismaCompanyRepository(database.prisma)) },
     rateLimit: {
       redis: rateRedis.client,
       profiles: options.profiles ?? profiles(),
@@ -169,9 +169,9 @@ interface Person {
   refreshToken: string;
 }
 
-async function enroll(h: Harness, client: Client, role: UserRole): Promise<Person> {
+async function enroll(h: Harness, company: Company, role: MembershipRole): Promise<Person> {
   const email = emailFor(role.toLowerCase());
-  const user = await h.auth.users.create(client.id, {
+  const membership = await h.auth.memberships.create(company.id, {
     email,
     passwordHash: await h.auth.hasher.hash(PASSWORD),
     role,
@@ -179,12 +179,12 @@ async function enroll(h: Harness, client: Client, role: UserRole): Promise<Perso
   const response = await h.app.inject({
     method: 'POST',
     url: '/auth/login',
-    payload: { clientSlug: client.slug, email, password: PASSWORD },
+    payload: { companySlug: company.slug, email, password: PASSWORD },
     remoteAddress: '203.0.113.10',
   });
   assert.equal(response.statusCode, 200, response.body);
   const tokens = response.json<{ accessToken: string; refreshToken: string }>();
-  return { id: user.id, email, ...tokens };
+  return { id: membership.id, email, ...tokens };
 }
 
 const as = (
@@ -205,91 +205,100 @@ const as = (
 const stable = (response: LightMyRequestResponse): string =>
   response.body.replace(/"requestId":"[^"]*"/, '');
 
-describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => {
-  it('o OWNER de A com :clientId ou userId de B recebe 404 idêntico ao de inexistente; nada de B muda; o ClientId vem do token', async () => {
+describe('RBAC de ponta a ponta (Postgres e Redis reais, duas empresas)', () => {
+  it('o OWNER de A com :companyId ou membershipId de B recebe 404 idêntico ao de inexistente; nada de B muda; o CompanyId vem do token', async () => {
     await withHarness({}, async (h) => {
-      const a = await tenants.createClient('rbac-a');
-      const b = await tenants.createClient('rbac-b');
+      const a = await tenants.createCompany('rbac-a');
+      const b = await tenants.createCompany('rbac-b');
       const ownerA = await enroll(h, a, 'OWNER');
       const victim = await enroll(h, b, 'AGENT');
       await enroll(h, b, 'OWNER');
       const ghost = randomUUID();
 
-      const alienClient = [
-        await as(h, ownerA, 'GET', `/admin/clients/${b.id}/users`),
-        await as(h, ownerA, 'PATCH', `/admin/clients/${b.id}/users/${victim.id}`, {
+      const alienCompany = [
+        await as(h, ownerA, 'GET', `/admin/companies/${b.id}/memberships`),
+        await as(h, ownerA, 'PATCH', `/admin/companies/${b.id}/memberships/${victim.id}`, {
           role: 'VIEWER',
         }),
       ];
-      const ghostClient = [
-        await as(h, ownerA, 'GET', `/admin/clients/${ghost}/users`),
-        await as(h, ownerA, 'PATCH', `/admin/clients/${ghost}/users/${victim.id}`, {
+      const ghostCompany = [
+        await as(h, ownerA, 'GET', `/admin/companies/${ghost}/memberships`),
+        await as(h, ownerA, 'PATCH', `/admin/companies/${ghost}/memberships/${victim.id}`, {
           role: 'VIEWER',
         }),
       ];
-      for (const response of [...alienClient, ...ghostClient])
+      for (const response of [...alienCompany, ...ghostCompany])
         assert.equal(response.statusCode, 404);
-      assert.deepEqual(alienClient.map(stable), ghostClient.map(stable));
+      assert.deepEqual(alienCompany.map(stable), ghostCompany.map(stable));
 
-      const alienUser = [
-        await as(h, ownerA, 'PATCH', `/admin/clients/${a.id}/users/${victim.id}`, {
+      const alienMembership = [
+        await as(h, ownerA, 'PATCH', `/admin/companies/${a.id}/memberships/${victim.id}`, {
           role: 'VIEWER',
         }),
-        await as(h, ownerA, 'POST', `/admin/clients/${a.id}/users/${victim.id}/password`, {
+        await as(h, ownerA, 'POST', `/admin/companies/${a.id}/memberships/${victim.id}/password`, {
           newPassword: NEW_PASSWORD,
         }),
       ];
-      const ghostUser = [
-        await as(h, ownerA, 'PATCH', `/admin/clients/${a.id}/users/${ghost}`, { role: 'VIEWER' }),
-        await as(h, ownerA, 'POST', `/admin/clients/${a.id}/users/${ghost}/password`, {
+      const ghostMembership = [
+        await as(h, ownerA, 'PATCH', `/admin/companies/${a.id}/memberships/${ghost}`, {
+          role: 'VIEWER',
+        }),
+        await as(h, ownerA, 'POST', `/admin/companies/${a.id}/memberships/${ghost}/password`, {
           newPassword: NEW_PASSWORD,
         }),
       ];
-      for (const response of [...alienUser, ...ghostUser]) assert.equal(response.statusCode, 404);
-      assert.deepEqual(alienUser.map(stable), ghostUser.map(stable));
+      for (const response of [...alienMembership, ...ghostMembership])
+        assert.equal(response.statusCode, 404);
+      assert.deepEqual(alienMembership.map(stable), ghostMembership.map(stable));
 
       // Nada de B foi lido nem alterado, e a trilha de B continua vazia.
-      assert.equal((await h.auth.users.findById(b.id, victim.id)).role, 'AGENT');
-      assert.equal(await h.auth.users.countActiveOwners(b.id), 1);
+      assert.equal((await h.auth.memberships.findById(b.id, victim.id)).role, 'AGENT');
+      assert.equal(await h.auth.memberships.countActiveOwners(b.id), 1);
       const login = await h.app.inject({
         method: 'POST',
         url: '/auth/login',
-        payload: { clientSlug: b.slug, email: victim.email, password: PASSWORD },
+        payload: { companySlug: b.slug, email: victim.email, password: PASSWORD },
       });
       assert.equal(login.statusCode, 200, 'a senha do alvo de B não mudou');
 
-      // Um usuário criado por A nasce em A, mesmo com o :clientId (conferido) igual ao do token.
-      const created = await as(h, ownerA, 'POST', `/admin/clients/${a.id}/users`, {
+      // Um usuário criado por A nasce em A, mesmo com o :companyId (conferido) igual ao do token.
+      const created = await as(h, ownerA, 'POST', `/admin/companies/${a.id}/memberships`, {
         email: emailFor('novo'),
         password: PASSWORD,
         role: 'AGENT',
       });
       assert.equal(created.statusCode, 201);
       const createdId = created.json<{ id: string }>().id;
-      assert.equal((await h.auth.users.findById(a.id, createdId)).clientId, a.id);
-      await assert.rejects(h.auth.users.findById(b.id, createdId));
+      assert.equal((await h.auth.memberships.findById(a.id, createdId)).companyId, a.id);
+      await assert.rejects(h.auth.memberships.findById(b.id, createdId));
     });
   });
 
-  it('GET /audit-events: cada cliente lê só a própria trilha (Postgres real), com cursor, e o VIEWER recebe 403', async () => {
+  it('GET /audit-events: cada empresa lê só a própria trilha (Postgres real), com cursor, e o VIEWER recebe 403', async () => {
     await withHarness({}, async (h) => {
-      const a = await tenants.createClient('rbac-aud-a');
-      const b = await tenants.createClient('rbac-aud-b');
+      const a = await tenants.createCompany('rbac-aud-a');
+      const b = await tenants.createCompany('rbac-aud-b');
       const ownerA = await enroll(h, a, 'OWNER');
       const ownerB = await enroll(h, b, 'OWNER');
       const viewer = await enroll(h, a, 'VIEWER');
       const agentA = await enroll(h, a, 'AGENT');
       const agentB = await enroll(h, b, 'AGENT');
       for (const role of ['VIEWER', 'ADMIN', 'AGENT'] as const) {
-        const done = await as(h, ownerA, 'PATCH', `/admin/clients/${a.id}/users/${agentA.id}`, {
-          role,
-        });
+        const done = await as(
+          h,
+          ownerA,
+          'PATCH',
+          `/admin/companies/${a.id}/memberships/${agentA.id}`,
+          {
+            role,
+          },
+        );
         assert.equal(done.statusCode, 200);
         await sleep(3);
       }
       assert.equal(
         (
-          await as(h, ownerB, 'PATCH', `/admin/clients/${b.id}/users/${agentB.id}`, {
+          await as(h, ownerB, 'PATCH', `/admin/companies/${b.id}/memberships/${agentB.id}`, {
             role: 'ADMIN',
           })
         ).statusCode,
@@ -299,8 +308,8 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
         items: {
           id: string;
           action: string;
-          actorUserId: string;
-          targetUserId: string;
+          actorMembershipId: string;
+          targetMembershipId: string;
           toRole: string | null;
         }[];
         nextCursor: string | null;
@@ -313,7 +322,7 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
           h,
           ownerA,
           'GET',
-          `/admin/clients/${a.id}/audit-events?limit=2${cursor === undefined ? '' : `&cursor=${cursor}`}`,
+          `/admin/companies/${a.id}/audit-events?limit=2${cursor === undefined ? '' : `&cursor=${cursor}`}`,
         );
         assert.equal(response.statusCode, 200);
         const page = response.json<Page>();
@@ -328,19 +337,22 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
         'mais recentes primeiro',
       );
       assert.ok(
-        seen.every((event) => event.actorUserId === ownerA.id && event.targetUserId === agentA.id),
+        seen.every(
+          (event) =>
+            event.actorMembershipId === ownerA.id && event.targetMembershipId === agentA.id,
+        ),
       );
       const fromB = (
-        await as(h, ownerB, 'GET', `/admin/clients/${b.id}/audit-events`)
+        await as(h, ownerB, 'GET', `/admin/companies/${b.id}/audit-events`)
       ).json<Page>();
       assert.equal(fromB.items.length, 1);
       assert.ok(!seen.some((event) => fromB.items.some((other) => other.id === event.id)));
       assert.equal(
-        (await as(h, viewer, 'GET', `/admin/clients/${a.id}/audit-events`)).statusCode,
+        (await as(h, viewer, 'GET', `/admin/companies/${a.id}/audit-events`)).statusCode,
         403,
       );
       assert.equal(
-        (await as(h, ownerA, 'GET', `/admin/clients/${b.id}/audit-events`)).statusCode,
+        (await as(h, ownerA, 'GET', `/admin/companies/${b.id}/audit-events`)).statusCode,
         404,
       );
     });
@@ -348,14 +360,14 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
 
   it('mudar papel, desativar e redefinir senha derrubam o access token ainda válido e o refresh (Redis real); o login traz o papel novo', async () => {
     await withHarness({}, async (h) => {
-      const client = await tenants.createClient('rbac-sess');
-      const other = await tenants.createClient('rbac-sess-b');
-      const owner = await enroll(h, client, 'OWNER');
-      const bystander = await enroll(h, client, 'AGENT');
+      const company = await tenants.createCompany('rbac-sess');
+      const other = await tenants.createCompany('rbac-sess-b');
+      const owner = await enroll(h, company, 'OWNER');
+      const bystander = await enroll(h, company, 'AGENT');
       const alien = await enroll(h, other, 'AGENT');
-      const url = (id: string): string => `/admin/clients/${client.id}/users/${id}`;
+      const url = (id: string): string => `/admin/companies/${company.id}/memberships/${id}`;
 
-      const demoted = await enroll(h, client, 'ADMIN');
+      const demoted = await enroll(h, company, 'ADMIN');
       assert.equal((await as(h, demoted, 'GET', '/auth/me')).statusCode, 200);
       assert.equal(
         (await as(h, owner, 'PATCH', url(demoted.id), { role: 'AGENT' })).statusCode,
@@ -371,7 +383,7 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       const relogin = await h.app.inject({
         method: 'POST',
         url: '/auth/login',
-        payload: { clientSlug: client.slug, email: demoted.email, password: PASSWORD },
+        payload: { companySlug: company.slug, email: demoted.email, password: PASSWORD },
       });
       assert.equal(relogin.statusCode, 200);
       const reborn: Person = {
@@ -379,11 +391,11 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
         ...relogin.json<{ accessToken: string; refreshToken: string }>(),
       };
       assert.equal(
-        (await as(h, reborn, 'GET', `/admin/clients/${client.id}/users`)).statusCode,
+        (await as(h, reborn, 'GET', `/admin/companies/${company.id}/memberships`)).statusCode,
         403,
       );
 
-      const disabled = await enroll(h, client, 'AGENT');
+      const disabled = await enroll(h, company, 'AGENT');
       assert.equal(
         (await as(h, owner, 'PATCH', url(disabled.id), { status: 'DISABLED' })).statusCode,
         200,
@@ -392,11 +404,11 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       const blocked = await h.app.inject({
         method: 'POST',
         url: '/auth/login',
-        payload: { clientSlug: client.slug, email: disabled.email, password: PASSWORD },
+        payload: { companySlug: company.slug, email: disabled.email, password: PASSWORD },
       });
       assert.equal(blocked.statusCode, 401);
 
-      const reset = await enroll(h, client, 'AGENT');
+      const reset = await enroll(h, company, 'AGENT');
       const resetResponse = await as(h, owner, 'POST', `${url(reset.id)}/password`, {
         newPassword: NEW_PASSWORD,
       });
@@ -405,11 +417,11 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       const withNew = await h.app.inject({
         method: 'POST',
         url: '/auth/login',
-        payload: { clientSlug: client.slug, email: reset.email, password: NEW_PASSWORD },
+        payload: { companySlug: company.slug, email: reset.email, password: NEW_PASSWORD },
       });
       assert.equal(withNew.statusCode, 200);
 
-      // Outras pessoas, do mesmo cliente e de outro, não foram afetadas.
+      // Outras pessoas, do mesma empresa e de outro, não foram afetadas.
       for (const who of [owner, bystander, alien]) {
         assert.equal((await as(h, who, 'GET', '/auth/me')).statusCode, 200);
       }
@@ -418,8 +430,8 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
 
   it('POST /auth/password: errada conta e bloqueia (429 antes do hash); certa troca e derruba todas as sessões (Redis real)', async () => {
     await withHarness({}, async (h) => {
-      const client = await tenants.createClient('rbac-pw');
-      const person = await enroll(h, client, 'VIEWER');
+      const company = await tenants.createCompany('rbac-pw');
+      const person = await enroll(h, company, 'VIEWER');
       const wrong = { currentPassword: `${PASSWORD}-x`, newPassword: NEW_PASSWORD };
       for (let i = 0; i < 3; i += 1) {
         assert.equal((await as(h, person, 'POST', '/auth/password', wrong)).statusCode, 401);
@@ -434,11 +446,11 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       assert.equal(h.hasher.verifyCalls, before, '429 vem antes de gastar hash');
 
       // Outra pessoa troca a sua sem problema (o contador é por pessoa).
-      const other = await enroll(h, client, 'AGENT');
+      const other = await enroll(h, company, 'AGENT');
       const second = await h.app.inject({
         method: 'POST',
         url: '/auth/login',
-        payload: { clientSlug: client.slug, email: other.email, password: PASSWORD },
+        payload: { companySlug: company.slug, email: other.email, password: PASSWORD },
       });
       const secondSession = second.json<{ accessToken: string; refreshToken: string }>();
       const changed = await as(h, other, 'POST', '/auth/password', {
@@ -462,7 +474,7 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       const relogin = await h.app.inject({
         method: 'POST',
         url: '/auth/login',
-        payload: { clientSlug: client.slug, email: other.email, password: NEW_PASSWORD },
+        payload: { companySlug: company.slug, email: other.email, password: NEW_PASSWORD },
       });
       assert.equal(relogin.statusCode, 200);
     });
@@ -480,8 +492,8 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       viaProxy.port = String(proxy.listeningPort);
       try {
         await withHarness({ rateRedisUrl: viaProxy.toString() }, async (h) => {
-          const client = await tenants.createClient('rbac-pw-down');
-          const person = await enroll(h, client, 'AGENT');
+          const company = await tenants.createCompany('rbac-pw-down');
+          const person = await enroll(h, company, 'AGENT');
           for (const mode of ['blackhole', 'stop'] as const) {
             if (mode === 'blackhole') proxy.mode = 'blackhole';
             else {
@@ -504,7 +516,7 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
           const stillValid = await h.app.inject({
             method: 'POST',
             url: '/auth/login',
-            payload: { clientSlug: client.slug, email: person.email, password: PASSWORD },
+            payload: { companySlug: company.slug, email: person.email, password: PASSWORD },
           });
           const deadline = Date.now() + 15_000;
           let status = stillValid.statusCode;
@@ -514,7 +526,7 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
               await h.app.inject({
                 method: 'POST',
                 url: '/auth/login',
-                payload: { clientSlug: client.slug, email: person.email, password: PASSWORD },
+                payload: { companySlug: company.slug, email: person.email, password: PASSWORD },
               })
             ).statusCode;
           }
@@ -528,11 +540,11 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
 
   it('senhas, e-mails, tokens e hashes nunca aparecem em log, métrica nem corpo de erro das rotas novas', async () => {
     await withHarness({}, async (h) => {
-      const client = await tenants.createClient('rbac-priv');
-      const owner = await enroll(h, client, 'OWNER');
+      const company = await tenants.createCompany('rbac-priv');
+      const owner = await enroll(h, company, 'OWNER');
       const secretEmail = emailFor('segredo');
       const errorBodies: string[] = [];
-      const created = await as(h, owner, 'POST', `/admin/clients/${client.id}/users`, {
+      const created = await as(h, owner, 'POST', `/admin/companies/${company.id}/memberships`, {
         email: secretEmail,
         password: NEW_PASSWORD,
         role: 'AGENT',
@@ -540,17 +552,19 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       assert.equal(created.statusCode, 201);
       const id = created.json<{ id: string }>().id;
       for (const response of [
-        await as(h, owner, 'POST', `/admin/clients/${client.id}/users`, {
+        await as(h, owner, 'POST', `/admin/companies/${company.id}/memberships`, {
           email: secretEmail,
           password: NEW_PASSWORD,
           role: 'AGENT',
         }),
-        await as(h, owner, 'POST', `/admin/clients/${client.id}/users`, {
+        await as(h, owner, 'POST', `/admin/companies/${company.id}/memberships`, {
           email: 'invalido',
           password: NEW_PASSWORD,
           role: 'AGENT',
         }),
-        await as(h, owner, 'PATCH', `/admin/clients/${client.id}/users/${id}`, { role: 'ROOT' }),
+        await as(h, owner, 'PATCH', `/admin/companies/${company.id}/memberships/${id}`, {
+          role: 'ROOT',
+        }),
         await as(h, owner, 'POST', '/auth/password', {
           currentPassword: `${PASSWORD}-errada`,
           newPassword: NEW_PASSWORD,
@@ -559,11 +573,13 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
         assert.ok(response.statusCode >= 400);
         errorBodies.push(response.body);
       }
-      await as(h, owner, 'PATCH', `/admin/clients/${client.id}/users/${id}`, { role: 'VIEWER' });
-      await as(h, owner, 'POST', `/admin/clients/${client.id}/users/${id}/password`, {
+      await as(h, owner, 'PATCH', `/admin/companies/${company.id}/memberships/${id}`, {
+        role: 'VIEWER',
+      });
+      await as(h, owner, 'POST', `/admin/companies/${company.id}/memberships/${id}/password`, {
         newPassword: NEW_PASSWORD,
       });
-      const stored = await h.auth.users.findCredentialsById(client.id, id);
+      const stored = await h.auth.memberships.findCredentialsById(company.id, id);
       const everything = `${h.logs.raw()}\n${await h.metrics.render()}\n${errorBodies.join('\n')}`;
       for (const secret of [
         PASSWORD,
@@ -577,7 +593,10 @@ describe('RBAC de ponta a ponta (Postgres e Redis reais, dois clientes)', () => 
       ]) {
         assert.ok(!everything.includes(secret), `vazou: ${secret.slice(0, 10)}`);
       }
-      assert.match(await h.metrics.render(), /user_admin_actions_total\{action="USER_CREATED"\} 1/);
+      assert.match(
+        await h.metrics.render(),
+        /membership_admin_actions_total\{action="MEMBERSHIP_CREATED"\} 1/,
+      );
     });
   });
 });

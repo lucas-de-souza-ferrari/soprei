@@ -1,14 +1,14 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { AuthService, deriveLoginLockSecret } from '../../application/auth/auth.service.js';
-import { UserAdminService } from '../../application/users/user-admin.service.js';
-import type { PlatformAdminRepository, UserRepository } from '../../domain/index.js';
+import { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
+import type { PlatformAdminRepository, MembershipRepository } from '../../domain/index.js';
 import type { Config } from '../config/index.js';
 import {
   PrismaAuditRepository,
-  PrismaClientRepository,
+  PrismaCompanyRepository,
   PrismaPlatformAdminRepository,
-  PrismaUserAdminUnitOfWork,
-  PrismaUserRepository,
+  PrismaMembershipAdminUnitOfWork,
+  PrismaMembershipRepository,
   type TenantScopedPrisma,
 } from '../database/index.js';
 import type { Metrics } from '../metrics/index.js';
@@ -34,11 +34,11 @@ export type AuthConfig = Pick<
 
 export interface AuthComponents {
   readonly service: AuthService;
-  /** Gestão de usuários do cliente, troca da própria senha e auditoria (spec 008). */
-  readonly userAdmin: UserAdminService;
+  /** Gestão de usuários da empresa, troca da própria senha e auditoria (spec 008). */
+  readonly membershipAdmin: MembershipAdminService;
   readonly hasher: ScryptPasswordHasher;
   readonly sessions: RedisSessionStore;
-  readonly users: UserRepository;
+  readonly memberships: MembershipRepository;
   readonly platformAdmins: PlatformAdminRepository;
 }
 
@@ -53,7 +53,7 @@ export function createAuthComponents(params: {
   readonly hasher?: ScryptPasswordHasher;
 }): AuthComponents {
   const { config, logger, prisma, authRedis, metrics } = params;
-  const users = new PrismaUserRepository(prisma);
+  const memberships = new PrismaMembershipRepository(prisma);
   const platformAdmins = new PrismaPlatformAdminRepository(prisma);
   const hasher = params.hasher ?? new ScryptPasswordHasher();
   const sessions = new RedisSessionStore({
@@ -67,8 +67,8 @@ export function createAuthComponents(params: {
     loginLockSeconds: config.AUTH_LOGIN_LOCK_SECONDS,
   });
   const service = new AuthService({
-    clients: new PrismaClientRepository(prisma),
-    users,
+    companies: new PrismaCompanyRepository(prisma),
+    memberships,
     platformAdmins,
     hasher,
     tokens: new JoseAccessTokenService({
@@ -83,17 +83,17 @@ export function createAuthComponents(params: {
     metrics,
     loginLockSecret: deriveLoginLockSecret(config.JWT_SECRET),
   });
-  const userAdmin = new UserAdminService({
-    users,
+  const membershipAdmin = new MembershipAdminService({
+    memberships,
     audit: new PrismaAuditRepository(prisma),
-    unitOfWork: new PrismaUserAdminUnitOfWork(prisma),
+    unitOfWork: new PrismaMembershipAdminUnitOfWork(prisma),
     hasher,
     sessions,
     logger,
     metrics,
     loginLockSecret: deriveLoginLockSecret(config.JWT_SECRET),
   });
-  return { service, userAdmin, hasher, sessions, users, platformAdmins };
+  return { service, membershipAdmin, hasher, sessions, memberships, platformAdmins };
 }
 
 /**
