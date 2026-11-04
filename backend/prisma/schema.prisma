@@ -68,6 +68,8 @@ model Conversation {
   @@unique([id, companyId])
   @@unique([companyId, contactRef])
   @@index([companyId, createdAt, id])
+  // Lista do painel por última atividade (spec 024).
+  @@index([companyId, updatedAt, id])
   @@map("conversations")
 }
 

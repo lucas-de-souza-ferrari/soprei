@@ -118,6 +118,56 @@ export function buildDescPageQuery(options: ListOptions | undefined): {
   };
 }
 
+/** Ordem por última atividade, decrescente: `updatedAt` e, no empate, `id` (spec 024). */
+export type ActivityOrderBy = [{ updatedAt: 'desc' }, { id: 'desc' }];
+
+export function activityOrderBy(): ActivityOrderBy {
+  return [{ updatedAt: 'desc' }, { id: 'desc' }];
+}
+
+/** Condição "depois do cursor" na ordem por atividade decrescente. */
+export type AfterActivityCursor =
+  { updatedAt: { lt: Date } } | { updatedAt: Date; id: { lt: string } };
+
+/**
+ * Como `buildDescPageQuery`, mas a chave do cursor é `updatedAt` (última atividade). A codificação
+ * é a mesma (`[data ISO, id]` em base64url); só o nome da coluna muda.
+ */
+export function buildActivityPageQuery(options: ListOptions | undefined): {
+  readonly limit: number;
+  readonly take: number;
+  readonly after: AfterActivityCursor[] | undefined;
+} {
+  const limit = resolveLimit(options?.limit);
+  const cursor = options?.cursor === undefined ? undefined : decodeCursor(options.cursor);
+  return {
+    limit,
+    take: limit + 1,
+    after:
+      cursor === undefined
+        ? undefined
+        : [
+            { updatedAt: { lt: cursor.createdAt } },
+            { updatedAt: cursor.createdAt, id: { lt: cursor.id } },
+          ],
+  };
+}
+
+/** Página da listagem por atividade: o cursor leva o `updatedAt` e o `id` da última linha. */
+export function toActivityPage<TRow extends { readonly id: string; readonly updatedAt: Date }, T>(
+  rows: readonly TRow[],
+  limit: number,
+  map: (row: TRow) => T,
+): Page<T> {
+  const pageRows = rows.slice(0, limit);
+  const last = pageRows.at(-1);
+  const hasMore = rows.length > limit && last !== undefined;
+  return {
+    items: pageRows.map(map),
+    nextCursor: hasMore ? encodeCursor({ createdAt: last.updatedAt, id: last.id }) : null,
+  };
+}
+
 export function toPage<TRow extends PagedRow, T>(
   rows: readonly TRow[],
   limit: number,

@@ -2,6 +2,7 @@ import type {
   CompanyId,
   ListOptions,
   Message,
+  MessageOrder,
   MessageRepository,
   MessageSentMark,
   MessageUpdate,
@@ -11,7 +12,13 @@ import type {
 import type { Message as MessageRow } from '../../../generated/prisma/client.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
-import { buildPageQuery, stableOrderBy, toPage } from './cursor.js';
+import {
+  buildDescPageQuery,
+  buildPageQuery,
+  descOrderBy,
+  stableOrderBy,
+  toPage,
+} from './cursor.js';
 import { toMessage } from './mappers.js';
 import { PrismaTenantRepository, type TenantModelOps } from './tenant.repository.base.js';
 import type { TenantScopedDb } from '../extensions/tenant-scope.js';
@@ -20,8 +27,8 @@ function messageOps(db: TenantScopedDb): TenantModelOps<MessageRow, NewMessage, 
   return {
     findFirst: (where) => db.message.findFirst({ where }),
     findMany: ({ where, orderBy, take }) => db.message.findMany({ where, orderBy, take }),
-    create: (data) =>
-      db.message.create({
+    create: async (data) => {
+      const row = await db.message.create({
         data: {
           companyId: data.companyId,
           conversationId: data.conversationId,
@@ -32,7 +39,19 @@ function messageOps(db: TenantScopedDb): TenantModelOps<MessageRow, NewMessage, 
           ...(data.replyToId === undefined ? {} : { replyToId: data.replyToId }),
           ...(data.createdAt === undefined ? {} : { createdAt: data.createdAt }),
         },
-      }),
+      });
+      // Última atividade da conversa (spec 024), na mesma transação quando há uma: o `updatedAt`
+      // só avança (nunca volta) até o instante da mensagem. O `where` leva a empresa, como sempre.
+      await db.conversation.updateMany({
+        where: {
+          companyId: data.companyId,
+          id: data.conversationId,
+          updatedAt: { lt: row.createdAt },
+        },
+        data: { updatedAt: row.createdAt },
+      });
+      return row;
+    },
     // Mensagens são imutáveis: "atualizar" só confirma que a mensagem existe nesta empresa.
     updateMany: async (where) => ({ count: await db.message.count({ where }) }),
     deleteMany: (where) => db.message.deleteMany({ where }),
@@ -181,10 +200,20 @@ export class PrismaMessageRepository
     companyId: CompanyId,
     conversationId: string,
     options?: ListOptions,
+    order: MessageOrder = 'asc',
   ): Promise<Page<Message>> {
     return this.run('listByConversation', async () => {
       if (!isUuid(conversationId)) {
         throw new NotFoundError('Recurso não encontrado', { context: { entity: 'Conversation' } });
+      }
+      if (order === 'desc') {
+        const { limit, take, after } = buildDescPageQuery(options);
+        const rows = await this.db.message.findMany({
+          where: { companyId, conversationId, ...(after === undefined ? {} : { OR: after }) },
+          orderBy: descOrderBy(),
+          take,
+        });
+        return toPage(rows, limit, toMessage);
       }
       const { limit, take, after } = buildPageQuery(options);
       const rows = await this.db.message.findMany({

@@ -42,6 +42,8 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     messages: Message[];
     /** Ids de mensagens marcadas como atendidas (`markAnswered`) dentro da transação. */
     answered: string[];
+    /** `updatedAt` anterior das conversas tocadas por uma mensagem gravada na transação. */
+    touched: { id: string; previous: Date }[];
   }>();
 
   constructor(private readonly now: () => Date = () => new Date()) {
@@ -51,6 +53,19 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         this.step(() =>
           page(
             this.conversationRows.filter((row) => row.companyId === companyId),
+            options,
+          ),
+        ),
+      listByActivity: (companyId, options) =>
+        this.step(() =>
+          page(
+            this.conversationRows
+              .filter((row) => row.companyId === companyId)
+              .sort(
+                (left, right) =>
+                  right.updatedAt.getTime() - left.updatedAt.getTime() ||
+                  (left.id < right.id ? 1 : left.id > right.id ? -1 : 0),
+              ),
             options,
           ),
         ),
@@ -112,8 +127,12 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         this.step(() => this.pendingIn(companyId, conversationId).slice(0, limit)),
       markAnswered: (companyId, messageIds, replyId) =>
         this.step(() => this.applyAnswered(companyId, messageIds, replyId)),
-      listByConversation: (companyId, conversationId, options) =>
-        this.step(() => page(this.inConversation(companyId, conversationId), options)),
+      listByConversation: (companyId, conversationId, options, order = 'asc') =>
+        this.step(() => {
+          // Como o banco, só a conversa desta empresa tem histórico (o service confere antes).
+          const rows = this.inConversation(companyId, conversationId);
+          return page(order === 'desc' ? rows.reverse() : rows, options);
+        }),
     } satisfies MessageRepository;
   }
 
@@ -131,6 +150,7 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       conversations: [] as Conversation[],
       messages: [] as Message[],
       answered: [] as string[],
+      touched: [] as { id: string; previous: Date }[],
     };
     this.openTransactions += 1;
     try {
@@ -145,8 +165,15 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         if (row !== undefined) this.messageRows[index] = { ...row, answeredById: null };
       }
       for (const row of log.messages) this.messageRows.splice(this.messageRows.indexOf(row), 1);
-      for (const row of log.conversations) {
-        this.conversationRows.splice(this.conversationRows.indexOf(row), 1);
+      // Desfaz o toque de `updatedAt` (do mais novo para o mais antigo) e depois as conversas criadas.
+      for (const { id, previous } of log.touched.reverse()) {
+        const index = this.conversationRows.findIndex((row) => row.id === id);
+        const row = this.conversationRows[index];
+        if (row !== undefined) this.conversationRows[index] = { ...row, updatedAt: previous };
+      }
+      for (const created of log.conversations) {
+        const index = this.conversationRows.findIndex((row) => row.id === created.id);
+        if (index !== -1) this.conversationRows.splice(index, 1);
       }
       throw error;
     } finally {
@@ -234,7 +261,19 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     };
     this.messageRows.push(row);
     this.transactionLog.getStore()?.messages.push(row);
+    this.touchConversation(companyId, data.conversationId, row.createdAt);
     return row;
+  }
+
+  /** Última atividade (spec 024): como o banco, o `updatedAt` só avança até o instante da mensagem. */
+  private touchConversation(companyId: CompanyId, conversationId: string, at: Date): void {
+    const index = this.conversationRows.findIndex(
+      (row) => row.companyId === companyId && row.id === conversationId,
+    );
+    const row = this.conversationRows[index];
+    if (row === undefined || row.updatedAt.getTime() >= at.getTime()) return;
+    this.conversationRows[index] = { ...row, updatedAt: at };
+    this.transactionLog.getStore()?.touched.push({ id: row.id, previous: row.updatedAt });
   }
 
   /** Como o `markSent` do banco: só ASSISTANT desta empresa e ainda sem marca. */

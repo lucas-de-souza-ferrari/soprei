@@ -6,11 +6,15 @@ import type { CompanyId } from '../value-objects/company-id.js';
  * Repositório de `Message`. O `CompanyId` é o primeiro parâmetro de todo método; mensagem ou
  * conversa de outra empresa se comporta como inexistente.
  */
+export type MessageOrder = 'asc' | 'desc';
+
 export interface MessageRepository {
   /**
    * Grava a mensagem. Lança `ConflictError` se o `externalId` já existe nesta empresa ou se a
    * mensagem do contato (`replyToId`) já tem resposta. A conversa e a mensagem referenciadas
-   * precisam ser do mesma empresa (o banco garante com chave estrangeira composta).
+   * precisam ser do mesma empresa (o banco garante com chave estrangeira composta). Na mesma
+   * transação, leva a última atividade da conversa (`updatedAt`) até o `createdAt` da mensagem
+   * (nunca para trás; spec 024).
    */
   create(companyId: CompanyId, data: NewMessage): Promise<Message>;
   /** A mensagem desta empresa com esse id de canal, ou `null`. */
@@ -59,10 +63,14 @@ export interface MessageRepository {
     messageIds: readonly string[],
     replyId: string,
   ): Promise<number>;
-  /** Histórico paginado da conversa, em ordem cronológica. */
+  /**
+   * Histórico paginado da conversa: `asc` (padrão) em ordem cronológica, `desc` da mais nova para a
+   * mais antiga (spec 024; o cursor sempre olha adiante na ordem pedida).
+   */
   listByConversation(
     companyId: CompanyId,
     conversationId: string,
     options?: ListOptions,
+    order?: MessageOrder,
   ): Promise<Page<Message>>;
 }

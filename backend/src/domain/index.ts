@@ -27,7 +27,7 @@ export type {
   AttendanceUnitOfWork,
 } from './repositories/attendance-unit-of-work.js';
 export type { ConversationRepository } from './repositories/conversation.repository.js';
-export type { MessageRepository } from './repositories/message.repository.js';
+export type { MessageOrder, MessageRepository } from './repositories/message.repository.js';
 export type { TenantRepository, WithoutCompanyId } from './repositories/tenant.repository.js';
 export { CompanyId } from './value-objects/company-id.js';
 export { EMAIL_MAX_LENGTH, MEMBERSHIP_ROLES, ACCESS_STATUSES } from './entities/membership.js';

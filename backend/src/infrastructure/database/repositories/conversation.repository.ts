@@ -3,10 +3,13 @@ import type {
   Conversation,
   ConversationRepository,
   ConversationUpdate,
+  ListOptions,
   NewConversation,
+  Page,
 } from '../../../domain/index.js';
 import type { Conversation as ConversationRow } from '../../../generated/prisma/client.js';
 import { DatabaseError } from '../../../shared/errors/index.js';
+import { activityOrderBy, buildActivityPageQuery, toActivityPage } from './cursor.js';
 import { toConversation } from './mappers.js';
 import { PrismaTenantRepository, type TenantModelOps } from './tenant.repository.base.js';
 import type { TenantScopedDb } from '../extensions/tenant-scope.js';
@@ -42,6 +45,18 @@ export class PrismaConversationRepository
     return this.run('findByContact', async () => {
       const row = await this.db.conversation.findFirst({ where: { companyId, contactRef } });
       return row === null ? null : toConversation(row);
+    });
+  }
+
+  listByActivity(companyId: CompanyId, options?: ListOptions): Promise<Page<Conversation>> {
+    return this.run('listByActivity', async () => {
+      const { limit, take, after } = buildActivityPageQuery(options);
+      const rows = await this.db.conversation.findMany({
+        where: { companyId, ...(after === undefined ? {} : { OR: after }) },
+        orderBy: activityOrderBy(),
+        take,
+      });
+      return toActivityPage(rows, limit, toConversation);
     });
   }
 

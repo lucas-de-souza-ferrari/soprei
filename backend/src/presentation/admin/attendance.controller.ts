@@ -1,4 +1,5 @@
 import type { FastifyPluginCallback, onRequestAsyncHookHandler } from 'fastify';
+import { describeContact } from '../../application/attendance/contact-label.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { Conversation, Message, Permission } from '../../domain/index.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
@@ -10,6 +11,7 @@ import {
   conversationParamsSchema,
   inboundMessageBodySchema,
   listQuerySchema,
+  messagesQuerySchema,
 } from './attendance.validators.js';
 
 export interface AdminAttendanceControllerOptions {
@@ -19,26 +21,39 @@ export interface AdminAttendanceControllerOptions {
   readonly attendance: AttendanceService;
 }
 
+/**
+ * Conversa para o navegador (spec 024): o `contactRef` (o telefone do contato no WhatsApp) **nunca**
+ * sai por aqui; vai só o rótulo mascarado no servidor e o canal. `updatedAt` é a última atividade.
+ */
 function toConversationResponse(conversation: Conversation): {
   id: string;
-  contactRef: string;
+  contactLabel: string;
+  channel: string;
   createdAt: string;
   updatedAt: string;
 } {
+  const { contactLabel, channel } = describeContact(
+    conversation.companyId,
+    conversation.contactRef,
+  );
   return {
     id: conversation.id,
-    contactRef: conversation.contactRef,
+    contactLabel,
+    channel,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };
 }
 
+/**
+ * Mensagem para o navegador. O `externalId` (o `wamid` do canal, que carrega o telefone em base64)
+ * não sai (spec 024).
+ */
 function toMessageResponse(message: Message): {
   id: string;
   role: string;
   content: string;
   isFallback: boolean;
-  externalId: string | null;
   replyToId: string | null;
   createdAt: string;
   /** Quando a resposta foi entregue ao canal (ISO); nulo = ainda não enviada (ou o envio falhou). */
@@ -49,7 +64,6 @@ function toMessageResponse(message: Message): {
     role: message.role,
     content: message.content,
     isFallback: message.isFallback,
-    externalId: message.externalId,
     replyToId: message.replyToId,
     createdAt: message.createdAt.toISOString(),
     sentAt: message.sentAt === null ? null : message.sentAt.toISOString(),
@@ -104,8 +118,13 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
     async (request) => {
       const { conversationId } = conversationParamsSchema.parse(request.params);
       const { companyId } = membershipAuth(request);
-      const query = listQuerySchema.parse(request.query);
-      const page = await attendance.listMessages(companyId, conversationId, toListOptions(query));
+      const query = messagesQuerySchema.parse(request.query);
+      const page = await attendance.listMessages(
+        companyId,
+        conversationId,
+        toListOptions(query),
+        query.order,
+      );
       return { items: page.items.map(toMessageResponse), nextCursor: page.nextCursor };
     },
   );

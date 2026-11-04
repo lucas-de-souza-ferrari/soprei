@@ -7,6 +7,7 @@ import type {
   ConversationRepository,
   ListOptions,
   Message,
+  MessageOrder,
   MessageRepository,
   Page,
 } from '../../domain/index.js';
@@ -439,18 +440,20 @@ export class AttendanceService {
     options?: ListOptions,
   ): Promise<Page<Conversation>> {
     await this.deps.companies.findById(companyId);
-    return this.deps.conversations.list(companyId, options);
+    // Última atividade primeiro (spec 024).
+    return this.deps.conversations.listByActivity(companyId, options);
   }
 
   async listMessages(
     companyId: CompanyId,
     conversationId: string,
     options?: ListOptions,
+    order?: MessageOrder,
   ): Promise<Page<Message>> {
     await this.deps.companies.findById(companyId);
     // Conversa de outra empresa se comporta como inexistente (NotFoundError).
     await this.deps.conversations.findById(companyId, conversationId);
-    return this.deps.messages.listByConversation(companyId, conversationId, options);
+    return this.deps.messages.listByConversation(companyId, conversationId, options, order);
   }
 
   /**

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
+import { describeContact } from '../../application/attendance/contact-label.js';
 import { CompanyId } from '../../domain/index.js';
 import { CompanyService } from '../../application/companies/company.service.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
@@ -36,7 +37,6 @@ interface MessageBody {
   role: string;
   content: string;
   isFallback: boolean;
-  externalId: string | null;
   replyToId: string | null;
   sentAt: string | null;
 }
@@ -300,7 +300,7 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
       assert.equal(after[1]?.sentAt, sentAt.toISOString());
     });
 
-    it('lista conversas e o histórico em ordem cronológica, com paginação', async () => {
+    it('lista conversas por última atividade e o histórico em ordem cronológica, com paginação', async () => {
       const companyId = await createCompany('get-ok');
       const first = await send(companyId, { contactRef: 'c1', text: 'um', externalId: 'e1' });
       await send(companyId, { contactRef: 'c1', text: 'dois' });
@@ -313,17 +313,26 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
         headers: as(companyId),
       });
       assert.equal(conversations.statusCode, 200);
-      const page = conversations.json<PageBody<{ id: string; contactRef: string }>>();
+      const page = conversations.json<PageBody<{ id: string; contactLabel: string }>>();
       assert.equal(page.items.length, 1);
-      assert.equal(page.items[0]?.id, conversationId);
-      assert.equal(page.items[0].contactRef, 'c1');
+      // A última atividade (c2) vem primeiro; o rótulo é o mascarado no servidor.
+      assert.equal(
+        page.items[0]?.contactLabel,
+        describeContact(CompanyId.parse(companyId), 'c2').contactLabel,
+      );
       assert.notEqual(page.nextCursor, null);
       const next = await app.inject({
         method: 'GET',
         url: `/admin/companies/${companyId}/conversations?limit=1&cursor=${page.nextCursor ?? ''}`,
         headers: as(companyId),
       });
-      assert.equal(next.json<PageBody<{ contactRef: string }>>().items[0]?.contactRef, 'c2');
+      const second = next.json<PageBody<{ id: string; contactLabel: string }>>();
+      assert.equal(second.items[0]?.id, conversationId);
+      assert.equal(
+        second.items[0].contactLabel,
+        describeContact(CompanyId.parse(companyId), 'c1').contactLabel,
+      );
+      assert.equal(second.nextCursor, null);
 
       const messages = await app.inject({
         method: 'GET',
@@ -337,12 +346,11 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
         ['USER', 'ASSISTANT', 'USER', 'ASSISTANT'],
       );
       assert.equal(items[0]?.content, 'um');
-      assert.equal(items[0].externalId, 'e1');
       assert.equal(items[1]?.replyToId, items[0].id);
+      // `externalId` (o wamid, que carrega o telefone) não sai (spec 024).
       assert.deepEqual(Object.keys(items[0]).sort(), [
         'content',
         'createdAt',
-        'externalId',
         'id',
         'isFallback',
         'replyToId',
@@ -359,7 +367,7 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
       assert.notEqual(paged.json<PageBody<MessageBody>>().nextCursor, null);
     });
 
-    it('conversa de outra empresa: 404; conversationId malformado: 400; :companyId diferente do token: 404', async () => {
+    it('conversa de outra empresa e conversationId malformado: o mesmo 404; :companyId diferente do token: 404', async () => {
       const a = await createCompany('get-iso-a');
       const b = await createCompany('get-iso-b');
       const sentB = await send(b, { contactRef: 'mesmo', text: 'segredo-do-B' });
@@ -381,8 +389,26 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
       });
       assert.ok(!listA.body.includes(conversationB));
 
+      // Malformado, inexistente e de outra empresa: mesmo status, `code` e `message` (spec 024).
+      const bodyOf = (response: { json: () => unknown }): unknown => {
+        const { error } = response.json() as { error: { code: string; message: string } };
+        return { code: error.code, message: error.message };
+      };
+      const probe = async (conversation: string) =>
+        app.inject({
+          method: 'GET',
+          url: `/admin/companies/${a}/conversations/${conversation}/messages`,
+          headers: as(a),
+        });
+      for (const conversation of ['nao-uuid', randomUUID()]) {
+        const response = await probe(conversation);
+        assert.equal(response.statusCode, 404, conversation);
+        assert.deepEqual(bodyOf(response), bodyOf(cross));
+        assert.ok(!response.body.includes(conversation));
+      }
+
       for (const url of [
-        `/admin/companies/${a}/conversations/nao-uuid/messages`,
+        `/admin/companies/${a}/conversations/${conversationB}/messages?order=sideways`,
         `/admin/companies/${a}/conversations?limit=0`,
         `/admin/companies/${a}/conversations?limit=201`,
         `/admin/companies/${a}/conversations?cursor=lixo`,
@@ -400,6 +426,137 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
         assert.equal(ghost.statusCode, 404, other);
         assert.ok(!ghost.body.includes('segredo-do-B'));
       }
+    });
+  });
+
+  describe('contrato do painel (spec 024)', () => {
+    const PHONE = '5511999991234';
+    const WAMID = `wamid.${Buffer.from(PHONE).toString('base64')}`;
+
+    it('nenhuma das duas rotas devolve o telefone, o wamid, contactRef nem externalId', async () => {
+      const companyId = await createCompany('contrato-privado');
+      const sent = await send(companyId, { contactRef: PHONE, text: 'oi', externalId: WAMID });
+      const { conversationId } = sent.json<ReplyBody>();
+      const list = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${companyId}/conversations`,
+        headers: as(companyId),
+      });
+      const history = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${companyId}/conversations/${conversationId}/messages`,
+        headers: as(companyId),
+      });
+      assert.equal(list.statusCode, 200);
+      assert.equal(history.statusCode, 200);
+      const sentinels = [
+        PHONE,
+        PHONE.slice(0, 8),
+        WAMID,
+        Buffer.from(PHONE).toString('base64'),
+        Buffer.from(PHONE).toString('base64url'),
+        '"contactRef"',
+        '"externalId"',
+      ];
+      for (const response of [list, history]) {
+        for (const sentinel of sentinels) {
+          assert.equal(response.body.includes(sentinel), false, sentinel);
+        }
+      }
+      const [conversation] = list.json<PageBody<Record<string, unknown>>>().items;
+      assert.ok(conversation);
+      assert.deepEqual(Object.keys(conversation).sort(), [
+        'channel',
+        'contactLabel',
+        'createdAt',
+        'id',
+        'updatedAt',
+      ]);
+      assert.equal(conversation.contactLabel, 'Contato final 1234');
+      assert.equal(conversation.channel, 'whatsapp');
+    });
+
+    it('simulador: rótulo "Simulador" sem o texto livre; teste do site: "Teste no site"', async () => {
+      const companyId = await createCompany('contrato-rotulos');
+      await send(companyId, { contactRef: 'maria-da-padaria', text: 'oi' });
+      await send(companyId, { contactRef: 'teste-no-site', text: 'oi' });
+      const list = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${companyId}/conversations`,
+        headers: as(companyId),
+      });
+      assert.ok(!list.body.includes('maria'));
+      const items = list.json<PageBody<{ contactLabel: string; channel: string }>>().items;
+      assert.deepEqual(
+        items.map((item) => [item.contactLabel, item.channel]),
+        [
+          ['Teste no site', 'simulator'],
+          [
+            describeContact(CompanyId.parse(companyId), 'maria-da-padaria').contactLabel,
+            'simulator',
+          ],
+        ],
+      );
+    });
+
+    it('order=desc devolve da mais nova para a mais antiga; asc e o padrão seguem cronológicos', async () => {
+      const companyId = await createCompany('contrato-ordem');
+      const first = await send(companyId, { contactRef: 'c1', text: 'um' });
+      await send(companyId, { contactRef: 'c1', text: 'dois' });
+      const { conversationId } = first.json<ReplyBody>();
+      const get = async (query: string) =>
+        app.inject({
+          method: 'GET',
+          url: `/admin/companies/${companyId}/conversations/${conversationId}/messages${query}`,
+          headers: as(companyId),
+        });
+      const asc = (await get('')).json<PageBody<MessageBody>>().items;
+      const explicitAsc = (await get('?order=asc')).json<PageBody<MessageBody>>().items;
+      const desc = (await get('?order=desc')).json<PageBody<MessageBody>>().items;
+      assert.deepEqual(
+        explicitAsc.map((m) => m.id),
+        asc.map((m) => m.id),
+      );
+      assert.deepEqual(
+        desc.map((m) => m.id),
+        asc.map((m) => m.id).reverse(),
+      );
+      // Páginas decrescentes percorrem tudo sem repetir.
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const response = await get(
+          `?order=desc&limit=3${cursor === null ? '' : `&cursor=${cursor}`}`,
+        );
+        const page = response.json<PageBody<MessageBody>>();
+        seen.push(...page.items.map((m) => m.id));
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+      assert.deepEqual(
+        seen,
+        desc.map((m) => m.id),
+      );
+    });
+
+    it('a conversa com atividade mais recente sobe ao topo da lista', async () => {
+      const companyId = await createCompany('contrato-atividade');
+      const first = await send(companyId, { contactRef: 'c1', text: 'um' });
+      await send(companyId, { contactRef: 'c2', text: 'dois' });
+      const idOf = async (): Promise<string[]> =>
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/admin/companies/${companyId}/conversations`,
+            headers: as(companyId),
+          })
+        )
+          .json<PageBody<{ id: string }>>()
+          .items.map((item) => item.id);
+      const before = await idOf();
+      assert.equal(before[1], first.json<ReplyBody>().conversationId);
+      await send(companyId, { contactRef: 'c1', text: 'tres' });
+      const after = await idOf();
+      assert.equal(after[0], first.json<ReplyBody>().conversationId);
     });
   });
 

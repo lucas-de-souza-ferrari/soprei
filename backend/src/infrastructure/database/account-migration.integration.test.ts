@@ -197,3 +197,86 @@ test('migration da 020 é aditiva: zera só os códigos pendentes, preserva as c
     await client.end();
   }
 });
+
+test('migration da 024 só cria índice e leva updated_at à data da última mensagem (schema temporário)', async () => {
+  const sql = await readFile(
+    new URL(
+      '../../../prisma/migrations/20261104180000_conversation_activity_index/migration.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const statements = sql
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+  for (const forbidden of [/\bDROP\b/i, /\bDELETE\s+FROM\b/i, /\bTRUNCATE\b/i, /\bRENAME\b/i]) {
+    assert.doesNotMatch(statements, forbidden);
+  }
+  assert.match(statements, /CREATE INDEX "conversations_company_id_updated_at_id_idx"/);
+  const schema = `soprei_migration_${randomUUID().replaceAll('-', '')}`;
+  const company = randomUUID();
+  const otherCompany = randomUUID();
+  const withMessages = randomUUID();
+  const withoutMessages = randomUUID();
+  const other = randomUUID();
+  const client = new pg.Client({ connectionString: config.DATABASE_URL });
+  await client.connect();
+  try {
+    // Schema criado numa transação que sempre sofre rollback: nenhuma tabela compartilhada muda.
+    await client.query('BEGIN');
+    await client.query(`CREATE SCHEMA "${schema}"`);
+    await client.query(`SET LOCAL search_path TO "${schema}", public`);
+    await client.query(
+      'CREATE TABLE conversations (id uuid PRIMARY KEY, company_id uuid NOT NULL, contact_ref text, created_at timestamp(3), updated_at timestamp(3))',
+    );
+    await client.query(
+      'CREATE TABLE messages (id uuid PRIMARY KEY, company_id uuid NOT NULL, conversation_id uuid NOT NULL, created_at timestamp(3))',
+    );
+    const created = '2026-11-01 10:00:00';
+    for (const [id, owner] of [
+      [withMessages, company],
+      [withoutMessages, company],
+      [other, otherCompany],
+    ] as const) {
+      await client.query('INSERT INTO conversations VALUES ($1, $2, $3, $4, $4)', [
+        id,
+        owner,
+        `ref-${id}`,
+        created,
+      ]);
+    }
+    for (const at of ['2026-11-02 08:00:00', '2026-11-03 09:30:00.123', '2026-11-02 12:00:00']) {
+      await client.query('INSERT INTO messages VALUES ($1, $2, $3, $4)', [
+        randomUUID(),
+        company,
+        withMessages,
+        at,
+      ]);
+    }
+    await client.query('INSERT INTO messages VALUES ($1, $2, $3, $4)', [
+      randomUUID(),
+      otherCompany,
+      other,
+      '2026-11-04 01:00:00',
+    ]);
+    await client.query(sql);
+    const rows = await client.query<{ id: string; updated: string; created: string }>(
+      "SELECT id, to_char(updated_at, 'YYYY-MM-DD HH24:MI:SS.MS') AS updated, to_char(created_at, 'YYYY-MM-DD HH24:MI:SS.MS') AS created FROM conversations",
+    );
+    const byId = new Map(rows.rows.map((row) => [row.id, row]));
+    assert.equal(byId.get(withMessages)?.updated, '2026-11-03 09:30:00.123');
+    assert.equal(byId.get(withoutMessages)?.updated, '2026-11-01 10:00:00.000');
+    assert.equal(byId.get(other)?.updated, '2026-11-04 01:00:00.000');
+    // `created_at` não muda.
+    for (const row of rows.rows) assert.equal(row.created, '2026-11-01 10:00:00.000');
+    const index = await client.query(
+      'SELECT 1 FROM pg_indexes WHERE schemaname = $1 AND indexname = $2',
+      [schema, 'conversations_company_id_updated_at_id_idx'],
+    );
+    assert.equal(index.rowCount, 1);
+    await client.query('ROLLBACK');
+  } finally {
+    await client.end();
+  }
+});
