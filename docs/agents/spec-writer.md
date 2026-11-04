@@ -10,7 +10,7 @@ Antes de escrever:
 Regras:
 - Use exatamente a estrutura do template.
 - Critérios de aceite verificáveis por teste automatizado; reescreva qualquer critério vago.
-- Preencha "Isolamento entre clientes" sempre que houver acesso a dados.
+- Preencha "Isolamento entre empresas" sempre que houver acesso a dados.
 - Mantenha a spec pequena: se não couber em um PR, divida.
 - Liste em "Fora de escopo" o que o pedido sugere mas não exige.
 - Decisões que mudam o desenho (banco, LLM, canal, janelas e limites...) vão numa seção "Decisões" com a recomendação e a alternativa; **o dono decide**. Não invente.

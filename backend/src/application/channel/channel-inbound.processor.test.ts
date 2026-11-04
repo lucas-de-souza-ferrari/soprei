@@ -1014,8 +1014,8 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
     assert.equal(h.llm.calls[0]?.userMessage, 'um\ndois\ntres');
     assert.equal(h.sender.calls.length, 1);
     assert.equal(h.sender.calls[0]?.phoneNumberId, '555001');
-    const users = h.store.allMessages().filter((message) => message.role === 'USER');
-    assert.ok(users.every((user) => user.answeredById !== null));
+    const contactMessages = h.store.allMessages().filter((message) => message.role === 'USER');
+    assert.ok(contactMessages.every((user) => user.answeredById !== null));
     // Nada sobrou: nenhum agendamento além dos três do aceitar.
     assert.equal(h.scheduler.calls.length, 3);
   });

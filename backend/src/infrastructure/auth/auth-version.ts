@@ -1,7 +1,7 @@
 /**
- * Versão do formato de sessão e de token (spec 022, renome de `Client`/`User` para `Company`/`Membership`).
+ * Versão do formato de sessão e de token (spec 022, renome do domínio: empresa e vínculo).
  * Trocar a versão torna INALCANÇÁVEL tudo o que foi gravado no formato antigo: o token antigo falha
- * na audiência (401) e a sessão antiga (hash com `userId`, JSON com `clientId`) fica sob um prefixo
+ * na audiência (401) e a sessão antiga (com os campos de antes do renome) fica sob um prefixo
  * que o código novo nunca lê, então expira sozinha pelos TTL em vez de falhar na validação e virar 503.
  * O formato antigo teve duas formas (sem segmento, e `v2:` com as contas globais): `v3` é novo nas duas.
  *

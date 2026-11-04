@@ -230,9 +230,9 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     assert.equal(reply.id, result.reply?.id);
     assert.equal(reply.replyToId, c.messageId, 'a unicidade (empresa, replyToId) segue valendo');
     assert.equal(reply.isFallback, false);
-    const users = stored.filter((message) => message.role === 'USER');
-    assert.equal(users.length, 3);
-    for (const user of users) assert.equal(user.answeredById, reply.id);
+    const contactMessages = stored.filter((message) => message.role === 'USER');
+    assert.equal(contactMessages.length, 3);
+    for (const user of contactMessages) assert.equal(user.answeredById, reply.id);
     // A resposta fica logo depois da última do lote, na ordem da conversa.
     const order = sorted(stored).map((message) => message.id);
     assert.equal(order.at(-1), reply.id);
@@ -294,9 +294,9 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
       h.llm.calls.map((call) => call.userMessage),
       ['m1\nm2', 'm3\nm4', 'm5'],
     );
-    const users = h.store.allMessages().filter((message) => message.role === 'USER');
+    const contactMessages = h.store.allMessages().filter((message) => message.role === 'USER');
     assert.ok(
-      users.every((user) => user.answeredById !== null),
+      contactMessages.every((user) => user.answeredById !== null),
       'nenhuma mensagem perdida',
     );
     assert.deepEqual(
@@ -365,8 +365,8 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
       ],
       'o turno seguinte enxerga a resposta anterior antes da mensagem nova',
     );
-    const users = h.store.allMessages().filter((message) => message.role === 'USER');
-    assert.ok(users.every((user) => user.answeredById !== null));
+    const contactMessages = h.store.allMessages().filter((message) => message.role === 'USER');
+    assert.ok(contactMessages.every((user) => user.answeredById !== null));
   });
 
   it('a chamada ao LLM fica fora de qualquer transação', async () => {

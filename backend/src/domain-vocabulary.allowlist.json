@@ -1,0 +1,70 @@
+{
+  "fileExceptions": [
+    {
+      "path": "backend/src/infrastructure/database/account-migration.integration.test.ts",
+      "patterns": ["WordUser", "SqlTables", "ClientId", "UserNames"],
+      "reason": "reproduz o schema anterior à spec 022 (clients, users, client_id) para exercitar as migrations 017 e 020, que continuam como estavam"
+    },
+    {
+      "path": "backend/src/infrastructure/database/migrations.test.ts",
+      "patterns": ["WordUser", "UserNames", "ClientId", "WordClient"],
+      "reason": "confere o conteúdo das migrations anteriores à 022, que citam os nomes antigos e não são editadas"
+    },
+    {
+      "path": "backend/src/infrastructure/database/rename-migration.integration.test.ts",
+      "patterns": [
+        "ClientId",
+        "WordClient",
+        "WordUser",
+        "SqlTables",
+        "UserNames",
+        "AuditActions",
+        "ClientNames"
+      ],
+      "reason": "monta o schema antigo e prova que a migration de renome da 022 o converte sem perder dados"
+    },
+    {
+      "path": "backend/src/infrastructure/queue/inbound-queue.integration.test.ts",
+      "patterns": ["ClientId"],
+      "reason": "prova que um job gravado no formato anterior à 022 (campo da empresa com o nome antigo) é descartado"
+    },
+    {
+      "path": "backend/src/infrastructure/http/accounts.integration.test.ts",
+      "patterns": ["ClientId"],
+      "reason": "planta uma sessão de conta no formato anterior à 022 e prova que ela nunca autentica"
+    },
+    {
+      "path": "backend/src/infrastructure/http/auth.integration.test.ts",
+      "patterns": ["UserNames"],
+      "reason": "planta uma sessão no formato anterior à 022 e prova que ela nunca autentica"
+    },
+    {
+      "path": "backend/src/presentation/webhooks/whatsapp-webhook.controller.test.ts",
+      "patterns": ["UserNames"],
+      "reason": "`from_user_id` é o campo do webhook da Meta (BSUID), não o User do domínio"
+    },
+    {
+      "path": "backend/src/test-support/whatsapp-payloads.ts",
+      "patterns": ["UserNames"],
+      "reason": "`from_user_id` é o campo do webhook da Meta (BSUID), não o User do domínio"
+    }
+  ],
+  "maskedTokens": [
+    {
+      "pattern": "pg.Client",
+      "reason": "cliente do driver pg (terceiros), não a empresa do domínio"
+    },
+    {
+      "pattern": "Prisma Client",
+      "reason": "nome do Prisma Client (terceiros), não a empresa do domínio"
+    },
+    {
+      "pattern": "Client de mentira",
+      "reason": "cliente ioredis falso nos testes do limiter (terceiros), não a empresa do domínio"
+    },
+    {
+      "pattern": "Client do Prisma",
+      "reason": "client do Prisma (terceiros), não a empresa do domínio"
+    }
+  ]
+}

@@ -9,7 +9,7 @@ Antes de começar:
 Execução:
 - Escreva o teste de cada critério de aceite e faça passar; teste antes do código quando der.
 - Implemente só o que a spec pede. O que for necessário e estiver fora de escopo vai para a spec ("Decisões e dependências novas") ou vira nova spec.
-- Siga as regras invariantes de `AGENTS.md`: isolamento entre clientes, Zod nas entradas, Pino sem conteúdo de mensagem, `LlmProvider` para modelo, convenções de pastas.
+- Siga as regras invariantes de `AGENTS.md`: isolamento entre empresas, Zod nas entradas, Pino sem conteúdo de mensagem, `LlmProvider` para modelo, convenções de pastas.
 - Migration: aditiva; nunca `migrate reset`, `DROP`, nem apagar dado que você não criou; nunca criar ou alterar roles e bancos. Testes de integração só tocam `soprei_test` e Redis `/15`, com prefixo único por teste, sem `FLUSHALL`/`FLUSHDB`.
 - Testes sensíveis a tempo: relógio injetável (`src/test-support/clock.ts`), esperas com prazo (sondagem) em vez de `sleep` fixo, margens folgadas; **repita as suítes novas várias vezes** (o CI já falhou por flake).
 - Nunca logue conteúdo de mensagem, contato, persona, tokens nem o objeto de erro inteiro do ioredis/BullMQ (carrega `command.args`).

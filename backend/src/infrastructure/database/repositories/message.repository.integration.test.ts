@@ -649,9 +649,9 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   async function freshPending(company: Company, contact: string, count: number) {
     const conversation = await conversations.findOrCreateByContact(company.id, contact);
     const base = Date.UTC(2026, 2, 1);
-    const users: Message[] = [];
+    const contactMessages: Message[] = [];
     for (let i = 0; i < count; i += 1) {
-      users.push(
+      contactMessages.push(
         await repo.create(company.id, {
           conversationId: conversation.id,
           role: 'USER',
@@ -660,7 +660,7 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
         }),
       );
     }
-    return { conversation, users };
+    return { conversation, contactMessages };
   }
 
   async function replyTo(company: Company, conversation: Conversation, last: Message) {
@@ -674,49 +674,49 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   }
 
   it('lista as pendentes da mais antiga para a mais nova, respeitando o limite', async () => {
-    const { conversation, users } = await freshPending(companyA, 'pend-order', 4);
+    const { conversation, contactMessages } = await freshPending(companyA, 'pend-order', 4);
     const all = await repo.listPending(companyA.id, conversation.id, 10);
     assert.deepEqual(
       all.map((message) => message.id),
-      users.map((message) => message.id),
+      contactMessages.map((message) => message.id),
     );
     const two = await repo.listPending(companyA.id, conversation.id, 2);
     assert.deepEqual(
       two.map((message) => message.id),
-      users.slice(0, 2).map((message) => message.id),
+      contactMessages.slice(0, 2).map((message) => message.id),
     );
   });
 
   it('mensagem do assistente nunca é pendente', async () => {
-    const { conversation, users } = await freshPending(companyA, 'pend-role', 1);
-    const first = users[0];
+    const { conversation, contactMessages } = await freshPending(companyA, 'pend-role', 1);
+    const first = contactMessages[0];
     assert.ok(first !== undefined);
     await replyTo(companyA, conversation, first);
     assert.deepEqual(await repo.listPending(companyA.id, conversation.id, 10), []);
   });
 
   it('respondida por replyToId (caminho do simulador e linhas antigas) não é pendente, sem answeredById', async () => {
-    const { conversation, users } = await freshPending(companyA, 'pend-reply-to', 3);
-    const middle = users[1];
+    const { conversation, contactMessages } = await freshPending(companyA, 'pend-reply-to', 3);
+    const middle = contactMessages[1];
     assert.ok(middle !== undefined);
     await replyTo(companyA, conversation, middle);
     const pending = await repo.listPending(companyA.id, conversation.id, 10);
     assert.deepEqual(
       pending.map((message) => message.id),
-      [users[0]?.id, users[2]?.id],
+      [contactMessages[0]?.id, contactMessages[2]?.id],
     );
     assert.equal((await repo.findById(companyA.id, middle.id)).answeredById, null);
   });
 
   it('markAnswered marca o lote inteiro, a resposta tem replyToId = a última, e a segunda chamada não acha pendentes', async () => {
-    const { conversation, users } = await freshPending(companyA, 'pend-batch', 3);
-    const last = users[2];
+    const { conversation, contactMessages } = await freshPending(companyA, 'pend-batch', 3);
+    const last = contactMessages[2];
     assert.ok(last !== undefined);
     const reply = await replyTo(companyA, conversation, last);
 
-    const ids = users.map((message) => message.id);
+    const ids = contactMessages.map((message) => message.id);
     assert.equal(await repo.markAnswered(companyA.id, ids, reply.id), 3);
-    for (const user of users) {
+    for (const user of contactMessages) {
       assert.equal((await repo.findById(companyA.id, user.id)).answeredById, reply.id);
     }
     assert.equal(reply.replyToId, last.id);
@@ -726,8 +726,8 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   });
 
   it('markAnswered não toca em mensagem já atendida por outra resposta nem em mensagem do assistente', async () => {
-    const { conversation, users } = await freshPending(companyA, 'pend-once', 2);
-    const [first, second] = users;
+    const { conversation, contactMessages } = await freshPending(companyA, 'pend-once', 2);
+    const [first, second] = contactMessages;
     assert.ok(first !== undefined && second !== undefined);
     const firstReply = await replyTo(companyA, conversation, first);
     await repo.markAnswered(companyA.id, [first.id], firstReply.id);
@@ -764,17 +764,17 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   it('isolamento: markAnswered com ids de outra empresa não altera nada', async () => {
     const a = await freshPending(companyA, 'pend-mark-iso', 2);
     const b = await freshPending(companyB, 'pend-mark-iso', 2);
-    const lastB = b.users[1];
+    const lastB = b.contactMessages[1];
     assert.ok(lastB !== undefined);
     const replyOfB = await replyTo(companyB, b.conversation, lastB);
-    const lastA = a.users[1];
+    const lastA = a.contactMessages[1];
     assert.ok(lastA !== undefined);
     const replyOfA = await replyTo(companyA, a.conversation, lastA);
 
     // O CompanyId de A com ids de mensagens de B: nada muda em B.
-    const idsOfB = b.users.map((message) => message.id);
+    const idsOfB = b.contactMessages.map((message) => message.id);
     assert.equal(await repo.markAnswered(companyA.id, idsOfB, replyOfA.id), 0);
-    for (const user of b.users) {
+    for (const user of b.contactMessages) {
       assert.equal((await repo.findById(companyB.id, user.id)).answeredById, null);
     }
     // Só a última de B foi respondida por replyToId (a resposta do lote de B): a primeira segue pendente.
@@ -782,13 +782,13 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
 
     // O CompanyId de A com ids de A mas a resposta de B: o banco recusa (chave estrangeira composta)
     // e nada fica marcado.
-    const idsOfA = a.users.map((message) => message.id);
+    const idsOfA = a.contactMessages.map((message) => message.id);
     await assert.rejects(
       repo.markAnswered(companyA.id, idsOfA, replyOfB.id),
       (error: unknown) => error instanceof DatabaseError,
     );
     assert.equal((await repo.listPending(companyA.id, a.conversation.id, 10)).length, 1);
-    for (const user of a.users) {
+    for (const user of a.contactMessages) {
       assert.equal((await repo.findById(companyA.id, user.id)).answeredById, null);
     }
   });
@@ -804,8 +804,8 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   });
 
   it('SQL cru: answered_by_id apontando para mensagem de outra empresa viola a chave estrangeira composta (23503)', async () => {
-    const { users } = await freshPending(companyA, 'pend-fk', 1);
-    const user = users[0];
+    const { contactMessages } = await freshPending(companyA, 'pend-fk', 1);
+    const user = contactMessages[0];
     assert.ok(user !== undefined);
     await assert.rejects(
       database.prisma.$executeRaw`
@@ -820,8 +820,8 @@ describe('listPending e markAnswered (spec 013): mensagens do contato à espera 
   });
 
   it('SQL cru: answered_by_id em mensagem do assistente viola o CHECK', async () => {
-    const { conversation, users } = await freshPending(companyA, 'pend-check', 1);
-    const user = users[0];
+    const { conversation, contactMessages } = await freshPending(companyA, 'pend-check', 1);
+    const user = contactMessages[0];
     assert.ok(user !== undefined);
     const reply = await replyTo(companyA, conversation, user);
     await assert.rejects(

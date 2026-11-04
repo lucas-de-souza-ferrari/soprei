@@ -78,9 +78,9 @@ describe('agrupamento no banco (spec 013)', () => {
     });
     const reply = rows.find((row) => row.role === 'ASSISTANT');
     assert.ok(reply !== undefined);
-    const users = rows.filter((row) => row.role === 'USER');
-    assert.ok(users.every((user) => user.answeredById === reply.id));
-    assert.equal(reply.replyToId, users[2]?.id);
+    const contactMessages = rows.filter((row) => row.role === 'USER');
+    assert.ok(contactMessages.every((user) => user.answeredById === reply.id));
+    assert.equal(reply.replyToId, contactMessages[2]?.id);
     assert.equal(rows.at(-1)?.id, reply.id, 'a resposta fica depois da última mensagem do lote');
 
     // Segunda chamada: sem pendentes. A resposta ainda não foi enviada: só reenvio, sem novo LLM.
@@ -183,13 +183,13 @@ describe('agrupamento no banco (spec 013)', () => {
     const rows = await database.prisma.message.findMany({
       where: { companyId: company.id, conversationId: conversation.id },
     });
-    const users = rows.filter((row) => row.role === 'USER');
+    const contactMessages = rows.filter((row) => row.role === 'USER');
     const replies = rows.filter((row) => row.role === 'ASSISTANT');
     assert.ok(
-      users.every((user) => user.answeredById !== null),
+      contactMessages.every((user) => user.answeredById !== null),
       'nenhuma mensagem sem resposta',
     );
-    const owners = new Set(users.map((user) => user.answeredById));
+    const owners = new Set(contactMessages.map((user) => user.answeredById));
     assert.equal(replies.length, owners.size, 'toda resposta atende pelo menos uma mensagem');
     assert.ok(replies.every((reply) => owners.has(reply.id)));
     assert.ok(replies.length <= 2);

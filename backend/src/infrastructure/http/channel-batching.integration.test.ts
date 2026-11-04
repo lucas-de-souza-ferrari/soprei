@@ -463,8 +463,8 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
         h.llm.calls.map((call) => call.userMessage),
         ['m1\nm2', 'm3\nm4', 'm5'],
       );
-      const users = (await stored(company, contact)).filter((m) => m.role === 'USER');
-      assert.ok(users.every((user) => user.answeredById !== null));
+      const contactMessages = (await stored(company, contact)).filter((m) => m.role === 'USER');
+      assert.ok(contactMessages.every((user) => user.answeredById !== null));
     });
     await withHarness({ windowMs: 1_500, maxMessages: 10, maxChars: 70 }, async (h) => {
       const number = phoneNumberId();
@@ -509,8 +509,8 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
         ],
         'o segundo turno enxerga o primeiro e a resposta dele',
       );
-      const users = (await stored(company, contact)).filter((m) => m.role === 'USER');
-      assert.ok(users.every((user) => user.answeredById !== null));
+      const contactMessages = (await stored(company, contact)).filter((m) => m.role === 'USER');
+      assert.ok(contactMessages.every((user) => user.answeredById !== null));
       assert.equal(graph.requests.length, 2);
     });
   });
