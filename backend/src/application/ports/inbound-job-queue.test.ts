@@ -9,23 +9,15 @@ const COMPANY = '0199c1d2-0000-7000-8000-000000000001';
 describe('identidade dos jobs do canal (spec 022)', () => {
   it('inboundJobId e flushKey mantêm o formato e os valores de antes do renome', () => {
     assert.equal(
-      inboundJobId({ companyId: COMPANY, externalId: 'wamid.ABC=' } as Parameters<
-        typeof inboundJobId
-      >[0]),
+      inboundJobId({ companyId: COMPANY, externalId: 'wamid.ABC=' }),
       `${COMPANY}_wamid.ABC%3D`,
     );
     const digest = createHash('sha256').update('5511999990000').digest('hex').slice(0, 32);
     assert.equal(
-      flushKey({ companyId: COMPANY, contactRef: '5511999990000' } as Parameters<
-        typeof flushKey
-      >[0]),
+      flushKey({ companyId: COMPANY, contactRef: '5511999990000' }),
       `flush_${COMPANY}_${digest}`,
     );
-    assert.ok(
-      !inboundJobId({ companyId: COMPANY, externalId: 'a:b' } as Parameters<
-        typeof inboundJobId
-      >[0]).includes(':'),
-    );
+    assert.ok(!inboundJobId({ companyId: COMPANY, externalId: 'a:b' }).includes(':'));
   });
 
   it('o schema do job só aceita companyId; o campo antigo da empresa é recusado', () => {
