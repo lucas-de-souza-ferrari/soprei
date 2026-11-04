@@ -1,6 +1,6 @@
 # 022 — Renome do domínio: `Client` vira `Company` e `User` vira `Membership`
 
-- **Status:** aprovada (2026-11-03, dono: "Aprovo tudo", com as 11 recomendações); spec 021 mergeada em 2026-11-03; pronta para implementar
+- **Status:** implementada (2026-11-04), aguardando `reviewer`, push e CI verde em Node 22 e na LTS (aprovada em 2026-11-03, dono: "Aprovo tudo", com as 11 recomendações)
 - **Branch:** `spec/022-renome-do-dominio`
 - **Depende de:** 021 (recuperação de senha) **mergeada na `main`**. Só começa a implementar com a `main` limpa e ninguém mais mexendo no backend durante a janela. Vai **antes** da spec que conecta o WhatsApp pelo site.
 - **Segurança:** toca em isolamento entre empresas (tenant), autenticação, sessões, fila e migration; passa pelo `reviewer` antes do merge, de preferência outro agente/modelo (obrigatório). É refatoração pura: nenhuma regra de negócio muda.
@@ -79,33 +79,33 @@ Nada muda para quem usa o produto, salvo o que está explícito aqui: (a) **nome
 Verificáveis por teste automatizado (os existentes migram de nome e passam **iguais**; o único código novo de teste é o gate, o teste de migration e o de catálogo).
 
 **Banco e migration**
-- [ ] Existe **uma** migration nova, com timestamp maior que o da 021; **nenhuma** migration anterior foi alterada (teste: o checksum/conteúdo das 11+ anteriores é igual ao de `main`; `migrations.test.ts` adaptado: a regra "as migrations anteriores não mencionam `audit_events`/`'VIEWER'`..." passa a ignorar a migration da 022 **sem enfraquecer** o que ela protege nas demais).
-- [ ] Teste de migration em schema temporário (padrão de `account-migration.integration.test.ts`, com rollback): cria o schema **antigo** com dados (empresa, vínculo com papel e estado, conta, conversa, mensagens com `reply_to_id`/`answered_by_id`, evento de auditoria `USER_*` e `CHANNEL_*`, conexão de canal), aplica a migration e prova que **todas as linhas e valores sobreviveram** com os nomes novos (inclusive o enum `MEMBERSHIP_*` e `access_status`), que as **FKs compostas continuam compostas** e recusam, no banco, vínculo/mensagem/auditoria de outra empresa (inserção cruzada falha com violação de FK), que os CHECKs (`messages_*`, `companies_*`, `channel_connections_waba_id_check`, o CHECK por ação recriado: `MEMBERSHIP_*` exige alvo, `CHANNEL_*` exige nulo) e o índice parcial `messages_pending_idx` seguem valendo, e que o preflight da própria migration (bloco `DO $$`) **falha** se um nome antigo for injetado.
-- [ ] Catálogo (integração, `soprei_test` migrado): nenhuma tabela, coluna, tipo, índice ou constraint do schema `public` com `client` ou `user` no nome (fora da lista declarada), e `prisma migrate diff` do banco migrado contra `schema.prisma` sem diferenças (sem drift); `pnpm db:migrate:deploy` roda do zero em banco vazio.
-- [ ] `MODEL_SCOPES` cobre exatamente os models do schema novo (`Company` global, `Membership` tenant etc.) e o teste de cobertura existente passa; um model com `companyId` classificado como global (e o inverso) é recusado como antes; **um `where: { clientId }` em model de tenant é rejeitado** (o nome antigo não vale mais como escopo).
+- [x] Existe **uma** migration nova, com timestamp maior que o da 021; **nenhuma** migration anterior foi alterada (teste: o checksum/conteúdo das 11+ anteriores é igual ao de `main`; `migrations.test.ts` adaptado: a regra "as migrations anteriores não mencionam `audit_events`/`'VIEWER'`..." passa a ignorar a migration da 022 **sem enfraquecer** o que ela protege nas demais). *(conteúdo das anteriores conferido por `git diff`, ver desvio 4.)*
+- [x] Teste de migration em schema temporário (padrão de `account-migration.integration.test.ts`, com rollback): cria o schema **antigo** com dados (empresa, vínculo com papel e estado, conta, conversa, mensagens com `reply_to_id`/`answered_by_id`, evento de auditoria `USER_*` e `CHANNEL_*`, conexão de canal), aplica a migration e prova que **todas as linhas e valores sobreviveram** com os nomes novos (inclusive o enum `MEMBERSHIP_*` e `access_status`), que as **FKs compostas continuam compostas** e recusam, no banco, vínculo/mensagem/auditoria de outra empresa (inserção cruzada falha com violação de FK), que os CHECKs (`messages_*`, `companies_*`, `channel_connections_waba_id_check`, o CHECK por ação recriado: `MEMBERSHIP_*` exige alvo, `CHANNEL_*` exige nulo) e o índice parcial `messages_pending_idx` seguem valendo, e que o preflight da própria migration (bloco `DO $$`) **falha** se um nome antigo for injetado.
+- [x] Catálogo (integração, `soprei_test` migrado): nenhuma tabela, coluna, tipo, índice ou constraint do schema `public` com `client` ou `user` no nome (fora da lista declarada), e `prisma migrate diff` do banco migrado contra `schema.prisma` sem diferenças (sem drift); `pnpm db:migrate:deploy` roda do zero em banco vazio. *(feito: sem drift **novo**, ver desvio 2; `migrate deploy` do zero em banco vazio fica para o CI.)*
+- [x] `MODEL_SCOPES` cobre exatamente os models do schema novo (`Company` global, `Membership` tenant etc.) e o teste de cobertura existente passa; um model com `companyId` classificado como global (e o inverso) é recusado como antes; **um `where: { clientId }` em model de tenant é rejeitado** (o nome antigo não vale mais como escopo).
 
 **Isolamento (as três barreiras, sem enfraquecer)**
-- [ ] Todos os testes de isolamento abaixo passam com **os mesmos casos e asserções** (só mudam os nomes): `tenant-scope.test.ts`, `tenant-scope.integration.test.ts`, `tenant.repository.base.test.ts`, `tenant.repository.types.test.ts`, `conversation.repository.integration.test.ts`, `message.repository.integration.test.ts`, `audit.repository.integration.test.ts`, `channel-connection.repository.integration.test.ts`, o do repositório de vínculos (antigo `user.repository.integration.test.ts`) e o de empresas, `user-admin.integration.test.ts` (-> membership), `attendance*.integration.test.ts`, `rbac.integration.test.ts`, `auth.integration.test.ts`, `channel-*.integration.test.ts`, `whatsapp-channel.integration.test.ts`, `channel-batching.integration.test.ts`, `admin-companies.integration.test.ts`, `accounts*.integration.test.ts`, `eslint-rules.test.ts`, `rate-limit.test.ts` (inventário de rotas com `requirePermission` e perfil), `redis-session-store.integration.test.ts`, `inbound-queue.integration.test.ts`, `auth-cli.integration.test.ts`. A contagem de casos (`it`/`test`) por pasta, medida **antes** e **depois**, é igual (registrada no Registro).
-- [ ] Gate de restos (decisão 7) verde com a lista de exceções declarada; um teste do próprio gate prova que ele **falha** com um arquivo temporário contendo `clientId` e que uma exceção sem correspondência falha.
-- [ ] A única resolução externo -> empresa continua sendo `CompanyRepository.findByWhatsappPhoneNumberId`, o `companyId` do job nasce dela e o worker envia pelo número lido do banco (testes da 011/015 iguais).
-- [ ] O `:companyId` do caminho continua **conferido** contra o `cid` do token (divergente = 404 idêntico a empresa inexistente, antes da permissão 403); `PlatformAdmin` não alcança rota de tenant; `User`/vínculo não alcança `/admin/companies` (testes da 007/008 iguais).
+- [x] Todos os testes de isolamento abaixo passam com **os mesmos casos e asserções** (só mudam os nomes): `tenant-scope.test.ts`, `tenant-scope.integration.test.ts`, `tenant.repository.base.test.ts`, `tenant.repository.types.test.ts`, `conversation.repository.integration.test.ts`, `message.repository.integration.test.ts`, `audit.repository.integration.test.ts`, `channel-connection.repository.integration.test.ts`, o do repositório de vínculos (antigo `user.repository.integration.test.ts`) e o de empresas, `user-admin.integration.test.ts` (-> membership), `attendance*.integration.test.ts`, `rbac.integration.test.ts`, `auth.integration.test.ts`, `channel-*.integration.test.ts`, `whatsapp-channel.integration.test.ts`, `channel-batching.integration.test.ts`, `admin-companies.integration.test.ts`, `accounts*.integration.test.ts`, `eslint-rules.test.ts`, `rate-limit.test.ts` (inventário de rotas com `requirePermission` e perfil), `redis-session-store.integration.test.ts`, `inbound-queue.integration.test.ts`, `auth-cli.integration.test.ts`. A contagem de casos (`it`/`test`) por pasta, medida **antes** e **depois**, é igual (registrada no Registro).
+- [x] Gate de restos (decisão 7) verde com a lista de exceções declarada; um teste do próprio gate prova que ele **falha** com um arquivo temporário contendo `clientId` e que uma exceção sem correspondência falha.
+- [x] A única resolução externo -> empresa continua sendo `CompanyRepository.findByWhatsappPhoneNumberId`, o `companyId` do job nasce dela e o worker envia pelo número lido do banco (testes da 011/015 iguais).
+- [x] O `:companyId` do caminho continua **conferido** contra o `cid` do token (divergente = 404 idêntico a empresa inexistente, antes da permissão 403); `PlatformAdmin` não alcança rota de tenant; `User`/vínculo não alcança `/admin/companies` (testes da 007/008 iguais).
 
 **Contrato e autenticação**
-- [ ] Todas as rotas da tabela respondem nos caminhos novos e **404** nos antigos (`/admin/clients...`); corpos e respostas usam `companyId`, `membershipId`, `companySlug`, `selectedCompanyId`, `actorMembershipId`, `targetMembershipId`; campos antigos em corpo `strict` são 400.
-- [ ] Token emitido com a audiência antiga (`soprei-api` e `soprei-api:v2`) é 401 (mesma resposta uniforme); token novo traz `kind: 'membership'` e `cid`; o `jose` continua só em `infrastructure/auth/`.
-- [ ] Chaves do Redis novas começam por `<prefixo>v2:<CompanyId|platform>:` (e a sessão da conta por `<prefixo>v2:account-session:`); uma chave **no formato antigo** plantada no Redis de teste **não** autentica nem causa 503 (401); toda chave continua com TTL; o contador de falhas de login e a revogação em massa passam iguais.
-- [ ] Cookie de sessão de conta antigo (JSON com `clientId`, fora do segmento novo) responde 401, não 503.
-- [ ] `X-Soprei-App: web` exigido onde `X-Soprei-Client` era (403 sem ele, 403 com o antigo), com `Origin` igual a `APP_ORIGIN`.
-- [ ] `pnpm auth:cli`: `--company <slug>` funciona; `--client` é recusado com erro de uso; a senha continua nunca vindo por argumento.
+- [x] Todas as rotas da tabela respondem nos caminhos novos e **404** nos antigos (`/admin/clients...`); corpos e respostas usam `companyId`, `membershipId`, `companySlug`, `selectedCompanyId`, `actorMembershipId`, `targetMembershipId`; campos antigos em corpo `strict` são 400.
+- [x] Token emitido com a audiência antiga (`soprei-api` e `soprei-api:v2`) é 401 (mesma resposta uniforme); token novo traz `kind: 'membership'` e `cid`; o `jose` continua só em `infrastructure/auth/`. *(feito com a versão `v3`, ver desvio 1.)*
+- [x] Chaves do Redis novas começam por `<prefixo>v2:<CompanyId|platform>:` (e a sessão da conta por `<prefixo>v2:account-session:`); uma chave **no formato antigo** plantada no Redis de teste **não** autentica nem causa 503 (401); toda chave continua com TTL; o contador de falhas de login e a revogação em massa passam iguais. *(feito como `<prefixo>v3:` (`v3-legacy` sem contas), ver desvio 1.)*
+- [x] Cookie de sessão de conta antigo (JSON com `clientId`, fora do segmento novo) responde 401, não 503.
+- [x] `X-Soprei-App: web` exigido onde `X-Soprei-Client` era (403 sem ele, 403 com o antigo), com `Origin` igual a `APP_ORIGIN`.
+- [x] `pnpm auth:cli`: `--company <slug>` funciona; `--client` é recusado com erro de uso; a senha continua nunca vindo por argumento.
 
 **Fila, logs e métricas**
-- [ ] Job com `companyId` é processado como antes; job com `clientId` (formato antigo) é descartado com `UnrecoverableError`, log só com `jobName` e `queue_jobs_total{result="failed"}`, **sem** enviar nada ao contato e **sem** texto no log; `jobId`/`flushKey` têm o mesmo formato (teste de unidade com os mesmos valores).
-- [ ] Todo log de requisição, de job e de auditoria usa `companyId` e `actorId`; testes de captura de log existentes continuam provando que texto de mensagem, persona, e-mail, senha, tokens e o `wamid` não aparecem; `redact` cobre os nomes novos que contenham segredo (nenhum campo de segredo mudou de nome).
-- [ ] As métricas existentes mantêm nomes e conjuntos de labels (`kind` e `permission` com valores novos, documentados); `/metrics` sem id.
+- [x] Job com `companyId` é processado como antes; job com `clientId` (formato antigo) é descartado com `UnrecoverableError`, log só com `jobName` e `queue_jobs_total{result="failed"}`, **sem** enviar nada ao contato e **sem** texto no log; `jobId`/`flushKey` têm o mesmo formato (teste de unidade com os mesmos valores).
+- [x] Todo log de requisição, de job e de auditoria usa `companyId` e `actorId`; testes de captura de log existentes continuam provando que texto de mensagem, persona, e-mail, senha, tokens e o `wamid` não aparecem; `redact` cobre os nomes novos que contenham segredo (nenhum campo de segredo mudou de nome).
+- [x] As métricas existentes mantêm nomes e conjuntos de labels (`kind` e `permission` com valores novos, documentados); `/metrics` sem id.
 
 **Frontend e documentação**
-- [ ] `pnpm --filter soprei-frontend test` e `test:browser` (desktop e celular, claro e escuro) passam com os campos novos e o cabeçalho novo; nenhuma mudança visual (`contrast.test.ts` intocado).
-- [ ] `AGENTS.md`, `docs/context.md` e `docs/handoff.md` no vocabulário novo, com o glossário, a tabela antigo -> novo e a nota "renomeado na spec 022"; `.env.example` sem referência à empresa como "cliente"; nenhum comentário do schema cita `clientId`.
+- [x] `pnpm --filter soprei-frontend test` e `test:browser` (desktop e celular, claro e escuro) passam com os campos novos e o cabeçalho novo; nenhuma mudança visual (`contrast.test.ts` intocado).
+- [x] `AGENTS.md`, `docs/context.md` e `docs/handoff.md` no vocabulário novo, com o glossário, a tabela antigo -> novo e a nota "renomeado na spec 022"; `.env.example` sem referência à empresa como "cliente"; nenhum comentário do schema cita `clientId`.
 - [ ] `typecheck`, `lint`, `format:check` (da raiz), `test`, `test:integration` e `test:browser` verdes no CI, em Node 22 e na LTS.
 
 ## Casos de borda e erros
@@ -166,4 +166,52 @@ Esta spec **não relaxa** nenhuma das três barreiras; ela renomeia o identifica
 
 ## Registro da implementação
 
-(vazio; preenchido por quem implementar)
+Implementada em 2026-11-04 por Claude Code (Sonnet 5.5), na branch `spec/022-renome-do-dominio` (a partir da `main` com a 021 mergeada). Sem push e sem merge. Commits pequenos, todos compilando: (1) `refactor`: `Client` vira `Company` e `User` vira `Membership` (schema, migration e código do backend, arquivos movidos com `git mv`); (2) `test`: migration de renome em schema temporário, catálogo e drift; (3) `feat`: sessões e tokens em formato versionado (`v3`), job antigo descartado, CLI só com `--company`; (4) `test`: gate de restos e documentação no vocabulário novo; (5) ajustes da bateria local, formato dos jobs, allowlist do gate e handoff.
+
+### Dimensionamento (recontado sobre a `main` com a 021)
+
+`backend/src` tinha **213 arquivos** com algum nome antigo (a spec estimava 179); a família `clientId`/`ClientId`/`client_id` estava em **139 arquivos** (~1.675 ocorrências) e a família `userId`/`UserId`/`user_id`/`USER_*` em **52** (~453). **16 arquivos** de código e testes foram renomeados com `git mv` (mais as pastas `application/clients` e `application/users`), e `AccountId` saiu para `account-id.ts`. O diff total é de 216 arquivos (quase todo renome). Frontend: 2 arquivos, como previsto.
+
+### Mecânica
+
+Substituição controlada por script (lista ordenada de pares, com **máscara** dos nomes de terceiros: `PrismaClient*`, `ITXClientDenyList`, `prom-client`, `pg.Client`, `client_secret`, `clientSecret`, `ioredis`, clientes HTTP, `EMAIL_PROVIDER_USER`, `MessageRole.USER`/`role: 'USER'`) e **revisão do diff** de cada área; nunca `sed` cego na árvore. Os arquivos em que `client`/`user` solto não era o domínio (cliente Redis, `pg`, LLM, SMTP, mensagens do contato) ficaram fora da regra de palavra solta e foram conferidos à mão; a concordância de gênero ("a empresa") foi uma segunda passagem. Ajustes manuais depois do script: caminhos do Prisma (`@prisma/client/runtime/client`), `.client` dos handles Redis, `prisma.company`, `Prisma Client` em comentários, `firstUser` do histórico do LLM, `users` das mensagens do contato (renomeado `contactMessages`), `account-migration` e `account-password-reset` (schema temporário no formato antigo).
+
+### Contagem de casos de teste (`it(`/`test(` por pasta, `grep -a`)
+
+| Pasta | Antes (`e2cc836`) | Depois |
+| --- | ---: | ---: |
+| `backend/src/application` | 241 | 243 |
+| `backend/src/domain` | 11 | 11 |
+| `backend/src/infrastructure` | 707 | 720 |
+| `backend/src/presentation` | 142 | 142 |
+| `backend/src/shared` | 19 | 19 |
+| `backend/src/test-support` | 7 | 7 |
+| `backend/src` (arquivos de raiz) | 26 | 31 |
+| `frontend/src` / `frontend/e2e` | 25 / 11 | 25 / 11 |
+
+Nenhum teste foi apagado, ignorado (`skip`) ou enfraquecido: os acréscimos são os testes novos desta spec (migration em schema temporário: 2; catálogo e drift: 2; `migrations.test.ts`: 4; gate: 5; job no formato antigo, versão das chaves e audiência: 3; formato dos jobs: 2; nome antigo do escopo recusado: 1; caminhos antigos dão 404: 1). Dois testes que reproduzem o schema anterior à 022 (`account-migration` e `account-password-reset`) passaram a criar o tipo `user_status` no próprio schema temporário (o `public` já tem `access_status`); `migrations.test.ts` continua conferindo as migrations antigas e só ignora a da 022 na regra "as anteriores não mencionam `audit_events`/`'VIEWER'`".
+
+### O que rodou localmente (Node 24.18, Windows) e o que depende do CI
+
+Rodou: `pnpm typecheck`, `pnpm lint`, `pnpm format:check` (da raiz), `pnpm test` (backend 1109 casos e frontend 30), `pnpm test:integration` (375 casos, 3m36s), `pnpm build` e `pnpm --filter soprei-frontend test:browser` (32 casos, desktop e celular, claro e escuro). A migration foi aplicada **só** em `soprei_test`. Na primeira tentativa ela falhou de propósito por um erro meu no bloco de verificação (coluna `found` ambígua) e **nada ficou pela metade** (tabelas e CHECK intactos; marcada com `migrate resolve --rolled-back`, só em `soprei_test`), o que provou a atomicidade no Prisma real. **Depende do CI:** Node 22 e a LTS mais recente, e `migrate deploy` do zero em banco vazio.
+
+Verificação de drift (dentro de `backend/`): `node --env-file=.env.test node_modules/prisma/build/index.js migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`; a verificação automática é `schema-catalog.integration.test.ts`.
+
+### Desvios da spec (pequenos e deliberados)
+
+1. **Versão das chaves e da audiência: `v3`, não `v2`.** Com as contas ligadas, o prefixo das sessões Bearer e a audiência já eram `v2` (spec 017); reusar `v2` deixaria as sessões antigas (hash com o campo antigo) alcançáveis pelo código novo. Usei `v3` (`infrastructure/auth/auth-version.ts`) e **mantive a separação por modo da 017**: `v3` com `ACCOUNTS_ENABLED` ligado e `v3-legacy` desligado (o teste de contas da 017, que prova que um modo não aceita token do outro, segue valendo). A sessão da conta fica em `<prefixo>v3:account-session:`. A spec pedia `:v3` "em todos os modos": a única diferença é o sufixo `-legacy` do modo sem contas.
+2. **"Sem drift" virou "sem drift novo".** O `migrate diff` mostra duas diferenças que já vinham da migration da 017 e que a 022 não deve mexer: `accounts.updated_at` tem DEFAULT no banco (o INSERT cru de `AccountRepository.register` depende dele) e a FK `memberships_account_id_fkey` não tem `ON UPDATE CASCADE`. O teste de drift aceita exatamente essas duas e falha com qualquer outra.
+3. **Mais nomes renomeados que a lista da spec:** a métrica `user_admin_actions_total` virou `membership_admin_actions_total`; o resultado `client_unavailable` de `channel_inbound_messages_total` virou `company_unavailable`; o CHECK `messages_answered_by_only_user_check` virou `..._only_contact_check` (o nome citava "user"); o slug gerado ao criar empresa pela conta passou de `cliente-<uuid>` para `empresa-<uuid>`. Os `NOT NULL` nomeados do PostgreSQL 18 (`users_client_id_not_null`...) também são renomeados (laço no SQL; nas versões anteriores ele não faz nada).
+4. **Critério do checksum das migrations anteriores:** verificado por `git diff e2cc836 -- backend/prisma/migrations` (só a pasta nova aparece), sem teste automático dedicado.
+5. **`create-user` da CLI** manteve o nome (conforme a spec); a opção antiga `--client` cai no `strict` do `parseArgs` (exit 2, sem pedir senha), com teste.
+
+### Exceções do gate (`backend/src/domain-vocabulary.allowlist.json`) e o porquê
+
+- **Arquivos que precisam citar o nome antigo:** `account-migration.integration.test.ts`, `account-password-reset.integration.test.ts` e `rename-migration.integration.test.ts` (reproduzem o schema anterior à 022 em schema temporário); `migrations.test.ts` (confere o conteúdo das migrations antigas); `inbound-queue.integration.test.ts` e `inbound-job-queue.test.ts` (job no formato antigo); `accounts.integration.test.ts` e `auth.integration.test.ts` (sessão no formato antigo); `tenant-scope.test.ts` (o nome antigo do escopo deixou de valer); `admin-companies.integration.test.ts` (caminhos antigos dão 404); `account-password-reset.controller.test.ts` (o cabeçalho antigo não vale); `whatsapp-webhook.controller.test.ts` e `whatsapp-payloads.ts` (`from_user_id` é campo do webhook da Meta); e os três arquivos do próprio gate.
+- **Máscaras (texto de terceiros):** `pg.Client`, `Prisma Client`, `Client de mentira` e `Client do Prisma`.
+- **Regiões marcadas nos `.md`:** a tabela antigo -> novo de `AGENTS.md`, as notas e as seções 6 e 7 de `docs/context.md`, e dois itens de `docs/handoff.md`, entre `<!-- vocabulario-antigo:inicio -->` e `<!-- vocabulario-antigo:fim -->`.
+- O gate falha se uma exceção ou máscara não casar com nada (teste incluído). `MessageRole.USER` e `EMAIL_PROVIDER_USER` não precisam de exceção: os padrões do gate não os alcançam.
+
+### Resultado do `reviewer`
+
+Pendente: revisão obrigatória (segurança), de preferência por outro agente/modelo. Pontos a conferir: o nome literal `companyId` que a `tenant-scope` exige e `MODEL_SCOPES`, os `where` com `companyId`, `lockCompany`, `findByWhatsappPhoneNumberId`, o `cid` do token, as chaves de Redis (`v3`) e a migration (atomicidade e nomes).

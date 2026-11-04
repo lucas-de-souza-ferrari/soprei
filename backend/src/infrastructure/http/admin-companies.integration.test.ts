@@ -141,6 +141,20 @@ describe('/admin/companies contra o PostgreSQL de testes', () => {
     }
   });
 
+  it('os caminhos antigos (spec 022) respondem 404, sem alias: /admin/clients e .../users', async () => {
+    const id = '0199c1d2-0000-7000-8000-000000000001';
+    for (const [method, url] of [
+      ['GET', '/admin/clients'],
+      ['POST', '/admin/clients'],
+      ['GET', `/admin/clients/${id}`],
+      ['GET', `/admin/clients/${id}/conversations`],
+      ['GET', `/admin/companies/${id}/users`],
+    ] as const) {
+      const response = await app.inject({ method, url, headers: auth, payload: {} });
+      assert.equal(response.statusCode, 404, `${method} ${url}`);
+    }
+  });
+
   it('401 sem chave e com chave errada, também contra o banco real', async () => {
     assert.equal((await app.inject({ method: 'GET', url: '/admin/companies' })).statusCode, 401);
     const wrong = await app.inject({

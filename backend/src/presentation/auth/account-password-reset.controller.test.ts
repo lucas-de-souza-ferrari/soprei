@@ -166,6 +166,8 @@ test('as duas rotas exigem Origin e X-Soprei-App válidos (403 antes de qualquer
         { origin: 'http://evil.example.test', 'x-soprei-app': 'web' },
         { origin: ORIGIN },
         { 'x-soprei-app': 'web' },
+        // Spec 022: o cabeçalho antigo (X-Soprei-Client) não é alias do novo.
+        { origin: ORIGIN, 'x-soprei-client': 'web' },
       ];
       for (const headers of bad) {
         assert.equal((await post(url, payload, headers)).statusCode, 403, url);
