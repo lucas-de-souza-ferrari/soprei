@@ -206,5 +206,6 @@ Toca em dados de empresa (conversas e mensagens) e **não cria acesso novo**: re
 5. Fixture e2e: falhas são flags (não contadores), porque o `StrictMode` repete efeitos.
 6. Correção de layout pré-existente: a raiz de `CompanyArea` ganhou `grid-cols-[minmax(0,1fr)]` (as 4 abas estouravam 360 px).
 7. Sem métrica nova, sem dependência nova.
+8. Ajustes da revisão (reviewer): regex dos nomes de métricas do teste ponta a ponta corrigido (barra perdida) com lista afirmada não vazia; testes de `updatedAt` com mensagens simultâneas e de paginação da lista quando uma conversa sobe entre as páginas (a que subiu fica de fora daquela navegação e reaparece ao reler a primeira página); `:conversationId` sem limite próprio no Zod (acima de 100 caracteres o roteador do Fastify já responde 414 antes do handler).
 
 **Validação local (Node 24.18, uma bateria no fim):** `typecheck`, `lint`, `format:check` verdes; `pnpm test` 1138 backend + 51 frontend, 0 falhas; `pnpm test:integration` 405 de 405; `pnpm build` ok; `test:browser` 104 de 104 (desktop e celular). Suítes novas repetidas 3x (atividade e lote) sem flake. Node 22 e a LTS ficam para o CI. A spec continua `aprovada` (o dono marca `concluída` depois do CI e do merge).

@@ -260,3 +260,63 @@ describe('histórico decrescente (spec 024)', () => {
     );
   });
 });
+
+describe('concorrência e paginação sobre dados que mudam (spec 024)', () => {
+  it('mensagens simultâneas na mesma conversa: o updatedAt termina no maior createdAt e nunca recua', async () => {
+    for (let round = 0; round < 8; round += 1) {
+      const conversation = await conversations.findOrCreateByContact(
+        companyA.id,
+        `simultaneas-${String(round)}`,
+      );
+      const base = 20_000 + round * 100;
+      // Ordem de disparo alternada: o resultado não pode depender de quem chega primeiro.
+      const seconds =
+        round % 2 === 0 ? [base + 1, base + 2, base + 3] : [base + 3, base + 1, base + 2];
+      await Promise.all(seconds.map((second) => say(companyA, conversation, second)));
+      assert.equal(
+        (await conversations.findById(companyA.id, conversation.id)).updatedAt.getTime(),
+        at(base + 3).getTime(),
+        `rodada ${String(round)}`,
+      );
+    }
+  });
+
+  it('conversa que sobe ao topo entre a página 1 e a 2: nada duplica; a que subiu só reaparece ao reler a primeira página', async () => {
+    const company = await tenants.createCompany('activity-c');
+    const created: Conversation[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const conversation = await conversations.findOrCreateByContact(
+        company.id,
+        `pg-${String(index)}`,
+      );
+      await say(company, conversation, 30_000 + index);
+      created.push(conversation);
+    }
+    // Atividade crescente: a lista é pg-4, pg-3, pg-2, pg-1, pg-0.
+    const first = await conversations.listByActivity(company.id, { limit: 2 });
+    assert.deepEqual(
+      first.items.map((item) => item.id),
+      [created[4]?.id, created[3]?.id],
+    );
+    // Entre as páginas, a conversa mais antiga (ainda não carregada) recebe mensagem e sobe ao topo.
+    const moved = created[0];
+    assert.ok(moved);
+    await say(company, moved, 31_000);
+    const second = await conversations.listByActivity(company.id, {
+      limit: 10,
+      cursor: first.nextCursor ?? '',
+    });
+    const loaded = [...first.items, ...second.items].map((item) => item.id);
+    // Comportamento esperado do cursor: ele só olha para a frente do ponto em que parou. Nada se
+    // repete e a conversa que subiu (acima do cursor) fica de fora desta navegação...
+    assert.equal(new Set(loaded).size, loaded.length);
+    assert.ok(!loaded.includes(moved.id));
+    assert.deepEqual(
+      second.items.map((item) => item.id),
+      [created[2]?.id, created[1]?.id],
+    );
+    // ...e aparece no topo ao reler a primeira página ("Atualizar" no site).
+    const refreshed = await conversations.listByActivity(company.id, { limit: 2 });
+    assert.equal(refreshed.items[0]?.id, moved.id);
+  });
+});
