@@ -125,7 +125,12 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
         toListOptions(query),
         query.order,
       );
-      return { items: page.items.map(toMessageResponse), nextCursor: page.nextCursor };
+      return {
+        // A conversa vai junto (rótulo mascarado e canal): o histórico abre pelo id, também ao recarregar.
+        conversation: toConversationResponse(page.conversation),
+        items: page.items.map(toMessageResponse),
+        nextCursor: page.nextCursor,
+      };
     },
   );
 

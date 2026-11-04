@@ -472,6 +472,14 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
         'id',
         'updatedAt',
       ]);
+      // O histórico traz a conversa (mascarada) junto, para abrir pelo id também ao recarregar.
+      const { conversation: header, ...rest } = history.json<{
+        conversation: Record<string, unknown>;
+        items: unknown[];
+        nextCursor: string | null;
+      }>();
+      assert.deepEqual(Object.keys(rest).sort(), ['items', 'nextCursor']);
+      assert.deepEqual(header, conversation);
       assert.equal(conversation.contactLabel, 'Contato final 1234');
       assert.equal(conversation.channel, 'whatsapp');
     });

@@ -93,6 +93,11 @@ export interface AttendanceOptions {
   readonly now?: () => Date;
 }
 
+/** Uma página do histórico mais a conversa a que ela pertence (o painel abre o histórico pelo id). */
+export interface ConversationHistory extends Page<Message> {
+  readonly conversation: Conversation;
+}
+
 export interface AttendanceDeps {
   readonly companies: CompanyRepository;
   readonly conversations: ConversationRepository;
@@ -449,11 +454,17 @@ export class AttendanceService {
     conversationId: string,
     options?: ListOptions,
     order?: MessageOrder,
-  ): Promise<Page<Message>> {
+  ): Promise<ConversationHistory> {
     await this.deps.companies.findById(companyId);
     // Conversa de outra empresa se comporta como inexistente (NotFoundError).
-    await this.deps.conversations.findById(companyId, conversationId);
-    return this.deps.messages.listByConversation(companyId, conversationId, options, order);
+    const conversation = await this.deps.conversations.findById(companyId, conversationId);
+    const page = await this.deps.messages.listByConversation(
+      companyId,
+      conversationId,
+      options,
+      order,
+    );
+    return { ...page, conversation };
   }
 
   /**
