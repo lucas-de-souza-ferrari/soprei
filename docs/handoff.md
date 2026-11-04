@@ -2,13 +2,13 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs, e o detalhe de cada spec no "Registro da implementação" dela.
 
-**Última atualização:** 2026-11-04, por Claude Code (Sonnet 5.5): spec 023 (conectar o WhatsApp pelo site) **implementada** na branch `spec/023-conectar-whatsapp-no-site`, com typecheck, lint, format e testes locais verdes em Node 24; falta o `reviewer` (spec de segurança), o push, o CI em Node 22 e na LTS e o merge, que são do dono.
+**Última atualização:** 2026-11-04, por Claude Code (Sonnet 5.5): spec 023 (conectar o WhatsApp pelo site) mergeada com o CI verde; spec 024 (painel de conversas) aprovada e na branch `spec/024-painel-de-conversas`, pronta para implementar. Pendente do dono: o teste do Embedded Signup real (domínio HTTPS na Meta) e a troca da 022 se ainda não aplicada.
 
 ## Onde estamos
 
 - **Concluídas e mergeadas:** specs 001 a 005, 007, 008 e 010 a 021 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta; cada empresa tem credencial própria cifrada (015); contas globais com cadastro, confirmação de e-mail por **código de 6 dígitos** e cookie HttpOnly (017, 020); e-mail por SMTP genérico (019); site com componentes beUI e modo escuro (018). O atendimento usa o `LlmProvider` `mock` por padrão e o Claude Haiku 5.5 com `LLM_PROVIDER=anthropic`.
 - **Ajustes da revisão da 023 (reviewer aprovou):** erro e carga da persona por status, comentários do renome em que o chamador (HTTP, SDK) virou empresa, máscaras no gate de vocabulário e documentação de que `CHANNEL_MANUAL_CONNECT_ENABLED` só controla a seção da interface (o `PUT` do canal segue como API).
-- **Em andamento:** spec 023 implementada, aguardando `reviewer` e CI (ver o "Registro da implementação" da spec: o que rodou local, cortes e desvios). Depois, painel mínimo de conversas (spec 024).
+- **Em andamento:** spec 024 (painel mínimo de conversas: lista e histórico no site, contato mascarado no servidor, ordem por última atividade) aprovada em 2026-11-04, na branch `spec/024-painel-de-conversas`.
 - **Validação:** o CI (GitHub Actions, Node 22 e LTS) é a palavra final. Localmente rodam sempre `typecheck`, `lint` e `format:check` (da **raiz**; de dentro de `backend/` o `format:check` dá falso alarme). Os testes só rodam localmente quando um teste falha no CI ou para verificar uma correção (decisão do dono, 2026-11-03, ver `AGENTS.md`).
 
 ## Passos do dono (a máquina dele)
@@ -27,7 +27,7 @@
 
 ## Próximo passo sugerido
 
-**Primeiro, o dono aplica a troca da spec 022 na máquina dele (passo 0 abaixo).** Depois: `reviewer` na spec 023 (endpoint novo, permissão nova, script de terceiro no site), push e CI; e os passos da 0a para ver o fluxo funcionando. Em seguida, o **painel mínimo de conversas** (spec 024); depois convites e gestão de equipe pelo site, tempo real (009), retenção e LGPD e hospedagem (antes de empresas reais), resiliência do canal (respostas não enviadas, mensagens pendentes antigas, BSUID) e cache (006) só com volume.
+**Primeiro, o dono aplica a troca da spec 022 na máquina dele (passo 0 abaixo).** Depois: os passos da 0a para ver o fluxo da 023 funcionando (a Fase 3, o Embedded Signup real, exige o domínio HTTPS do site/túnel na Meta e o `allowedHosts` do Vite, ainda não feito). Em seguida, a **spec 024** (painel de conversas, já aprovada); depois convites e gestão de equipe pelo site, tempo real (009), retenção e LGPD e hospedagem (antes de empresas reais), resiliência do canal (respostas não enviadas, mensagens pendentes antigas, BSUID) e cache (006) só com volume.
 
 ## Decisões do dono que não são óbvias no código
 

@@ -1,6 +1,6 @@
 # 023 — Conectar o WhatsApp pelo site (canal, persona e teste do atendimento)
 
-- **Status:** aprovada (2026-11-04, dono: "Aprovo tudo", com as 11 recomendações)
+- **Status:** concluída e mergeada (2026-11-04; revisada pelo `reviewer`, sem bloqueador; CI verde; falta só o teste manual do Embedded Signup real com a Meta, Fase 3); aprovada (2026-11-04, dono: "Aprovo tudo", com as 11 recomendações)
 - **Branch:** `spec/023-conectar-whatsapp-no-site`
 - **Depende de:** 008 (permissões), 015 (credencial do canal e Embedded Signup no servidor), 017 e 021 (sessão da conta por cookie), 018 (beUI, modo escuro, contraste) e 022 (vocabulário: `Company`, `Membership`, `Account`, `contact`; rota `/admin/companies/:companyId/...`; cabeçalho `X-Soprei-App`; claim `cid`)
 - **Passa pelo `reviewer` antes do merge:** sim (endpoint novo, permissão nova, fluxo de credencial no navegador, script de terceiro no site).
