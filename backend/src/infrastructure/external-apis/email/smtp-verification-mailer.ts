@@ -1,5 +1,11 @@
 import nodemailer, { type SendMailOptions } from 'nodemailer';
+import {
+  INVITATION_MAIL_SUBJECT,
+  invitationMailText,
+} from '../../../application/invitations/invitation-mail.js';
 import type {
+  CompanyInvitationMail,
+  InvitationMailer,
   PasswordResetMailer,
   VerificationMailer,
 } from '../../../application/ports/account-session.js';
@@ -36,7 +42,9 @@ export function buildTransportOptions(options: SmtpMailerOptions): Record<string
   };
 }
 
-export class SmtpVerificationMailer implements VerificationMailer, PasswordResetMailer {
+export class SmtpVerificationMailer
+  implements VerificationMailer, PasswordResetMailer, InvitationMailer
+{
   private readonly transport: MailTransport;
   private readonly from: string;
 
@@ -91,6 +99,16 @@ export class SmtpVerificationMailer implements VerificationMailer, PasswordReset
         'Ele vale por 15 minutos. Se você não pediu isso, ignore esta mensagem; sua senha continua a mesma.',
       ],
       'Não foi possível enviar o código de recuperação.',
+    );
+  }
+
+  sendCompanyInvitation(email: string, mail: CompanyInvitationMail): Promise<void> {
+    // Falha fixa: nunca ecoa destinatário, nome da empresa, papel nem link.
+    return this.send(
+      email,
+      INVITATION_MAIL_SUBJECT,
+      [invitationMailText(mail)],
+      'Não foi possível enviar o convite.',
     );
   }
 

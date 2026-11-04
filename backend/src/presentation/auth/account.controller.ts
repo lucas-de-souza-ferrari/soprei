@@ -1,6 +1,7 @@
 import type { FastifyPluginCallback } from 'fastify';
 import { z } from 'zod';
 import type { AccountService } from '../../application/auth/account.service.js';
+import type { InvitationService } from '../../application/invitations/invitation.service.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
 import {
   emailSchema,
@@ -43,6 +44,17 @@ export const passwordResetConfirmSchema = z
   })
   .strict();
 
+/**
+ * Corpos das rotas públicas de convite (spec 025). O token é só limitado em tamanho aqui: formato
+ * malformado, vencido, usado e o resto são a MESMA falha uniforme do service (400 `INVITATION_INVALID`),
+ * não um 400 de validação que distinguiria o problema. Estritos; a senha segue a política do cadastro.
+ */
+const invitationToken = z.string().max(4096);
+export const invitationTokenSchema = z.object({ token: invitationToken }).strict();
+export const invitationAcceptNewSchema = z
+  .object({ token: invitationToken, password: accountPasswordSchema })
+  .strict();
+
 export const ACCOUNT_COOKIE = 'soprei_session';
 export function accountCookie(header: string | undefined): string {
   const matches = (header ?? '')
@@ -67,9 +79,11 @@ export function cookieIsSecure(nodeEnv: string, appOrigin: string): boolean {
 export const accountController: FastifyPluginCallback<{
   service: AccountService;
   legacyAuth?: Pick<AuthService, 'logout'>;
+  /** Convites (spec 025); sem isto as rotas `/auth/invitations/*` não existem (404). */
+  invitations?: Pick<InvitationService, 'preview' | 'accept' | 'acceptNew'>;
   origin: string;
   secure: boolean;
-}> = (app, { service, origin, secure, legacyAuth }, done) => {
+}> = (app, { service, origin, secure, legacyAuth, invitations }, done) => {
   const cookie = (value: string, clear = false): string =>
     `${ACCOUNT_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${clear ? 0 : 30 * 86400}${secure ? '; Secure' : ''}`;
   const credentials = z.object({ email: emailSchema, password: loginPasswordSchema }).strict();
@@ -119,6 +133,29 @@ export const accountController: FastifyPluginCallback<{
     // Sem cookie e sem login automático: a pessoa entra com a senha nova.
     return reply.status(204).send();
   });
+  if (invitations !== undefined) {
+    // Rotas públicas de convite (spec 025): perfil `login` (fail-closed), sem login automático.
+    app.post('/auth/invitations/preview', login, async (request) => {
+      const body = invitationTokenSchema.parse(request.body);
+      return invitations.preview(body.token);
+    });
+    app.post('/auth/invitations/accept', login, async (request, reply) => {
+      // Sem cookie válido = 401 (o site vai ao login e volta ao convite).
+      const secret = accountCookie(request.headers.cookie);
+      const body = invitationTokenSchema.parse(request.body);
+      const account = await service.me(secret);
+      const { companyId } = await invitations.accept(account, body.token);
+      // A empresa nova passa a ser a selecionada na sessão (Redis fora aqui = 503 com o vínculo criado).
+      await service.selectCompany(secret, companyId);
+      return reply.status(204).send();
+    });
+    app.post('/auth/invitations/accept-new', login, async (request, reply) => {
+      const body = invitationAcceptNewSchema.parse(request.body);
+      await invitations.acceptNew(body.token, body.password);
+      // Sem cookie e sem login automático: a pessoa entra com a senha que definiu.
+      return reply.status(204).send();
+    });
+  }
   app.post('/auth/login', login, async (request, reply) => {
     const body = credentials.parse(request.body);
     const secret = await service.login(body.email, body.password);

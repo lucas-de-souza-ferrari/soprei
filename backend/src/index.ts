@@ -210,8 +210,12 @@ async function main(): Promise<void> {
     );
   }
 
+  // Um só mailer SMTP para contas (confirmação, recuperação) e convites; só com contas globais ligadas.
+  const accountMailer = config.ACCOUNTS_ENABLED
+    ? new SmtpVerificationMailer(smtpMailerOptions(config))
+    : undefined;
   const app = buildServer({
-    ...(config.ACCOUNTS_ENABLED
+    ...(config.ACCOUNTS_ENABLED && accountMailer !== undefined
       ? {
           accounts: {
             service: new AccountService({
@@ -265,7 +269,24 @@ async function main(): Promise<void> {
                   'bloqueio de login não zerado depois da redefinição',
                 );
               },
-              mailer: new SmtpVerificationMailer(smtpMailerOptions(config)),
+              mailer: accountMailer,
+            }),
+            // Convites por e-mail (spec 025): sem variável nova; só id e enum em log e métrica.
+            invitations: new InvitationService({
+              invitations: new PrismaCompanyInvitationRepository(prisma),
+              companies: companyRepository,
+              accounts: new PrismaAccountRepository(prisma),
+              unitOfWork: new PrismaInvitationUnitOfWork(prisma),
+              hasher: auth.hasher,
+              mailer: accountMailer,
+              quota: new RedisInvitationQuotaStore(
+                authRedis.client,
+                versionedAuthPrefix(config.AUTH_REDIS_PREFIX, true),
+              ),
+              logger,
+              metrics,
+              loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
+              appOrigin: config.APP_ORIGIN ?? '',
             }),
             origin: config.APP_ORIGIN ?? '',
             secure: cookieIsSecure(config.NODE_ENV, config.APP_ORIGIN ?? ''),
@@ -323,9 +344,25 @@ async function main(): Promise<void> {
       }
     },
   });
+  // Expurgo do e-mail dos convites pendentes vencidos há 7 dias (spec 025): mesmo ciclo de vida.
+  const invitationPurger = new InvitationExpiryPurger({
+    repository: new PrismaInvitationExpiryRepository(prisma),
+    // Só contagens: nunca e-mail nem id.
+    onRun: ({ result, expired, batches }) => {
+      metrics.countCompanyInvitation('purge', result === 'ok' ? 'ok' : 'error');
+      if (result === 'error') {
+        logger.error({ expired, batches }, 'falha no expurgo de convites vencidos');
+      } else if (expired > 0) {
+        logger.info({ expired, batches }, 'convites vencidos expurgados');
+      }
+    },
+  });
   infrastructure.accountPurge = startPurgeTimer({
     enabled: config.ACCOUNTS_ENABLED,
-    run: () => purger.runOnce(),
+    run: async () => {
+      await purger.runOnce();
+      await invitationPurger.runOnce();
+    },
     intervalMinutes: config.ACCOUNT_PURGE_INTERVAL_MINUTES,
   });
 
@@ -361,8 +398,14 @@ import { AccountService } from './application/auth/account.service.js';
 import { deriveLoginLockSecret } from './application/auth/auth.service.js';
 import {
   PrismaAccountRepository,
+  PrismaCompanyInvitationRepository,
+  PrismaInvitationExpiryRepository,
+  PrismaInvitationUnitOfWork,
   PrismaUnverifiedAccountPurgeRepository,
 } from './infrastructure/database/index.js';
+import { InvitationExpiryPurger } from './application/invitations/invitation-expiry-purger.js';
+import { InvitationService } from './application/invitations/invitation.service.js';
+import { RedisInvitationQuotaStore } from './infrastructure/auth/redis-invitation-quota.js';
 import { startPurgeTimer } from './application/auth/purge-timer.js';
 import { UnverifiedAccountPurger } from './application/auth/unverified-account-purger.js';
 import { versionedAuthPrefix } from './infrastructure/auth/auth-version.js';

@@ -32,3 +32,18 @@ export interface PasswordResetMailer {
 
 /** O que o `AccountService` precisa do transporte de e-mail. */
 export type AccountMailer = VerificationMailer & PasswordResetMailer;
+
+/** Dados do e-mail de convite (spec 025). O nome da empresa ainda não está sanitizado. */
+export interface CompanyInvitationMail {
+  readonly companyName: string;
+  readonly role: 'ADMIN' | 'AGENT' | 'VIEWER';
+  /** `${APP_ORIGIN}/convite#t=...`: nunca vai a log. */
+  readonly link: string;
+  readonly validDays: number;
+}
+
+/** E-mail de convite para a equipe de uma empresa (spec 025), em texto simples. */
+export interface InvitationMailer {
+  /** Assunto fixo, sem nome da empresa; falha com erro fixo, sem eco de destinatário nem de link. */
+  sendCompanyInvitation(email: string, mail: CompanyInvitationMail): Promise<void>;
+}

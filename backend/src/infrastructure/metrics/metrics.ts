@@ -85,6 +85,13 @@ export type ChannelConnectionResult =
   | 'unsubscribe_failed';
 /** Mudança de persona pela própria empresa (spec 023): conjunto fixo. */
 export type PersonaUpdateAction = 'set' | 'cleared';
+
+/** Operação de convite (spec 025). Conjunto fixo; nunca e-mail, id nem token. */
+export type InvitationMetricAction =
+  'create' | 'resend' | 'revoke' | 'preview' | 'accept' | 'accept_new' | 'purge';
+export type InvitationMetricResult =
+  'ok' | 'invalid' | 'forbidden' | 'limited' | 'conflict' | 'mismatch' | 'error';
+export type InvitationEmailResult = 'sent' | 'failed' | 'skipped';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {
@@ -196,6 +203,10 @@ export interface Metrics {
   countMembershipAdminAction(action: AuditAction): void;
   /** A empresa gravou ou limpou a própria persona (spec 023). Nunca o texto nem o tamanho. */
   countCompanyPersonaUpdate(action: PersonaUpdateAction): void;
+  /** Uma operação de convite terminou (spec 025). A razão detalhada de uma falha uniforme vai só aqui. */
+  countCompanyInvitation(action: InvitationMetricAction, result: InvitationMetricResult): void;
+  /** O e-mail de convite foi enviado, falhou ou foi pulado pela cota (spec 025). */
+  countCompanyInvitationEmail(result: InvitationEmailResult): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
 }
@@ -448,6 +459,19 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const companyInvitations = new Counter({
+    name: 'company_invitations_total',
+    help: 'Operações de convite por ação e resultado (spec 025, conjuntos fixos)',
+    labelNames: ['action', 'result'] as const,
+    registers: [registry],
+  });
+  const companyInvitationEmails = new Counter({
+    name: 'company_invitation_emails_total',
+    help: 'E-mails de convite por resultado (sent, failed, skipped)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
     name: 'db_pool_connections',
@@ -565,6 +589,12 @@ export function createMetrics(): Metrics {
     },
     countCompanyPersonaUpdate(action) {
       companyPersonaUpdates.inc({ action });
+    },
+    countCompanyInvitation(action, result) {
+      companyInvitations.inc({ action, result });
+    },
+    countCompanyInvitationEmail(result) {
+      companyInvitationEmails.inc({ result });
     },
     bindPool(source) {
       poolSource = source;

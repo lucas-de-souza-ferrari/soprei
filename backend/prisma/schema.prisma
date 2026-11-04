@@ -41,6 +41,7 @@ model Company {
   memberships       Membership[]
   auditEvents       AuditEvent[]
   channelConnection ChannelConnection?
+  invitations       CompanyInvitation[]
 
   @@map("companies")
 }
@@ -142,9 +143,11 @@ model Membership {
   accountId    String?        @map("account_id") @db.Uuid
   account      Account?       @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
-  company       Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  auditAsActor  AuditEvent[] @relation("AuditActor")
-  auditAsTarget AuditEvent[] @relation("AuditTarget")
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  auditAsActor       AuditEvent[]        @relation("AuditActor")
+  auditAsTarget      AuditEvent[]        @relation("AuditTarget")
+  invitationsSent    CompanyInvitation[] @relation("InvitationInviter")
+  invitationAccepted CompanyInvitation[] @relation("InvitationAccepted")
 
   // `[id, companyId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
   @@unique([id, companyId])
@@ -189,6 +192,10 @@ enum AuditAction {
   CHANNEL_CONNECTED
   CHANNEL_TOKEN_REPLACED
   CHANNEL_DISCONNECTED
+  INVITATION_CREATED
+  INVITATION_RESENT
+  INVITATION_REVOKED
+  INVITATION_ACCEPTED
 
   @@map("audit_action")
 }
@@ -205,14 +212,55 @@ model AuditEvent {
   targetMembershipId String?         @map("target_membership_id") @db.Uuid
   fromRole           MembershipRole? @map("from_role")
   toRole             MembershipRole? @map("to_role")
+  /// Convite a que o evento se refere (ações INVITATION_*, spec 025); nulo nas demais. Só o id: nunca o e-mail.
+  invitationId       String?         @map("invitation_id") @db.Uuid
   createdAt          DateTime        @default(now()) @map("created_at")
 
-  company Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  actor   Membership  @relation("AuditActor", fields: [actorMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
-  target  Membership? @relation("AuditTarget", fields: [targetMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  company    Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invitation CompanyInvitation? @relation(fields: [invitationId, companyId], references: [id, companyId], onDelete: Restrict)
+  actor      Membership         @relation("AuditActor", fields: [actorMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  target     Membership?        @relation("AuditTarget", fields: [targetMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
 
   @@index([companyId, createdAt, id])
   @@map("audit_events")
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+
+  @@map("invitation_status")
+}
+
+/// Convite por e-mail para entrar numa empresa (TENANT, spec 025). O e-mail do convidado (dado pessoal) e o
+/// HMAC do segredo existem só enquanto PENDING (CHECK no banco os anula ao fechar). As chaves estrangeiras
+/// são COMPOSTAS com `companyId`. O índice único parcial `(company_id, email) WHERE status = 'PENDING'` e os
+/// CHECKs só existem na migration (o Prisma não os representa).
+model CompanyInvitation {
+  id                    String           @id @default(uuid(7)) @db.Uuid
+  companyId             String           @map("company_id") @db.Uuid
+  email                 String?
+  role                  MembershipRole
+  status                InvitationStatus @default(PENDING)
+  tokenHash             String?          @map("token_hash")
+  invitedByMembershipId String           @map("invited_by_membership_id") @db.Uuid
+  acceptedMembershipId  String?          @map("accepted_membership_id") @db.Uuid
+  expiresAt             DateTime         @map("expires_at") @db.Timestamptz(6)
+  lastSentAt            DateTime         @map("last_sent_at") @db.Timestamptz(6)
+  sendCount             Int              @default(1) @map("send_count") @db.SmallInt
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  closedAt              DateTime?        @map("closed_at") @db.Timestamptz(6)
+
+  company            Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invitedBy          Membership   @relation("InvitationInviter", fields: [invitedByMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  acceptedMembership Membership?  @relation("InvitationAccepted", fields: [acceptedMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  auditEvents        AuditEvent[]
+
+  @@unique([id, companyId])
+  @@index([companyId, status, createdAt, id])
+  @@map("company_invitations")
 }
 
 /// Operador da plataforma (GLOBAL: não pertence a empresa alguma). E-mail único global.

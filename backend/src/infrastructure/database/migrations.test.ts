@@ -54,7 +54,8 @@ describe('migration da spec 008 (RBAC e auditoria)', () => {
       if (
         file.name.endsWith('_rbac_audit') ||
         file.name.endsWith('_channel_connections') ||
-        file.name.endsWith('_rename_company_membership')
+        file.name.endsWith('_rename_company_membership') ||
+        file.name.endsWith('_company_invitations')
       ) {
         continue;
       }
@@ -146,5 +147,54 @@ describe('migration da spec 022 (renome do domínio)', () => {
 
   it('termina com a verificação que recusa qualquer nome antigo que sobrar', () => {
     assert.match(statements, /RAISE EXCEPTION 'RENAME_LEFTOVERS/);
+  });
+});
+
+describe('migration da spec 025 (convites por e-mail)', () => {
+  const migration = migrationFiles().find((file) => file.name.endsWith('_company_invitations'));
+  const statements = (migration?.sql ?? '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+
+  it('é aditiva: nada é apagado nem reescrito além do CHECK por ação recriado', () => {
+    assert.ok(migration !== undefined, 'migration _company_invitations existe');
+    for (const forbidden of [
+      /\bDROP\s+(TABLE|COLUMN|TYPE|INDEX|DEFAULT)\b/i,
+      /\bDELETE\s+FROM\b/i,
+      /\bTRUNCATE\b/i,
+      /\bRENAME\b/i,
+      /\bUPDATE\s+"/i,
+    ]) {
+      assert.doesNotMatch(statements, forbidden);
+    }
+    // O único DROP é o do CHECK por ação, recriado na mesma migration.
+    assert.deepEqual(statements.match(/DROP CONSTRAINT "[a-z_]+"/g), [
+      'DROP CONSTRAINT "audit_events_target_by_action_check"',
+    ]);
+    assert.match(statements, /CREATE TABLE "company_invitations"/);
+    assert.match(statements, /ADD COLUMN "invitation_id" UUID/);
+  });
+
+  it('usa os valores novos de audit_action só pelo texto (valor de enum novo não vale na mesma transação)', () => {
+    assert.match(statements, /ADD VALUE IF NOT EXISTS 'INVITATION_ACCEPTED'/);
+    assert.match(statements, /"action"::text IN \('INVITATION_CREATED'/);
+    assert.doesNotMatch(statements, /'INVITATION_[A-Z]+'::"?audit_action/);
+  });
+
+  it('guarda e-mail e hash só em convite PENDING, bloqueia OWNER e usa chaves compostas', () => {
+    assert.match(statements, /company_invitations_state_check/);
+    assert.match(statements, /company_invitations_role_check" CHECK \("role" <> 'OWNER'\)/);
+    assert.match(statements, /WHERE "status" = 'PENDING'/);
+    for (const column of ['invited_by_membership_id', 'accepted_membership_id']) {
+      assert.match(
+        statements,
+        new RegExp(`FOREIGN KEY \\("${column}", "company_id"\\) REFERENCES "memberships"`),
+      );
+    }
+    assert.match(
+      statements,
+      /FOREIGN KEY \("invitation_id", "company_id"\) REFERENCES "company_invitations"/,
+    );
   });
 });

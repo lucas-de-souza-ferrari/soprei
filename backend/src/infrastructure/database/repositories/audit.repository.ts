@@ -1,4 +1,5 @@
 import type {
+  AuditAction,
   AuditEvent,
   AuditRepository,
   CompanyId,
@@ -35,6 +36,7 @@ export class PrismaAuditRepository implements AuditRepository {
           targetMembershipId: data.targetMembershipId ?? null,
           fromRole: data.fromRole ?? null,
           toRole: data.toRole ?? null,
+          invitationId: data.invitationId ?? null,
         },
       });
       return toAuditEvent(row);
@@ -51,5 +53,27 @@ export class PrismaAuditRepository implements AuditRepository {
       });
       return toPage(rows, limit, toAuditEvent);
     });
+  }
+
+  countSince(
+    companyId: CompanyId,
+    filter: {
+      readonly actions: readonly AuditAction[];
+      readonly since: Date;
+      readonly actorMembershipId?: string;
+    },
+  ): Promise<number> {
+    return withRepositoryErrors('AuditEvent.countSince', () =>
+      this.db.auditEvent.count({
+        where: {
+          companyId,
+          action: { in: [...filter.actions] },
+          createdAt: { gte: filter.since },
+          ...(filter.actorMembershipId === undefined
+            ? {}
+            : { actorMembershipId: filter.actorMembershipId }),
+        },
+      }),
+    );
   }
 }

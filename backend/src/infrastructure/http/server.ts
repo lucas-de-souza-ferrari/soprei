@@ -7,6 +7,7 @@ import type { AttendanceService } from '../../application/attendance/attendance.
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
 import type { CompanyService } from '../../application/companies/company.service.js';
+import type { InvitationService } from '../../application/invitations/invitation.service.js';
 import type { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
 import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
@@ -16,6 +17,7 @@ import {
   type ChannelSetupInfo,
 } from '../../presentation/admin/channel.controller.js';
 import { adminCompaniesController } from '../../presentation/admin/companies.controller.js';
+import { adminInvitationsController } from '../../presentation/admin/invitations.controller.js';
 import { adminMembershipsController } from '../../presentation/admin/memberships.controller.js';
 import {
   healthController,
@@ -56,7 +58,13 @@ export interface WhatsappRoutesParams {
 }
 
 export interface BuildServerParams {
-  readonly accounts?: { service: AccountService; origin: string; secure: boolean };
+  readonly accounts?: {
+    service: AccountService;
+    origin: string;
+    secure: boolean;
+    /** Convites por e-mail (spec 025): só existem com contas globais ligadas (sem isto, 404). */
+    invitations?: InvitationService;
+  };
   readonly logger: FastifyBaseLogger;
   readonly readiness: ReadinessChecks;
   /**
@@ -168,9 +176,13 @@ export function buildServer({
     // Envios de confirmação em segundo plano não se perdem em silêncio no desligamento.
     app.addHook('onClose', async () => {
       await accounts.service.drain();
+      await accounts.invitations?.drain();
     });
     void app.register(accountController, {
-      ...accounts,
+      service: accounts.service,
+      origin: accounts.origin,
+      secure: accounts.secure,
+      ...(accounts.invitations === undefined ? {} : { invitations: accounts.invitations }),
       ...(auth === undefined ? {} : { legacyAuth: auth }),
     });
   }
@@ -211,6 +223,14 @@ export function buildServer({
         auth,
         metrics,
         memberships: membershipAdmin,
+      });
+    }
+    if (accounts?.invitations !== undefined) {
+      void app.register(adminInvitationsController, {
+        prefix: '/admin/companies',
+        auth,
+        metrics,
+        invitations: accounts.invitations,
       });
     }
     if (admin.channel !== undefined) {

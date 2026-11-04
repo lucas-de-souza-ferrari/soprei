@@ -18,6 +18,7 @@ import type {
   SessionStore,
 } from '../application/ports/session-store.js';
 import {
+  type AuditAction,
   type AuditEvent,
   type AuditRepository,
   type CompanyId,
@@ -215,6 +216,28 @@ export class InMemoryAuditRepository implements AuditRepository {
   readonly events: AuditEvent[] = [];
   /** Liga uma falha na gravação da trilha (para provar que a mudança do usuário é desfeita). */
   failWith: Error | undefined;
+  /** Relógio dos eventos (os testes de cota o injetam). */
+  now: () => Date = () => new Date();
+
+  countSince(
+    companyId: CompanyId,
+    filter: {
+      readonly actions: readonly AuditAction[];
+      readonly since: Date;
+      readonly actorMembershipId?: string;
+    },
+  ): Promise<number> {
+    return Promise.resolve(
+      this.events.filter(
+        (event) =>
+          event.companyId === companyId &&
+          filter.actions.includes(event.action) &&
+          event.createdAt.getTime() >= filter.since.getTime() &&
+          (filter.actorMembershipId === undefined ||
+            event.actorMembershipId === filter.actorMembershipId),
+      ).length,
+    );
+  }
 
   create(companyId: CompanyId, data: NewAuditEvent): Promise<AuditEvent> {
     if (this.failWith !== undefined) return Promise.reject(this.failWith);
@@ -226,7 +249,8 @@ export class InMemoryAuditRepository implements AuditRepository {
       targetMembershipId: data.targetMembershipId ?? null,
       fromRole: data.fromRole ?? null,
       toRole: data.toRole ?? null,
-      createdAt: new Date(),
+      invitationId: data.invitationId ?? null,
+      createdAt: this.now(),
     };
     this.events.push(event);
     return Promise.resolve(event);

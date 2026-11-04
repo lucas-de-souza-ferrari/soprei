@@ -75,3 +75,30 @@ export {
   VERIFICATION_FAILURE_WINDOW_MS,
   VERIFICATION_MAX_ATTEMPTS,
 } from './repositories/account.repository.js';
+export {
+  INVITABLE_ROLES,
+  INVITATION_ACCOUNT_SENDS_PER_DAY,
+  INVITATION_COMPANY_SENDS_PER_DAY,
+  INVITATION_EXPIRY_GRACE_MS,
+  INVITATION_INVITER_SENDS_PER_DAY,
+  INVITATION_MAX_PENDING,
+  INVITATION_MAX_SENDS,
+  INVITATION_QUOTA_WINDOW_MS,
+  INVITATION_RECIPIENT_EMAILS_PER_DAY,
+  INVITATION_RESEND_INTERVAL_MS,
+  INVITATION_STATUSES,
+  INVITATION_VALIDITY_DAYS,
+  INVITATION_VALIDITY_MS,
+} from './entities/company-invitation.js';
+export type {
+  CompanyInvitation,
+  InvitableRole,
+  InvitationClosing,
+  InvitationRenewal,
+  InvitationStatus,
+  NewCompanyInvitation,
+} from './entities/company-invitation.js';
+export type {
+  CompanyInvitationRepository,
+  InvitationExpiryRepository,
+} from './repositories/company-invitation.repository.js';

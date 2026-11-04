@@ -13,6 +13,10 @@ export const AUDIT_ACTIONS = [
   'CHANNEL_CONNECTED',
   'CHANNEL_TOKEN_REPLACED',
   'CHANNEL_DISCONNECTED',
+  'INVITATION_CREATED',
+  'INVITATION_RESENT',
+  'INVITATION_REVOKED',
+  'INVITATION_ACCEPTED',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -29,6 +33,8 @@ export interface AuditEvent {
   readonly targetMembershipId: string | null;
   readonly fromRole: MembershipRole | null;
   readonly toRole: MembershipRole | null;
+  /** Convite a que o evento se refere (`INVITATION_*`, spec 025); só o id, nunca o e-mail. */
+  readonly invitationId: string | null;
   readonly createdAt: Date;
 }
 
@@ -36,8 +42,10 @@ export interface AuditEvent {
 export interface NewAuditEvent extends WithoutCompanyId {
   readonly action: AuditAction;
   readonly actorMembershipId: string;
-  /** Obrigatório nas ações `MEMBERSHIP_*`; ausente nas `CHANNEL_*` (o banco confere com um CHECK). */
+  /** Obrigatório nas ações `MEMBERSHIP_*` e em `INVITATION_ACCEPTED`; ausente nas `CHANNEL_*` e nas demais `INVITATION_*` (o banco confere com um CHECK). */
   readonly targetMembershipId?: string | null;
   readonly fromRole?: MembershipRole | null;
   readonly toRole?: MembershipRole | null;
+  /** Obrigatório nas ações `INVITATION_*` (o banco confere com o CHECK por ação). */
+  readonly invitationId?: string | null;
 }

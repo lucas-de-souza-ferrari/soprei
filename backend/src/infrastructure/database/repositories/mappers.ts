@@ -2,6 +2,7 @@ import {
   type AuditEvent,
   type ChannelConnection,
   type Company,
+  type CompanyInvitation,
   CompanyId,
   type Conversation,
   type Message,
@@ -13,6 +14,7 @@ import {
 import type {
   AuditEvent as AuditEventRow,
   ChannelConnection as ChannelConnectionRow,
+  CompanyInvitation as CompanyInvitationRow,
   Company as CompanyRow,
   Conversation as ConversationRow,
   Message as MessageRow,
@@ -95,6 +97,7 @@ export function toAuditEvent(row: AuditEventRow): AuditEvent {
     targetMembershipId: row.targetMembershipId,
     fromRole: row.fromRole,
     toRole: row.toRole,
+    invitationId: row.invitationId,
     createdAt: row.createdAt,
   };
 }
@@ -113,5 +116,24 @@ export function toChannelConnection(row: ChannelConnectionRow): ChannelConnectio
     tokenInvalidAt: row.tokenInvalidAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+/** Linha para entidade. `email` e `tokenHash` já vêm nulos nos convites fechados (CHECK no banco). */
+export function toCompanyInvitation(row: CompanyInvitationRow): CompanyInvitation {
+  return {
+    id: row.id,
+    companyId: CompanyId.parse(row.companyId),
+    email: row.email,
+    role: row.role,
+    status: row.status,
+    tokenHash: row.tokenHash,
+    invitedByMembershipId: row.invitedByMembershipId,
+    acceptedMembershipId: row.acceptedMembershipId,
+    expiresAt: row.expiresAt,
+    lastSentAt: row.lastSentAt,
+    sendCount: row.sendCount,
+    createdAt: row.createdAt,
+    closedAt: row.closedAt,
   };
 }

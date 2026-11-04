@@ -83,7 +83,7 @@ export class RateLimitError extends BaseError {
   constructor(
     retryAfterSeconds: number,
     message = 'Muitas requisições. Tente novamente em instantes.',
-    options: AppErrorOptions = {},
+    options: AppErrorOptions & { readonly code?: string } = {},
   ) {
     const seconds = Number.isFinite(retryAfterSeconds)
       ? Math.max(1, Math.ceil(retryAfterSeconds))

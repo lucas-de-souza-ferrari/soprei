@@ -39,6 +39,9 @@ const REDACTED_KEYS = [
   'registrationPin',
   'registrationPinCiphertext',
   'CHANNEL_CREDENTIALS_KEYS',
+  // Convites (spec 025): o token do link e o próprio link nunca vão a log.
+  'invitationToken',
+  'inviteLink',
 ] as const;
 
 /**
