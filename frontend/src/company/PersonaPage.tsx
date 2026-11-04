@@ -3,7 +3,8 @@ import { Alert, AlertContent, AlertDescription, AlertIcon } from '../components/
 import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
 import { Textarea } from '../components/textarea';
-import { companyApi, GENERIC_MESSAGE, PERSONA_MAX_LENGTH } from './company-api';
+import { ApiError } from '../api';
+import { companyApi, PERSONA_MAX_LENGTH } from './company-api';
 
 export interface PageProps {
   readonly companyId: string;
@@ -12,6 +13,10 @@ export interface PageProps {
 }
 
 type Notice = { tone: 'error' | 'success'; text: string } | null;
+
+export const SAVE_FAILED_MESSAGE = 'Não foi possível salvar agora. Tente de novo.';
+/** Status que já têm mensagem própria em `settle` (permissão, limite, indisponível). */
+const OWN_MESSAGE_STATUSES = [403, 429, 502, 503];
 
 const NUL = String.fromCharCode(0);
 const HINT =
@@ -27,9 +32,12 @@ export function PersonaPage({ companyId, settle }: PageProps) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const generation = useRef(0);
 
   useEffect(() => {
+    setLoadError(null);
     const stamp = ++generation.current;
     companyApi
       .persona(companyId)
@@ -41,12 +49,12 @@ export function PersonaPage({ companyId, settle }: PageProps) {
       .catch((error: unknown) => {
         if (stamp !== generation.current) return;
         const text = settle(error);
-        if (text !== null) setNotice({ tone: 'error', text });
+        if (text !== null) setLoadError(text);
       });
     return () => {
       generation.current++;
     };
-  }, [companyId, settle]);
+  }, [companyId, settle, attempt]);
 
   const save = useCallback(
     async (next: string | null): Promise<void> => {
@@ -64,16 +72,17 @@ export function PersonaPage({ companyId, settle }: PageProps) {
         });
       } catch (error) {
         if (stamp !== generation.current) return;
+        // Só o 400 (texto recusado pelo servidor) fica ligado ao campo; o resto tem mensagem própria.
+        if (error instanceof ApiError && error.status === 400) {
+          setFieldError(
+            `A persona não foi aceita. Use de 1 a ${String(PERSONA_MAX_LENGTH)} caracteres.`,
+          );
+          return;
+        }
         const text = settle(error);
         if (text !== null) {
-          // 400: o texto não foi aceito; a mensagem fica ligada ao campo.
-          if (text === GENERIC_MESSAGE) {
-            setFieldError(
-              `A persona não foi aceita. Use de 1 a ${String(PERSONA_MAX_LENGTH)} caracteres.`,
-            );
-          } else {
-            setNotice({ tone: 'error', text });
-          }
+          const own = error instanceof ApiError && OWN_MESSAGE_STATUSES.includes(error.status);
+          setNotice({ tone: 'error', text: own ? text : SAVE_FAILED_MESSAGE });
         }
       } finally {
         if (stamp === generation.current) setBusy(false);
@@ -82,7 +91,27 @@ export function PersonaPage({ companyId, settle }: PageProps) {
     [companyId, settle],
   );
 
-  if (!loaded && notice === null) {
+  if (loadError !== null) {
+    return (
+      <div className="grid gap-4">
+        <div aria-live="polite">
+          <Alert variant="destructive">
+            <AlertIcon />
+            <AlertContent>
+              <AlertDescription className="text-inherit">{loadError}</AlertDescription>
+            </AlertContent>
+          </Alert>
+        </div>
+        <div>
+          <Button variant="outline" size="sm" onClick={() => setAttempt((value) => value + 1)}>
+            Tentar de novo
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!loaded) {
     return (
       <div className="grid place-items-center gap-3 py-10 text-sm text-muted-foreground">
         <Loader variant="spinner" size={28} label="Carregando a persona" />

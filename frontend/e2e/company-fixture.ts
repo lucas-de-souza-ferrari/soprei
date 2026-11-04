@@ -87,6 +87,8 @@ export interface FakeApi {
   /** Resposta do próximo `embedded-signup`: `ok` ou um erro com `code`. */
   signup: { status: number; code?: string } | 'ok';
   personaStatus: number;
+  /** Status do `GET .../persona` (200 = normal). */
+  personaLoadStatus: number;
   /** Resposta do simulador. */
   reply: { text: string; isFallback: boolean };
   /** Seleção da sessão depois do primeiro 404 do canal (outra aba trocou a empresa). */
@@ -137,6 +139,7 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
     persona: null,
     signup: 'ok',
     personaStatus: 200,
+    personaLoadStatus: 200,
     reply: { text: 'Olá! Como posso ajudar?', isFallback: false },
     gate: null,
     laterSelected: undefined,
@@ -223,7 +226,11 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
     }
     if (rest === 'persona') {
       if (!allowed('persona:manage')) return fail(403, 'FORBIDDEN');
-      if (method === 'GET') return reply(200, { persona: state.persona });
+      if (method === 'GET') {
+        return state.personaLoadStatus === 200
+          ? reply(200, { persona: state.persona })
+          : fail(state.personaLoadStatus, 'INTERNAL_ERROR');
+      }
       if (state.personaStatus !== 200) return fail(state.personaStatus, 'VALIDATION_ERROR');
       state.persona = (body as { persona: string | null }).persona;
       return reply(200, { persona: state.persona });

@@ -366,7 +366,27 @@ test('persona: salvar, voltar ao padrao, contador e erro acessivel', async ({ pa
   await page.getByRole('button', { name: 'Salvar', exact: true }).click();
   await expect(page.locator(`#${errorId}`)).toContainText('A persona não foi aceita');
   await expect(page.locator('body')).not.toContainText(SENTINEL);
+  // 500 não é "texto recusado": mensagem genérica de salvar, sem erro no campo.
+  api.personaStatus = 500;
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'Não foi possível salvar agora. Tente de novo.',
+  );
+  await expect(page.locator(`#${errorId}`)).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText(SENTINEL);
   await expectNoSecretsStored(page, ['Texto', 'Fale com carinho.']);
+});
+
+test('persona: falha ao carregar mostra a mensagem e Tentar de novo no lugar do formulario', async ({
+  page,
+}) => {
+  const api = await installApi(page, { personaLoadStatus: 500 });
+  await page.goto('/painel/persona');
+  await expect(page.getByRole('alert')).toContainText('Não foi possível concluir');
+  await expect(page.getByLabel('Persona do assistente')).toHaveCount(0);
+  api.personaLoadStatus = 200;
+  await page.getByRole('button', { name: 'Tentar de novo' }).click();
+  await expect(page.getByLabel('Persona do assistente')).toBeEnabled();
 });
 
 test('testar o atendimento: envio, resposta, marca de fallback e botao desabilitado enquanto espera', async ({
