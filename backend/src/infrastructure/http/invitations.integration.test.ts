@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import { INVITATION_INVALID_MESSAGE } from '../../application/invitations/invitation.service.js';
-import { INVITATION_MAX_PENDING } from '../../domain/index.js';
+import { CompanyId, INVITATION_MAX_PENDING, MembershipId } from '../../domain/index.js';
+import { ForbiddenError } from '../../shared/errors/index.js';
 import {
   createInvitationWorld,
   errorOf,
@@ -745,5 +746,38 @@ describe('gestão de membros com o cookie (ponte): vale na requisição seguinte
       where: { companyId: company, role: 'OWNER', status: 'ACTIVE' },
     });
     assert.equal(owners, 1);
+  });
+
+  it('empresa suspensa corta o acesso (401) e não grava nem envia convite; ao voltar, o acesso volta', async () => {
+    const { owner, company } = await w.setup('Empresa que será suspensa');
+    await w.db.prisma.company.update({ where: { id: company }, data: { status: 'SUSPENDED' } });
+    try {
+      const before = w.sent.length;
+      const response = await w.invite(owner, company, w.freshEmail('susp'));
+      assert.equal(response.statusCode, 401);
+      await w.invitations.drain();
+      assert.equal(w.sent.length, before);
+      assert.equal(await w.db.prisma.companyInvitation.count({ where: { companyId: company } }), 0);
+      // Mesmo por um caminho sem a ponte do cookie, o service recusa criar em empresa suspensa (403).
+      const membership = await w.db.prisma.membership.findFirst({
+        where: { companyId: company, accountId: owner.accountId },
+      });
+      assert.ok(membership);
+      const identity = {
+        kind: 'membership' as const,
+        companyId: CompanyId.parse(company),
+        membershipId: MembershipId.parse(membership.id),
+        role: 'OWNER' as const,
+        sessionId: randomUUID(),
+      };
+      await assert.rejects(
+        w.invitations.create(identity, { email: w.freshEmail('susp2'), role: 'AGENT' }),
+        ForbiddenError,
+      );
+    } finally {
+      await w.db.prisma.company.update({ where: { id: company }, data: { status: 'ACTIVE' } });
+    }
+    assert.equal((await w.invite(owner, company, w.freshEmail('volta'))).statusCode, 201);
+    await w.invitations.drain();
   });
 });
