@@ -65,7 +65,8 @@ after(async () => {
 describe('AuditRepository (isolamento entre empresas A e B)', () => {
   it('não expõe update nem delete: a trilha é imutável pela API', () => {
     const methods = Object.getOwnPropertyNames(PrismaAuditRepository.prototype).sort();
-    assert.deepEqual(methods, ['constructor', 'create', 'forTransaction', 'list']);
+    // `countSince` (spec 025) é só leitura de contagem: a trilha continua sem update nem delete.
+    assert.deepEqual(methods, ['constructor', 'countSince', 'create', 'forTransaction', 'list']);
     assert.ok(!('update' in audit));
     assert.ok(!('delete' in audit));
   });

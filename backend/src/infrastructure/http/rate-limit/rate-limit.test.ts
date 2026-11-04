@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import type { Redis } from 'ioredis';
 import { AttendanceService } from '../../../application/attendance/attendance.service.js';
 import type { AccountService } from '../../../application/auth/account.service.js';
+import type { InvitationService } from '../../../application/invitations/invitation.service.js';
 import { CompanyService } from '../../../application/companies/company.service.js';
 import { Result } from '../../../shared/types/index.js';
 import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
@@ -129,6 +130,8 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         service: { drain: () => Promise.resolve() } as unknown as AccountService,
         origin: 'http://localhost:5174',
         secure: false,
+        // Convites (spec 025): as rotas autenticadas e as três públicas entram no inventário.
+        invitations: { drain: () => Promise.resolve() } as unknown as InvitationService,
       },
       admin: {
         companies: new CompanyService(companies),
@@ -204,6 +207,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/auth/password',
       '/auth/password-reset/request',
       '/auth/password-reset/confirm',
+      '/auth/invitations/preview',
+      '/auth/invitations/accept',
+      '/auth/invitations/accept-new',
+      '/admin/companies/:companyId/invitations',
+      '/admin/companies/:companyId/invitations/:invitationId/resend',
+      '/admin/companies/:companyId/invitations/:invitationId',
       '/webhooks/whatsapp',
     ]) {
       assert.ok(
@@ -245,6 +254,17 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         .filter((entry) => !entry.startsWith('HEAD'))
         .sort();
     assert.deepEqual(declared('/admin/companies/:companyId/channel/setup'), ['GET:channel:manage']);
+    // Spec 025: convites reaproveitam as permissões da gestão de membros (nenhuma permissão nova).
+    assert.deepEqual(declared('/admin/companies/:companyId/invitations'), [
+      'GET:membership:read',
+      'POST:membership:manage',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/invitations/:invitationId/resend'), [
+      'POST:membership:manage',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/invitations/:invitationId'), [
+      'DELETE:membership:manage',
+    ]);
     assert.deepEqual(declared('/admin/companies/:companyId/persona'), [
       'GET:persona:manage',
       'PUT:persona:manage',
@@ -300,6 +320,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           '/auth/session': 'admin',
           '/auth/password-reset/request': 'login',
           '/auth/password-reset/confirm': 'login',
+          // Spec 025: rotas públicas de convite, todas no perfil `login` (fail-closed).
+          '/auth/invitations/preview': 'login',
+          '/auth/invitations/accept': 'login',
+          '/auth/invitations/accept-new': 'login',
         };
         assert.equal(route.config.rateLimitProfile, expected[route.url], `${label} perfil`);
       } else {

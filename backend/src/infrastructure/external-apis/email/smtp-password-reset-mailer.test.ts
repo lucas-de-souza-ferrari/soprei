@@ -84,3 +84,42 @@ test('falha do transporte vira ServiceUnavailableError fixo, sem cause, e-mail, 
     });
   }
 });
+
+test('convite: assunto fixo sem nome de empresa, texto simples, link em linha própria e erro fixo na falha', async () => {
+  const { sent, mailer } = capture();
+  const link = 'https://app.exemplo.test/convite#t=token-secreto';
+  await mailer.sendCompanyInvitation('convidada@example.test', {
+    companyName: 'Padaria Boa',
+    role: 'VIEWER',
+    link,
+    validDays: 7,
+  });
+  const message = sent[0];
+  assert.ok(message);
+  assert.equal(message.to, 'convidada@example.test');
+  assert.equal(message.subject, 'Você recebeu um convite para o Soprei');
+  assert.ok(!(message.subject ?? '').includes('Padaria'));
+  assert.equal(message.html, undefined);
+  assert.ok(typeof message.text === 'string');
+  assert.ok(message.text.split(NL).includes(link));
+  assert.ok(message.text.includes('"Padaria Boa"'));
+
+  const failing = new SmtpVerificationMailer(BASE, {
+    sendMail: () => Promise.reject(new Error('550 convidada@example.test token-secreto')),
+  });
+  await assert.rejects(
+    failing.sendCompanyInvitation('convidada@example.test', {
+      companyName: 'Padaria Boa',
+      role: 'VIEWER',
+      link,
+      validDays: 7,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ServiceUnavailableError);
+      assert.ok(!error.message.includes('convidada'));
+      assert.ok(!error.message.includes('token-secreto'));
+      assert.ok(!error.message.includes('Padaria'));
+      return true;
+    },
+  );
+});
