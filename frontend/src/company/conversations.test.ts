@@ -75,7 +75,7 @@ test('a aba Conversas é a primeira e vale para quem tem conversation:read', () 
   );
 });
 
-test('contrato do cliente: recusa contactRef, externalId, campo desconhecido e papel desconhecido', () => {
+test('contrato lido pelo site: recusa contactRef, externalId, campo desconhecido e papel desconhecido', () => {
   const conversation = {
     id: ID,
     contactLabel: 'Contato final 1234',

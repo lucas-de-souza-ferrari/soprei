@@ -31,11 +31,11 @@ describe('describeContact (spec 024)', () => {
   });
 
   it('texto livre vira "Simulador" com 4 hexadecimais estáveis e nunca aparece', () => {
-    const first = describeContact(A, 'cliente-maria-segredo');
+    const first = describeContact(A, 'contato-maria-segredo');
     assert.match(first.contactLabel, /^Simulador [0-9a-f]{4}$/u);
     assert.equal(first.channel, 'simulator');
     assert.equal(first.contactLabel.includes('maria'), false);
-    assert.deepEqual(describeContact(A, 'cliente-maria-segredo'), first);
+    assert.deepEqual(describeContact(A, 'contato-maria-segredo'), first);
   });
 
   it('o hash inclui a empresa: o mesmo texto em empresas diferentes tem rótulos independentes', () => {
