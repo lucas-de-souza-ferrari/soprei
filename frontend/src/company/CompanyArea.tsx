@@ -2,7 +2,16 @@ import { useCallback, useRef } from 'react';
 import { Button } from '../components/motion/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/motion/tabs';
 import { ChannelPage } from './ChannelPage';
-import { allowedPages, AREA_LABELS, canOpen, isAreaPage, type AreaPage } from './company-nav';
+import {
+  allowedPages,
+  AREA_LABELS,
+  canOpen,
+  type ConversasRoute,
+  isAreaPage,
+  type AreaPage,
+} from './company-nav';
+import { ConversationPage } from './ConversationPage';
+import { ConversationsPage } from './ConversationsPage';
 import { failureOf } from './company-api';
 import { PersonaPage } from './PersonaPage';
 import { TestPage } from './TestPage';
@@ -16,6 +25,10 @@ export interface AreaCompany {
 export interface CompanyAreaProps {
   readonly company: AreaCompany;
   readonly page: AreaPage;
+  /** Dentro da aba Conversas: a lista ou uma conversa (spec 024). */
+  readonly route: ConversasRoute;
+  readonly onOpenConversation: (conversationId: string) => void;
+  readonly onBackToConversations: () => void;
   readonly onNavigate: (page: AreaPage) => void;
   readonly onSwitch: () => void;
   /** 401: a sessão acabou; o site volta ao login. */
@@ -25,13 +38,16 @@ export interface CompanyAreaProps {
 }
 
 /**
- * Área da empresa selecionada (spec 023): menu por permissão e as telas Canal, Persona e Testar. O
+ * Área da empresa selecionada (spec 023): menu por permissão e as telas Conversas (spec 024), Canal, Persona e Testar. O
  * componente é remontado a cada empresa (`key`), então nada de uma empresa sobra na outra. O que o
  * menu esconde é só conveniência: o servidor aplica as permissões de verdade.
  */
 export function CompanyArea({
   company,
   page,
+  route,
+  onOpenConversation,
+  onBackToConversations,
   onNavigate,
   onSwitch,
   onSession,
@@ -58,7 +74,7 @@ export function CompanyArea({
   const allowed = canOpen(page, company.permissions);
 
   return (
-    <div className="grid gap-5">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="m-0 text-sm text-muted-foreground">
           Você está na empresa <strong className="text-foreground">{company.name}</strong>.
@@ -93,6 +109,26 @@ export function CompanyArea({
                 ? 'Você não tem permissão para usar nenhuma tela desta empresa.'
                 : 'Você não tem permissão para ver esta tela.'}
             </p>
+          ) : page === 'conversas' ? (
+            route.kind === 'list' ? (
+              <ConversationsPage
+                key={company.companyId}
+                companyId={company.companyId}
+                permissions={company.permissions}
+                settle={settle}
+                onOpen={onOpenConversation}
+                onNavigate={onNavigate}
+              />
+            ) : (
+              <ConversationPage
+                key={`${company.companyId}:${route.kind === 'detail' ? route.id : 'invalida'}`}
+                companyId={company.companyId}
+                conversationId={route.kind === 'detail' ? route.id : null}
+                settle={settle}
+                onChanged={stableChanged}
+                onBack={onBackToConversations}
+              />
+            )
           ) : page === 'canal' ? (
             <ChannelPage
               key={company.companyId}

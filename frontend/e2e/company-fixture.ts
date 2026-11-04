@@ -66,6 +66,61 @@ export interface Call {
   readonly body: unknown;
 }
 
+/** Conversa da API falsa (spec 024): só o rótulo mascarado e o canal, como o servidor devolve. */
+export interface FakeConversation {
+  id: string;
+  contactLabel: string;
+  channel: 'whatsapp' | 'simulator';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FakeMessage {
+  id: string;
+  role: 'USER' | 'ASSISTANT';
+  content: string;
+  isFallback: boolean;
+  replyToId: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
+/** Leituras de cada tipo que falham com 500 enquanto a flag estiver ligada (o StrictMode repete efeitos). */
+export interface PanelFailures {
+  list: boolean;
+  more: boolean;
+  history: boolean;
+  older: boolean;
+}
+
+export function conversation(
+  label: string,
+  channel: 'whatsapp' | 'simulator' = 'whatsapp',
+  minutesAgo = 5,
+): FakeConversation {
+  const at = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  return { id: randomUUID(), contactLabel: label, channel, createdAt: at, updatedAt: at };
+}
+
+export function message(
+  role: 'USER' | 'ASSISTANT',
+  content: string,
+  minutesAgo: number,
+  extra: Partial<FakeMessage> = {},
+): FakeMessage {
+  const at = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  return {
+    id: randomUUID(),
+    role,
+    content,
+    isFallback: false,
+    replyToId: null,
+    createdAt: at,
+    sentAt: role === 'ASSISTANT' ? at : null,
+    ...extra,
+  };
+}
+
 export interface FakeCompany {
   companyId: string;
   membershipId: string;
@@ -93,6 +148,14 @@ export interface FakeApi {
   reply: { text: string; isFallback: boolean };
   /** Seleção da sessão depois do primeiro 404 do canal (outra aba trocou a empresa). */
   laterSelected: string | null | undefined;
+  /** Conversas da empresa selecionada, da mais recente para a mais antiga (ordem do servidor). */
+  conversations: FakeConversation[];
+  /** Mensagens por id de conversa, em ordem cronológica. */
+  history: Record<string, FakeMessage[]>;
+  failures: PanelFailures;
+  /** Segura a próxima leitura da lista até `releaseList()`. */
+  listGate: Promise<void> | null;
+  releaseList: () => void;
   /** Segura as respostas do simulador até `release()`. */
   gate: Promise<void> | null;
   calls: Call[];
@@ -141,6 +204,11 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
     personaStatus: 200,
     personaLoadStatus: 200,
     reply: { text: 'Olá! Como posso ajudar?', isFallback: false },
+    conversations: [],
+    history: {},
+    failures: { list: false, more: false, history: false, older: false },
+    listGate: null,
+    releaseList: () => undefined,
     gate: null,
     laterSelected: undefined,
     calls: [],
@@ -193,6 +261,34 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
       return reply(204);
     }
     if (path === '/auth/logout') return reply(204);
+    const panelRoute = /^\/admin\/companies\/([^/]+)\/conversations(?:\/([^/]+)\/messages)?$/.exec(
+      path,
+    );
+    if (panelRoute !== null && method === 'GET') {
+      const [, companyId, conversationId] = panelRoute;
+      if (companyId !== state.selected || current === undefined) return fail(404, 'NOT_FOUND');
+      if (!current.permissions.includes('conversation:read')) return fail(403, 'FORBIDDEN');
+      const query = new URL(request.url()).searchParams;
+      const offset = query.has('cursor') ? Number(query.get('cursor')) : 0;
+      const limit = Number(query.get('limit') ?? 50);
+      if (conversationId === undefined) {
+        if (state.listGate !== null) await state.listGate;
+        const kind = query.has('cursor') ? 'more' : 'list';
+        if (state.failures[kind]) return fail(500, 'INTERNAL_ERROR');
+        const slice = state.conversations.slice(offset, offset + limit);
+        const next = offset + limit < state.conversations.length ? String(offset + limit) : null;
+        return reply(200, { items: slice, nextCursor: next });
+      }
+      const found = state.conversations.find((item) => item.id === conversationId);
+      const rows = state.history[conversationId ?? ''];
+      if (found === undefined || rows === undefined) return fail(404, 'NOT_FOUND');
+      const kind = query.has('cursor') ? 'older' : 'history';
+      if (state.failures[kind]) return fail(500, 'INTERNAL_ERROR');
+      const ordered = query.get('order') === 'desc' ? [...rows].reverse() : rows;
+      const slice = ordered.slice(offset, offset + limit);
+      const next = offset + limit < ordered.length ? String(offset + limit) : null;
+      return reply(200, { conversation: found, items: slice, nextCursor: next });
+    }
     if (channelRoute === null) return fail(404, 'NOT_FOUND');
 
     const [, id, rest] = channelRoute;
@@ -247,6 +343,7 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
     return fail(404, 'NOT_FOUND');
   });
   state.release = () => undefined;
+  state.releaseList = () => undefined;
   return state;
 }
 
@@ -255,6 +352,16 @@ export function hold(state: FakeApi): void {
   state.gate = new Promise<void>((resolve) => {
     state.release = () => {
       state.gate = null;
+      resolve();
+    };
+  });
+}
+
+/** Segura a próxima leitura da lista de conversas até `releaseList()`. */
+export function holdList(state: FakeApi): void {
+  state.listGate = new Promise<void>((resolve) => {
+    state.releaseList = () => {
+      state.listGate = null;
       resolve();
     };
   });

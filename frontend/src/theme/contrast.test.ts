@@ -60,6 +60,11 @@ const textPairs: [string, string][] = [
   ['background', 'destructive'],
   ['card-foreground', 'bubble'],
   ['card-foreground', 'muted'],
+  // Spec 024: painel de conversas. Balão do contato (card-foreground em card, já coberto acima), do
+  // assistente (foreground em bubble, idem), hora no balão do assistente, "Não enviada" em muted;
+  // "Enviando…", separador de dia e hora do contato usam muted-foreground em muted/card (cobertos acima).
+  ['muted-foreground', 'bubble'],
+  ['destructive', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],

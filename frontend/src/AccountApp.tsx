@@ -11,7 +11,13 @@ import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
 import { CompanyArea } from './company/CompanyArea';
-import { allowedPages, isAreaPage } from './company/company-nav';
+import {
+  allowedPages,
+  type ConversasRoute,
+  conversasPath,
+  conversasRouteForPath,
+  isAreaPage,
+} from './company/company-nav';
 import {
   isNeutralResetRequestError,
   pageForPath,
@@ -92,6 +98,9 @@ export function AccountApp() {
     field: 'password' | 'confirmation' | 'verification';
     text: string;
   } | null>(null);
+  const [route, setRoute] = useState<ConversasRoute>(
+    conversasRouteForPath(location.pathname) ?? { kind: 'list' },
+  );
   const generation = useRef(0);
   // Página em que o site abriu: um endereço da área da empresa só vale com sessão e empresa selecionada.
   const initialPage = useRef<Page>(pageForPath(location.pathname));
@@ -289,8 +298,17 @@ export function AccountApp() {
 
   const openArea = (next: Page) => {
     setPage(next);
+    setRoute({ kind: 'list' });
     setNotice(null);
     history.replaceState(null, '', pathForPage(next));
+  };
+  // Conversas (spec 024): abrir e voltar à lista entram no histórico do navegador (o "voltar" funciona);
+  // a empresa selecionada vive na sessão do servidor, então ela é a mesma ao voltar e ao atualizar.
+  const goConversations = (next: ConversasRoute) => {
+    setPage('conversas');
+    setRoute(next);
+    setNotice(null);
+    history.pushState(null, '', conversasPath(next));
   };
   const sessionLost = () => {
     generation.current++;
@@ -319,6 +337,19 @@ export function AccountApp() {
         if (generation.current === stamp) setBusy(false);
       });
   };
+  // Voltar e avançar do navegador dentro da área da empresa (só com sessão e empresa selecionada).
+  useEffect(() => {
+    if (session === null) return;
+    const onPop = () => {
+      const next = pageForPath(location.pathname);
+      if (!isAreaPage(next)) return;
+      setPage(next);
+      setRoute(conversasRouteForPath(location.pathname) ?? { kind: 'list' });
+      setNotice(null);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [session]);
   const selectedCompany = companies.find((item) => item.companyId === session?.selectedCompanyId);
 
   const submitLabel =
@@ -490,6 +521,9 @@ export function AccountApp() {
                 key={selectedCompany.companyId}
                 company={selectedCompany}
                 page={page}
+                route={route}
+                onOpenConversation={(id) => goConversations({ kind: 'detail', id })}
+                onBackToConversations={() => goConversations({ kind: 'list' })}
                 onNavigate={openArea}
                 onSwitch={() => openArea('companies')}
                 onSession={sessionLost}

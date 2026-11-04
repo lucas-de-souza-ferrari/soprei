@@ -41,6 +41,77 @@ export const attendanceResultSchema = z.object({
   reply: z.object({ text: z.string(), isFallback: z.boolean() }),
 });
 
+/** Itens por requisição do painel de conversas (spec 024); o máximo da API continua 200. */
+export const CONVERSATIONS_PAGE_SIZE = 30;
+export const MESSAGES_PAGE_SIZE = 50;
+
+/**
+ * Contratos estritos do painel de conversas (spec 024): campo desconhecido é recusado, e a resposta
+ * **não pode** trazer `contactRef` nem `externalId` (o telefone e o wamid nunca chegam ao navegador;
+ * se o servidor voltar a mandá-los, a tela falha em vez de exibir).
+ */
+const isoDate = z.iso.datetime();
+const cursorText = z.string().min(1).max(512);
+
+export const conversationSchema = z.strictObject({
+  id: z.uuid(),
+  contactLabel: z.string().min(1).max(128),
+  channel: z.enum(['whatsapp', 'simulator']),
+  createdAt: isoDate,
+  updatedAt: isoDate,
+});
+export type ConversationItem = z.infer<typeof conversationSchema>;
+
+export const conversationsPageSchema = z.strictObject({
+  items: z.array(conversationSchema).max(200),
+  nextCursor: cursorText.nullable(),
+});
+export type ConversationsPage = z.infer<typeof conversationsPageSchema>;
+
+export const messageSchema = z.strictObject({
+  id: z.uuid(),
+  role: z.enum(['USER', 'ASSISTANT']),
+  content: z.string().max(100_000),
+  isFallback: z.boolean(),
+  replyToId: z.uuid().nullable(),
+  createdAt: isoDate,
+  sentAt: isoDate.nullable(),
+});
+export type MessageItem = z.infer<typeof messageSchema>;
+
+export const messagesPageSchema = z.strictObject({
+  conversation: conversationSchema,
+  items: z.array(messageSchema).max(200),
+  nextCursor: cursorText.nullable(),
+});
+export type MessagesPage = z.infer<typeof messagesPageSchema>;
+
+export interface PageParams {
+  readonly cursor?: string | undefined;
+  readonly limit?: number | undefined;
+}
+
+function queryOf(params: Readonly<Record<string, string | number | undefined>>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text === '' ? '' : `?${text}`;
+}
+
+const sessionSchema = z.object({ selectedCompanyId: z.uuid().nullable() });
+
+/**
+ * Depois de um 404 numa rota da empresa: a empresa selecionada na sessão ainda é `companyId`? Se sim, o
+ * 404 é do recurso (canal desabilitado, conversa inexistente); se não, a empresa mudou (outra aba,
+ * suspensão). Lança a falha da própria leitura da sessão.
+ */
+export async function isStillSelected(companyId: string): Promise<boolean> {
+  const session = sessionSchema.parse(await request('/auth/session'));
+  return session.selectedCompanyId === companyId;
+}
+
 const companyPath = (companyId: string): string => `/admin/companies/${companyId}`;
 
 export const companyApi = {
@@ -73,6 +144,22 @@ export const companyApi = {
   savePersona: async (companyId: string, persona: string | null) =>
     personaSchema.parse(
       await request(`${companyPath(companyId)}/persona`, { method: 'PUT', body: { persona } }),
+    ),
+  conversations: async (companyId: string, params: PageParams = {}) =>
+    conversationsPageSchema.parse(
+      await request(
+        `${companyPath(companyId)}/conversations${queryOf({ limit: params.limit, cursor: params.cursor })}`,
+      ),
+    ),
+  conversationMessages: async (
+    companyId: string,
+    conversationId: string,
+    params: PageParams & { readonly order?: 'asc' | 'desc' } = {},
+  ) =>
+    messagesPageSchema.parse(
+      await request(
+        `${companyPath(companyId)}/conversations/${encodeURIComponent(conversationId)}/messages${queryOf({ limit: params.limit, cursor: params.cursor, order: params.order })}`,
+      ),
     ),
   send: async (companyId: string, text: string) =>
     attendanceResultSchema.parse(

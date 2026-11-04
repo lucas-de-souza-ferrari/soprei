@@ -302,8 +302,10 @@ test('AGENT e VIEWER nao veem as abas; forcar a URL nao chama a API de canal', a
 
   const viewer = await installApi(page, { role: 'VIEWER' });
   await page.goto('/painel/persona');
-  await expect(page.getByRole('tab')).toHaveCount(0);
-  await expect(page.getByText('Você não tem permissão para usar nenhuma tela')).toBeVisible();
+  // Somente leitura vê só Conversas (spec 024).
+  await expect(page.getByRole('tab')).toHaveCount(1);
+  await expect(page.getByRole('tab', { name: 'Conversas' })).toBeVisible();
+  await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
   expect(viewer.calls.filter((call) => call.path.includes('/persona'))).toHaveLength(0);
   expect(viewer.calls.filter((call) => call.path.includes('/messages'))).toHaveLength(0);
 });

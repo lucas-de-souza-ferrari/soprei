@@ -72,17 +72,18 @@ test('menu da empresa: abas por permissão do servidor, por papel', () => {
   ];
   const agent = ['conversation:read', 'conversation:simulate'];
   const viewer = ['conversation:read'];
-  assert.deepEqual(allowedPages(owner), ['canal', 'persona', 'testar']);
-  assert.deepEqual(allowedPages(agent), ['testar']);
-  assert.deepEqual(allowedPages(viewer), []);
+  assert.deepEqual(allowedPages(owner), ['conversas', 'canal', 'persona', 'testar']);
+  assert.deepEqual(allowedPages(agent), ['conversas', 'testar']);
+  assert.deepEqual(allowedPages(viewer), ['conversas']);
   assert.equal(canOpen('canal', agent), false);
   assert.equal(canOpen('persona', agent), false);
   assert.equal(canOpen('testar', viewer), false);
+  assert.equal(canOpen('conversas', viewer), true);
   assert.deepEqual(allowedPages([]), []);
 });
 
 test('rotas da área da empresa: sem ids na URL', () => {
-  for (const page of ['canal', 'persona', 'testar'] as const) {
+  for (const page of ['conversas', 'canal', 'persona', 'testar'] as const) {
     assert.match(areaPath(page), /^\/painel\/[a-z]+$/);
     assert.equal(pageForPath(areaPath(page)), page);
     assert.equal(pathForPage(page), areaPath(page));

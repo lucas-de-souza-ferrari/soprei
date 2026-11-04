@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { z } from 'zod';
-import { ApiError, request } from '../api';
+import { ApiError } from '../api';
 import { Alert, AlertContent, AlertDescription, AlertIcon } from '../components/motion/alert';
 import { Button } from '../components/motion/button';
 import { Input } from '../components/motion/input';
 import { Loader } from '../components/motion/loader';
-import { type ChannelSetup, type ChannelState, companyApi } from './company-api';
+import { type ChannelSetup, type ChannelState, companyApi, isStillSelected } from './company-api';
 import { parseSignupEvent } from './embedded-signup-event';
 import {
   INITIAL_SIGNUP_STATE,
@@ -32,8 +31,6 @@ const NOT_CONFIGURED_MESSAGE = 'A conexão pelo site ainda não está configurad
 
 type Notice = { tone: 'error' | 'info' | 'success'; text: string } | null;
 type Status = 'loading' | 'ready' | 'disabled' | 'failed';
-
-const sessionSchema = z.object({ selectedCompanyId: z.uuid().nullable() });
 
 const dateFormat = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 const formatDate = (iso: string | null): string | null => {
@@ -95,9 +92,9 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
   const notFound = useCallback(
     async (stamp: number): Promise<void> => {
       try {
-        const session = sessionSchema.parse(await request('/auth/session'));
+        const same = await isStillSelected(companyId);
         if (stamp !== generation.current) return;
-        if (session.selectedCompanyId === companyId) setStatus('disabled');
+        if (same) setStatus('disabled');
         else onChanged();
       } catch (error) {
         report(error, stamp);

@@ -11,6 +11,7 @@ const PATHS: Record<AccountPage, string> = {
   forgot: '/recuperar-senha',
   reset: '/redefinir-senha',
   companies: '/painel/empresas',
+  conversas: areaPath('conversas'),
   canal: areaPath('canal'),
   persona: areaPath('persona'),
   testar: areaPath('testar'),
