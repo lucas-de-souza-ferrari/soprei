@@ -105,8 +105,8 @@ DO $$
 DECLARE
   leftovers text;
 BEGIN
-  SELECT string_agg(found, ', ' ORDER BY found) INTO leftovers FROM (
-    SELECT 'relation ' || c.relname AS found
+  SELECT string_agg(leftover.item_name, ', ' ORDER BY leftover.item_name) INTO leftovers FROM (
+    SELECT 'relation ' || c.relname AS item_name
       FROM pg_class c
       WHERE c.relnamespace = current_schema()::regnamespace AND c.relname ~* '(client|user)'
     UNION ALL

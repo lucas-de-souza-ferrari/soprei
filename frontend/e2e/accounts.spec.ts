@@ -11,12 +11,12 @@ for (const theme of ['light', 'dark'] as const) {
     let logged = false;
     let registrations = 0;
     const verifyBodies: unknown[] = [];
-    let selectedClientId: string | null = null;
+    let selectedCompanyId: string | null = null;
     const email = 'pessoa@example.test';
     const accountId = randomUUID();
     const secondId = randomUUID();
     let currentEmail = email;
-    const companies: { clientId: string; userId: string; name: string; role: string }[] = [];
+    const companies: { companyId: string; membershipId: string; name: string; role: string }[] = [];
     await page.route('https://**/*', (route) => route.abort());
     await page.route('**/api/**', async (route) => {
       const path = new URL(route.request().url()).pathname.replace('/api', '');
@@ -29,7 +29,7 @@ for (const theme of ['light', 'dark'] as const) {
           ? {
               id: currentEmail === email ? accountId : secondId,
               email: currentEmail,
-              selectedClientId,
+              selectedCompanyId,
             }
           : {};
       } else if (path === '/auth/register') {
@@ -46,7 +46,7 @@ for (const theme of ['light', 'dark'] as const) {
         status = logged ? 204 : 403;
       } else if (path === '/auth/logout') {
         logged = false;
-        selectedClientId = null;
+        selectedCompanyId = null;
       } else if (!logged) status = 401;
       else if (path === '/account/companies' && route.request().method() === 'GET') {
         await pending.list;
@@ -55,13 +55,13 @@ for (const theme of ['light', 'dark'] as const) {
       } else if (path === '/account/companies') {
         status = 201;
         json = {
-          clientId: randomUUID(),
-          userId: randomUUID(),
+          companyId: randomUUID(),
+          membershipId: randomUUID(),
           name: (body as { name: string }).name,
           role: 'OWNER',
         };
         companies.push(json as (typeof companies)[number]);
-      } else if (path.endsWith('/select')) selectedClientId = path.split('/')[3] ?? null;
+      } else if (path.endsWith('/select')) selectedCompanyId = path.split('/')[3] ?? null;
       else status = 404;
       await route.fulfill({ status, ...(status === 204 ? {} : { json: json ?? {} }) });
     });
@@ -180,7 +180,7 @@ for (const theme of ['light', 'dark'] as const) {
       else if (path === '/auth/session')
         await route.fulfill({
           status: 200,
-          json: { id: randomUUID(), email: 'fixa@example.test', selectedClientId: null },
+          json: { id: randomUUID(), email: 'fixa@example.test', selectedCompanyId: null },
         });
       else await route.fulfill({ status: 200, json: { items: [] } });
     });

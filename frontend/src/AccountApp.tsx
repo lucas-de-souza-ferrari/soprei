@@ -24,8 +24,8 @@ import { isCompleteVerificationCode } from './verification-code';
 import { VerificationField } from './verification-field';
 
 const companySchema = z.object({
-  clientId: z.uuid(),
-  userId: z.uuid(),
+  companyId: z.uuid(),
+  membershipId: z.uuid(),
   name: z.string(),
   role: z.enum(['OWNER', 'ADMIN', 'AGENT', 'VIEWER']),
 });
@@ -33,7 +33,7 @@ const companiesSchema = z.object({ items: z.array(companySchema) });
 const sessionSchema = z.object({
   id: z.uuid(),
   email: z.email(),
-  selectedClientId: z.uuid().nullable(),
+  selectedCompanyId: z.uuid().nullable(),
 });
 type Company = z.infer<typeof companySchema>;
 type Session = z.infer<typeof sessionSchema>;
@@ -59,7 +59,7 @@ async function api(path: string, body?: unknown, unauthorized?: string): Promise
     method: body === undefined ? 'GET' : 'POST',
     credentials: 'same-origin',
     cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', 'X-Soprei-Client': 'web' },
+    headers: { 'Content-Type': 'application/json', 'X-Soprei-App': 'web' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   if (!response.ok)
@@ -478,7 +478,7 @@ export function AccountApp() {
                 <ul className="m-0 list-none p-0">
                   {companies.map((company) => (
                     <li
-                      key={company.clientId}
+                      key={company.companyId}
                       className="flex items-center justify-between gap-4 border-b border-border py-4"
                     >
                       <div className="min-w-0">
@@ -490,17 +490,17 @@ export function AccountApp() {
                       <Button
                         size="sm"
                         variant={
-                          session.selectedClientId === company.clientId ? 'primary' : 'secondary'
+                          session.selectedCompanyId === company.companyId ? 'primary' : 'secondary'
                         }
                         disabled={busy}
                         onClick={() =>
                           void perform(async (stamp) => {
-                            await api(`/account/companies/${company.clientId}/select`, {});
+                            await api(`/account/companies/${company.companyId}/select`, {});
                             await load(stamp);
                           })
                         }
                       >
-                        {session.selectedClientId === company.clientId
+                        {session.selectedCompanyId === company.companyId
                           ? 'Selecionada ✓'
                           : 'Selecionar'}
                       </Button>
