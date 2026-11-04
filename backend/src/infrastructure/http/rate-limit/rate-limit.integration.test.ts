@@ -756,7 +756,8 @@ describe('rotas públicas de convite (spec 025): perfil login é fail-closed', (
       );
       assert.ok(await handle.waitUntilReady(5_000));
       const ORIGIN = 'http://localhost:5174';
-      let consulted = 0 as number;
+      let consulted = 0;
+      const consultedCount = (): number => consulted;
       const touch = () => {
         consulted += 1;
         return Promise.resolve();
@@ -823,13 +824,13 @@ describe('rotas públicas de convite (spec 025): perfil login é fail-closed', (
             'SERVICE_UNAVAILABLE',
           );
         }
-        assert.equal(consulted, 0, 'o convite foi consultado com o limiter fora');
+        assert.equal(consultedCount(), 0, 'o convite foi consultado com o limiter fora');
 
         proxy.mode = 'forward';
         await proxy.start();
         assert.ok(await handle.waitUntilReady(15_000), 'a conexão não voltou');
         assert.deepEqual(statuses(await Promise.all(all())), [200, 204, 204]);
-        assert.ok(consulted >= 3);
+        assert.ok(consultedCount() >= 3);
       } finally {
         await app.close();
         await handle.close();
