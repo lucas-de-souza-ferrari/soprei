@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Cliente da API do site (spec 017, ampliado na 023). O site chama `/api/*` com o cookie `HttpOnly`
+ * Acesso à API do site (spec 017, ampliado na 023). O site chama `/api/*` com o cookie `HttpOnly`
  * da sessão e o cabeçalho `X-Soprei-App: web`; nenhum token fica no navegador.
  *
  * O texto de erro do servidor **nunca** é lido nem mostrado: só o `status` e, quando existe, o

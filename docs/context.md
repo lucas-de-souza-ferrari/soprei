@@ -155,7 +155,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 <!-- vocabulario-antigo:inicio -->
 - **Spec 022 — renome do domínio** ([spec](specs/022-renome-do-dominio.md)): **concluída e mergeada** (CI verde em Node 22 e LTS; aprovada em 2026-11-03). `Client` -> `Company`, `User` (vínculo) -> `Membership`, `Account` fica; banco, API, sessões, fila, logs, site e documentação. Refatoração pura, com gate de restos.
 <!-- vocabulario-antigo:fim -->
-- **Depois:** conectar o WhatsApp pelo site e painel mínimo de conversas (objetivo do dono: ter algo para mostrar); convites e equipe; tempo real (009); retenção, LGPD e hospedagem (antes de empresas reais); resiliência do canal; cache (006) sob demanda.
+- **Spec 023 — conectar o WhatsApp pelo site** ([spec](specs/023-conectar-whatsapp-no-site.md)): **implementada na branch `spec/023-conectar-whatsapp-no-site`, aguardando `reviewer`, CI e merge** (aprovada em 2026-11-04). Área da empresa no site (`/painel/canal`, `/painel/persona`, `/painel/testar`): Embedded Signup da Meta com o SDK carregado sob demanda, estado, troca e desconexão do canal; persona editável pela própria empresa (permissão `persona:manage`); caixa "Testar o atendimento" sobre o simulador. Sem autorização nova: usa a ponte cookie -> rotas de tenant que já existia.
+- **Depois:** painel mínimo de conversas (spec 024; objetivo do dono: ter algo para mostrar); convites e equipe; tempo real (009); retenção, LGPD e hospedagem (antes de empresas reais); resiliência do canal; cache (006) sob demanda.
 
 - Cadastro público: o dono pediu senha com mínimo de seis caracteres, uma letra maiúscula e um número, confirmação na tela e controles de visibilidade. A política de senha legada permanece separada.
 
@@ -186,6 +187,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 ## 6. Estado atual
 
+- **Spec 023 (conectar o WhatsApp pelo site): implementada, aguardando revisão e CI.** Backend: `persona:manage`, `GET/PUT .../persona`, `GET .../channel/setup`, `permissions` em `GET /account/companies`, config `WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` e `CHANNEL_MANUAL_CONNECT_ENABLED`, métrica `company_persona_updates_total{action}`. Frontend: `src/api.ts`, `src/company/` (Embedded Signup com máquina de estados pura, parser estrito do `postMessage` e SDK sob demanda). Detalhes e desvios no "Registro da implementação" da spec.
+
 <!-- vocabulario-antigo:inicio -->
 - **Spec 022 (renome do domínio): concluída e mergeada.** Banco (uma migration de renome, só metadado), schema, código, API, sessões (audiência e chaves `v3`), fila, logs, site e documentação passam de `Client`/`User` para `Company`/`Membership`; gate de restos em `backend/src/domain-vocabulary.test.ts`. Detalhes e desvios no "Registro da implementação" da spec.
 
@@ -206,6 +209,8 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 - **Spec 008 (RBAC): implementada, aguardando revisão e merge.** Já existem: papéis `OWNER`, `ADMIN`, `AGENT`, `VIEWER` com mapa fixo papel -> permissão (`src/domain/permissions.ts`), hook `requirePermission` (401, 403 para `PlatformAdmin`, 404 de `:clientId` alheio antes de 403), `GET`/`POST /admin/clients/:clientId/users`, `PATCH .../users/:userId`, `POST .../users/:userId/password`, `GET .../audit-events`, `POST /auth/password`, hierarquia no service, regra do último `OWNER` com bloqueio da linha do cliente, auditoria na mesma transação (`AuditEvent`, FKs compostas), revogação das sessões do alvo depois do commit e teto de 32 na fila do hasher scrypt.
 
 ## 7. Histórico de decisões
+
+- 2026-11-04: o dono aprovou a spec 023 ("Aprovo tudo", com as 11 recomendações): o site chama as rotas de tenant pela ponte do cookie que já existe (sem caminho de autorização novo), `appId`, `config_id` e versão da Graph chegam ao navegador por `GET /admin/companies/:companyId/channel/setup` (`WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` opcional), formulário manual só com `CHANNEL_MANUAL_CONNECT_ENABLED=true` (recusado em produção), permissão nova `persona:manage` (OWNER e ADMIN) sem auditoria por enquanto, caixa de teste incluída, `permissions` aditivo em `GET /account/companies`, URLs `/painel/canal|persona|testar` sem ids, SDK da Meta só na tela do canal depois do clique 1 (popup no clique 2) e App Review só para empresas que não sejam do dono e dos testadores. Correção feita na implementação: a troca do `code` voltou a usar o parâmetro OAuth da Meta com o nome que ela define (o renome da 022 o tinha trocado, o que quebraria a troca real).
 
 - 2026-11-03: o dono aprovou a spec 022 ("Aprovo tudo", com as 11 recomendações): renome do domínio (`Client` -> `Company`, `User` -> `Membership`, `Account` fica), de verdade no banco, na API, nas sessões, na fila, nos logs, no site e na documentação, sem alias de compatibilidade; todo mundo entra de novo uma vez e a fila é esvaziada antes da troca. Renomeado na spec 022: as entradas abaixo usam os nomes de antes.
 
