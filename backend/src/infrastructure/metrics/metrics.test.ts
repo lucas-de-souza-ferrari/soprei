@@ -230,6 +230,21 @@ describe('createMetrics', () => {
     assert.doesNotMatch(body, /companyId|waba|phone|token="/i);
   });
 
+  it('métrica de persona (spec 023): só o label action, nunca texto, id nem tamanho', async () => {
+    const metrics = createMetrics();
+    metrics.countCompanyPersonaUpdate('set');
+    metrics.countCompanyPersonaUpdate('set');
+    metrics.countCompanyPersonaUpdate('cleared');
+    const body = await metrics.render();
+    assert.match(body, /company_persona_updates_total{action="set"} 2/);
+    assert.match(body, /company_persona_updates_total{action="cleared"} 1/);
+    const labels = body
+      .split('\n')
+      .filter((line) => line.startsWith('company_persona_updates_total{'))
+      .map((line) => line.slice(line.indexOf('{') + 1, line.indexOf('}')).replace(/="[^"]*"/g, ''));
+    assert.deepEqual([...new Set(labels)], ['action']);
+  });
+
   it('métricas de autorização e de gestão de usuários (spec 008): só labels de conjunto fixo', async () => {
     const metrics = createMetrics();
     metrics.countAuthzDenial('membership:manage');

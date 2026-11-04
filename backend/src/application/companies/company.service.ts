@@ -74,6 +74,20 @@ export class CompanyService {
     return await this.companies.update(id, data);
   }
 
+  /**
+   * Persona da **própria** empresa (spec 023). Recebe só o `CompanyId` da identidade (nunca do caminho,
+   * do corpo ou da query). O texto só volta a quem é dono do dado; nunca é logado.
+   */
+  async getPersona(companyId: CompanyId): Promise<string | null> {
+    return (await this.companies.findById(companyId)).persona;
+  }
+
+  /** Grava (ou limpa, com `null`) a persona da própria empresa; devolve o que ficou gravado. */
+  async setPersona(companyId: CompanyId, persona: string | null): Promise<string | null> {
+    const updated = await this.companies.update(companyId, { persona: parsePersona(persona) });
+    return updated.persona;
+  }
+
   /** Soft delete: a empresa some das buscas, os dados e o slug permanecem. */
   remove(id: CompanyId): Promise<void> {
     return this.companies.delete(id);

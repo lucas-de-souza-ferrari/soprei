@@ -83,6 +83,8 @@ export type ChannelConnectionResult =
   | 'registration_failed'
   | 'graph_error'
   | 'unsubscribe_failed';
+/** Mudança de persona pela própria empresa (spec 023): conjunto fixo. */
+export type PersonaUpdateAction = 'set' | 'cleared';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {
@@ -192,6 +194,8 @@ export interface Metrics {
   countAuthzDenial(permission: Permission): void;
   /** Uma operação de gestão de usuários foi confirmada (spec 008). `action` é o `AuditAction`. */
   countMembershipAdminAction(action: AuditAction): void;
+  /** A empresa gravou ou limpou a própria persona (spec 023). Nunca o texto nem o tamanho. */
+  countCompanyPersonaUpdate(action: PersonaUpdateAction): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
 }
@@ -437,6 +441,13 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const companyPersonaUpdates = new Counter({
+    name: 'company_persona_updates_total',
+    help: 'Persona gravada ou limpa pela própria empresa (spec 023), por ação (conjunto fixo)',
+    labelNames: ['action'] as const,
+    registers: [registry],
+  });
+
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
     name: 'db_pool_connections',
@@ -551,6 +562,9 @@ export function createMetrics(): Metrics {
     },
     countMembershipAdminAction(action) {
       membershipAdminActions.inc({ action });
+    },
+    countCompanyPersonaUpdate(action) {
+      companyPersonaUpdates.inc({ action });
     },
     bindPool(source) {
       poolSource = source;

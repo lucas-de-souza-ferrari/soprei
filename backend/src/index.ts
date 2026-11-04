@@ -295,6 +295,16 @@ async function main(): Promise<void> {
       companies: new CompanyService(companyRepository),
       attendance,
       ...(channelService === undefined ? {} : { channel: channelService }),
+      ...(whatsapp === undefined
+        ? {}
+        : {
+            channelSetup: {
+              appId: whatsapp.appId,
+              embeddedSignupConfigId: whatsapp.embeddedSignupConfigId,
+              graphApiVersion: whatsapp.graphApiVersion,
+              manualConnect: whatsapp.manualConnectEnabled,
+            },
+          }),
     },
   });
 

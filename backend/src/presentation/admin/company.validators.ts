@@ -35,20 +35,24 @@ export const createCompanyBodySchema = z
   })
   .strict();
 
+// `null` limpa a persona (volta à padrão). Nunca é logada.
+const personaSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PERSONA_MAX_LENGTH)
+  // O Postgres recusa NUL em texto (22021): vira 400 aqui, não 500 no banco.
+  .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL')
+  .nullable();
+
+/** Corpo de `PUT /admin/companies/:companyId/persona` (spec 023): só `persona`, nada mais. */
+export const putPersonaBodySchema = z.object({ persona: personaSchema }).strict();
+
 export const updateCompanyBodySchema = z
   .object({
     name: nameSchema.optional(),
     status: statusSchema.optional(),
-    // `null` limpa a persona (volta à padrão). Nunca é logada.
-    persona: z
-      .string()
-      .trim()
-      .min(1)
-      .max(PERSONA_MAX_LENGTH)
-      // O Postgres recusa NUL em texto (22021): vira 400 aqui, não 500 no banco.
-      .refine((value) => !value.includes('\u0000'), 'não pode conter o caractere NUL')
-      .nullable()
-      .optional(),
+    persona: personaSchema.optional(),
   })
   .strict()
   .refine(

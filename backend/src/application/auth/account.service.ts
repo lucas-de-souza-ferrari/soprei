@@ -3,7 +3,10 @@ import {
   AccountId,
   CompanyId,
   type Account,
+  type AccountMembership,
   type AccountRepository,
+  type Permission,
+  ROLE_PERMISSIONS,
   type ResetFailureOutcome,
   type VerifyOutcome,
 } from '../../domain/index.js';
@@ -35,6 +38,13 @@ const RESET_MIN_INTERVAL_MS = 60_000;
 
 /** Resposta uniforme de qualquer falha do código de recuperação (a razão vai só ao observador). */
 const RESET_INVALID_MESSAGE = 'Código inválido ou expirado';
+
+/** Vínculo da conta com as permissões do papel (spec 023): campo aditivo, só leitura para o site. */
+export type AccountMembershipView = AccountMembership & { readonly permissions: readonly Permission[] };
+
+function withPermissions(membership: AccountMembership): AccountMembershipView {
+  return { ...membership, permissions: [...ROLE_PERMISSIONS[membership.role]] };
+}
 
 export type PasswordResetResult = ResetFailureOutcome | 'reset' | 'revoke_failed';
 
@@ -355,11 +365,12 @@ export class AccountService {
   }
   async companies(secret: string) {
     const { account } = await this.session(secret);
-    return this.deps.accounts.listMemberships(account.id);
+    // `permissions` (spec 023) é derivado do mapa fixo no servidor; o site só o usa para mostrar abas.
+    return (await this.deps.accounts.listMemberships(account.id)).map(withPermissions);
   }
   async createCompany(secret: string, name: string) {
     const { account } = await this.session(secret);
-    return this.deps.accounts.createCompany(account.id, name);
+    return withPermissions(await this.deps.accounts.createCompany(account.id, name));
   }
   async selectCompany(secret: string, id: string): Promise<void> {
     const { account } = await this.session(secret);

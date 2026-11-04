@@ -9,7 +9,19 @@ import { authenticateHook, requirePermission, membershipAuth } from '../common/a
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { embeddedSignupBodySchema, putChannelBodySchema } from './channel.validators.js';
 
+/** Valores PÚBLICOS que o site precisa para abrir o Embedded Signup (spec 023): nenhum segredo. */
+export interface ChannelSetupInfo {
+  readonly appId: string;
+  /** Ausente = Embedded Signup indisponível neste ambiente. */
+  readonly embeddedSignupConfigId: string | undefined;
+  readonly graphApiVersion: string;
+  /** `CHANNEL_MANUAL_CONNECT_ENABLED`: só decide se a seção "Avançado" aparece no site. */
+  readonly manualConnect: boolean;
+}
+
 export interface AdminChannelControllerOptions {
+  /** Sem isto `GET .../channel/setup` não existe. */
+  readonly setup?: ChannelSetupInfo | undefined;
   readonly auth: Pick<AuthService, 'authenticate'>;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   readonly channel: Pick<
@@ -47,7 +59,7 @@ function toResponse(view: ChannelStateView): ChannelResponse {
  */
 export const adminChannelController: FastifyPluginCallback<AdminChannelControllerOptions> = (
   app,
-  { auth, metrics, channel },
+  { auth, metrics, channel, setup },
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
@@ -61,6 +73,28 @@ export const adminChannelController: FastifyPluginCallback<AdminChannelControlle
     },
     async (request) => toResponse(await channel.getState(membershipAuth(request))),
   );
+
+  // Spec 023: só quem pode conectar (channel:manage) recebe o app id e o config_id (públicos).
+  if (setup !== undefined) {
+    app.get(
+      '/:companyId/channel/setup',
+      {
+        config,
+        onRequest: requirePermission('channel:manage', { companyParam: 'companyId', metrics }),
+      },
+      () => ({
+        embeddedSignup:
+          setup.embeddedSignupConfigId === undefined
+            ? null
+            : {
+                appId: setup.appId,
+                configId: setup.embeddedSignupConfigId,
+                graphApiVersion: setup.graphApiVersion,
+              },
+        manualConnect: setup.manualConnect,
+      }),
+    );
+  }
 
   app.put(
     '/:companyId/channel',

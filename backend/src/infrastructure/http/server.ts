@@ -11,13 +11,17 @@ import type { MembershipAdminService } from '../../application/memberships/membe
 import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
 import { adminAuditController } from '../../presentation/admin/audit.controller.js';
-import { adminChannelController } from '../../presentation/admin/channel.controller.js';
+import {
+  adminChannelController,
+  type ChannelSetupInfo,
+} from '../../presentation/admin/channel.controller.js';
 import { adminCompaniesController } from '../../presentation/admin/companies.controller.js';
 import { adminMembershipsController } from '../../presentation/admin/memberships.controller.js';
 import {
   healthController,
   type ReadinessChecks,
 } from '../../presentation/system/health.controller.js';
+import { adminPersonaController } from '../../presentation/admin/persona.controller.js';
 import { metricsController } from '../../presentation/system/metrics.controller.js';
 import { whatsappWebhookController } from '../../presentation/webhooks/whatsapp-webhook.controller.js';
 import type { TrustProxySetting } from '../config/trust-proxy.js';
@@ -38,6 +42,8 @@ export interface AdminRoutesParams {
     ChannelConnectionService,
     'getState' | 'connect' | 'disconnect' | 'embeddedSignup'
   >;
+  /** Valores públicos do Embedded Signup para o site (spec 023); sem isto `.../channel/setup` não existe. */
+  readonly channelSetup?: ChannelSetupInfo;
 }
 
 /** Canal WhatsApp (spec 011): sem isto as rotas `/webhooks/whatsapp` NÃO existem (404). */
@@ -213,8 +219,15 @@ export function buildServer({
         auth,
         metrics,
         channel: admin.channel,
+        setup: admin.channelSetup,
       });
     }
+    void app.register(adminPersonaController, {
+      prefix: '/admin/companies',
+      auth,
+      metrics,
+      companies: admin.companies,
+    });
     if (admin.attendance !== undefined) {
       void app.register(adminAttendanceController, {
         prefix: '/admin/companies',

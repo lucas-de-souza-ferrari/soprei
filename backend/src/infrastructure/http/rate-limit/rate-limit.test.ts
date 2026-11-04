@@ -138,6 +138,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           disconnect: () => Promise.reject(new Error('inventário')),
           embeddedSignup: () => Promise.reject(new Error('inventário')),
         },
+        channelSetup: {
+          appId: '1',
+          embeddedSignupConfigId: '2',
+          graphApiVersion: 'v26.0',
+          manualConnect: false,
+        },
         attendance: new AttendanceService({
           companies,
           conversations: store.conversations,
@@ -185,6 +191,8 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/audit-events',
       '/admin/companies/:companyId/channel',
       '/admin/companies/:companyId/channel/embedded-signup',
+      '/admin/companies/:companyId/channel/setup',
+      '/admin/companies/:companyId/persona',
       '/admin/companies/:companyId/memberships/:membershipId',
       '/admin/companies/:companyId/memberships/:membershipId/password',
       '/auth/login',
@@ -224,6 +232,23 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       signup.map((route) => `${String(route.method)}:${String(route.permissions.find(Boolean))}`),
       ['POST:channel:manage'],
     );
+
+    // Spec 023: setup do Embedded Signup e persona têm a permissão certa, por método.
+    const declared = (url: string): string[] =>
+      routes
+        .filter((route) => route.url === url)
+        .flatMap((route) =>
+          [route.method]
+            .flat()
+            .map((method) => method + ':' + String(route.permissions.find(Boolean))),
+        )
+        .filter((entry) => !entry.startsWith('HEAD'))
+        .sort();
+    assert.deepEqual(declared('/admin/companies/:companyId/channel/setup'), ['GET:channel:manage']);
+    assert.deepEqual(declared('/admin/companies/:companyId/persona'), [
+      'GET:persona:manage',
+      'PUT:persona:manage',
+    ]);
 
     // Regra do projeto: rota nova declara o perfil (cair em `public` por omissão é só a rede de
     // segurança). Só a infraestrutura fica sem limite, com opt-out explícito.
