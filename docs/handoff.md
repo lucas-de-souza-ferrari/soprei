@@ -2,13 +2,13 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs, e o detalhe de cada spec no "Registro da implementação" dela.
 
-**Última atualização:** 2026-11-04, por Claude Code (Sonnet 5.5): spec 024 (painel de conversas) implementada na branch `spec/024-painel-de-conversas`; falta o CI (Node 22 e LTS), a revisão do `reviewer` e o merge pelo dono.
+**Última atualização:** 2026-11-04, por Claude Code (Sonnet 5.5): spec 024 (painel de conversas) mergeada com o CI verde (bateria local também verde em Node 24); spec 025 (convites e gestão de equipe) aprovada e na branch `spec/025-convites-e-equipe`, pronta para implementar. Pendente do dono: `pnpm db:migrate:deploy` da 024, o teste do Embedded Signup real (domínio HTTPS na Meta) e a troca da 022 se ainda não aplicada.
 
 ## Onde estamos
 
 - **Concluídas e mergeadas:** specs 001 a 005, 007, 008 e 010 a 021 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta; cada empresa tem credencial própria cifrada (015); contas globais com cadastro, confirmação de e-mail por **código de 6 dígitos** e cookie HttpOnly (017, 020); e-mail por SMTP genérico (019); site com componentes beUI e modo escuro (018). O atendimento usa o `LlmProvider` `mock` por padrão e o Claude Haiku 5.5 com `LLM_PROVIDER=anthropic`.
 - **Ajustes da revisão da 023 (reviewer aprovou):** erro e carga da persona por status, comentários do renome em que o chamador (HTTP, SDK) virou empresa, máscaras no gate de vocabulário e documentação de que `CHANNEL_MANUAL_CONNECT_ENABLED` só controla a seção da interface (o `PUT` do canal segue como API).
-- **Em andamento:** spec 024 (painel mínimo de conversas) implementada, na branch `spec/024-painel-de-conversas`: lista e histórico no site, contato mascarado no servidor (as rotas deixam de devolver `contactRef` e `externalId`), ordem por última atividade, `order=desc`. Detalhes e desvios no "Registro da implementação" da spec.
+- **Em andamento:** spec 025 (convites e gestão de equipe: convite por link de uso único, `/painel/equipe`, aceite com conta logada, deslogada ou sem conta; `OWNER` não convidável) aprovada em 2026-11-04, na branch `spec/025-convites-e-equipe`.
 - **Validação:** o CI (GitHub Actions, Node 22 e LTS) é a palavra final. Localmente rodam sempre `typecheck`, `lint` e `format:check` (da **raiz**; de dentro de `backend/` o `format:check` dá falso alarme). Os testes só rodam localmente quando um teste falha no CI ou para verificar uma correção (decisão do dono, 2026-11-03, ver `AGENTS.md`).
 
 ## Passos do dono (a máquina dele)

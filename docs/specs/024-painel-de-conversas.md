@@ -1,6 +1,6 @@
 # 024 — Painel mínimo de conversas no site (lista e histórico, só leitura)
 
-- **Status:** aprovada (2026-11-04, dono: "Aprovo tudo", com as 10 recomendações)
+- **Status:** concluída e mergeada (2026-11-04; revisada pelo `reviewer`; CI verde; bateria local em Node 24: 1138+51 unitários, 407 integração, 104 browser); aprovada (2026-11-04, dono: "Aprovo tudo", com as 10 recomendações)
 - **Branch:** `spec/024-painel-de-conversas`
 - **Depende de:** 008 (permissões), 010 (rotas de conversas e mensagens), 013 (agrupamento: `replyToId`, `answeredById`, `sentAt`), 017 e 021 (sessão da conta por cookie), 018 (beUI, modo escuro, contraste), 022 (vocabulário: `Company`, `Membership`, `Account`, `contact`; rota `/admin/companies/:companyId/...`; `X-Soprei-App`) e 023 (área `/painel/*`, `request()` com `ApiError`, menu por `permissions`, ponte cookie -> rotas de tenant)
 - **Passa pelo `reviewer` antes do merge:** sim (mostra dado pessoal ao navegador, muda o contrato de uma rota de tenant e a máscara do contato é regra de privacidade).
