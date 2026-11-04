@@ -243,13 +243,13 @@ export const envSchema = z
         }
       }
     }
-    // `true` confia em toda a cadeia de X-Forwarded-For: a empresa escolhe o IP e escapa do limite.
+    // `true` confia em toda a cadeia de X-Forwarded-For: o chamador escolhe o IP e escapa do limite.
     if (env.NODE_ENV === 'production' && env.TRUST_PROXY === true) {
       ctx.addIssue({
         code: 'custom',
         path: ['TRUST_PROXY'],
         message:
-          'não pode ser "true" em produção (a empresa escolheria o próprio IP); liste os IPs/CIDRs dos proxies, ex.: 127.0.0.1,::1',
+          'não pode ser "true" em produção (o chamador escolheria o próprio IP); liste os IPs/CIDRs dos proxies, ex.: 127.0.0.1,::1',
       });
     }
     if (env.NODE_ENV === 'production' && !env.RATE_LIMIT_ENABLED) {

@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   }
   if (config.TRUST_PROXY === true) {
     logger.warn(
-      'TRUST_PROXY=true confia em toda a cadeia X-Forwarded-For (a empresa escolhe o IP); use só em ambiente fechado',
+      'TRUST_PROXY=true confia em toda a cadeia X-Forwarded-For (o chamador escolhe o IP); use só em ambiente fechado',
     );
   }
 

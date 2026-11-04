@@ -78,7 +78,7 @@ interface CallParams {
 }
 
 /**
- * Empresa Graph de administração do canal (spec 015): `debug_token`, lista de números da WABA e
+ * Cliente Graph de administração do canal (spec 015): `debug_token`, lista de números da WABA e
  * `subscribed_apps`. Mesmo padrão do `WhatsappCloudApiClient`: `fetch` nativo, `redirect: 'manual'`
  * (redirecionar levaria o token a outro host), prazo por `AbortSignal.timeout`, leitura com teto de
  * 64 KiB e schemas Zod tolerantes. O token da empresa e o token de app vão em `Authorization`; o

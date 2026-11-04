@@ -186,7 +186,7 @@ export class AnthropicLlmProvider implements LlmProvider {
 }
 
 /**
- * O SDK lê `ANTHROPIC_CUSTOM_HEADERS` direto de `process.env` ao criar a empresa e o mescla nos
+ * O SDK lê `ANTHROPIC_CUSTOM_HEADERS` direto de `process.env` ao criar o cliente do SDK e o mescla nos
  * cabeçalhos de toda requisição: fora da nossa config e da validação. Aqui ele é ignorado (some só
  * durante a construção, e é restaurado em seguida).
  */

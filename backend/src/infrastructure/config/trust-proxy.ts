@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 /**
  * Valor de `TRUST_PROXY` já interpretado, no formato que o `trustProxy` do Fastify aceita:
  * - `false`: ignora `X-Forwarded-For` (o IP é o do socket);
- * - `true`: confia em TODA a cadeia (spoofável: a empresa escolhe o IP; só para ambiente fechado);
+ * - `true`: confia em TODA a cadeia (spoofável: o chamador escolhe o IP; só para ambiente fechado);
  * - lista de IPs/CIDRs: só esses proxies são confiados (o proxy-addr valida o peer imediato).
  *
  * Não existe valor inteiro ("n proxies à frente"): o Fastify 5.12.7 o trata como fail-closed (nunca

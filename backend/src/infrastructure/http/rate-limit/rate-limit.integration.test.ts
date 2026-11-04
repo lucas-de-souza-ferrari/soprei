@@ -726,7 +726,7 @@ describe('TRUST_PROXY', () => {
     });
   });
 
-  it('true: confia em toda a cadeia (a empresa escolhe o IP; por isso só para ambiente fechado)', async () => {
+  it('true: confia em toda a cadeia (o chamador escolhe o IP; por isso só para ambiente fechado)', async () => {
     await withHarness({ trustProxy: true, profiles: profiles(quota1) }, async (h) => {
       const response = await h.get('/test/ip', {
         ip: PROXY_IP,

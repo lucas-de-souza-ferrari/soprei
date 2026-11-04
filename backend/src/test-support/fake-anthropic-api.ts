@@ -64,7 +64,7 @@ export const textMessage = (
 /**
  * Servidor falso da API de mensagens da Anthropic (`POST /v1/messages`), local (`node:http`, porta
  * 0): registra cada pedido, responde com sucesso por padrão e aceita comportamentos enfileirados
- * (`script`, `always`). Conta as conexões que a empresa encerrou antes da resposta (cancelamento).
+ * (`script`, `always`). Conta as conexões que o cliente encerrou antes da resposta (cancelamento).
  */
 export class FakeAnthropicApi {
   readonly requests: AnthropicRequest[] = [];

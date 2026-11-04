@@ -41,7 +41,7 @@ export interface LoggableRedisError {
 /**
  * Campos controlados de um erro do ioredis para o log. NUNCA logue o erro inteiro (`{ err }`): o
  * ioredis anexa `command: { name, args }` aos erros de comando (`ReplyError`, `AbortError`) e o
- * serializer do Pino o copiaria, vazando a chave do contador, que carrega o IP da empresa (dado
+ * serializer do Pino o copiaria, vazando a chave do contador, que carrega o IP do cliente (quem chama) (dado
  * pessoal). Aqui saem só o nome, o `code` (ex.: `ECONNREFUSED`) e, se for uma das mensagens
  * constantes conhecidas do ioredis, a mensagem.
  */

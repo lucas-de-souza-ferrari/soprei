@@ -226,7 +226,7 @@ describe('WhatsappCloudApiClient: corpo da resposta com teto', () => {
     while (!graph.floodClosedByClient && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    assert.equal(graph.floodClosedByClient, true, 'a empresa cancelou a conexão');
+    assert.equal(graph.floodClosedByClient, true, 'o cliente cancelou a conexão');
     // Leu só até o teto (64 KiB) mais o que já estava em trânsito: nada perto de "o corpo inteiro".
     assert.ok(
       graph.floodBytesWritten < 16 * 1024 * 1024,
