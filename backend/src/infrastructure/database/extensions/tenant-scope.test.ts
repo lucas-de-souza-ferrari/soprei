@@ -123,6 +123,14 @@ describe('segunda barreira: regras da verificação', () => {
       }
     });
 
+    it('o nome antigo do escopo (clientId, spec 022) não vale mais: where ou data com ele é recusado', () => {
+      rejects('Conversation', 'findMany', { where: { clientId: companyA } });
+      rejects('Conversation', 'updateMany', { where: { clientId: companyA }, data: {} });
+      rejects('Conversation', 'deleteMany', { where: { clientId: companyA } });
+      rejects('Conversation', 'create', { data: { clientId: companyA, contactRef: 'x' } });
+      rejects('Membership', 'findMany', { where: { clientId: companyA } });
+    });
+
     it('rejeita companyId que não é um valor definido (undefined, null, vazio, in, not, OR)', () => {
       rejects('Conversation', 'findMany', { where: { companyId: undefined } });
       rejects('Conversation', 'findMany', { where: { companyId: null } });

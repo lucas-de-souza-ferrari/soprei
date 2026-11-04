@@ -1,6 +1,16 @@
 {
   "fileExceptions": [
     {
+      "path": "backend/src/application/ports/inbound-job-queue.test.ts",
+      "patterns": ["ClientId"],
+      "reason": "prova que o schema do job recusa o campo antigo da empresa (formato anterior à spec 022)"
+    },
+    {
+      "path": "backend/src/infrastructure/database/extensions/tenant-scope.test.ts",
+      "patterns": ["ClientId"],
+      "reason": "prova que o nome antigo do escopo (clientId) deixou de valer na tenant-scope"
+    },
+    {
       "path": "backend/src/infrastructure/database/account-password-reset.integration.test.ts",
       "patterns": ["UserNames"],
       "reason": "cria o tipo user_status no schema temporário que reproduz o formato anterior à spec 022 para exercitar a migration da 021"
@@ -84,7 +94,7 @@
     },
     {
       "path": "backend/src/domain-vocabulary.allowlist.json",
-      "patterns": ["UserNames", "ClientId", "WordClient", "WordUser", "Cliente", "UserAdmin"],
+      "patterns": ["ClientId", "UserNames", "WordClient", "WordUser", "Cliente", "UserAdmin"],
       "reason": "a própria lista de exceções cita os nomes antigos nos motivos"
     }
   ],
