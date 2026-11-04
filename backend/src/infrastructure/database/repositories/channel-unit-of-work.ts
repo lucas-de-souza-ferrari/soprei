@@ -22,7 +22,7 @@ async function lockCompanyRow(db: TenantScopedDb, companyId: CompanyId): Promise
   }
 }
 
-/** Transação do canal (spec 015): conexão, número da empresa e auditoria sobre o mesmo company. */
+/** Transação do canal (spec 015): conexão, número da empresa e auditoria sobre a mesma empresa. */
 export class PrismaChannelUnitOfWork implements ChannelUnitOfWork {
   private readonly connections: PrismaChannelConnectionRepository;
   private readonly companies: PrismaCompanyRepository;

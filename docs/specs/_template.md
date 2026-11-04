@@ -25,7 +25,7 @@ O que acontece quando algo falha ou a entrada é inválida.
 
 ## Isolamento entre empresas
 
-Se toca em dados: como o identificador do cliente é exigido e qual teste prova que um cliente não vê dado de outro. Se não toca, escreva "não se aplica".
+Se toca em dados: como o identificador da empresa (`CompanyId`) é exigido e qual teste prova que uma empresa não vê dado de outra. Se não toca, escreva "não se aplica".
 
 ## Fora de escopo
 

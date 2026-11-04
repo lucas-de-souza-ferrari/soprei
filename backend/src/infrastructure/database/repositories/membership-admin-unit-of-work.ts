@@ -28,7 +28,7 @@ async function lockCompanyRow(db: TenantScopedDb, companyId: CompanyId): Promise
 }
 
 /**
- * Transação da gestão de usuários (spec 008): usuários e auditoria sobre o mesmo company
+ * Transação da gestão de usuários (spec 008): usuários e auditoria sobre a mesma empresa
  * transacional, mais o bloqueio da empresa que serializa a regra do último `OWNER`. O callback não
  * deve fazer chamada externa (hash, Redis): a transação segura uma conexão e o bloqueio.
  */
