@@ -400,12 +400,17 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
           url: `/admin/companies/${a}/conversations/${conversation}/messages`,
           headers: as(a),
         });
-      for (const conversation of ['nao-uuid', randomUUID()]) {
+      // Também ids longos (até o limite de 100 caracteres do roteador): nunca 400 nem eco do valor.
+      for (const conversation of ['nao-uuid', randomUUID(), 'x'.repeat(100)]) {
         const response = await probe(conversation);
         assert.equal(response.statusCode, 404, conversation);
         assert.deepEqual(bodyOf(response), bodyOf(cross));
         assert.ok(!response.body.includes(conversation));
       }
+
+      // Acima de 100 caracteres o roteador recusa antes do handler (414): nunca 400 de validação.
+      const tooLong = await probe('y'.repeat(300));
+      assert.notEqual(tooLong.statusCode, 400);
 
       for (const url of [
         `/admin/companies/${a}/conversations/${conversationB}/messages?order=sideways`,

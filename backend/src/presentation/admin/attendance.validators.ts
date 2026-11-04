@@ -8,7 +8,7 @@ import { companyIdSchema, listCompaniesQuerySchema } from './company.validators.
  */
 export const conversationParamsSchema = z.object({
   companyId: companyIdSchema,
-  conversationId: z.string().max(256),
+  conversationId: z.string(),
 });
 
 /** Corpo de `POST /admin/companies/:companyId/messages`. */
