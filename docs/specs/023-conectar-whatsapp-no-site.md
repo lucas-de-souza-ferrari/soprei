@@ -263,6 +263,8 @@ Do lado da Meta (a conferir contra a documentação atual de cada item; o dono a
 7. **Tamanho:** o diff de produção ficou em ~2 000 linhas (o total passa de 4 000 com testes). Nenhum corte foi aplicado (a caixa de teste e o formulário manual somam menos de 300 linhas e a demonstração depende deles); o dono pode pedir o corte.
 8. O teclado é coberto para o menu (setas) e o diálogo (Esc e foco); a ordem de tabulação do painel explicativo segue a ordem natural do DOM e não tem teste próprio.
 
+9. **Ajustes pós-revisão (reviewer aprovou, sem bloqueador):** a persona trata o erro por `ApiError.status` (só o 400 vira erro do campo; o resto mostra "Não foi possível salvar agora. Tente de novo.") e a falha ao carregar mostra a mensagem com "Tentar de novo"; comentários e a mensagem de config em que "cliente" (HTTP, SDK, chamador) tinha virado "empresa" no renome foram corrigidos; as exceções por arquivo do `client_id` viraram máscaras no gate de vocabulário. `CHANNEL_MANUAL_CONNECT_ENABLED` controla **só** a seção "Avançado" da interface: o `PUT .../channel` com token digitado segue existindo como API para OWNER/ADMIN em qualquer ambiente, protegido pela prova de posse da 015 (não foi fechado).
+
 **O que rodou localmente (Node 24.18):** ver a tabela de validação abaixo. **Depende do CI:** Node 22 e a LTS mais recente (typecheck, lint, format, unitários, integração, build e Playwright).
 
 **Fontes consultadas:** só a spec ("Confirmações na documentação da Meta", 2026-11-04). Nenhuma chamada real à Meta, ao SDK do Facebook ou à Anthropic.
