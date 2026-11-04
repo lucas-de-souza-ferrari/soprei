@@ -32,13 +32,12 @@
     },
     {
       "path": "backend/src/infrastructure/database/migrations.test.ts",
-      "patterns": ["WordUser", "UserNames", "ClientId", "WordClient"],
+      "patterns": ["WordUser", "UserNames", "WordClient"],
       "reason": "confere o conteúdo das migrations anteriores à 022, que citam os nomes antigos e não são editadas"
     },
     {
       "path": "backend/src/infrastructure/database/rename-migration.integration.test.ts",
       "patterns": [
-        "ClientId",
         "WordClient",
         "WordUser",
         "SqlTables",
@@ -114,26 +113,6 @@
         "UserAdmin"
       ],
       "reason": "a própria lista de exceções cita os nomes antigos nos motivos"
-    },
-    {
-      "path": "backend/src/infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.ts",
-      "patterns": ["ClientId"],
-      "reason": "`client_id` é o parâmetro OAuth da Meta na troca do code (`/oauth/access_token`), não o ClientId do domínio"
-    },
-    {
-      "path": "backend/src/infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.test.ts",
-      "patterns": ["ClientId"],
-      "reason": "`client_id` é o parâmetro OAuth da Meta na troca do code (`/oauth/access_token`), não o ClientId do domínio"
-    },
-    {
-      "path": "backend/src/infrastructure/http/channel-embedded-signup.integration.test.ts",
-      "patterns": ["ClientId"],
-      "reason": "`client_id` é o parâmetro OAuth da Meta na troca do code (`/oauth/access_token`), não o ClientId do domínio"
-    },
-    {
-      "path": "backend/src/test-support/fake-graph-api.ts",
-      "patterns": ["ClientId"],
-      "reason": "`client_id` é o parâmetro OAuth da Meta na troca do code (`/oauth/access_token`), não o ClientId do domínio"
     }
   ],
   "maskedTokens": [
@@ -152,6 +131,42 @@
     {
       "pattern": "Client do Prisma",
       "reason": "client do Prisma (terceiros), não a empresa do domínio"
+    },
+    {
+      "pattern": "client_id",
+      "reason": "`client_id` é o parâmetro OAuth da Meta na troca do code (`/oauth/access_token`), não o ClientId do domínio"
+    },
+    {
+      "pattern": "IP do cliente \\(quem chama\\)",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
+    },
+    {
+      "pattern": "Cliente Graph de administração",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
+    },
+    {
+      "pattern": "cliente do SDK",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
+    },
+    {
+      "pattern": "o cliente encerrou",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
+    },
+    {
+      "pattern": "o cliente cancelou a conexão",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
+    },
+    {
+      "pattern": "até o cliente fechar",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
+    },
+    {
+      "pattern": "o cliente fechou a conexão",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
+    },
+    {
+      "pattern": "o cliente nunca pode repassá-lo",
+      "reason": "cliente HTTP/SDK/chamador (quem chama), não a empresa do domínio"
     }
   ]
 }
