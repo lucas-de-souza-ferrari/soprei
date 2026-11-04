@@ -299,4 +299,12 @@ Fonte consultada para a busca: documentação do PostgreSQL (busca textual: `to_
 
 ## Registro da implementação
 
-(vazio; preenchido pelo implementador ao terminar cada etapa)
+**E1 (conhecimento, ponta a ponta): implementada na branch, tudo verde localmente em Node 24** (ver a bateria no handoff). Pastas: `domain/knowledge.ts`; `application/knowledge/` (`normalize.ts`, `chunker.ts`, `query.ts`, `knowledge.service.ts`); `application/attendance/knowledge-prompt.ts`; `application/ports/knowledge-retriever.ts`; `infrastructure/database/repositories/knowledge-document.repository.ts` e `knowledge-retriever.ts` (o único SQL cru novo); `presentation/admin/knowledge.controller.ts` e `.validators.ts`; migration `20261104210000_knowledge_documents`; no site, `company/KnowledgePage.tsx`, `knowledge-api.ts` e `knowledge-rules.ts`.
+
+Desvios e decisões da E1 (com motivo):
+- **Acentos na busca:** o teste de fixture mostrou que o stemmer `portuguese` NÃO reduz "devolucao" e "devolucoes" ao mesmo radical (`devoluca` x `devoluco`), mas reduz "devolução" e "devoluções" a `devolu`. Em vez de só sem acento (plano da spec) ou só com acento (alternativa da spec), `search_text` guarda **as duas formas** (com acento e, depois, sem acento) e a consulta leva a palavra sem acento, a digitada (se tinha acento) e variantes de `-ção`/`-ções`/`-ões` (letras apenas; nenhum operador). Continua sem `unaccent` e sem extensão. Por isso a consulta tem letras acentuadas além de `[a-z0-9]` (só `p{L}p{N}`, validado).
+- **Relevância:** `ts_rank_cd` de um termo só dá o mesmo valor para qualquer palavra, então o "mínimo de relevância" é `KNOWLEDGE_MIN_RANK = 0.05` mais um corte relativo (metade da melhor nota); o teto de 4 trechos é a proteção real contra uma palavra comum.
+- Cumprimentos e palavras muito comuns ("oi", "bom dia", "tudo bem") não entram na consulta (lista curta em `query.ts`): a consulta vira "sem consulta" e nada é recuperado.
+- O limite de tamanho do texto (100.000 caracteres) responde `KNOWLEDGE_DOCUMENT_TOO_LARGE` pelo service (o Zod só barra o absurdo, 400.000).
+- A permissão `inventory:manage` e as rotas de estoque entram na E2; `isSample` já existe nas tabelas e na lista (a E3 só o usa).
+- Testes: `knowledge.test.ts`, `attendance-knowledge.service.test.ts`, `knowledge.controller.test.ts`, `knowledge.integration.test.ts` (busca, isolamento, cascata, GIN por `EXPLAIN`), `knowledge-attendance.integration.test.ts` (simulador e lote, privacidade), `knowledge-migration.integration.test.ts` (schema temporário) e, no site, `knowledge.test.ts`.
