@@ -576,3 +576,156 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
     assert.ok(secretOf(erin).length > 0);
   });
 });
+
+// Spec 024: as duas rotas de leitura do painel de conversas por cookie da conta (ponte da 023).
+describe('painel de conversas por cookie (spec 024)', () => {
+  const PHONE = '5511999991234';
+  const WAMID = `wamid.${Buffer.from(PHONE).toString('base64')}`;
+  const SECRET_TEXT = `texto do contato ${randomUUID()}`;
+  let dana: Person;
+  let danaCompany: string;
+  let conversationId: string;
+  let other: Person;
+  let otherCompany: string;
+  let otherConversationId: string;
+
+  const list = (companyId: string, person: Person | undefined) =>
+    get(`/admin/companies/${companyId}/conversations`, person);
+  const history = (companyId: string, id: string, person: Person | undefined) =>
+    get(`/admin/companies/${companyId}/conversations/${id}/messages`, person);
+
+  before(async () => {
+    dana = await signUp('dana');
+    danaCompany = await createCompany(dana, 'Empresa D do site');
+    await select(dana, danaCompany);
+    other = await signUp('fabio');
+    otherCompany = await createCompany(other, 'Empresa F do site');
+    await select(other, otherCompany);
+    const sent = await send('POST', `/admin/companies/${danaCompany}/messages`, dana, {
+      contactRef: PHONE,
+      text: SECRET_TEXT,
+      externalId: WAMID,
+    });
+    assert.equal(sent.statusCode, 201);
+    conversationId = sent.json<{ conversationId: string }>().conversationId;
+    const sentOther = await send('POST', `/admin/companies/${otherCompany}/messages`, other, {
+      contactRef: 'teste-no-site',
+      text: 'conversa da outra empresa',
+    });
+    otherConversationId = sentOther.json<{ conversationId: string }>().conversationId;
+  });
+
+  it('os quatro papéis leem lista e histórico (GET sem Origin) e o telefone nunca vai junto', async () => {
+    for (const role of MEMBERSHIP_ROLES) {
+      await setRole(danaCompany, dana, role);
+      const items = await list(danaCompany, dana);
+      const messages = await history(danaCompany, conversationId, dana);
+      assert.equal(items.statusCode, 200, role);
+      assert.equal(messages.statusCode, 200, role);
+      assert.equal(items.headers['cache-control'], 'no-store');
+      assert.deepEqual(
+        items
+          .json<{ items: { contactLabel: string; channel: string }[] }>()
+          .items.map((item) => [item.contactLabel, item.channel]),
+        [['Contato final 1234', 'whatsapp']],
+      );
+      assert.ok(messages.body.includes(SECRET_TEXT), 'o conteúdo trafega só nesta resposta');
+      for (const response of [items, messages]) {
+        for (const sentinel of [PHONE, PHONE.slice(0, 8), WAMID, 'contactRef', 'externalId']) {
+          assert.equal(response.body.includes(sentinel), false, `${role}: ${sentinel}`);
+        }
+      }
+    }
+    await setRole(danaCompany, dana, 'OWNER');
+  });
+
+  it('isolamento: a lista de uma empresa nunca traz a conversa da outra; id alheio, inexistente e malformado dão o mesmo 404', async () => {
+    const mine = await list(danaCompany, dana);
+    assert.ok(!mine.body.includes(otherConversationId));
+    const cross = await history(danaCompany, otherConversationId, dana);
+    assert.equal(cross.statusCode, 404);
+    for (const id of [randomUUID(), 'nao-e-uuid', otherConversationId.toUpperCase()]) {
+      const response = await history(danaCompany, id, dana);
+      assert.equal(response.statusCode, 404, id);
+      assert.deepEqual(errorOf(response), errorOf(cross));
+      assert.ok(!response.body.includes(id));
+    }
+    // A outra empresa no caminho (a seleção é danaCompany): 404 idêntico ao de empresa inexistente.
+    const alienList = await list(otherCompany, dana);
+    const ghostList = await list(randomUUID(), dana);
+    assert.equal(alienList.statusCode, 404);
+    assert.deepEqual(errorOf(alienList), errorOf(ghostList));
+    const alienHistory = await history(otherCompany, otherConversationId, dana);
+    assert.equal(alienHistory.statusCode, 404);
+    assert.ok(!alienHistory.body.includes('conversa da outra empresa'));
+    // E a recíproca: a outra empresa não enxerga a conversa de Dana.
+    const theirs = await history(otherCompany, conversationId, other);
+    assert.equal(theirs.statusCode, 404);
+    assert.ok(!(await list(otherCompany, other)).body.includes(conversationId));
+  });
+
+  it('order=desc, order inválido e cursor adulterado', async () => {
+    const base = `/admin/companies/${danaCompany}/conversations/${conversationId}/messages`;
+    const desc = await get(`${base}?order=desc`, dana);
+    const asc = await get(`${base}?order=asc`, dana);
+    assert.equal(desc.statusCode, 200);
+    const ids = (response: LightMyRequestResponse): string[] =>
+      response.json<{ items: { id: string }[] }>().items.map((item) => item.id);
+    assert.deepEqual(ids(desc), ids(asc).reverse());
+    assert.equal((await get(`${base}?order=sideways`, dana)).statusCode, 400);
+    assert.equal((await get(`${base}?cursor=lixo`, dana)).statusCode, 400);
+    assert.equal(
+      (await get(`/admin/companies/${danaCompany}/conversations?limit=0`, dana)).statusCode,
+      400,
+    );
+  });
+
+  it('sem empresa selecionada e sem cookie: 401; Redis das sessões fora: 503', async () => {
+    const gina = await signUp('gina');
+    const ginaCompany = await createCompany(gina, 'Empresa G do site');
+    // Criar empresa não seleciona: a sessão ainda não tem empresa.
+    assert.equal((await list(ginaCompany, gina)).statusCode, 401);
+    assert.equal((await list(danaCompany, undefined)).statusCode, 401);
+    sessionsDown = true;
+    try {
+      assert.equal((await list(danaCompany, dana)).statusCode, 503);
+      assert.equal((await history(danaCompany, conversationId, dana)).statusCode, 503);
+    } finally {
+      sessionsDown = false;
+    }
+  });
+
+  it('vínculo desativado e empresa suspensa deixam de ler na requisição seguinte (401)', async () => {
+    const hugo = await signUp('hugo');
+    const hugoCompany = await createCompany(hugo, 'Empresa H do site');
+    await select(hugo, hugoCompany);
+    assert.equal((await list(hugoCompany, hugo)).statusCode, 200);
+    await db.prisma.membership.updateMany({
+      where: { companyId: hugoCompany, accountId: hugo.accountId },
+      data: { status: 'DISABLED' },
+    });
+    assert.equal((await list(hugoCompany, hugo)).statusCode, 401);
+    await db.prisma.membership.updateMany({
+      where: { companyId: hugoCompany, accountId: hugo.accountId },
+      data: { status: 'ACTIVE' },
+    });
+    await db.prisma.company.update({ where: { id: hugoCompany }, data: { status: 'SUSPENDED' } });
+    assert.equal((await list(hugoCompany, hugo)).statusCode, 401);
+    await db.prisma.company.update({ where: { id: hugoCompany }, data: { status: 'ACTIVE' } });
+  });
+
+  it('o log do fluxo não contém texto, telefone, wamid nem rótulo; a leitura não loga o id da conversa', async () => {
+    // O log do atendimento (escrita) leva só ids, como desde a 010; a leitura não pode acrescentar o id.
+    const mark = logs.raw().length;
+    await list(danaCompany, dana);
+    await history(danaCompany, conversationId, dana);
+    await history(danaCompany, randomUUID(), dana);
+    await history(danaCompany, 'nao-e-uuid', dana);
+    const reading = logs.raw().slice(mark);
+    assert.ok(reading.includes('requisição concluída'));
+    assert.ok(!logContains(reading, conversationId));
+    for (const secret of [SECRET_TEXT, PHONE, WAMID, 'Contato final 1234']) {
+      assert.ok(!logContains(logs.raw(), secret), secret);
+    }
+  });
+});

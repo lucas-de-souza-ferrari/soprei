@@ -195,3 +195,49 @@ describe('agrupamento no banco (spec 013)', () => {
     assert.ok(replies.length <= 2);
   });
 });
+
+describe('última atividade da conversa pelos três caminhos de gravação (spec 024)', () => {
+  const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
+
+  it('handleInboundMessage, acceptInboundMessage e respondToPending levam o updatedAt à mensagem mais recente e reordenam a lista', async () => {
+    const company = await tenants.createCompany('atividade-db');
+    const order = async (): Promise<string[]> =>
+      (await conversations.listByActivity(company.id)).items.map((item) => item.contactRef);
+    const lastMessageAt = async (contact: string): Promise<number> => {
+      const conversation = await conversations.findByContact(company.id, contact);
+      assert.ok(conversation !== null);
+      const rows = await database.prisma.message.findMany({
+        where: { companyId: company.id, conversationId: conversation.id },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      });
+      assert.equal(conversation.updatedAt.getTime(), rows[0]?.createdAt.getTime());
+      return conversation.updatedAt.getTime();
+    };
+
+    // Simulador (handleInboundMessage): pergunta e resposta na mesma conversa.
+    await service.handleInboundMessage(company.id, { contactRef: 'ativ-x', text: 'um' });
+    await pause();
+    await service.handleInboundMessage(company.id, { contactRef: 'ativ-y', text: 'dois' });
+    assert.deepEqual(await order(), ['ativ-y', 'ativ-x']);
+    await lastMessageAt('ativ-x');
+    await lastMessageAt('ativ-y');
+
+    await pause();
+    await service.handleInboundMessage(company.id, { contactRef: 'ativ-x', text: 'tres' });
+    assert.deepEqual(await order(), ['ativ-x', 'ativ-y']);
+
+    // Canal: aceitar (só a mensagem do contato) já move a conversa.
+    await pause();
+    await accept(company.id, 'quatro', 'ativ-y', 'ativ-ext-1');
+    assert.deepEqual(await order(), ['ativ-y', 'ativ-x']);
+    const afterAccept = await lastMessageAt('ativ-y');
+
+    // Responder: a resposta (última mensagem + 1 ms) leva o updatedAt até ela.
+    await pause();
+    await service.respondToPending(company.id, 'ativ-y', LIMITS);
+    const afterReply = await lastMessageAt('ativ-y');
+    assert.ok(afterReply > afterAccept);
+    assert.deepEqual(await order(), ['ativ-y', 'ativ-x']);
+  });
+});

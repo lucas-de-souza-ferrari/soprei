@@ -14,6 +14,7 @@ import {
   type InboundAttendance,
 } from '../../application/channel/channel-inbound.processor.js';
 import { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
+import { CompanyService } from '../../application/companies/company.service.js';
 import { CHANNEL_NOTICE_TEXTS } from '../../application/channel/channel-texts.js';
 import type { Company } from '../../domain/index.js';
 import { DatabaseError } from '../../shared/errors/index.js';
@@ -21,9 +22,10 @@ import { Result } from '../../shared/types/index.js';
 import { FakeGraphApi, graphError } from '../../test-support/fake-graph-api.js';
 import { getClosedPort, withPort } from '../../test-support/closed-port.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
+import { bearer, buildTestAuth, type TestAuth } from '../../test-support/in-memory-auth.js';
 import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
 import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
-import { captureLogs } from '../../test-support/log-capture.js';
+import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import {
@@ -126,6 +128,8 @@ interface Harness {
   readonly queue: InboundQueueHandle;
   readonly prefix: string;
   readonly messages: PrismaMessageRepository;
+  /** Autenticação em memória: token de usuário da empresa para ler as rotas do painel (spec 024). */
+  readonly testAuth: TestAuth;
   stop(): Promise<void>;
 }
 
@@ -190,10 +194,13 @@ async function start(setup: Setup = {}): Promise<Harness> {
     setup.rateLimitWebhookMax === undefined ? undefined : createRateLimitRedis(config, logs.logger);
   // Sem a conexão pronta o limiter passaria em fail-open nas primeiras requisições.
   if (rateLimitRedis !== undefined) assert.ok(await rateLimitRedis.waitUntilReady(3_000));
+  const testAuth = buildTestAuth({ logger: logs.logger, companies });
   const app = buildServer({
     logger: logs.logger,
     metrics,
     metricsToken: METRICS_TOKEN,
+    auth: testAuth.service,
+    admin: { companies: new CompanyService(companies), attendance },
     readiness: {
       database: () => Promise.resolve(Result.ok(undefined)),
       redis: () => Promise.resolve(Result.ok(undefined)),
@@ -234,6 +241,7 @@ async function start(setup: Setup = {}): Promise<Harness> {
     queue,
     prefix,
     messages,
+    testAuth,
     async stop() {
       if (stopped) return;
       stopped = true;
@@ -1342,3 +1350,77 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
 });
 
 const SECRET_FOR_METRICS = 'texto-secreto-para-metricas-88';
+
+describe('canal WhatsApp: leitura pelo painel (spec 024)', () => {
+  it('webhook -> conversa -> as duas rotas de leitura: o telefone e o wamid nunca saem; log e métricas sem texto, rótulo nem id', async () => {
+    await withHarness(async (h) => {
+      const number = phoneNumberId();
+      const company = await newCompany('painel-leitura', number);
+      const contact = contactNumber();
+      const text = `Pergunta secreta do painel ${randomUUID()}`;
+      const { id: wamid, payload } = textEvent(number, contact, text);
+      assert.equal((await deliver(h, payload)).statusCode, 200);
+      await waitFor(
+        async () => (await stored(company, contact)).some((m) => m.sentAt !== null),
+        'resposta enviada',
+      );
+      const conversation = await fixturesDb.prisma.conversation.findFirst({
+        where: { companyId: company.id, contactRef: contact },
+      });
+      assert.ok(conversation);
+      const headers = bearer((await h.testAuth.membershipToken(company.id)).accessToken);
+      const typesBefore = (await metricsBody(h)).match(/^# TYPE S+/gmu) ?? [];
+      const mark = h.logs.raw().length;
+
+      const list = await h.app.inject({
+        method: 'GET',
+        url: `/admin/companies/${company.id}/conversations`,
+        headers,
+      });
+      const history = await h.app.inject({
+        method: 'GET',
+        url: `/admin/companies/${company.id}/conversations/${conversation.id}/messages`,
+        headers,
+      });
+      assert.equal(list.statusCode, 200);
+      assert.equal(history.statusCode, 200);
+      const label = `Contato final ${contact.slice(-4)}`;
+      const [item] = list.json<{ items: { contactLabel: string; channel: string }[] }>().items;
+      assert.equal(item?.contactLabel, label);
+      assert.equal(item.channel, 'whatsapp');
+      const messages = history.json<{
+        items: { role: string; content: string; sentAt: string | null }[];
+      }>().items;
+      assert.deepEqual(
+        messages.map((m) => m.role),
+        ['USER', 'ASSISTANT'],
+      );
+      assert.equal(messages[0]?.content, text);
+      assert.notEqual(messages[1]?.sentAt, null);
+
+      const encodings = [contact, wamid].flatMap((value) => [
+        value,
+        Buffer.from(value).toString('base64'),
+        Buffer.from(value).toString('base64url'),
+      ]);
+      for (const response of [list, history]) {
+        for (const sentinel of [...encodings, contact.slice(0, 8), 'contactRef', 'externalId']) {
+          assert.equal(response.body.includes(sentinel), false, sentinel);
+        }
+      }
+
+      // Log: nada de texto, telefone, wamid nem rótulo; a leitura não logou o id da conversa.
+      const reading = h.logs.raw().slice(mark);
+      assert.ok(!logContains(reading, conversation.id));
+      for (const secret of [text, contact, wamid, label]) {
+        assert.ok(!logContains(h.logs.raw(), secret), secret);
+      }
+      // Métricas: nenhuma métrica nova e nenhum rótulo com id, rótulo de contato ou texto.
+      const after = await metricsBody(h);
+      assert.deepEqual(after.match(/^# TYPE S+/gmu) ?? [], typesBefore);
+      for (const secret of [text, contact, label, conversation.id]) {
+        assert.ok(!after.includes(secret), secret);
+      }
+    });
+  });
+});
