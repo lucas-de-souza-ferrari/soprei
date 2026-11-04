@@ -270,8 +270,7 @@ export class FakeGraphApi {
     if (operation === 'oauth_token') {
       if (
         this.expectedApp !== undefined &&
-        (query.client_id !== this.expectedApp.id ||
-          query.client_secret !== this.expectedApp.secret)
+        (query.client_id !== this.expectedApp.id || query.client_secret !== this.expectedApp.secret)
       ) {
         return fail(400, 101);
       }

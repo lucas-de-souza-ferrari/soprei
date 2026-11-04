@@ -40,7 +40,9 @@ const RESET_MIN_INTERVAL_MS = 60_000;
 const RESET_INVALID_MESSAGE = 'Código inválido ou expirado';
 
 /** Vínculo da conta com as permissões do papel (spec 023): campo aditivo, só leitura para o site. */
-export type AccountMembershipView = AccountMembership & { readonly permissions: readonly Permission[] };
+export type AccountMembershipView = AccountMembership & {
+  readonly permissions: readonly Permission[];
+};
 
 function withPermissions(membership: AccountMembership): AccountMembershipView {
   return { ...membership, permissions: [...ROLE_PERMISSIONS[membership.role]] };
