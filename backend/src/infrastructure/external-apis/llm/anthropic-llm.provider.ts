@@ -207,8 +207,8 @@ function withoutCustomHeadersEnv<T>(build: () => T): T {
  */
 function toMessages(input: LlmGenerateInput): Anthropic.MessageParam[] {
   const turns: LlmTurn[] = input.history.filter((turn) => turn.content.trim().length > 0);
-  const firstMembership = turns.findIndex((turn) => turn.role === 'user');
-  const history = firstMembership === -1 ? [] : turns.slice(firstMembership);
+  const firstUser = turns.findIndex((turn) => turn.role === 'user');
+  const history = firstUser === -1 ? [] : turns.slice(firstUser);
   return [
     ...history.map((turn) => ({ role: turn.role, content: turn.content })),
     { role: 'user' as const, content: input.userMessage },

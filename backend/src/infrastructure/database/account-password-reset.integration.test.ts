@@ -248,6 +248,8 @@ test('migration da 021 é aditiva: colunas, CHECKs e índice parcial; preserva a
     await client.query('BEGIN');
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET LOCAL search_path TO "${schema}", public`);
+    // O schema temporário reproduz o formato anterior à spec 022 (o enum `user_status` virou `access_status`).
+    await client.query("CREATE TYPE user_status AS ENUM ('ACTIVE', 'DISABLED')");
     await client.query(definition);
     await client.query(verification);
     const pendingId = randomUUID();

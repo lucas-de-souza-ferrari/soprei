@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Revisa o diff de uma branch/PR contra a spec e as regras de AGENTS.md, com foco em isolamento entre clientes, segurança e tratamento de erro. Somente leitura.
+description: Revisa o diff de uma branch/PR contra a spec e as regras de AGENTS.md, com foco em isolamento entre empresas, segurança e tratamento de erro. Somente leitura.
 tools: Read, Glob, Grep, Bash
 ---
 

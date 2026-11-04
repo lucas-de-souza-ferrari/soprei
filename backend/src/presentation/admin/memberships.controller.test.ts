@@ -764,7 +764,7 @@ describe('rotas de usuários (/admin/companies/:companyId/memberships), spec 008
                   'hostname',
                   'msg',
                   'requestId',
-                  'membershipId',
+                  'actorId',
                   'operation',
                 ].includes(key),
             )

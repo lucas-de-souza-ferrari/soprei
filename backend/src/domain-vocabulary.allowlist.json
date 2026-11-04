@@ -1,6 +1,11 @@
 {
   "fileExceptions": [
     {
+      "path": "backend/src/infrastructure/database/account-password-reset.integration.test.ts",
+      "patterns": ["UserNames"],
+      "reason": "cria o tipo user_status no schema temporário que reproduz o formato anterior à spec 022 para exercitar a migration da 021"
+    },
+    {
       "path": "backend/src/infrastructure/database/account-migration.integration.test.ts",
       "patterns": ["WordUser", "SqlTables", "ClientId", "UserNames"],
       "reason": "reproduz o schema anterior à spec 022 (clients, users, client_id) para exercitar as migrations 017 e 020, que continuam como estavam"
@@ -47,6 +52,40 @@
       "path": "backend/src/test-support/whatsapp-payloads.ts",
       "patterns": ["UserNames"],
       "reason": "`from_user_id` é o campo do webhook da Meta (BSUID), não o User do domínio"
+    },
+    {
+      "path": "backend/src/domain-vocabulary.test.ts",
+      "patterns": [
+        "WordClient",
+        "WordUser",
+        "ClientId",
+        "SqlTables",
+        "Cliente",
+        "AdminClientsRoute",
+        "UserNames",
+        "AuditActions",
+        "ClientHeader"
+      ],
+      "reason": "o gate cita nomes antigos em exemplos que precisam falhar"
+    },
+    {
+      "path": "backend/src/test-support/vocabulary-gate.ts",
+      "patterns": [
+        "WordClient",
+        "WordUser",
+        "ClientId",
+        "ClientNames",
+        "UserNames",
+        "UserAdmin",
+        "ClientHeader",
+        "Cliente"
+      ],
+      "reason": "define os padrões do vocabulário antigo que o gate procura"
+    },
+    {
+      "path": "backend/src/domain-vocabulary.allowlist.json",
+      "patterns": ["UserNames", "ClientId", "WordClient", "WordUser", "Cliente", "UserAdmin"],
+      "reason": "a própria lista de exceções cita os nomes antigos nos motivos"
     }
   ],
   "maskedTokens": [

@@ -398,14 +398,14 @@ describe('hook authenticate', () => {
     }
   });
 
-  it('authenticate preenche membershipId e companyId no contexto: o log da requisição os traz', async () => {
+  it('authenticate preenche actorId e companyId no contexto: o log da requisição os traz', async () => {
     const response = await me({ ...bearer(valid), 'x-request-id': 'req-auth-ctx-001' });
     assert.equal(response.statusCode, 200);
     const lines = env.logs.lines().filter((line) => line.requestId === 'req-auth-ctx-001');
     assert.ok(lines.length > 0);
     for (const line of lines) {
       assert.equal(line.companyId, env.companyId);
-      assert.equal(typeof line.membershipId, 'string');
+      assert.equal(typeof line.actorId, 'string');
     }
     const end = lines.find((line) => line.msg === 'requisição concluída');
     assert.ok(end);
