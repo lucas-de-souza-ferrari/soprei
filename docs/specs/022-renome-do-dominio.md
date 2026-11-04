@@ -1,6 +1,6 @@
 # 022 — Renome do domínio: `Client` vira `Company` e `User` vira `Membership`
 
-- **Status:** implementada (2026-11-04), aguardando `reviewer`, push e CI verde em Node 22 e na LTS (aprovada em 2026-11-03, dono: "Aprovo tudo", com as 11 recomendações)
+- **Status:** concluída e mergeada (2026-11-04; revisada pelo `reviewer`, sem bloqueador; CI verde em Node 22 e LTS); aprovada em 2026-11-03, dono: "Aprovo tudo", com as 11 recomendações)
 - **Branch:** `spec/022-renome-do-dominio`
 - **Depende de:** 021 (recuperação de senha) **mergeada na `main`**. Só começa a implementar com a `main` limpa e ninguém mais mexendo no backend durante a janela. Vai **antes** da spec que conecta o WhatsApp pelo site.
 - **Segurança:** toca em isolamento entre empresas (tenant), autenticação, sessões, fila e migration; passa pelo `reviewer` antes do merge, de preferência outro agente/modelo (obrigatório). É refatoração pura: nenhuma regra de negócio muda.

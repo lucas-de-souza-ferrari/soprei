@@ -153,7 +153,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 **Próximas**
 
 <!-- vocabulario-antigo:inicio -->
-- **Spec 022 — renome do domínio** ([spec](specs/022-renome-do-dominio.md)): **implementada, aguardando revisão (`reviewer`, de preferência outro agente/modelo) e CI** (aprovada em 2026-11-03). `Client` -> `Company`, `User` (vínculo) -> `Membership`, `Account` fica; banco, API, sessões, fila, logs, site e documentação. Refatoração pura, com gate de restos.
+- **Spec 022 — renome do domínio** ([spec](specs/022-renome-do-dominio.md)): **concluída e mergeada** (CI verde em Node 22 e LTS; aprovada em 2026-11-03). `Client` -> `Company`, `User` (vínculo) -> `Membership`, `Account` fica; banco, API, sessões, fila, logs, site e documentação. Refatoração pura, com gate de restos.
 <!-- vocabulario-antigo:fim -->
 - **Depois:** conectar o WhatsApp pelo site e painel mínimo de conversas (objetivo do dono: ter algo para mostrar); convites e equipe; tempo real (009); retenção, LGPD e hospedagem (antes de empresas reais); resiliência do canal; cache (006) sob demanda.
 
@@ -187,7 +187,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 ## 6. Estado atual
 
 <!-- vocabulario-antigo:inicio -->
-- **Spec 022 (renome do domínio): implementada, aguardando revisão e CI.** Banco (uma migration de renome, só metadado), schema, código, API, sessões (audiência e chaves `v3`), fila, logs, site e documentação passam de `Client`/`User` para `Company`/`Membership`; gate de restos em `backend/src/domain-vocabulary.test.ts`. Detalhes e desvios no "Registro da implementação" da spec.
+- **Spec 022 (renome do domínio): concluída e mergeada.** Banco (uma migration de renome, só metadado), schema, código, API, sessões (audiência e chaves `v3`), fila, logs, site e documentação passam de `Client`/`User` para `Company`/`Membership`; gate de restos em `backend/src/domain-vocabulary.test.ts`. Detalhes e desvios no "Registro da implementação" da spec.
 
 - **Spec 001 (bootstrap): concluída e mergeada**, CI verde em Node 22 e LTS. Já existem: Fastify com `GET /health`, config validada com Zod (fail-fast), Pino, hierarquia de erros com error handler central, `Brand` e `Result`, ESLint + Prettier, Prisma 7 sem models e CI. Camadas `shared`, `infrastructure` e `presentation`; `domain` e `application` nascem quando houver conteúdo.
 - Versões fixadas na 001: TypeScript 6.0.x (o `typescript-eslint` ainda não suporta o 7) e Prisma 7.10.x (a tag `latest` do CLI aponta para um RC).
