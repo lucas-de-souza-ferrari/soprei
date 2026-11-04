@@ -1351,6 +1351,11 @@ describe('canal WhatsApp: rate limit, métricas e privacidade', () => {
 
 const SECRET_FOR_METRICS = 'texto-secreto-para-metricas-88';
 
+/** Nomes das métricas expostas (`# TYPE <nome> ...`). */
+function metricNames(body: string): string[] {
+  return [...body.matchAll(/^# TYPE (\S+)/gmu)].map((match) => match[1] ?? '');
+}
+
 describe('canal WhatsApp: leitura pelo painel (spec 024)', () => {
   it('webhook -> conversa -> as duas rotas de leitura: o telefone e o wamid nunca saem; log e métricas sem texto, rótulo nem id', async () => {
     await withHarness(async (h) => {
@@ -1369,7 +1374,8 @@ describe('canal WhatsApp: leitura pelo painel (spec 024)', () => {
       });
       assert.ok(conversation);
       const headers = bearer((await h.testAuth.membershipToken(company.id)).accessToken);
-      const typesBefore = (await metricsBody(h)).match(/^# TYPE S+/gmu) ?? [];
+      const typesBefore = metricNames(await metricsBody(h));
+      assert.ok(typesBefore.length > 0, 'a lista de métricas não pode ficar vazia');
       const mark = h.logs.raw().length;
 
       const list = await h.app.inject({
@@ -1417,7 +1423,7 @@ describe('canal WhatsApp: leitura pelo painel (spec 024)', () => {
       }
       // Métricas: nenhuma métrica nova e nenhum rótulo com id, rótulo de contato ou texto.
       const after = await metricsBody(h);
-      assert.deepEqual(after.match(/^# TYPE S+/gmu) ?? [], typesBefore);
+      assert.deepEqual(metricNames(after), typesBefore);
       for (const secret of [text, contact, label, conversation.id]) {
         assert.ok(!after.includes(secret), secret);
       }
