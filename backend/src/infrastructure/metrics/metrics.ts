@@ -127,6 +127,8 @@ export type PasswordResetAttemptResult =
 export type PasswordResetEmailKind = 'code' | 'notice';
 /** Execução do expurgo de contas não confirmadas (spec 021). */
 export type AccountPurgeRunResult = 'ok' | 'error';
+/** Recuperação da base de conhecimento (spec 026). Conjunto fixo: vai a label. */
+export type KnowledgeRetrievalResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
 
 export interface DbQuerySample {
   readonly model: string;
@@ -157,6 +159,8 @@ export interface Metrics {
   observeAttendanceBatch(sample: BatchSample): void;
   /** Um turno saiu com a resposta do turno anterior ainda sem `sentAt` (spec 013). Sem labels. */
   countUnsentReply(): void;
+  /** Uma recuperação da base de conhecimento terminou (spec 026). Conjunto fixo; nunca a consulta. */
+  countKnowledgeRetrieval(result: KnowledgeRetrievalResult): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
   /** O destino de uma mensagem de entrada do canal. */
@@ -299,6 +303,13 @@ export function createMetrics(): Metrics {
   const unsentReplies = new Counter({
     name: 'attendance_unsent_replies_total',
     help: 'Turnos que responderam as pendentes com a resposta anterior gravada e ainda sem sentAt',
+    registers: [registry],
+  });
+
+  const knowledgeRetrievals = new Counter({
+    name: 'knowledge_retrievals_total',
+    help: 'Recuperações da base de conhecimento por resultado (spec 026, conjunto fixo)',
+    labelNames: ['result'] as const,
     registers: [registry],
   });
 
@@ -516,6 +527,9 @@ export function createMetrics(): Metrics {
     },
     countUnsentReply() {
       unsentReplies.inc();
+    },
+    countKnowledgeRetrieval(result) {
+      knowledgeRetrievals.inc({ result });
     },
     countWebhookRequest(channel, result) {
       webhookRequests.inc({ channel, result });

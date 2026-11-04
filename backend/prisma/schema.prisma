@@ -42,6 +42,8 @@ model Company {
   auditEvents       AuditEvent[]
   channelConnection ChannelConnection?
   invitations       CompanyInvitation[]
+  knowledgeDocuments KnowledgeDocument[]
+  knowledgeChunks    KnowledgeChunk[]
 
   @@map("companies")
 }
@@ -148,6 +150,7 @@ model Membership {
   auditAsTarget      AuditEvent[]        @relation("AuditTarget")
   invitationsSent    CompanyInvitation[] @relation("InvitationInviter")
   invitationAccepted CompanyInvitation[] @relation("InvitationAccepted")
+  knowledgeDocuments KnowledgeDocument[] @relation("KnowledgeDocumentCreator")
 
   // `[id, companyId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
   @@unique([id, companyId])
@@ -303,4 +306,45 @@ model ChannelConnection {
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   @@map("channel_connections")
+}
+
+/// Documento de texto da base de conhecimento da IA (TENANT, spec 026). O texto inteiro vive só nos trechos;
+/// aqui ficam o tamanho e uma pré-visualização. Título e texto nunca vão a log nem a label de métrica.
+model KnowledgeDocument {
+  id                    String   @id @default(uuid(7)) @db.Uuid
+  companyId             String   @map("company_id") @db.Uuid
+  title                 String
+  charCount             Int      @map("char_count")
+  chunkCount            Int      @map("chunk_count")
+  preview               String
+  isSample              Boolean  @default(false) @map("is_sample")
+  createdByMembershipId String   @map("created_by_membership_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  createdBy Membership       @relation("KnowledgeDocumentCreator", fields: [createdByMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  chunks    KnowledgeChunk[]
+
+  @@unique([id, companyId])
+  @@index([companyId, createdAt, id])
+  @@map("knowledge_documents")
+}
+
+/// Trecho de um documento (TENANT, spec 026). `content` é o original (vai ao modelo); `searchText` é o mesmo
+/// texto (com o título) em minúsculas e sem acentos, só para a busca. O índice GIN de expressão sobre
+/// `to_tsvector('portuguese', search_text)` só existe na migration (o Prisma não o representa).
+model KnowledgeChunk {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  documentId String   @map("document_id") @db.Uuid
+  position   Int
+  content    String
+  searchText String   @map("search_text")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  document KnowledgeDocument @relation(fields: [documentId, companyId], references: [id, companyId], onDelete: Cascade)
+
+  @@index([companyId, documentId, position])
+  @@map("knowledge_chunks")
 }

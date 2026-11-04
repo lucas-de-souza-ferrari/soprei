@@ -9,6 +9,7 @@ export type {
   AuthLoginResult,
   AuthLogoutScope,
   AccountPurgeRunResult,
+  KnowledgeRetrievalResult,
   InvitationEmailResult,
   InvitationMetricAction,
   InvitationMetricResult,

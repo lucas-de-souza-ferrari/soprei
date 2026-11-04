@@ -20,6 +20,8 @@ export const MODEL_SCOPES = {
   AuditEvent: 'tenant',
   ChannelConnection: 'tenant',
   CompanyInvitation: 'tenant',
+  KnowledgeDocument: 'tenant',
+  KnowledgeChunk: 'tenant',
   PlatformAdmin: 'global',
   Account: 'global',
 } as const satisfies Record<Prisma.ModelName, ModelScope>;

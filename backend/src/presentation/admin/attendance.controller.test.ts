@@ -135,6 +135,7 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
         'duplicate',
         'messageId',
         'reply',
+        'sources',
       ]);
 
       const second = await send(companyId, { contactRef: 'c1', text: 'De novo' });

@@ -11,7 +11,7 @@ import type {
   MessageRepository,
   Page,
 } from '../../domain/index.js';
-import { MESSAGE_CONTENT_MAX_LENGTH } from '../../domain/index.js';
+import { KNOWLEDGE_RETRIEVAL_TIMEOUT_MS, MESSAGE_CONTENT_MAX_LENGTH } from '../../domain/index.js';
 import { ConflictError, ExternalServiceError, ForbiddenError } from '../../shared/errors/index.js';
 import { TimeoutError, withTimeout } from '../../shared/utils/index.js';
 import {
@@ -28,6 +28,9 @@ import {
   type LlmTurn,
   type LlmUsage,
 } from '../ports/llm-provider.js';
+import { buildKnowledgeQuery } from '../knowledge/query.js';
+import type { KnowledgeRetriever } from '../ports/knowledge-retriever.js';
+import { buildKnowledgePrompt, type KnowledgeSource } from './knowledge-prompt.js';
 
 /** Quantas mensagens anteriores da conversa vão ao modelo. */
 export const ATTENDANCE_HISTORY_LIMIT = 20;
@@ -69,6 +72,8 @@ export interface AttendanceMetrics {
    * Contador sem labels.
    */
   countUnsentReply?(): void;
+  /** Uma recuperação da base de conhecimento terminou (spec 026). Conjunto fixo; nunca a consulta. */
+  countKnowledgeRetrieval?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
 }
 
 export type BatchResult = 'answered' | 'empty' | 'capped';
@@ -91,6 +96,8 @@ export interface AttendanceOptions {
   readonly historyMaxChars?: number;
   /** Relógio injetável, para os testes. */
   readonly now?: () => Date;
+  /** Prazo da recuperação da base de conhecimento (spec 026); padrão 1.500 ms. */
+  readonly knowledgeTimeoutMs?: number;
 }
 
 /** Uma página do histórico mais a conversa a que ela pertence (o painel abre o histórico pelo id). */
@@ -108,6 +115,8 @@ export interface AttendanceDeps {
   readonly logger: AttendanceLogger;
   readonly metrics?: AttendanceMetrics;
   readonly options: AttendanceOptions;
+  /** Base de conhecimento da empresa (spec 026). Sem isto, o atendimento é o de sempre. */
+  readonly knowledge?: KnowledgeRetriever;
 }
 
 export interface AttendanceReply {
@@ -125,6 +134,8 @@ export interface AttendanceResult {
   readonly reply: AttendanceReply;
   /** Verdadeiro quando o `externalId` já tinha sido atendido: devolve a resposta gravada. */
   readonly duplicate: boolean;
+  /** De onde veio a resposta (spec 026): só rótulos, nunca conteúdo. Vazio em resposta repetida. */
+  readonly sources: readonly KnowledgeSource[];
 }
 
 /** O que `acceptInboundMessage` fez com a mensagem do contato (spec 013). */
@@ -347,12 +358,19 @@ export class AttendanceService {
     const userMessage = batch.map((message) => message.content).join(BATCH_SEPARATOR);
     // O histórico é tudo o que veio ANTES da primeira mensagem do lote.
     const history = await this.loadHistory(companyId, first);
+    const prompt = await this.buildPrompt(
+      company,
+      { conversationId: conversation.id, messageId: last.id },
+      userMessage,
+      history,
+    );
     const outcome = await this.callProvider(
       companyId,
       { conversationId: conversation.id, messageId: last.id, inputChars: userMessage.length },
       {
-        // A persona é a única coisa que vai no systemPrompt; o texto do contato vai como `user`.
-        systemPrompt: buildSystemPrompt(company),
+        // Persona, estilo e (spec 026) o bloco de conhecimento vão no systemPrompt; o texto do
+        // contato vai SEMPRE como `user`.
+        systemPrompt: prompt.systemPrompt,
         history,
         userMessage,
       },
@@ -417,6 +435,7 @@ export class AttendanceService {
         historyTurns: history.length,
         isFallback: reply.isFallback,
         hasMorePending,
+        ...prompt.stats,
         ...usageFields(outcome),
         durationMs: Math.round(performance.now() - startedAt),
       },
@@ -679,9 +698,16 @@ export class AttendanceService {
     const startedAt = performance.now();
 
     const history = await this.loadHistory(companyId, message);
+    const prompt = await this.buildPrompt(
+      company,
+      { conversationId: message.conversationId, messageId: message.id },
+      message.content,
+      history,
+    );
     const input: LlmGenerateInput = {
-      // A persona é a única coisa que vai no systemPrompt; o texto do contato vai como `user`.
-      systemPrompt: buildSystemPrompt(company),
+      // Persona, estilo e (spec 026) o bloco de conhecimento vão no systemPrompt; o texto do
+      // contato vai SEMPRE como `user`.
+      systemPrompt: prompt.systemPrompt,
       history,
       userMessage: message.content,
     };
@@ -727,12 +753,88 @@ export class AttendanceService {
         replyChars: reply.content.length,
         historyTurns: history.length,
         isFallback: reply.isFallback,
+        ...prompt.stats,
         ...usageFields(outcome),
         durationMs: Math.round(performance.now() - startedAt),
       },
       'mensagem atendida',
     );
-    return toResult(message, reply, false);
+    return toResult(message, reply, false, prompt.sources);
+  }
+
+  /**
+   * Monta o `systemPrompt` do turno (spec 026): persona + estilo e, se a empresa tem base e a
+   * pergunta acha algo, o bloco de conhecimento. **Fail-open**: falha ou prazo da recuperação
+   * atende sem contexto (nunca bloqueia nem vira fallback). Roda fora de qualquer transação. A
+   * consulta, os títulos e os trechos nunca vão a log nem a métrica: só ids, números e o motivo.
+   */
+  private async buildPrompt(
+    company: Company,
+    subject: { readonly conversationId: string; readonly messageId: string },
+    queryText: string,
+    history: readonly LlmTurn[],
+  ): Promise<{
+    readonly systemPrompt: string;
+    readonly sources: readonly KnowledgeSource[];
+    readonly stats: object;
+  }> {
+    const base = buildSystemPrompt(company);
+    const plain = { systemPrompt: base, sources: [] as readonly KnowledgeSource[], stats: {} };
+    const retriever = this.deps.knowledge;
+    if (retriever === undefined) return plain;
+
+    const lastUserTurn = history.findLast((turn) => turn.role === 'user')?.content;
+    const tsquery = buildKnowledgeQuery(queryText, lastUserTurn);
+    if (tsquery === null) {
+      this.recordKnowledge('skipped');
+      return plain;
+    }
+    try {
+      const retrieval = await withTimeout(
+        retriever.retrieve(company.id, tsquery),
+        this.deps.options.knowledgeTimeoutMs ?? KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
+        'knowledge',
+      );
+      const prompt = buildKnowledgePrompt(retrieval);
+      if (prompt.block === null) {
+        this.recordKnowledge('skipped');
+        return plain;
+      }
+      const hit = prompt.passages + prompt.products > 0;
+      this.recordKnowledge(hit ? 'hit' : 'empty');
+      return {
+        systemPrompt: base + prompt.block,
+        sources: prompt.sources,
+        stats: {
+          knowledgePassages: prompt.passages,
+          knowledgeProducts: prompt.products,
+          knowledgeChars: prompt.chars,
+        },
+      };
+    } catch (error) {
+      const timedOut = error instanceof TimeoutError;
+      this.recordKnowledge(timedOut ? 'timeout' : 'error');
+      // Só ids e o motivo: o erro do driver pode carregar a consulta (texto do contato).
+      this.deps.logger.warn(
+        {
+          companyId: company.id,
+          conversationId: subject.conversationId,
+          messageId: subject.messageId,
+          reason: timedOut ? 'timeout' : 'error',
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+        'recuperação de conhecimento indisponível; atendendo sem contexto',
+      );
+      return plain;
+    }
+  }
+
+  private recordKnowledge(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void {
+    try {
+      this.deps.metrics?.countKnowledgeRetrieval?.(result);
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de conhecimento');
+    }
   }
 
   private async loadHistory(companyId: CompanyId, current: Message): Promise<readonly LlmTurn[]> {
@@ -912,12 +1014,18 @@ function toReply(reply: Message): AttendanceReply {
   };
 }
 
-function toResult(message: Message, reply: Message, duplicate: boolean): AttendanceResult {
+function toResult(
+  message: Message,
+  reply: Message,
+  duplicate: boolean,
+  sources: readonly KnowledgeSource[] = [],
+): AttendanceResult {
   return {
     conversationId: message.conversationId,
     messageId: message.id,
     reply: toReply(reply),
     duplicate,
+    sources,
   };
 }
 

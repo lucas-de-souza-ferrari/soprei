@@ -1,4 +1,5 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { KnowledgeService } from './application/knowledge/knowledge.service.js';
 import { ChannelConnectionService } from './application/channel/channel-connection.service.js';
 import { ChannelCredentialsService } from './application/channel/channel-credentials.service.js';
 import { ChannelInboundProcessor } from './application/channel/channel-inbound.processor.js';
@@ -21,6 +22,8 @@ import {
   PrismaChannelConnectionRepository,
   PrismaChannelUnitOfWork,
   PrismaCompanyRepository,
+  PrismaKnowledgeDocumentRepository,
+  PrismaKnowledgeRetriever,
   PrismaConversationRepository,
   PrismaMessageRepository,
 } from './infrastructure/database/index.js';
@@ -133,7 +136,10 @@ async function main(): Promise<void> {
       llmTimeoutMs: config.LLM_TIMEOUT_MS,
       inFlightTimeoutMs: config.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS,
     },
+    // Base de conhecimento da empresa (spec 026): recuperação por busca textual, fail-open.
+    knowledge: new PrismaKnowledgeRetriever(prisma),
   });
+  const knowledge = new KnowledgeService(new PrismaKnowledgeDocumentRepository(prisma));
 
   let whatsappRoutes: WhatsappRoutesParams | undefined;
   let channelService: ChannelConnectionService | undefined;
@@ -315,6 +321,7 @@ async function main(): Promise<void> {
     admin: {
       companies: new CompanyService(companyRepository),
       attendance,
+      knowledge,
       ...(channelService === undefined ? {} : { channel: channelService }),
       ...(whatsapp === undefined
         ? {}

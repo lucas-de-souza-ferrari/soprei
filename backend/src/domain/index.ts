@@ -102,3 +102,27 @@ export type {
   CompanyInvitationRepository,
   InvitationExpiryRepository,
 } from './repositories/company-invitation.repository.js';
+export {
+  KNOWLEDGE_BLOCK_MAX_CHARS,
+  KNOWLEDGE_CHUNK_MAX_CHARS,
+  KNOWLEDGE_CONTENT_MAX_LENGTH,
+  KNOWLEDGE_MAX_CHUNKS,
+  KNOWLEDGE_MAX_CHUNKS_PER_DOCUMENT,
+  KNOWLEDGE_MAX_DOCUMENTS,
+  KNOWLEDGE_MAX_PASSAGES,
+  KNOWLEDGE_MAX_PRODUCTS,
+  KNOWLEDGE_MIN_RANK,
+  KNOWLEDGE_PREVIEW_LENGTH,
+  KNOWLEDGE_PRODUCT_DESCRIPTION_PROMPT_CHARS,
+  KNOWLEDGE_QUERY_MAX_CHARS,
+  KNOWLEDGE_QUERY_MAX_TERMS,
+  KNOWLEDGE_RELATIVE_RANK_FLOOR,
+  KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
+  KNOWLEDGE_TITLE_MAX_LENGTH,
+} from './knowledge.js';
+export type {
+  KnowledgeDocument,
+  KnowledgeDocumentRepository,
+  NewKnowledgeChunk,
+  NewKnowledgeDocument,
+} from './knowledge.js';

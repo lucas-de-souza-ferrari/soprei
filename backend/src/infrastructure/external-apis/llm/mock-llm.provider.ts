@@ -6,6 +6,11 @@ import {
   type LlmReply,
 } from '../../../application/ports/llm-provider.js';
 import { ATTENDANCE_STYLE_INSTRUCTION } from '../../../application/attendance/attendance.service.js';
+import {
+  KNOWLEDGE_BLOCK_CLOSE,
+  KNOWLEDGE_BLOCK_OPEN,
+  KNOWLEDGE_HEADER_MARKER,
+} from '../../../application/attendance/knowledge-prompt.js';
 import { ExternalServiceError } from '../../../shared/errors/index.js';
 import { Result } from '../../../shared/types/index.js';
 
@@ -80,16 +85,32 @@ export class MockLlmProvider implements LlmProvider {
     if (text.includes(MOCK_HUGE_MARKER)) return Result.ok({ text: 'x'.repeat(5000) });
 
     // Cita só o começo da persona: a instrução fixa de estilo (spec 014) vem depois dela e não entra.
-    const suffix = `\n\n${ATTENDANCE_STYLE_INSTRUCTION}`;
-    const personaText = input.systemPrompt.endsWith(suffix)
-      ? input.systemPrompt.slice(0, -suffix.length)
-      : input.systemPrompt;
+    // Com o bloco de conhecimento (spec 026) a instrução de estilo deixa de ser o fim do prompt:
+    // corta no primeiro "\n\n<estilo>".
+    const marker = `\n\n${ATTENDANCE_STYLE_INSTRUCTION}`;
+    const styleAt = input.systemPrompt.indexOf(marker);
+    const personaText = styleAt === -1 ? input.systemPrompt : input.systemPrompt.slice(0, styleAt);
     const persona = personaText.slice(0, PERSONA_PREVIEW_CHARS);
     const echo = text.slice(0, ECHO_MAX_CHARS);
     return Result.ok({
-      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})`,
+      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}`,
     });
   }
+}
+
+/**
+ * Quando o `systemPrompt` traz o bloco de conhecimento (spec 026), conta as linhas `[Documento]` e
+ * `[Produto]` dentro dos delimitadores, para a demonstração e os testes determinísticos. Sem bloco,
+ * nada é acrescentado.
+ */
+function knowledgeSummary(systemPrompt: string): string {
+  if (!systemPrompt.includes(KNOWLEDGE_HEADER_MARKER)) return '';
+  const open = systemPrompt.indexOf(KNOWLEDGE_BLOCK_OPEN);
+  const close = systemPrompt.indexOf(KNOWLEDGE_BLOCK_CLOSE);
+  const block = open === -1 || close < open ? '' : systemPrompt.slice(open, close);
+  const passages = block.match(/^\[Documento\] /gm)?.length ?? 0;
+  const products = block.match(/^\[Produto\] /gm)?.length ?? 0;
+  return ` (conhecimento: ${String(passages)} trechos, ${String(products)} produtos)`;
 }
 
 /** Nunca responde, mas termina (como um provedor de verdade) quando a chamada é cancelada. */

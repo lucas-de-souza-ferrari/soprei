@@ -23,7 +23,9 @@ import {
   healthController,
   type ReadinessChecks,
 } from '../../presentation/system/health.controller.js';
+import { adminKnowledgeController } from '../../presentation/admin/knowledge.controller.js';
 import { adminPersonaController } from '../../presentation/admin/persona.controller.js';
+import type { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import { metricsController } from '../../presentation/system/metrics.controller.js';
 import { whatsappWebhookController } from '../../presentation/webhooks/whatsapp-webhook.controller.js';
 import type { TrustProxySetting } from '../config/trust-proxy.js';
@@ -44,6 +46,8 @@ export interface AdminRoutesParams {
     ChannelConnectionService,
     'getState' | 'connect' | 'disconnect' | 'embeddedSignup'
   >;
+  /** Documentos da base de conhecimento (spec 026); sem isto as rotas `.../knowledge/*` não existem. */
+  readonly knowledge?: Pick<KnowledgeService, 'list' | 'create' | 'delete'>;
   /** Valores públicos do Embedded Signup para o site (spec 023); sem isto `.../channel/setup` não existe. */
   readonly channelSetup?: ChannelSetupInfo;
 }
@@ -248,6 +252,14 @@ export function buildServer({
       metrics,
       companies: admin.companies,
     });
+    if (admin.knowledge !== undefined) {
+      void app.register(adminKnowledgeController, {
+        prefix: '/admin/companies',
+        auth,
+        metrics,
+        knowledge: admin.knowledge,
+      });
+    }
     if (admin.attendance !== undefined) {
       void app.register(adminAttendanceController, {
         prefix: '/admin/companies',

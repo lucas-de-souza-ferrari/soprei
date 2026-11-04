@@ -147,6 +147,11 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           graphApiVersion: 'v26.0',
           manualConnect: false,
         },
+        knowledge: {
+          list: () => Promise.reject(new Error('inventário')),
+          create: () => Promise.reject(new Error('inventário')),
+          delete: () => Promise.reject(new Error('inventário')),
+        },
         attendance: new AttendanceService({
           companies,
           conversations: store.conversations,
@@ -196,6 +201,8 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/channel/embedded-signup',
       '/admin/companies/:companyId/channel/setup',
       '/admin/companies/:companyId/persona',
+      '/admin/companies/:companyId/knowledge/documents',
+      '/admin/companies/:companyId/knowledge/documents/:documentId',
       '/admin/companies/:companyId/memberships/:membershipId',
       '/admin/companies/:companyId/memberships/:membershipId/password',
       '/auth/login',
@@ -264,6 +271,14 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     ]);
     assert.deepEqual(declared('/admin/companies/:companyId/invitations/:invitationId'), [
       'DELETE:membership:manage',
+    ]);
+    // Spec 026: a base de conhecimento tem a permissão própria.
+    assert.deepEqual(declared('/admin/companies/:companyId/knowledge/documents'), [
+      'GET:knowledge:manage',
+      'POST:knowledge:manage',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/knowledge/documents/:documentId'), [
+      'DELETE:knowledge:manage',
     ]);
     assert.deepEqual(declared('/admin/companies/:companyId/persona'), [
       'GET:persona:manage',
