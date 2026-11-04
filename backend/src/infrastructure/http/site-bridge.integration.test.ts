@@ -521,7 +521,7 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
       'NOT_CONNECTED',
     );
     // Nem o code nem o token aparecem no log.
-    for (const secret of [code, token, SECRET_PERSONA, SECRET_MESSAGE, CONFIG_ID]) {
+    for (const secret of [code, token, SECRET_PERSONA, SECRET_MESSAGE, CONFIG_ID, APP_ID]) {
       assert.ok(!logContains(logs.raw(), secret));
     }
   });

@@ -134,13 +134,18 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
   // Ao voltar para a aba, o estado é relido (outra aba pode ter conectado ou desconectado).
   useEffect(() => {
     const onVisible = (): void => {
-      if (document.visibilityState === 'visible' && phase !== 'waiting' && phase !== 'submitting') {
+      if (
+        document.visibilityState === 'visible' &&
+        !busy &&
+        phase !== 'waiting' &&
+        phase !== 'submitting'
+      ) {
         void refresh();
       }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [phase, refresh]);
+  }, [busy, phase, refresh]);
 
   const submitSignup = useCallback(
     async (

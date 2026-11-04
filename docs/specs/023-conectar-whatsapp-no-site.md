@@ -41,33 +41,33 @@ Se o servidor responder 404 a uma rota de empresa (a seleção mudou em outra ab
 
 Mostra o estado de `GET .../channel`, sem nunca receber nem exibir token, texto cifrado ou PIN:
 
-| `state` | O que a pessoa vê | Ações |
-| --- | --- | --- |
-| `NOT_CONNECTED` | "Nenhum número conectado" e o painel explicativo | "Conectar com a Meta"; seção "Avançado" (decisão 4) |
-| `CONNECTED` | número (ID do número de telefone da Meta, rótulo "ID do número"), "conectado desde" e, se houver, validade do token | "Trocar número ou renovar" (refaz o Embedded Signup), "Desconectar" |
-| `TOKEN_INVALID` | alerta "A Meta recusou o acesso. O assistente parou de responder neste número" e a data | "Reconectar" (refaz o Embedded Signup), "Desconectar" |
-| `LEGACY` | "Este número usa a credencial antiga do Soprei. Reconecte para continuar" | "Reconectar" |
+| `state`         | O que a pessoa vê                                                                                                   | Ações                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `NOT_CONNECTED` | "Nenhum número conectado" e o painel explicativo                                                                    | "Conectar com a Meta"; seção "Avançado" (decisão 4)                 |
+| `CONNECTED`     | número (ID do número de telefone da Meta, rótulo "ID do número"), "conectado desde" e, se houver, validade do token | "Trocar número ou renovar" (refaz o Embedded Signup), "Desconectar" |
+| `TOKEN_INVALID` | alerta "A Meta recusou o acesso. O assistente parou de responder neste número" e a data                             | "Reconectar" (refaz o Embedded Signup), "Desconectar"               |
+| `LEGACY`        | "Este número usa a credencial antiga do Soprei. Reconecte para continuar"                                           | "Reconectar"                                                        |
 
 - **Painel explicativo (antes do popup)**: o que acontece ("uma janela da Meta abre; você escolhe a conta e o número"), que o Soprei passa a responder mensagens recebidas nesse número, e **aviso de WABA compartilhada**: "uma conta do WhatsApp Business conecta a uma empresa só; desconectar remove o acesso do Soprei à conta inteira, o que afeta qualquer número dela". Esse aviso aparece também na confirmação de desconectar.
 - **Desconectar:** diálogo de confirmação (foco preso, Esc fecha, botão destrutivo, texto do aviso acima). Chama `DELETE` (204 idempotente). Depois, o estado vira `NOT_CONNECTED`.
 - Cada ação desabilita os botões enquanto roda (sem duplo envio), e uma resposta tardia de ação anterior (troca de empresa, nova ação) é descartada com o mesmo contador de geração do `AccountApp` (017).
 - **Mensagens de erro (pt-BR, escolhidas pelo `code` do corpo; o texto do servidor é ignorado, o site nunca mostra `message` da API nem da Meta):**
 
-| Origem | Mensagem ao usuário |
-| --- | --- |
-| `CHANNEL_TOKEN_REJECTED` | "A Meta recusou a autorização. Tente conectar de novo." |
-| `CHANNEL_WRONG_APP` | "A autorização não veio do aplicativo do Soprei. Tente conectar de novo pela janela do site." |
-| `CHANNEL_MISSING_SCOPE` | "Faltou conceder todas as permissões do WhatsApp. Conecte de novo e aceite todas." |
-| `CHANNEL_NUMBER_NOT_IN_WABA` | "Esse número não pertence à conta escolhida. Selecione o número na janela da Meta." |
-| `CHANNEL_NUMBER_IN_USE` (409) | "Esse número já está conectado a outra empresa." (sem dizer qual) |
-| `CHANNEL_CODE_INVALID` | "A autorização expirou ou já foi usada. Tente de novo." |
-| `CHANNEL_REGISTRATION_FAILED` | "Não foi possível registrar o número na Meta. Tente de novo; se persistir, fale com o suporte." |
-| 502, 503 | "A Meta ou o serviço está indisponível. Tente novamente em instantes." (nada foi gravado) |
-| 429 | "Muitas tentativas. Aguarde antes de tentar novamente." |
-| 403 | "Você não tem permissão para esta ação." (não o texto de "confirme seu e-mail") |
-| 404 | fluxo "a empresa selecionada mudou" acima |
-| 401 | volta ao login (comportamento atual) |
-| 400 sem código conhecido, rede, resposta fora do schema | "Não foi possível concluir. Tente novamente." |
+| Origem                                                  | Mensagem ao usuário                                                                             |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `CHANNEL_TOKEN_REJECTED`                                | "A Meta recusou a autorização. Tente conectar de novo."                                         |
+| `CHANNEL_WRONG_APP`                                     | "A autorização não veio do aplicativo do Soprei. Tente conectar de novo pela janela do site."   |
+| `CHANNEL_MISSING_SCOPE`                                 | "Faltou conceder todas as permissões do WhatsApp. Conecte de novo e aceite todas."              |
+| `CHANNEL_NUMBER_NOT_IN_WABA`                            | "Esse número não pertence à conta escolhida. Selecione o número na janela da Meta."             |
+| `CHANNEL_NUMBER_IN_USE` (409)                           | "Esse número já está conectado a outra empresa." (sem dizer qual)                               |
+| `CHANNEL_CODE_INVALID`                                  | "A autorização expirou ou já foi usada. Tente de novo."                                         |
+| `CHANNEL_REGISTRATION_FAILED`                           | "Não foi possível registrar o número na Meta. Tente de novo; se persistir, fale com o suporte." |
+| 502, 503                                                | "A Meta ou o serviço está indisponível. Tente novamente em instantes." (nada foi gravado)       |
+| 429                                                     | "Muitas tentativas. Aguarde antes de tentar novamente."                                         |
+| 403                                                     | "Você não tem permissão para esta ação." (não o texto de "confirme seu e-mail")                 |
+| 404                                                     | fluxo "a empresa selecionada mudou" acima                                                       |
+| 401                                                     | volta ao login (comportamento atual)                                                            |
+| 400 sem código conhecido, rede, resposta fora do schema | "Não foi possível concluir. Tente novamente."                                                   |
 
 Os avisos de erro usam `Alert` com `role="alert"` e o campo/botão relacionado fica com `aria-describedby` (padrão da 018/021).
 
@@ -116,29 +116,29 @@ Tudo atrás dos mesmos hooks de sempre (cookie ou Bearer, `requirePermission`, p
 
 Backend (testes unitários e de integração; `FakeGraphApi` existente para a Meta; nenhuma chamada real):
 
-- [ ] **Ponte de sessão nas rotas de canal e de atendimento:** com cookie da conta, empresa selecionada e papel `OWNER`, `GET/PUT/DELETE .../channel`, `POST .../channel/embedded-signup`, `GET .../channel/setup`, `GET/PUT .../persona` e `POST .../messages` respondem como com Bearer (teste que percorre as rotas de tenant do inventário com cookie, sem lista manual que envelheça).
-- [ ] Papéis com cookie: `ADMIN` igual a `OWNER` nas rotas de canal e persona; `AGENT` recebe 403 em canal e persona e 201 no simulador; `VIEWER` recebe 403 em canal, persona e simulador; **a negação usa o papel lido do banco agora** (rebaixar o vínculo no meio da sessão muda a resposta na requisição seguinte).
-- [ ] Empresa alheia: conta com vínculo só em A, seleção em A, chamando `.../companies/B/channel`, `.../persona`, `.../messages` e `.../channel/setup` recebe 404 **idêntico** ao de empresa inexistente (mesmo corpo, sem `requestId` na comparação); `B` não é alterada. Conta sem seleção recebe 401. Vínculo desativado, conta desativada e empresa suspensa deixam de acessar (401).
-- [ ] `PlatformAdmin` (Bearer de plataforma) recebe 403 em `.../persona`, `.../channel/setup` e nas de canal; `Authorization` inválido com cookie válido não cai no cookie (Bearer manda).
-- [ ] CSRF: PUT/DELETE/POST com cookie e sem `Origin` igual a `APP_ORIGIN`, ou sem `X-Soprei-App: web`, dão 403 e **nada é gravado** (canal, persona, mensagem); GET com cookie não exige. Redis das sessões fora = 503.
-- [ ] `GET .../channel/setup`: com `WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` devolve `appId`, `configId`, `graphApiVersion`; sem ele `embeddedSignup: null`; `manualConnect` reflete `CHANNEL_MANUAL_CONNECT_ENABLED`; a resposta serializada **não contém** o segredo do app, o token legado nem as chaves de cifra (teste por busca dos valores sentinela). Sem `WHATSAPP_ENABLED` a rota não existe (404). Config: `CHANNEL_MANUAL_CONNECT_ENABLED=true` com `NODE_ENV=production` falha no boot; `WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` inválido falha no boot.
-- [ ] Persona: `PUT` grava e `GET` devolve; `null` limpa; vazio, só espaços, NUL, 4001 caracteres, campo extra (`companyId`, `name`...) e corpo sem `persona` dão 400; a persona gravada chega ao `LlmProvider` na próxima mensagem do simulador (o teste olha o `systemPrompt` recebido pelo mock). Corpo com `companyId` de outra empresa não tem efeito (o schema estrito recusa).
-- [ ] **Isolamento da persona:** duas empresas com personas diferentes; o `OWNER` de A lê e grava só a de A (também por cookie); a de B segue intacta depois de tentativas por caminho de B (404) e por corpo adulterado.
-- [ ] `GET /account/companies` devolve `permissions` coerentes com `ROLE_PERMISSIONS` para cada papel e vínculo da conta (OWNER em A, VIEWER em B retornam listas diferentes); o teste de snapshot do mapa de permissões inclui `persona:manage`.
-- [ ] **Privacidade (log e métrica):** testes de fluxo capturam o log (`logContains`) e provam que **não** aparecem: texto da persona, texto das mensagens do simulador, `code` do Embedded Signup, token, PIN, texto cifrado, `appId`/`configId`. `/metrics` expõe `company_persona_updates_total` só com o label `action`. Os testes comparam erros por `code` e `message` (nunca `requestId`).
-- [ ] O inventário de rotas (`rate-limit.test.ts`) passa: rotas novas com perfil `admin` e `requirePermission` (`channel:manage`, `persona:manage`).
+- [x] **Ponte de sessão nas rotas de canal e de atendimento:** com cookie da conta, empresa selecionada e papel `OWNER`, `GET/PUT/DELETE .../channel`, `POST .../channel/embedded-signup`, `GET .../channel/setup`, `GET/PUT .../persona` e `POST .../messages` respondem como com Bearer (teste que percorre as rotas de tenant do inventário com cookie, sem lista manual que envelheça).
+- [x] Papéis com cookie: `ADMIN` igual a `OWNER` nas rotas de canal e persona; `AGENT` recebe 403 em canal e persona e 201 no simulador; `VIEWER` recebe 403 em canal, persona e simulador; **a negação usa o papel lido do banco agora** (rebaixar o vínculo no meio da sessão muda a resposta na requisição seguinte).
+- [x] Empresa alheia: conta com vínculo só em A, seleção em A, chamando `.../companies/B/channel`, `.../persona`, `.../messages` e `.../channel/setup` recebe 404 **idêntico** ao de empresa inexistente (mesmo corpo, sem `requestId` na comparação); `B` não é alterada. Conta sem seleção recebe 401. Vínculo desativado, conta desativada e empresa suspensa deixam de acessar (401).
+- [x] `PlatformAdmin` (Bearer de plataforma) recebe 403 em `.../persona`, `.../channel/setup` e nas de canal; `Authorization` inválido com cookie válido não cai no cookie (Bearer manda).
+- [x] CSRF: PUT/DELETE/POST com cookie e sem `Origin` igual a `APP_ORIGIN`, ou sem `X-Soprei-App: web`, dão 403 e **nada é gravado** (canal, persona, mensagem); GET com cookie não exige. Redis das sessões fora = 503.
+- [x] `GET .../channel/setup`: com `WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` devolve `appId`, `configId`, `graphApiVersion`; sem ele `embeddedSignup: null`; `manualConnect` reflete `CHANNEL_MANUAL_CONNECT_ENABLED`; a resposta serializada **não contém** o segredo do app, o token legado nem as chaves de cifra (teste por busca dos valores sentinela). Sem `WHATSAPP_ENABLED` a rota não existe (404). Config: `CHANNEL_MANUAL_CONNECT_ENABLED=true` com `NODE_ENV=production` falha no boot; `WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` inválido falha no boot.
+- [x] Persona: `PUT` grava e `GET` devolve; `null` limpa; vazio, só espaços, NUL, 4001 caracteres, campo extra (`companyId`, `name`...) e corpo sem `persona` dão 400; a persona gravada chega ao `LlmProvider` na próxima mensagem do simulador (o teste olha o `systemPrompt` recebido pelo mock). Corpo com `companyId` de outra empresa não tem efeito (o schema estrito recusa).
+- [x] **Isolamento da persona:** duas empresas com personas diferentes; o `OWNER` de A lê e grava só a de A (também por cookie); a de B segue intacta depois de tentativas por caminho de B (404) e por corpo adulterado.
+- [x] `GET /account/companies` devolve `permissions` coerentes com `ROLE_PERMISSIONS` para cada papel e vínculo da conta (OWNER em A, VIEWER em B retornam listas diferentes); o teste de snapshot do mapa de permissões inclui `persona:manage`.
+- [x] **Privacidade (log e métrica):** testes de fluxo capturam o log (`logContains`) e provam que **não** aparecem: texto da persona, texto das mensagens do simulador, `code` do Embedded Signup, token, PIN, texto cifrado, `appId`/`configId`. `/metrics` expõe `company_persona_updates_total` só com o label `action`. Os testes comparam erros por `code` e `message` (nunca `requestId`).
+- [x] O inventário de rotas (`rate-limit.test.ts`) passa: rotas novas com perfil `admin` e `requirePermission` (`channel:manage`, `persona:manage`).
 
 Frontend (unitários `node:test`, Playwright com API falsa local, desktop e celular, claro e escuro):
 
-- [ ] Máquina de estados do Embedded Signup (unitário, relógio injetável): envia só com `code` **e** ids; aceita as duas ordens de chegada; descarta o `code` com mais de 20 s sem enviar; 10 s sem ids = falha; segunda tentativa não reaproveita ids nem `code` da anterior; estado zerado ao concluir, falhar, cancelar e trocar de empresa.
-- [ ] Parser do evento (unitário): aceita `FINISH` bem formado das duas origens da Meta; **ignora** origem diferente (`https://evil.example`, `http://www.facebook.com`, `https://www.facebook.com.evil.example`, `null`), tipo diferente de `WA_EMBEDDED_SIGNUP`, JSON inválido, texto acima de 8 KiB, ids não numéricos e evento fora de tentativa; `CANCEL` e erro viram estados distintos.
-- [ ] O SDK **não é requisitado** antes do clique 1 (a rota `https://connect.facebook.net/**` do Playwright não recebe pedido ao abrir o site, a lista de empresas nem a aba Canal) e é requisitado uma única vez depois (clique 1 duas vezes não duplica o `<script>`). `FB.login` é chamado dentro do clique 2 e recebe `config_id`, `response_type: 'code'`, `override_default_response_type: true` e `extras.sessionInfoVersion: '3'` (a confirmar).
-- [ ] e2e com `window.FB` falso servido pela rota do SDK e `postMessage` disparado pelo teste: conectar (estado `NOT_CONNECTED` -> `CONNECTED`, o corpo enviado ao servidor tem exatamente `{ code, wabaId, phoneNumberId }`) -> desconectar com confirmação (aviso de WABA visível) -> `NOT_CONNECTED`.
-- [ ] e2e: evento com origem incorreta **não** conclui a conexão (nenhum pedido ao servidor); `TOKEN_INVALID` mostra o alerta e "Reconectar" refaz o fluxo; `LEGACY` mostra a orientação; cancelar o popup (`authResponse` nulo e evento `CANCEL`) volta ao estado anterior sem erro vermelho; popup bloqueado mostra a mensagem própria e libera o botão; 409 `CHANNEL_NUMBER_IN_USE`, 400 `CHANNEL_CODE_INVALID`, `CHANNEL_REGISTRATION_FAILED`, 502 e 429 mostram a mensagem da tabela e **não** o texto do servidor; `code` expirado (relógio) não é enviado.
-- [ ] e2e: `AGENT` e `VIEWER` não veem a aba Canal nem Persona (e `VIEWER` não vê Testar); mesmo forçando `/painel/canal` na URL, a tela não chama a API de canal e mostra "sem permissão"; 404 de empresa muda a tela para "A empresa selecionada mudou".
-- [ ] e2e persona: salvar, limpar ("Voltar ao padrão"), contador de caracteres, erro de 400 acessível (`aria-describedby`); e2e testar atendimento: envio, resposta, resposta de fallback marcada, botão desabilitado enquanto espera, resposta tardia depois de trocar de empresa **não** aparece na outra empresa.
-- [ ] Nenhuma tela guarda `code`, ids, token ou persona em `localStorage`/`sessionStorage`/URL (teste do Playwright confere os dois storages e `location` ao fim dos fluxos); nenhuma chamada de rede além de `/api/**` e do script do SDK; mensagens de erro nunca contêm o texto do corpo da resposta (a API falsa devolve `message` com um sentinela que não pode aparecer).
-- [ ] Contraste: pares novos em `contrast.test.ts` nos dois temas (mínimo 4,5:1 texto; 3:1 bordas e foco). Foco por teclado percorre o menu da empresa, o painel e o diálogo; Esc fecha o diálogo e devolve o foco ao botão de origem.
+- [x] Máquina de estados do Embedded Signup (unitário, relógio injetável): envia só com `code` **e** ids; aceita as duas ordens de chegada; descarta o `code` com mais de 20 s sem enviar; 10 s sem ids = falha; segunda tentativa não reaproveita ids nem `code` da anterior; estado zerado ao concluir, falhar, cancelar e trocar de empresa.
+- [x] Parser do evento (unitário): aceita `FINISH` bem formado das duas origens da Meta; **ignora** origem diferente (`https://evil.example`, `http://www.facebook.com`, `https://www.facebook.com.evil.example`, `null`), tipo diferente de `WA_EMBEDDED_SIGNUP`, JSON inválido, texto acima de 8 KiB, ids não numéricos e evento fora de tentativa; `CANCEL` e erro viram estados distintos.
+- [x] O SDK **não é requisitado** antes do clique 1 (a rota `https://connect.facebook.net/**` do Playwright não recebe pedido ao abrir o site, a lista de empresas nem a aba Canal) e é requisitado uma única vez depois (clique 1 duas vezes não duplica o `<script>`). `FB.login` é chamado dentro do clique 2 e recebe `config_id`, `response_type: 'code'`, `override_default_response_type: true` e `extras.sessionInfoVersion: '3'` (a confirmar).
+- [x] e2e com `window.FB` falso servido pela rota do SDK e `postMessage` disparado pelo teste: conectar (estado `NOT_CONNECTED` -> `CONNECTED`, o corpo enviado ao servidor tem exatamente `{ code, wabaId, phoneNumberId }`) -> desconectar com confirmação (aviso de WABA visível) -> `NOT_CONNECTED`.
+- [x] e2e: evento com origem incorreta **não** conclui a conexão (nenhum pedido ao servidor); `TOKEN_INVALID` mostra o alerta e "Reconectar" refaz o fluxo; `LEGACY` mostra a orientação; cancelar o popup (`authResponse` nulo e evento `CANCEL`) volta ao estado anterior sem erro vermelho; popup bloqueado mostra a mensagem própria e libera o botão; 409 `CHANNEL_NUMBER_IN_USE`, 400 `CHANNEL_CODE_INVALID`, `CHANNEL_REGISTRATION_FAILED`, 502 e 429 mostram a mensagem da tabela e **não** o texto do servidor; `code` expirado (relógio) não é enviado.
+- [x] e2e: `AGENT` e `VIEWER` não veem a aba Canal nem Persona (e `VIEWER` não vê Testar); mesmo forçando `/painel/canal` na URL, a tela não chama a API de canal e mostra "sem permissão"; 404 de empresa muda a tela para "A empresa selecionada mudou".
+- [x] e2e persona: salvar, limpar ("Voltar ao padrão"), contador de caracteres, erro de 400 acessível (`aria-describedby`); e2e testar atendimento: envio, resposta, resposta de fallback marcada, botão desabilitado enquanto espera, resposta tardia depois de trocar de empresa **não** aparece na outra empresa.
+- [x] Nenhuma tela guarda `code`, ids, token ou persona em `localStorage`/`sessionStorage`/URL (teste do Playwright confere os dois storages e `location` ao fim dos fluxos); nenhuma chamada de rede além de `/api/**` e do script do SDK; mensagens de erro nunca contêm o texto do corpo da resposta (a API falsa devolve `message` com um sentinela que não pode aparecer).
+- [x] Contraste: pares novos em `contrast.test.ts` nos dois temas (mínimo 4,5:1 texto; 3:1 bordas e foco). Foco por teclado percorre o menu da empresa, o painel e o diálogo; Esc fecha o diálogo e devolve o foco ao botão de origem.
 
 Gerais: `pnpm typecheck`, `pnpm lint`, `pnpm format:check` (raiz) verdes; o CI verde em Node 22 e na LTS mais recente; o gate de vocabulário da 022 (`domain-vocabulary.test.ts`) segue verde (sem os termos antigos).
 
@@ -237,7 +237,37 @@ Do lado da Meta (a conferir contra a documentação atual de cada item; o dono a
 
 ## Registro da implementação
 
-(vazio; preenchido pelo implementador ao terminar)
+**Implementada em 2026-11-04** por Claude Code (Sonnet 5.5) na branch `spec/023-conectar-whatsapp-no-site`. Sem migration, sem dependência nova (backend e frontend). O SDK do Facebook é um `<script>` carregado em tempo de execução.
+
+**Pastas e arquivos finais**
+
+- Backend: `domain/permissions.ts` (`persona:manage`), `infrastructure/config/` (`WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID`, `CHANNEL_MANUAL_CONNECT_ENABLED`, `whatsapp.ts`), `presentation/admin/persona.controller.ts` (novo), `presentation/admin/channel.controller.ts` (`GET .../channel/setup`), `presentation/admin/company.validators.ts` (schema da persona compartilhado), `application/companies/company.service.ts` (`getPersona`, `setPersona`), `application/auth/account.service.ts` (`permissions` em `/account/companies`), `infrastructure/metrics/` (`company_persona_updates_total{action}`), `infrastructure/http/server.ts` e `index.ts` (ligação). Nenhum caminho de autorização novo.
+- Frontend: `src/api.ts` (GET, POST, PUT, PATCH, DELETE; só `error.code`), `src/company/` (`CompanyArea`, `ChannelPage`, `PersonaPage`, `TestPage`, `company-api`, `company-nav`, `embedded-signup-event`, `embedded-signup-state`, `facebook-sdk`), `src/components/textarea.tsx`, `src/AccountApp.tsx` e `src/account-flow.ts` (rotas e landing), `e2e/company.spec.ts` e `e2e/company-fixture.ts`.
+- Docs: `AGENTS.md` (seção da 023), `docs/context.md`, `docs/handoff.md` (passos do dono).
+
+**Testes**
+
+- Backend, unitários: `persona.controller.test.ts` (matriz de papéis, 404 uniforme, isolamento, `systemPrompt`, privacidade de log e métrica, setup), `config.test.ts` (as duas variáveis novas), `permissions.test.ts`, `metrics.test.ts`, `rate-limit.test.ts` (inventário com as rotas novas).
+- Backend, integração (Postgres e Redis reais, só `soprei_test` e Redis `/15`): `site-bridge.integration.test.ts` varre **toda rota de tenant registrada** com cookie (a lista vem do `onRoute`, sem lista manual) e confere papel lido do banco agora, 404 antes de 403, CSRF, 503 com Redis das sessões fora, vínculo/conta/empresa desativados, Embedded Signup por cookie com o Graph falso e privacidade do log.
+- Frontend, unitários: parser do evento (origem estrita, 8 KiB, ids, variantes), máquina de estados (relógio por parâmetro), mensagens de erro por `code`, menu por permissão, rotas, contraste (pares novos nos dois temas, inclusive o `Alert` de aviso).
+- Frontend, Playwright (desktop e celular, claro e escuro no fluxo principal): API falsa, `window.FB` falso servido pela rota do SDK e `postMessage` com origem correta e incorreta.
+
+**Desvios e decisões da implementação**
+
+1. **Correção de um defeito da 022:** o renome tinha trocado o parâmetro OAuth `client_id` da troca do `code` por `company_id`; a Meta o recusaria. Voltou a `client_id` (cliente Graph, servidor falso e testes) e os quatro arquivos entraram na lista de exceções do gate de vocabulário. Nenhuma outra mudança de comportamento na 015.
+2. **Menu depois de selecionar:** a seleção em "Suas empresas" **não** navega sozinha (o e2e da 017 espera continuar na lista com "Selecionada ✓"); o botão "Abrir painel" aparece na empresa selecionada, para quem tem alguma tela.
+3. **Popup bloqueado:** em vez da heurística de 3 s sem callback (que erraria com quem demora no popup), o site observa o retorno de `window.open` durante a chamada síncrona do `FB.login` (`null` = bloqueado). Sem `sessionInfoVersion` nem `featureType` (não confirmados).
+4. **Desconectar:** diálogo nativo `<dialog>` com `showModal()` (foco preso, Esc fecha, foco volta ao botão), sem componente novo do beUI. O campo de texto longo é um `<textarea>` próprio no mesmo visual do `Input` (`components/textarea.tsx`, não copiado do registro, então sem entrada no `NOTICE.md`).
+5. **Rede nos testes:** além de `/api/**` e do script do SDK, a página pede só as fontes do próprio site (Google Fonts, spec 018), que o teste admite.
+6. **404 de canal:** relê `GET /auth/session`; mesma empresa = "canal não habilitado neste ambiente", outra = "A empresa selecionada mudou".
+7. **Tamanho:** o diff de produção ficou em ~2 000 linhas (o total passa de 4 000 com testes). Nenhum corte foi aplicado (a caixa de teste e o formulário manual somam menos de 300 linhas e a demonstração depende deles); o dono pode pedir o corte.
+8. O teclado é coberto para o menu (setas) e o diálogo (Esc e foco); a ordem de tabulação do painel explicativo segue a ordem natural do DOM e não tem teste próprio.
+
+**O que rodou localmente (Node 24.18):** ver a tabela de validação abaixo. **Depende do CI:** Node 22 e a LTS mais recente (typecheck, lint, format, unitários, integração, build e Playwright).
+
+**Fontes consultadas:** só a spec ("Confirmações na documentação da Meta", 2026-11-04). Nenhuma chamada real à Meta, ao SDK do Facebook ou à Anthropic.
+
+**Validação local (Node 24.18, em 2026-11-04):** `pnpm typecheck`, `pnpm lint`, `pnpm format:check` verdes; `pnpm test` 1127 backend e 44 frontend, 0 falhas; `pnpm test:integration` 387 de 387; `pnpm build` ok; `pnpm --filter soprei-frontend test:browser` 60 de 60 (desktop e celular). Node 22 e a LTS ficam para o CI, que continua sendo a palavra final.
 
 ## Confirmações na documentação da Meta (2026-11-04)
 
