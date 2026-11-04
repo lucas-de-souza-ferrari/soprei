@@ -11,6 +11,7 @@ import {
   type AreaPage,
 } from './company-nav';
 import { ConversationPage } from './ConversationPage';
+import { KnowledgePage } from './KnowledgePage';
 import { ConversationsPage } from './ConversationsPage';
 import { failureOf } from './company-api';
 import { PersonaPage } from './PersonaPage';
@@ -144,6 +145,8 @@ export function CompanyArea({
             />
           ) : page === 'persona' ? (
             <PersonaPage key={company.companyId} companyId={company.companyId} settle={settle} />
+          ) : page === 'conhecimento' ? (
+            <KnowledgePage key={company.companyId} companyId={company.companyId} settle={settle} />
           ) : page === 'equipe' ? (
             <TeamPage
               key={company.companyId}

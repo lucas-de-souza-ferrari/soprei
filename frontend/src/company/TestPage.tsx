@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertContent, AlertDescription, AlertIcon } from '../components/motion/alert';
 import { Button } from '../components/motion/button';
 import { Textarea } from '../components/textarea';
-import { companyApi, MESSAGE_MAX_LENGTH } from './company-api';
+import { type AnswerSource, companyApi, MESSAGE_MAX_LENGTH } from './company-api';
 import type { PageProps } from './PersonaPage';
 
 interface Line {
@@ -10,10 +10,20 @@ interface Line {
   readonly from: 'you' | 'assistant';
   readonly text: string;
   readonly fallback: boolean;
+  /** Só na resposta do assistente (spec 026). */
+  readonly sources?: readonly AnswerSource[];
 }
 
 const NOTICE =
   'É um teste: a conversa fica gravada no Soprei e, com o modelo real ligado, o texto é enviado ao provedor de IA. Nada é enviado ao WhatsApp.';
+const KIND_LABELS = { document: 'documento', product: 'produto' } as const;
+
+/** Linha de fontes da resposta (spec 026): só rótulos. */
+export function sourcesText(sources: readonly AnswerSource[]): string {
+  if (sources.length === 0) return 'Nenhuma informação da empresa usada';
+  return `Fontes usadas: ${sources.map((source) => `${source.label} (${KIND_LABELS[source.kind]})`).join(', ')}`;
+}
+
 const FALLBACK_MARK = 'resposta padrão (houve falha ao gerar)';
 
 /**
@@ -62,6 +72,7 @@ export function TestPage({ companyId, settle }: PageProps) {
           from: 'assistant',
           text: result.reply.text,
           fallback: result.reply.isFallback,
+          sources: result.sources,
         },
       ]);
     } catch (failure) {
@@ -93,6 +104,11 @@ export function TestPage({ companyId, settle }: PageProps) {
           >
             <span className="sr-only">{line.from === 'you' ? 'Você: ' : 'Assistente: '}</span>
             <span className="[overflow-wrap:anywhere] whitespace-pre-wrap">{line.text}</span>
+            {line.from === 'assistant' && line.sources !== undefined && (
+              <small className="mt-1 block text-xs text-muted-foreground">
+                {sourcesText(line.sources)}
+              </small>
+            )}
             {line.fallback && (
               <small className="mt-1 block text-xs text-muted-foreground">{FALLBACK_MARK}</small>
             )}

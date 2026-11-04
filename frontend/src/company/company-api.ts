@@ -37,8 +37,16 @@ export type ChannelSetup = z.infer<typeof channelSetupSchema>;
 
 export const personaSchema = z.object({ persona: z.string().nullable() });
 
+/** De onde veio a resposta (spec 026): só rótulos; o servidor nunca manda o conteúdo. */
+export const sourceSchema = z.object({
+  kind: z.enum(['document', 'product']),
+  label: z.string().max(200),
+});
+export type AnswerSource = z.infer<typeof sourceSchema>;
+
 export const attendanceResultSchema = z.object({
   reply: z.object({ text: z.string(), isFallback: z.boolean() }),
+  sources: z.array(sourceSchema).max(20).default([]),
 });
 
 /** Itens por requisição do painel de conversas (spec 024); o máximo da API continua 200. */

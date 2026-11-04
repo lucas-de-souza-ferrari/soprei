@@ -16,6 +16,7 @@ const PATHS: Record<AccountPage, string> = {
   conversas: areaPath('conversas'),
   canal: areaPath('canal'),
   persona: areaPath('persona'),
+  conhecimento: areaPath('conhecimento'),
   equipe: areaPath('equipe'),
   testar: areaPath('testar'),
 };
