@@ -44,6 +44,7 @@ import { JoseAccessTokenService } from '../infrastructure/auth/jose-access-token
 import type { Metrics } from '../infrastructure/metrics/index.js';
 import { ConflictError, NotFoundError } from '../shared/errors/index.js';
 import { InMemoryCompanyRepository } from './in-memory-company.repository.js';
+import { InMemoryInvitationRepository } from './in-memory-invitation.repository.js';
 
 export const TEST_JWT_SECRET = 'segredo-de-teste-com-mais-de-32-caracteres-0123456789';
 export const TEST_PASSWORD = 'senha-de-teste-forte-123';
@@ -552,6 +553,8 @@ export function buildTestAuth(options: TestAuthOptions) {
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const audit = new InMemoryAuditRepository();
+  // Convites (spec 025): o mesmo contrato do repositório do Postgres, em memória.
+  const invitations = new InMemoryInvitationRepository();
   const unitOfWork = new InMemoryMembershipAdminUnitOfWork(memberships, audit);
   const membershipAdmin = new MembershipAdminService({
     memberships,
@@ -620,6 +623,7 @@ export function buildTestAuth(options: TestAuthOptions) {
     companies,
     memberships,
     audit,
+    invitations,
     unitOfWork,
     membershipAdmin,
     platformAdmins,

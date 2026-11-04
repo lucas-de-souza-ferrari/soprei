@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { AccountService } from '../application/auth/account.service.js';
 import { deriveLoginLockSecret } from '../application/auth/auth.service.js';
+import { AttendanceService } from '../application/attendance/attendance.service.js';
 import { CompanyService } from '../application/companies/company.service.js';
 import {
   InvitationService,
@@ -25,9 +26,13 @@ import {
   createDatabase,
   PrismaAccountRepository,
   PrismaCompanyInvitationRepository,
+  PrismaAttendanceUnitOfWork,
   PrismaCompanyRepository,
+  PrismaConversationRepository,
   PrismaInvitationUnitOfWork,
+  PrismaMessageRepository,
 } from '../infrastructure/database/index.js';
+import { MockLlmProvider } from '../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { buildServer } from '../infrastructure/http/server.js';
 import { createMetrics } from '../infrastructure/metrics/index.js';
 import { ServiceUnavailableError } from '../shared/errors/index.js';
@@ -179,7 +184,20 @@ export async function createInvitationWorld(label: string) {
     readiness: { database: () => db.check(), redis: () => Promise.resolve(Result.ok(undefined)) },
     auth: auth.service,
     membershipAdmin: auth.membershipAdmin,
-    admin: { companies: new CompanyService(companyRepository) },
+    admin: {
+      companies: new CompanyService(companyRepository),
+      // Rotas de conversa (conversation:read) para provar o que cada papel alcança depois do aceite.
+      attendance: new AttendanceService({
+        companies: companyRepository,
+        conversations: new PrismaConversationRepository(db.prisma),
+        messages: new PrismaMessageRepository(db.prisma),
+        unitOfWork: new PrismaAttendanceUnitOfWork(db.prisma),
+        llm: new MockLlmProvider(),
+        logger: logs.logger,
+        metrics,
+        options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000 },
+      }),
+    },
     accounts: { service: accounts, origin: INVITE_ORIGIN, secure: false, invitations },
   });
 

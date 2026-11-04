@@ -45,11 +45,12 @@ export const passwordResetConfirmSchema = z
   .strict();
 
 /**
- * Corpos das rotas públicas de convite (spec 025). O token é só limitado em tamanho aqui: formato
+ * Corpos das rotas públicas de convite (spec 025). O token não é interpretado aqui: formato
  * malformado, vencido, usado e o resto são a MESMA falha uniforme do service (400 `INVITATION_INVALID`),
  * não um 400 de validação que distinguiria o problema. Estritos; a senha segue a política do cadastro.
  */
-const invitationToken = z.string().max(4096);
+// Sem teto próprio: token longo demais é a mesma falha uniforme do service (o limite do corpo é do Fastify).
+const invitationToken = z.string();
 export const invitationTokenSchema = z.object({ token: invitationToken }).strict();
 export const invitationAcceptNewSchema = z
   .object({ token: invitationToken, password: accountPasswordSchema })
