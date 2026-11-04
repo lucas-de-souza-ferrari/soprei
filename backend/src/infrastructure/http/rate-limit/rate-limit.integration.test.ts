@@ -756,7 +756,7 @@ describe('rotas públicas de convite (spec 025): perfil login é fail-closed', (
       );
       assert.ok(await handle.waitUntilReady(5_000));
       const ORIGIN = 'http://localhost:5174';
-      let consulted = 0;
+      let consulted = 0 as number;
       const touch = () => {
         consulted += 1;
         return Promise.resolve();
