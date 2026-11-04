@@ -29,7 +29,7 @@ describe('error handler central', () => {
   before(async () => {
     app = buildTestServer();
     app.get('/test/not-found', () => {
-      throw new NotFoundError('Empresa não encontrado', { context: { segredo: SEGREDO } });
+      throw new NotFoundError('Empresa não encontrada', { context: { segredo: SEGREDO } });
     });
     app.get('/test/external', () => {
       throw new ExternalServiceError(`falha ao falar com ${SEGREDO}`);
@@ -67,7 +67,7 @@ describe('error handler central', () => {
     assert.equal(response.statusCode, 404);
     const body = response.json<ErrorResponse>();
     assert.equal(body.error.code, 'NOT_FOUND');
-    assert.equal(body.error.message, 'Empresa não encontrado');
+    assert.equal(body.error.message, 'Empresa não encontrada');
     assert.equal(typeof body.error.requestId, 'string');
     assert.ok(!response.body.includes('stack'));
     assert.ok(!response.body.includes(SEGREDO));

@@ -134,7 +134,7 @@ function checkMembership(
     const params = request.params as Readonly<Record<string, unknown>> | undefined;
     const fromPath = params?.[companyParam];
     if (typeof fromPath !== 'string' || fromPath.toLowerCase() !== auth.companyId) {
-      throw new NotFoundError('Empresa não encontrado', { context: { entity: 'Company' } });
+      throw new NotFoundError('Empresa não encontrada', { context: { entity: 'Company' } });
     }
   }
   return auth;

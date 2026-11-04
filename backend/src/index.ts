@@ -217,7 +217,10 @@ async function main(): Promise<void> {
             service: new AccountService({
               accounts: new PrismaAccountRepository(prisma),
               passwords: auth.hasher,
-              sessions: new RedisAccountSessionStore(authRedis.client, config.AUTH_REDIS_PREFIX),
+              sessions: new RedisAccountSessionStore(
+                authRedis.client,
+                versionedAuthPrefix(config.AUTH_REDIS_PREFIX, true),
+              ),
               loginLocks: auth.sessions,
               loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
               // Só id e resultado: nunca e-mail, código nem credenciais SMTP.
@@ -352,6 +355,7 @@ import {
 } from './infrastructure/database/index.js';
 import { startPurgeTimer } from './application/auth/purge-timer.js';
 import { UnverifiedAccountPurger } from './application/auth/unverified-account-purger.js';
+import { versionedAuthPrefix } from './infrastructure/auth/auth-version.js';
 import { RedisAccountSessionStore } from './infrastructure/auth/redis-account-session-store.js';
 import { smtpMailerOptions } from './infrastructure/config/email.js';
 import { SmtpVerificationMailer } from './infrastructure/external-apis/email/smtp-verification-mailer.js';

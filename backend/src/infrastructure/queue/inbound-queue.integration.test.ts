@@ -283,6 +283,34 @@ describe('fila de entrada (BullMQ sobre o Redis /15)', () => {
     assert.ok(!logs.raw().includes(CONTACT));
   });
 
+  it('job no formato antigo (clientId, spec 022) é descartado: handler não roda, nada é enviado, log só com jobName', async () => {
+    const { handle, metrics, logs, prefix } = setup();
+    const { handler, calls } = recordingHandler();
+    handle.startWorker(handler);
+
+    const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
+    rawConnections.push(connection);
+    const raw = new Queue(INBOUND_QUEUE_NAME, { connection, prefix });
+    rawQueues.push(raw);
+    // Job gravado antes da 022: o campo da empresa se chamava `clientId`. O schema novo só aceita `companyId`.
+    await raw.add('text', {
+      kind: 'text',
+      clientId: randomUUID(),
+      phoneNumberId: '123',
+      externalId: 'wamid.antigo',
+      text: SECRET_TEXT,
+      contactRef: CONTACT,
+    });
+
+    await waitFor(async () => (await metricValue(metrics, 'failed')) === 1, 'failed');
+    assert.equal(calls.length, 0);
+    assert.equal(await metricValue(metrics, 'completed'), 0);
+    assert.ok(logs.raw().includes('job da fila com formato inválido; descartado'));
+    assert.ok(!logs.raw().includes(SECRET_TEXT));
+    assert.ok(!logs.raw().includes(CONTACT));
+    assert.ok(!logs.raw().includes('wamid.antigo'));
+  });
+
   it('concorrência 1: os jobs rodam um por vez, na ordem em que entraram', async () => {
     const { handle } = setup();
     let active = 0;

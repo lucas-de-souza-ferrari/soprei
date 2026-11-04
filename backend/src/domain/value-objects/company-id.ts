@@ -9,7 +9,7 @@ export const CompanyId = {
   /** Valida um UUID e o marca como `CompanyId`; qualquer outra coisa lança `ValidationError`. */
   parse(value: string): CompanyId {
     if (!isUuid(value)) {
-      throw new ValidationError('Identificador de empresa inválida');
+      throw new ValidationError('Identificador de empresa inválido');
     }
     // UUID em minúsculas, a forma que o PostgreSQL devolve: ids iguais comparam iguais.
     return value.toLowerCase() as CompanyId;

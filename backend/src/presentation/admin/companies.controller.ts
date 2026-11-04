@@ -83,7 +83,7 @@ export const adminCompaniesController: FastifyPluginCallback<AdminCompaniesContr
     const { id } = companyParamsSchema.parse(request.params);
     const body = updateCompanyBodySchema.parse(request.body);
     const company = await companies.update(id, body);
-    request.log.info({ companyId: company.id }, 'empresa atualizado');
+    request.log.info({ companyId: company.id }, 'empresa atualizada');
     return toResponse(company);
   });
 

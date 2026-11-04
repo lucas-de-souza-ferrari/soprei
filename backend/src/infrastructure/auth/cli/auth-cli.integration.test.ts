@@ -212,6 +212,9 @@ describe('pnpm auth:cli (contra soprei_test)', () => {
         leaked,
       ],
       ['create-platform-admin', '--email', email, '--senha', leaked],
+      // Spec 022: a opção antiga `--client` não é alias silencioso; vira erro de uso.
+      ['create-user', '--client', companyA.slug, '--email', email, '--role', 'OWNER'],
+      ['reset-password', '--client', companyA.slug, '--email', email],
       ['create-platform-admin', 'sobra', '--email', email],
     ]) {
       const result = await run(args, [PASSWORD, PASSWORD]);

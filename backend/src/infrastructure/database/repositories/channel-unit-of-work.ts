@@ -18,7 +18,7 @@ async function lockCompanyRow(db: TenantScopedDb, companyId: CompanyId): Promise
   const rows = await db.$queryRaw<{ id: string }[]>`
     SELECT id FROM companies WHERE id = ${companyId}::uuid AND deleted_at IS NULL FOR NO KEY UPDATE`;
   if (rows.length === 0) {
-    throw new NotFoundError('Empresa não encontrado', { context: { entity: 'Company' } });
+    throw new NotFoundError('Empresa não encontrada', { context: { entity: 'Company' } });
   }
 }
 

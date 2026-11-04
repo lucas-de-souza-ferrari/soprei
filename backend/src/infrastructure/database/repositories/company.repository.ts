@@ -124,5 +124,5 @@ export class PrismaCompanyRepository implements CompanyRepository {
 }
 
 function notFound(): NotFoundError {
-  return new NotFoundError('Empresa não encontrado', { context: { entity: 'Company' } });
+  return new NotFoundError('Empresa não encontrada', { context: { entity: 'Company' } });
 }

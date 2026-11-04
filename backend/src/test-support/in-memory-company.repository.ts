@@ -107,7 +107,7 @@ export class InMemoryCompanyRepository implements CompanyRepository {
 }
 
 function notFound(): NotFoundError {
-  return new NotFoundError('Empresa não encontrado');
+  return new NotFoundError('Empresa não encontrada');
 }
 
 /** Erros viram rejeição da promise, como num repositório assíncrono de verdade. */

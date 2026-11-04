@@ -3,6 +3,7 @@ import { AuthService, deriveLoginLockSecret } from '../../application/auth/auth.
 import { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
 import type { PlatformAdminRepository, MembershipRepository } from '../../domain/index.js';
 import type { Config } from '../config/index.js';
+import { versionedAudience, versionedAuthPrefix } from './auth-version.js';
 import {
   PrismaAuditRepository,
   PrismaCompanyRepository,
@@ -59,7 +60,7 @@ export function createAuthComponents(params: {
   const sessions = new RedisSessionStore({
     client: authRedis.client,
     logger,
-    prefix: `${config.AUTH_REDIS_PREFIX}${config.ACCOUNTS_ENABLED ? 'v2:' : ''}`,
+    prefix: versionedAuthPrefix(config.AUTH_REDIS_PREFIX, config.ACCOUNTS_ENABLED),
     idleTtlSeconds: config.AUTH_REFRESH_TTL_SECONDS,
     maxSeconds: config.AUTH_SESSION_MAX_SECONDS,
     accessTtlSeconds: config.AUTH_ACCESS_TTL_SECONDS,
@@ -74,7 +75,7 @@ export function createAuthComponents(params: {
     tokens: new JoseAccessTokenService({
       secret: config.JWT_SECRET,
       issuer: config.JWT_ISSUER,
-      audience: `${config.JWT_AUDIENCE}${config.ACCOUNTS_ENABLED ? ':v2' : ''}`,
+      audience: versionedAudience(config.JWT_AUDIENCE, config.ACCOUNTS_ENABLED),
       ttlSeconds: config.AUTH_ACCESS_TTL_SECONDS,
       clockToleranceSeconds: config.AUTH_CLOCK_TOLERANCE_SECONDS,
     }),

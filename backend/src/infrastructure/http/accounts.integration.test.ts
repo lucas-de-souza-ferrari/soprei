@@ -19,6 +19,7 @@ import {
 import { createAuthRedis } from '../auth/auth-redis.js';
 import { createAuthComponents } from '../auth/create-auth.js';
 import { ScryptPasswordHasher } from '../auth/scrypt-password-hasher.js';
+import { versionedAuthPrefix } from '../auth/auth-version.js';
 import { RedisAccountSessionStore } from '../auth/redis-account-session-store.js';
 import { buildServer } from './server.js';
 
@@ -42,7 +43,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
   const repo = new PrismaAccountRepository(db.prisma);
   const mail = new Map<string, string>();
   let mailFails = false;
-  const store = new RedisAccountSessionStore(redis.client, prefix);
+  const store = new RedisAccountSessionStore(redis.client, versionedAuthPrefix(prefix, true));
   let sessionsDown = false;
   const sessions: AccountSessionStore = {
     create: (id) => store.create(id),
@@ -274,7 +275,7 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     const accountA = await repo.findByEmail(emails[0] ?? '');
     assert.ok(accountA);
     const expired = randomBytes(32).toString('base64url');
-    const expiredKey = `${prefix}account-session:${createHash('sha256').update(expired).digest('hex')}`;
+    const expiredKey = `${versionedAuthPrefix(prefix, true)}account-session:${createHash('sha256').update(expired).digest('hex')}`;
     await redis.client.set(
       expiredKey,
       JSON.stringify({
@@ -289,6 +290,28 @@ test('conta global: confirmação, cookie, empresas, isolamento, revogação e p
     );
     assert.equal(await store.read(expired), null);
     assert.equal(await redis.client.exists(expiredKey), 0);
+    // Spec 022: sessão no formato antigo (JSON com `clientId`, sem o segmento de versão) nunca é lida:
+    // o cookie correspondente dá 401, não 503 nem identidade com campo faltando.
+    const legacy = randomBytes(32).toString('base64url');
+    const legacyKey = `${prefix}account-session:${createHash('sha256').update(legacy).digest('hex')}`;
+    await redis.client.set(
+      legacyKey,
+      JSON.stringify({
+        accountId: accountA.id,
+        id: randomUUID(),
+        clientId: company.companyId,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 600_000,
+      }),
+      'EX',
+      60,
+    );
+    assert.equal(await store.read(legacy), null);
+    assert.equal(
+      (await app.inject({ url: '/auth/session', headers: { cookie: `soprei_session=${legacy}` } }))
+        .statusCode,
+      401,
+    );
     // Em novo request, o vínculo é relido; desativá-lo não conserva a identidade anterior.
     await db.prisma.membership.updateMany({
       where: { companyId: company.companyId },

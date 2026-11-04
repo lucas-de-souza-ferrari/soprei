@@ -21,7 +21,7 @@ export class PrismaUnverifiedAccountPurgeRepository implements UnverifiedAccount
           SELECT a.id FROM accounts a
           WHERE a.email_verified_at IS NULL
             AND a.updated_at < ${cutoff}::timestamptz
-            AND NOT EXISTS (SELECT 1 FROM memberships u WHERE u.account_id = a.id)
+            AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.account_id = a.id)
           ORDER BY a.updated_at
           LIMIT ${batchSize}::int
           FOR UPDATE SKIP LOCKED)
@@ -29,7 +29,7 @@ export class PrismaUnverifiedAccountPurgeRepository implements UnverifiedAccount
         WHERE id IN (SELECT id FROM picked)
           AND email_verified_at IS NULL
           AND updated_at < ${cutoff}::timestamptz
-          AND NOT EXISTS (SELECT 1 FROM memberships u WHERE u.account_id = accounts.id)
+          AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.account_id = accounts.id)
         RETURNING id`;
       return rows.length;
     });

@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
 import { CompanyService } from '../../application/companies/company.service.js';
 import type { Company } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
+import { forgeJwt } from '../../test-support/forge-jwt.js';
 import { bearer } from '../../test-support/in-memory-auth.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { captureLogs, type LogCapture } from '../../test-support/log-capture.js';
 import { TestKeyspace } from '../../test-support/test-keyspace.js';
 import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { ToggleProxy } from '../../test-support/toggle-proxy.js';
+import { versionedAudience, versionedAuthPrefix } from '../auth/auth-version.js';
 import { createAuthRedis, type AuthRedisHandle } from '../auth/auth-redis.js';
 import { createAuthComponents, type AuthComponents } from '../auth/create-auth.js';
 import { ScryptPasswordHasher } from '../auth/scrypt-password-hasher.js';
@@ -94,6 +96,8 @@ interface Harness {
   readonly authRedis: AuthRedisHandle;
   readonly rateRedis: RateLimitRedisHandle;
   readonly attendanceCalls: { count: number };
+  /** `AUTH_REDIS_PREFIX` deste harness (o formato das chaves nasce sob `<prefixo>v3:`). */
+  readonly authPrefix: string;
   close(): Promise<void>;
 }
 
@@ -179,6 +183,7 @@ async function createHarness(
     authRedis,
     rateRedis,
     attendanceCalls,
+    authPrefix,
     async close() {
       try {
         await app.close();
@@ -762,6 +767,87 @@ describe('privacidade e métricas de ponta a ponta', () => {
       }
       // "email" só vale como nome de label: a métrica account_password_reset_emails_total (021) o tem no nome.
       assert.doesNotMatch(body, /companyId|membershipId|\{[^}]*email|\bip=/i);
+    });
+  });
+});
+
+describe('versão do formato de sessão e de token (spec 022)', () => {
+  it('as chaves novas ficam sob <prefixo><versão>:<CompanyId>: (todas com TTL) e sessão no formato antigo dá 401, nunca 503', async () => {
+    await withHarness({}, async (h) => {
+      const company = await tenants.createCompany('e2e-versao');
+      const email = emailFor('versao');
+      await createMembership(h, company, email);
+      const tokens = await login(h, company, email);
+
+      const versioned = versionedAuthPrefix(h.authPrefix, config.ACCOUNTS_ENABLED);
+      assert.match(versioned, /v3(-legacy)?:$/);
+      const keys = await keyspace.keysUnder(main.client, h.authPrefix);
+      assert.ok(keys.length > 0);
+      for (const key of keys) {
+        assert.ok(key.startsWith(versioned), key);
+        assert.ok((await main.client.ttl(key)) > 0, `TTL em ${key}`);
+      }
+      assert.ok(keys.some((key) => key.startsWith(`${versioned}${company.id}:sess:`)));
+
+      // Sessão no formato anterior (hash com `userId`), sob o prefixo sem versão e sob `v2:`: o código
+      // novo nunca a lê. O refresh token é bem formado e cai no mesmo 401 de qualquer sessão ausente.
+      const secret = randomBytes(48).toString('base64url').slice(0, 64);
+      const sessionId = randomUUID();
+      const secretHash = createHash('sha256').update(secret).digest('hex');
+      for (const legacyPrefix of [h.authPrefix, `${h.authPrefix}v2:`]) {
+        const key = `${legacyPrefix}${company.id}:sess:${sessionId}`;
+        await main.client.hset(key, {
+          userId: randomUUID(),
+          current: secretHash,
+          maxAt: Math.floor(Date.now() / 1000) + 3_600,
+        });
+        await main.client.expire(key, 120);
+      }
+      const old = await postJson(h, '/auth/refresh', {
+        refreshToken: `${company.id}.${sessionId}.${secret}`,
+      });
+      assert.equal(old.statusCode, 401, old.body);
+      const fresh = await postJson(h, '/auth/refresh', { refreshToken: tokens.refreshToken });
+      assert.equal(fresh.statusCode, 200, fresh.body);
+    });
+  });
+
+  it('access token com a audiência antiga (soprei-api e soprei-api:v2) é recusado com a 401 uniforme; o novo (:v3) vale', async () => {
+    await withHarness({}, async (h) => {
+      const company = await tenants.createCompany('e2e-aud');
+      const email = emailFor('aud');
+      await createMembership(h, company, email);
+      const tokens = await login(h, company, email);
+      const issued = await h.app.inject({
+        method: 'GET',
+        url: '/auth/me',
+        headers: bearer(tokens.accessToken),
+      });
+      assert.equal(issued.statusCode, 200, issued.body);
+      const claims = JSON.parse(
+        Buffer.from(tokens.accessToken.split('.')[1] ?? '', 'base64url').toString('utf8'),
+      ) as Record<string, unknown>;
+      assert.equal(claims.aud, versionedAudience(config.JWT_AUDIENCE, config.ACCOUNTS_ENABLED));
+      assert.equal(claims.kind, 'membership');
+      assert.equal(typeof claims.cid, 'string');
+      const rejected: unknown[] = [];
+      for (const aud of [config.JWT_AUDIENCE, `${config.JWT_AUDIENCE}:v2`]) {
+        const forged = forgeJwt({
+          header: { alg: 'HS256', typ: 'at+jwt' },
+          payload: { ...claims, aud },
+          secret: config.JWT_SECRET,
+        });
+        const response = await h.app.inject({
+          method: 'GET',
+          url: '/auth/me',
+          headers: bearer(forged),
+        });
+        assert.equal(response.statusCode, 401);
+        rejected.push(stable(response));
+      }
+      const missing = await h.app.inject({ method: 'GET', url: '/auth/me' });
+      assert.deepEqual(rejected[0], stable(missing));
+      assert.deepEqual(rejected[1], stable(missing));
     });
   });
 });
