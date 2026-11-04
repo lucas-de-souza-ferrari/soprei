@@ -403,7 +403,7 @@ describe('concorrência e atomicidade', () => {
   });
 
   it('convidador desativado ou rebaixado depois de convidar: o aceite é a falha uniforme, o convite é fechado e não há vínculo', async () => {
-    const { owner, company } = await w.setup('Empresa do convidador caído');
+    const { company } = await w.setup('Empresa do convidador caído');
     for (const change of [{ status: 'DISABLED' as const }, { role: 'AGENT' as const }]) {
       const inviter = await w.signUp('convidador');
       const inviterId = await w.join(inviter, company, 'ADMIN');
@@ -421,7 +421,6 @@ describe('concorrência e atomicidade', () => {
       assert.equal(row?.status, 'REVOKED');
       assert.equal(row.email, null);
     }
-    void owner;
   });
 
   it('aceitar enquanto o convidador é desativado: nunca há vínculo com convidador sem hierarquia depois do bloqueio', async () => {
@@ -600,12 +599,10 @@ describe('privacidade: log, métrica, auditoria e erros', () => {
       .filter((line) => /^company_invitation(s|_emails)_total\{/.test(line));
     assert.ok(lines.length > 0);
     for (const line of lines) {
-      const labels = Object.fromEntries(
-        [...(/\{(.*)\}/.exec(line)?.[1] ?? '').matchAll(/(\w+)="([^"]*)"/g)].map((m) => [
-          m[1],
-          m[2],
-        ]),
-      );
+      const labels: Record<string, string | undefined> = {};
+      for (const match of (/\{(.*)\}/.exec(line)?.[1] ?? '').matchAll(/(\w+)="([^"]*)"/g)) {
+        labels[match[1] ?? ''] = match[2];
+      }
       assert.ok(
         Object.keys(labels).every((key) => ['action', 'result'].includes(key)),
         line,

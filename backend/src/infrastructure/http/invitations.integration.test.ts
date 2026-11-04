@@ -7,7 +7,6 @@ import {
   createInvitationWorld,
   errorOf,
   type InvitationWorld,
-  type Person,
   tokenOf,
 } from '../../test-support/invitation-world.js';
 
@@ -104,7 +103,7 @@ describe('criar convite: permissão, hierarquia e papéis', () => {
   });
 
   it(':companyId de outra empresa é 404 antes do 403, mesmo para quem não tem permissão', async () => {
-    const { owner, company } = await w.setup('Empresa do 404');
+    const { company } = await w.setup('Empresa do 404');
     const agent = await member('agt404', company, 'AGENT');
     const other = await w.signUp('estranho');
     const otherCompany = await w.createCompany(other, 'Empresa do estranho');
@@ -126,7 +125,7 @@ describe('criar convite: permissão, hierarquia e papéis', () => {
   });
 
   it('o convidador é relido do banco: rebaixado perde a permissão e desativado perde o acesso, com o cookie ainda válido', async () => {
-    const { owner, company } = await w.setup('Empresa do rebaixamento');
+    const { company } = await w.setup('Empresa do rebaixamento');
     const admin = await member('reb', company, 'ADMIN');
     assert.equal(
       (await w.invite(admin.person, company, w.freshEmail('x'), 'AGENT')).statusCode,
