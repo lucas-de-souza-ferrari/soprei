@@ -1,5 +1,8 @@
+import { areaPageForPath, areaPath, type AreaPage } from './company/company-nav';
+
 /** Páginas do site de contas e seus caminhos (spec 021 acrescenta recuperação de senha). */
-export type AccountPage = 'login' | 'register' | 'verify' | 'forgot' | 'reset' | 'companies';
+export type AccountPage =
+  'login' | 'register' | 'verify' | 'forgot' | 'reset' | 'companies' | AreaPage;
 
 const PATHS: Record<AccountPage, string> = {
   login: '/entrar',
@@ -8,6 +11,9 @@ const PATHS: Record<AccountPage, string> = {
   forgot: '/recuperar-senha',
   reset: '/redefinir-senha',
   companies: '/painel/empresas',
+  canal: areaPath('canal'),
+  persona: areaPath('persona'),
+  testar: areaPath('testar'),
 };
 
 /** Caminhos que o `main.tsx` entrega ao `AccountApp` (além de tudo sob `/painel`). */
@@ -35,7 +41,8 @@ export function pageForPath(pathname: string): AccountPage {
     case PATHS.reset:
       return 'reset';
     default:
-      return 'login';
+      // As telas da empresa (spec 023) só abrem com sessão: o AccountApp decide depois de ler a sessão.
+      return areaPageForPath(pathname) ?? 'login';
   }
 }
 

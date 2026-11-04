@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { z } from 'zod';
+import { api, ApiError } from './api';
 import { Logo } from './components/logo';
 import { Alert, AlertContent, AlertDescription, AlertIcon } from './components/motion/alert';
 import { Button } from './components/motion/button';
@@ -9,6 +10,8 @@ import { Input } from './components/motion/input';
 import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
+import { CompanyArea } from './company/CompanyArea';
+import { allowedPages, isAreaPage } from './company/company-nav';
 import {
   isNeutralResetRequestError,
   pageForPath,
@@ -28,6 +31,8 @@ const companySchema = z.object({
   membershipId: z.uuid(),
   name: z.string(),
   role: z.enum(['OWNER', 'ADMIN', 'AGENT', 'VIEWER']),
+  // Permissões do papel, derivadas no servidor (spec 023); só decidem quais abas aparecem.
+  permissions: z.array(z.string().max(64)).max(32).default([]),
 });
 const companiesSchema = z.object({ items: z.array(companySchema) });
 const sessionSchema = z.object({
@@ -45,37 +50,6 @@ const roles = {
   AGENT: 'Atendente',
   VIEWER: 'Somente leitura',
 } as const;
-class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-async function api(path: string, body?: unknown, unauthorized?: string): Promise<unknown> {
-  const response = await fetch(`/api${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', 'X-Soprei-App': 'web' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  if (!response.ok)
-    throw new ApiError(
-      response.status,
-      response.status === 401
-        ? (unauthorized ?? 'Entre novamente ou confira suas credenciais.')
-        : response.status === 403
-          ? 'Confirme seu e-mail ou confira seu acesso.'
-          : response.status === 429
-            ? 'Muitas tentativas. Aguarde antes de tentar novamente.'
-            : 'Não foi possível concluir. Tente novamente mais tarde.',
-    );
-  return response.status === 204 ? undefined : response.json();
-}
-
 function PasswordToggle({
   shown,
   onToggle,
@@ -119,6 +93,8 @@ export function AccountApp() {
     text: string;
   } | null>(null);
   const generation = useRef(0);
+  // Página em que o site abriu: um endereço da área da empresa só vale com sessão e empresa selecionada.
+  const initialPage = useRef<Page>(pageForPath(location.pathname));
   const navigate = (next: Page) => {
     setPage(next);
     setNotice(null);
@@ -129,22 +105,30 @@ export function AccountApp() {
     history.replaceState(null, '', pathForPage(next));
   };
 
-  const load = async (stamp: number) => {
+  const load = async (stamp: number, landing: Page = 'companies') => {
     const current = sessionSchema.parse(await api('/auth/session'));
     const list = companiesSchema.parse(await api('/account/companies'));
     if (generation.current !== stamp) return;
     setSession(current);
     setCompanies(list.items);
-    setPage('companies');
-    history.replaceState(null, '', '/painel/empresas');
+    const target =
+      isAreaPage(landing) && list.items.some((item) => item.companyId === current.selectedCompanyId)
+        ? landing
+        : 'companies';
+    setPage(target);
+    if (target === 'companies') history.replaceState(null, '', '/painel/empresas');
   };
   useEffect(() => {
     const stamp = ++generation.current;
-    void load(stamp)
+    void load(stamp, initialPage.current)
       .catch(() => {
         if (generation.current === stamp) {
           setSession(null);
           setCompanies([]);
+          if (isAreaPage(initialPage.current)) {
+            setPage('login');
+            history.replaceState(null, '', pathForPage('login'));
+          }
         }
       })
       .finally(() => {
@@ -303,6 +287,40 @@ export function AccountApp() {
       });
   };
 
+  const openArea = (next: Page) => {
+    setPage(next);
+    setNotice(null);
+    history.replaceState(null, '', pathForPage(next));
+  };
+  const sessionLost = () => {
+    generation.current++;
+    setSession(null);
+    setCompanies([]);
+    setName('');
+    setEmail('');
+    setPassword('');
+    setCode('');
+    setBusy(false);
+    navigate('login');
+    setNotice({ tone: 'error', text: 'Sua sessão terminou. Entre novamente.' });
+  };
+  const companyChanged = () => {
+    const stamp = ++generation.current;
+    setBusy(true);
+    void load(stamp)
+      .then(() => {
+        if (generation.current === stamp)
+          setNotice({ tone: 'info', text: 'A empresa selecionada mudou. Escolha de novo.' });
+      })
+      .catch(() => {
+        if (generation.current === stamp) sessionLost();
+      })
+      .finally(() => {
+        if (generation.current === stamp) setBusy(false);
+      });
+  };
+  const selectedCompany = companies.find((item) => item.companyId === session?.selectedCompanyId);
+
   const submitLabel =
     page === 'register'
       ? 'Criar conta'
@@ -420,31 +438,37 @@ export function AccountApp() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,var(--tint),transparent_55%)] px-5 py-10">
-      <header className="mx-auto mb-10 flex w-full max-w-[620px] items-center justify-between">
+      <header
+        className={`mx-auto mb-10 flex w-full items-center justify-between ${isAreaPage(page) ? 'max-w-[860px]' : 'max-w-[620px]'}`}
+      >
         <a href="/" className="block w-[140px]">
           <Logo alt="Soprei — início" className="w-full" />
         </a>
         <ThemeToggle />
       </header>
       <main>
-        <Card className="mx-auto w-full bg-card max-w-[620px] gap-5 p-0 py-8 shadow-[0_20px_70px_var(--shadow)] max-sm:py-6">
+        <Card
+          className={`mx-auto w-full bg-card ${isAreaPage(page) ? 'max-w-[860px]' : 'max-w-[620px]'} gap-5 p-0 py-8 shadow-[0_20px_70px_var(--shadow)] max-sm:py-6`}
+        >
           <CardHeader className="gap-3 px-8 max-sm:px-5">
             <p className="eyebrow">SEU ESPAÇO NO SOPREI</p>
             <CardTitle
               as="h1"
               className="font-[Manrope] text-4xl leading-tight tracking-[-0.05em] max-sm:text-3xl"
             >
-              {page === 'companies'
-                ? 'Suas empresas'
-                : page === 'register'
-                  ? 'Vamos começar.'
-                  : page === 'verify'
-                    ? 'Confirme seu e-mail.'
-                    : page === 'forgot'
-                      ? 'Recupere seu acesso.'
-                      : page === 'reset'
-                        ? 'Crie uma nova senha.'
-                        : 'Que bom ter você aqui.'}
+              {isAreaPage(page)
+                ? (selectedCompany?.name ?? 'Painel da empresa')
+                : page === 'companies'
+                  ? 'Suas empresas'
+                  : page === 'register'
+                    ? 'Vamos começar.'
+                    : page === 'verify'
+                      ? 'Confirme seu e-mail.'
+                      : page === 'forgot'
+                        ? 'Recupere seu acesso.'
+                        : page === 'reset'
+                          ? 'Crie uma nova senha.'
+                          : 'Que bom ter você aqui.'}
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-5 px-8 max-sm:px-5">
@@ -461,6 +485,16 @@ export function AccountApp() {
                 <Loader variant="spinner" size={28} label="Verificando sua sessão" />
                 <span aria-hidden="true">Verificando sua sessão…</span>
               </div>
+            ) : isAreaPage(page) && session && selectedCompany ? (
+              <CompanyArea
+                key={selectedCompany.companyId}
+                company={selectedCompany}
+                page={page}
+                onNavigate={openArea}
+                onSwitch={() => openArea('companies')}
+                onSession={sessionLost}
+                onChanged={companyChanged}
+              />
             ) : page === 'companies' && session ? (
               <>
                 <div className="flex items-center justify-between gap-4 break-words">
@@ -487,23 +521,40 @@ export function AccountApp() {
                           {roles[company.role]}
                         </small>
                       </div>
-                      <Button
-                        size="sm"
-                        variant={
-                          session.selectedCompanyId === company.companyId ? 'primary' : 'secondary'
-                        }
-                        disabled={busy}
-                        onClick={() =>
-                          void perform(async (stamp) => {
-                            await api(`/account/companies/${company.companyId}/select`, {});
-                            await load(stamp);
-                          })
-                        }
-                      >
-                        {session.selectedCompanyId === company.companyId
-                          ? 'Selecionada ✓'
-                          : 'Selecionar'}
-                      </Button>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant={
+                            session.selectedCompanyId === company.companyId
+                              ? 'primary'
+                              : 'secondary'
+                          }
+                          disabled={busy}
+                          onClick={() =>
+                            void perform(async (stamp) => {
+                              await api(`/account/companies/${company.companyId}/select`, {});
+                              await load(stamp);
+                            })
+                          }
+                        >
+                          {session.selectedCompanyId === company.companyId
+                            ? 'Selecionada ✓'
+                            : 'Selecionar'}
+                        </Button>
+                        {session.selectedCompanyId === company.companyId &&
+                          allowedPages(company.permissions).length > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                openArea(allowedPages(company.permissions)[0] ?? 'companies')
+                              }
+                            >
+                              Abrir painel
+                            </Button>
+                          )}
+                      </div>
                     </li>
                   ))}
                 </ul>
