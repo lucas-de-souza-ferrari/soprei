@@ -736,3 +736,106 @@ describe('TRUST_PROXY', () => {
     });
   });
 });
+
+describe('rotas públicas de convite (spec 025): perfil login é fail-closed', () => {
+  it(
+    'Redis do limiter fora: 503 SERVICE_UNAVAILABLE nas três rotas, sem consultar o convite; de volta, respondem normalmente',
+    { timeout: 60_000 },
+    async () => {
+      const redisUrl = new URL(config.REDIS_URL);
+      const proxy = new ToggleProxy(redisUrl.hostname, Number(redisUrl.port || '6379'));
+      await proxy.start();
+      const viaProxy = new URL(config.REDIS_URL);
+      viaProxy.hostname = '127.0.0.1';
+      viaProxy.port = String(proxy.listeningPort);
+      const logs = captureLogs();
+      const keyspace = new TestKeyspace();
+      const handle = createRateLimitRedis(
+        { REDIS_URL: viaProxy.toString(), RATE_LIMIT_REDIS_TIMEOUT_MS: REDIS_TIMEOUT_MS },
+        logs.logger,
+      );
+      assert.ok(await handle.waitUntilReady(5_000));
+      const ORIGIN = 'http://localhost:5174';
+      let consulted = 0;
+      const touch = () => {
+        consulted += 1;
+        return Promise.resolve();
+      };
+      const invitations = {
+        preview: () => {
+          consulted += 1;
+          return Promise.resolve({
+            companyName: 'X',
+            role: 'AGENT',
+            email: 'a@b.test',
+            accountState: 'NEW',
+          });
+        },
+        accept: () => {
+          consulted += 1;
+          return Promise.resolve({ companyId: randomUUID() });
+        },
+        acceptNew: touch,
+        drain: () => Promise.resolve(),
+      };
+      const service = {
+        me: () => Promise.resolve({ id: randomUUID(), email: 'a@b.test', selectedCompanyId: null }),
+        selectCompany: touch,
+        drain: () => Promise.resolve(),
+      };
+      const app = buildServer({
+        logger: logs.logger,
+        readiness: ALL_UP,
+        accounts: {
+          service: service as never,
+          origin: ORIGIN,
+          secure: false,
+          invitations: invitations as never,
+        },
+        rateLimit: {
+          redis: handle.client,
+          profiles: profiles(),
+          keyPrefix: keyspace.scopedPrefix('rl-invite'),
+        },
+      });
+      await app.ready();
+      const token = `${randomUUID()}.${randomUUID()}.${'A'.repeat(43)}`;
+      const cookie = `soprei_session=${'a'.repeat(43)}`;
+      const call = (path: string, payload: object) =>
+        app.inject({
+          method: 'POST',
+          url: `/auth/invitations/${path}`,
+          headers: { origin: ORIGIN, 'x-soprei-app': 'web', cookie },
+          payload,
+        });
+      const all = () => [
+        call('preview', { token }),
+        call('accept', { token }),
+        call('accept-new', { token, password: 'Forte1senha' }),
+      ];
+      try {
+        await proxy.stop();
+        for (const pending of all()) {
+          const response = await pending;
+          assert.equal(response.statusCode, 503);
+          assert.equal(
+            response.json<{ error: { code: string } }>().error.code,
+            'SERVICE_UNAVAILABLE',
+          );
+        }
+        assert.equal(consulted, 0, 'o convite foi consultado com o limiter fora');
+
+        proxy.mode = 'forward';
+        await proxy.start();
+        assert.ok(await handle.waitUntilReady(15_000), 'a conexão não voltou');
+        assert.deepEqual(statuses(await Promise.all(all())), [200, 204, 204]);
+        assert.ok(consulted >= 3);
+      } finally {
+        await app.close();
+        await handle.close();
+        await proxy.stop();
+        await keyspace.cleanup(mainRedis.client);
+      }
+    },
+  );
+});

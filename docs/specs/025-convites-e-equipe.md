@@ -320,7 +320,7 @@ Toca em dados de empresa (`CompanyInvitation`, `AuditEvent`, `Membership`) e **n
 **Critérios sem teste específico (cortes honestos)**
 - `PlatformAdmin` recebe 403 nas rotas de convite: vale pelo hook `requirePermission` compartilhado (testado na 008 e no inventário de rotas), sem teste do endpoint de convites.
 - "Mesma contagem de consultas de banco" no criar: provado pela sonda que conta as consultas a `accounts` (zero), não pela contagem total.
-- Fail-closed do perfil `login` com o Redis do limiter fora para as três rotas públicas: vale pela lista `FAIL_CLOSED_RATE_LIMIT_PROFILES` e pelo inventário (cada rota declara `login`), sem teste específico.
+- Fail-closed do perfil `login` com o Redis do limiter fora para as três rotas públicas: vale pela lista `FAIL_CLOSED_RATE_LIMIT_PROFILES` e pelo inventário (cada rota declara `login`), sem teste específico. **Fechado depois da revisão:** `rate-limit.integration.test.ts` (bloco da 025) prova, com o `ToggleProxy`, 503 `SERVICE_UNAVAILABLE` nas três rotas sem consultar o convite com o Redis do limiter fora, e respostas normais quando ele volta.
 - O timer do expurgo de convites (`ACCOUNT_PURGE_INTERVAL_MINUTES=0` e espera no `closeInfrastructure`) reaproveita o `startPurgeTimer`, que já tem testes; a composição em `index.ts` não é testável em unidade.
 - Foco por teclado percorrendo menu, lista, ações, diálogo e formulário: só o diálogo (foco inicial, Esc, retorno do foco) tem teste.
 - `LAST_OWNER` é inalcançável pela API (a hierarquia e "ninguém altera a si mesmo" o impedem); o teste cobre que convite pendente não conta como `OWNER` ativo.
