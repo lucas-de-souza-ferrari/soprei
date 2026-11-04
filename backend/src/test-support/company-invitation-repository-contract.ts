@@ -34,7 +34,7 @@ export function describeInvitationRepositoryContract(
   name: string,
   world: () => Promise<InvitationContractWorld>,
 ): void {
-  describe(`contrato do repositório de convites: ${name}`, () => {
+  void describe(`contrato do repositório de convites: ${name}`, () => {
     function input(w: InvitationContractWorld, address: string): NewCompanyInvitation {
       return {
         email: address,
@@ -46,7 +46,7 @@ export function describeInvitationRepositoryContract(
       };
     }
 
-    it('cria como PENDING com um envio e acha pelo id só na própria empresa', async () => {
+    void it('cria como PENDING com um envio e acha pelo id só na própria empresa', async () => {
       const w = await world();
       const address = email('a');
       const created = await w.repository.create(w.companyA, input(w, address));
@@ -66,7 +66,7 @@ export function describeInvitationRepositoryContract(
       await assert.rejects(w.repository.findById(w.companyA, 'nao-e-uuid'), NotFoundError);
     });
 
-    it('um PENDING por e-mail e empresa: repetido é ConflictError; outra empresa e depois de fechado, não', async () => {
+    void it('um PENDING por e-mail e empresa: repetido é ConflictError; outra empresa e depois de fechado, não', async () => {
       const w = await world();
       const address = email('dup');
       const first = await w.repository.create(w.companyA, input(w, address));
@@ -85,7 +85,7 @@ export function describeInvitationRepositoryContract(
       assert.notEqual(again.id, first.id);
     });
 
-    it('findPendingByEmail só vê o PENDING da própria empresa', async () => {
+    void it('findPendingByEmail só vê o PENDING da própria empresa', async () => {
       const w = await world();
       const address = email('find');
       const created = await w.repository.create(w.companyA, input(w, address));
@@ -95,7 +95,7 @@ export function describeInvitationRepositoryContract(
       assert.equal(await w.repository.findPendingByEmail(w.companyA, address), null);
     });
 
-    it('fechar anula e-mail e hash (ACCEPTED guarda o vínculo) e só fecha PENDING da própria empresa', async () => {
+    void it('fechar anula e-mail e hash (ACCEPTED guarda o vínculo) e só fecha PENDING da própria empresa', async () => {
       const w = await world();
       const accepted = await w.repository.create(w.companyA, input(w, email('acc')));
       // Empresa errada: nada muda.
@@ -133,7 +133,7 @@ export function describeInvitationRepositoryContract(
       assert.equal(row.acceptedMembershipId, null);
     });
 
-    it('lista só os PENDING da empresa, por cursor, sem repetir nem pular', async () => {
+    void it('lista só os PENDING da empresa, por cursor, sem repetir nem pular', async () => {
       const w = await world();
       const marker = randomUUID();
       const ids: string[] = [];
@@ -164,7 +164,7 @@ export function describeInvitationRepositoryContract(
       assert.ok(other.items.every((item) => !item.email?.startsWith(marker)));
     });
 
-    it('conta PENDING não vencidos por empresa', async () => {
+    void it('conta PENDING não vencidos por empresa', async () => {
       const w = await world();
       const before = await w.repository.countPending(w.companyA, T0);
       const live = await w.repository.create(w.companyA, input(w, email('live')));
@@ -180,7 +180,7 @@ export function describeInvitationRepositoryContract(
       assert.ok((await w.repository.countPending(w.companyB, T0)) >= 0);
     });
 
-    it('renew troca o hash e a validade, soma um envio e só vale em PENDING da própria empresa', async () => {
+    void it('renew troca o hash e a validade, soma um envio e só vale em PENDING da própria empresa', async () => {
       const w = await world();
       const created = await w.repository.create(w.companyA, input(w, email('ren')));
       const later = new Date(T0.getTime() + 5 * 60_000);
