@@ -56,6 +56,10 @@ const textPairs: [string, string][] = [
   ['color-success', 'card'],
   ['foreground', 'bubble'],
   ['primary', 'bubble'],
+  // Spec 023: botão destrutivo (Desconectar) e o texto do diálogo da área da empresa.
+  ['background', 'destructive'],
+  ['card-foreground', 'bubble'],
+  ['card-foreground', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],
@@ -109,6 +113,11 @@ const emerald = {
   claro: { text: '#007a55', bg: '#00bc7d' },
   escuro: { text: '#00d492', bg: '#00bc7d' },
 };
+// Alert de aviso (spec 023: canal com token recusado ou credencial antiga): amber-800/500 e amber-300/500.
+const amber = {
+  claro: { text: '#973c00', bg: '#fe9a00' },
+  escuro: { text: '#ffd230', bg: '#fe9a00' },
+};
 
 for (const [name, selector] of [
   ['claro', ':root'],
@@ -125,11 +134,12 @@ for (const [name, selector] of [
       }
   });
 
-  test(`tema ${name}: Alerts (erro, info, sucesso) com as opacidades usadas têm 4,5:1`, () => {
+  test(`tema ${name}: Alerts (erro, info, sucesso, aviso) com as opacidades usadas têm 4,5:1`, () => {
     const cases: [string, string, string][] = [
       ['erro', theme['destructive'] as string, over(theme['destructive'] as string, 0.05, card)],
       ['info', theme['primary'] as string, over(theme['primary'] as string, 0.05, card)],
       ['sucesso', emerald[name].text, over(emerald[name].bg, 0.05, card)],
+      ['aviso', amber[name].text, over(amber[name].bg, 0.05, card)],
     ];
     for (const [label, fg, bg] of cases) {
       const ratio = contrast(fg, bg);
