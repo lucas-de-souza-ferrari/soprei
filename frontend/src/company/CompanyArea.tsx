@@ -14,11 +14,16 @@ import { ConversationPage } from './ConversationPage';
 import { ConversationsPage } from './ConversationsPage';
 import { failureOf } from './company-api';
 import { PersonaPage } from './PersonaPage';
+import { TeamPage } from './TeamPage';
+import type { Role } from './team-rules';
 import { TestPage } from './TestPage';
 
 export interface AreaCompany {
   readonly companyId: string;
   readonly name: string;
+  /** Vínculo e papel de quem está na tela (spec 025): só decidem o que a tela de equipe mostra. */
+  readonly membershipId: string;
+  readonly role: Role;
   readonly permissions: readonly string[];
 }
 
@@ -139,6 +144,15 @@ export function CompanyArea({
             />
           ) : page === 'persona' ? (
             <PersonaPage key={company.companyId} companyId={company.companyId} settle={settle} />
+          ) : page === 'equipe' ? (
+            <TeamPage
+              key={company.companyId}
+              companyId={company.companyId}
+              actor={{ role: company.role, membershipId: company.membershipId }}
+              permissions={company.permissions}
+              settle={settle}
+              onChanged={stableChanged}
+            />
           ) : (
             <TestPage key={company.companyId} companyId={company.companyId} settle={settle} />
           )}

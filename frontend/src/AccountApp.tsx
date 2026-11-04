@@ -11,6 +11,8 @@ import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
 import { CompanyArea } from './company/CompanyArea';
+import { InvitePage } from './invite/InvitePage';
+import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
 import {
   allowedPages,
   type ConversasRoute,
@@ -80,8 +82,15 @@ function PasswordToggle({
   );
 }
 
-export function AccountApp() {
+export interface AccountAppProps {
+  /** Token do convite lido do fragmento pelo `main.tsx` (spec 025); só vive em memória. */
+  readonly initialInviteToken?: string | null;
+}
+
+export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) {
   const [page, setPage] = useState<Page>(pageForPath(location.pathname));
+  // O convite aberto fica só em memória: atravessa o login (`/entrar`) e volta, nunca vai a armazenamento.
+  const [inviteToken, setInviteToken] = useState<string | null>(initialInviteToken);
   const [session, setSession] = useState<Session | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [email, setEmail] = useState('');
@@ -114,18 +123,23 @@ export function AccountApp() {
     history.replaceState(null, '', pathForPage(next));
   };
 
-  const load = async (stamp: number, landing: Page = 'companies') => {
+  const load = async (stamp: number, landing: Page = 'companies', replaceUrl = false) => {
     const current = sessionSchema.parse(await api('/auth/session'));
     const list = companiesSchema.parse(await api('/account/companies'));
     if (generation.current !== stamp) return;
     setSession(current);
     setCompanies(list.items);
     const target =
-      isAreaPage(landing) && list.items.some((item) => item.companyId === current.selectedCompanyId)
-        ? landing
-        : 'companies';
+      landing === 'invite'
+        ? 'invite'
+        : isAreaPage(landing) &&
+            list.items.some((item) => item.companyId === current.selectedCompanyId)
+          ? landing
+          : 'companies';
     setPage(target);
     if (target === 'companies') history.replaceState(null, '', '/painel/empresas');
+    else if (target === 'invite') history.replaceState(null, '', pathForPage('invite'));
+    else if (replaceUrl) history.replaceState(null, '', pathForPage(target));
   };
   useEffect(() => {
     const stamp = ++generation.current;
@@ -264,7 +278,8 @@ export function AccountApp() {
       await api('/auth/login', { email, password });
       if (stamp === generation.current) {
         setPassword('');
-        await load(stamp);
+        // Com um convite aberto em memória, o login volta a ele (`/convite`) em vez de ir às empresas.
+        await load(stamp, inviteToken === null ? 'companies' : 'invite');
       }
     }
   };
@@ -309,6 +324,27 @@ export function AccountApp() {
     setRoute(next);
     setNotice(null);
     history.pushState(null, '', conversasPath(next));
+  };
+  // Convite (spec 025). Aceito: o painel da empresa nova abre em Conversas. Conta criada: login com aviso.
+  const inviteAccepted = () => {
+    setInviteToken(null);
+    const stamp = ++generation.current;
+    setBusy(true);
+    void load(stamp, 'conversas', true)
+      .catch(() => {
+        if (generation.current === stamp) sessionLost();
+      })
+      .finally(() => {
+        if (generation.current === stamp) setBusy(false);
+      });
+  };
+  const inviteCreated = (inviteEmail: string) => {
+    setInviteToken(null);
+    setPassword('');
+    setCode('');
+    navigate('login');
+    setEmail(inviteEmail);
+    setNotice({ tone: 'success', text: INVITE_ACCOUNT_CREATED_MESSAGE });
   };
   const sessionLost = () => {
     generation.current++;
@@ -489,17 +525,19 @@ export function AccountApp() {
             >
               {isAreaPage(page)
                 ? (selectedCompany?.name ?? 'Painel da empresa')
-                : page === 'companies'
-                  ? 'Suas empresas'
-                  : page === 'register'
-                    ? 'Vamos começar.'
-                    : page === 'verify'
-                      ? 'Confirme seu e-mail.'
-                      : page === 'forgot'
-                        ? 'Recupere seu acesso.'
-                        : page === 'reset'
-                          ? 'Crie uma nova senha.'
-                          : 'Que bom ter você aqui.'}
+                : page === 'invite'
+                  ? 'Você recebeu um convite.'
+                  : page === 'companies'
+                    ? 'Suas empresas'
+                    : page === 'register'
+                      ? 'Vamos começar.'
+                      : page === 'verify'
+                        ? 'Confirme seu e-mail.'
+                        : page === 'forgot'
+                          ? 'Recupere seu acesso.'
+                          : page === 'reset'
+                            ? 'Crie uma nova senha.'
+                            : 'Que bom ter você aqui.'}
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-5 px-8 max-sm:px-5">
@@ -528,6 +566,19 @@ export function AccountApp() {
                 onSwitch={() => openArea('companies')}
                 onSession={sessionLost}
                 onChanged={companyChanged}
+              />
+            ) : page === 'invite' ? (
+              <InvitePage
+                token={inviteToken}
+                session={session === null ? null : { email: session.email }}
+                onNeedLogin={() => navigate('login')}
+                onSwitchAccount={logout}
+                onAccepted={inviteAccepted}
+                onCreated={inviteCreated}
+                onClose={() => {
+                  setInviteToken(null);
+                  navigate('login');
+                }}
               />
             ) : page === 'companies' && session ? (
               <>

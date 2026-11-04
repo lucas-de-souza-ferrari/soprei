@@ -2,7 +2,7 @@ import { areaPageForPath, areaPath, type AreaPage } from './company/company-nav'
 
 /** Páginas do site de contas e seus caminhos (spec 021 acrescenta recuperação de senha). */
 export type AccountPage =
-  'login' | 'register' | 'verify' | 'forgot' | 'reset' | 'companies' | AreaPage;
+  'login' | 'register' | 'verify' | 'forgot' | 'reset' | 'invite' | 'companies' | AreaPage;
 
 const PATHS: Record<AccountPage, string> = {
   login: '/entrar',
@@ -10,10 +10,13 @@ const PATHS: Record<AccountPage, string> = {
   verify: '/confirmar-email',
   forgot: '/recuperar-senha',
   reset: '/redefinir-senha',
+  // Convite por e-mail (spec 025): o token vai no fragmento `#t=` e nunca no caminho.
+  invite: '/convite',
   companies: '/painel/empresas',
   conversas: areaPath('conversas'),
   canal: areaPath('canal'),
   persona: areaPath('persona'),
+  equipe: areaPath('equipe'),
   testar: areaPath('testar'),
 };
 
@@ -24,6 +27,7 @@ export const ACCOUNT_PATHS: readonly string[] = [
   PATHS.verify,
   PATHS.forgot,
   PATHS.reset,
+  PATHS.invite,
 ];
 
 export function pathForPage(page: AccountPage): string {
@@ -41,6 +45,8 @@ export function pageForPath(pathname: string): AccountPage {
       return 'forgot';
     case PATHS.reset:
       return 'reset';
+    case PATHS.invite:
+      return 'invite';
     default:
       // As telas da empresa (spec 023) só abrem com sessão: o AccountApp decide depois de ler a sessão.
       return areaPageForPath(pathname) ?? 'login';

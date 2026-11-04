@@ -65,6 +65,10 @@ const textPairs: [string, string][] = [
   // "Enviando…", separador de dia e hora do contato usam muted-foreground em muted/card (cobertos acima).
   ['muted-foreground', 'bubble'],
   ['destructive', 'muted'],
+  // Spec 025: selos de texto da equipe sobre `muted` (Ativo = color-success, Desativado =
+  // muted-foreground, Pendente = primary, Vencido = destructive), texto secundário das linhas em card
+  // (muted-foreground/card) e o diálogo de confirmação (card-foreground/card e background/destructive).
+  ['color-success', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],

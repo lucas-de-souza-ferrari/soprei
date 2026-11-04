@@ -3,15 +3,23 @@
  * servidor devolve em `GET /account/companies`. É só conveniência de tela: o backend continua sendo a
  * barreira (uma aba escondida não protege nada).
  */
-export type AreaPage = 'conversas' | 'canal' | 'persona' | 'testar';
+export type AreaPage = 'conversas' | 'canal' | 'persona' | 'equipe' | 'testar';
 
 /** Ordem do menu: Conversas é a primeira aba e a página inicial de quem pode ler (spec 024). */
-export const AREA_PAGES: readonly AreaPage[] = ['conversas', 'canal', 'persona', 'testar'];
+export const AREA_PAGES: readonly AreaPage[] = [
+  'conversas',
+  'canal',
+  'persona',
+  'equipe',
+  'testar',
+];
 
 const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   conversas: '/painel/conversas',
   canal: '/painel/canal',
   persona: '/painel/persona',
+  // Equipe (spec 025): depois de Persona e antes de Testar, só com `membership:read`.
+  equipe: '/painel/equipe',
   testar: '/painel/testar',
 };
 
@@ -19,6 +27,7 @@ export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   conversas: 'Conversas',
   canal: 'Canal',
   persona: 'Persona',
+  equipe: 'Equipe',
   testar: 'Testar',
 };
 
@@ -27,6 +36,7 @@ const REQUIRED: Readonly<Record<AreaPage, string>> = {
   conversas: 'conversation:read',
   canal: 'channel:read',
   persona: 'persona:manage',
+  equipe: 'membership:read',
   testar: 'conversation:simulate',
 };
 
