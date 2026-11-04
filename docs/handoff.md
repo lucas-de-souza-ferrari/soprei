@@ -2,13 +2,13 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs, e o detalhe de cada spec no "Registro da implementação" dela.
 
-**Última atualização:** 2026-11-04, por Claude Code (Sonnet 5.5): spec 025 (convites por e-mail e gestão da equipe) **implementada** na branch `spec/025-convites-e-equipe`, com a bateria local verde em Node 24 (números no "Registro da implementação" da spec); falta o push, o CI em Node 22 e na LTS, a revisão do `reviewer` (spec de segurança) e o merge. Pendente do dono: `pnpm db:migrate:deploy` da 024 e da 025, o teste do Embedded Signup real e a troca da 022 se ainda não aplicada.
+**Última atualização:** 2026-11-04, por Claude Code (Sonnet 5.5): spec 025 (convites e gestão da equipe) revisada, mergeada e com o CI verde nos dois Node (incluindo o teste de fail-closed das rotas públicas de convite e a correção de lint na main). Spec 026 (conhecimento da IA e estoque) em rascunho, aguardando a aprovação do dono. Pendente do dono: `pnpm db:migrate:deploy` (migrations 024 e 025), o teste do Embedded Signup real e a troca da 022 se ainda não aplicada.
 
 ## Onde estamos
 
 - **Concluídas e mergeadas:** specs 001 a 005, 007, 008 e 010 a 021 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta; cada empresa tem credencial própria cifrada (015); contas globais com cadastro, confirmação de e-mail por **código de 6 dígitos** e cookie HttpOnly (017, 020); e-mail por SMTP genérico (019); site com componentes beUI e modo escuro (018). O atendimento usa o `LlmProvider` `mock` por padrão e o Claude Haiku 5.5 com `LLM_PROVIDER=anthropic`.
 - **Ajustes da revisão da 023 (reviewer aprovou):** erro e carga da persona por status, comentários do renome em que o chamador (HTTP, SDK) virou empresa, máscaras no gate de vocabulário e documentação de que `CHANNEL_MANUAL_CONNECT_ENABLED` só controla a seção da interface (o `PUT` do canal segue como API).
-- **Em andamento:** spec 025 (convites e gestão de equipe: convite por link de uso único, `/painel/equipe`, aceite com conta logada, deslogada ou sem conta; `OWNER` não convidável) **implementada** em 2026-11-04 na branch `spec/025-convites-e-equipe`, aguardando CI, `reviewer` e merge. Pontos para o revisor: transação de aceite (ordem empresa -> conta), falha uniforme, cotas (Redis e trilha), `accept-new` substituindo a senha de conta não confirmada, expurgo e a migration.
+- **Em andamento:** nenhuma implementação. Spec 026 (base de conhecimento para a IA, com busca textual do PostgreSQL em português, e controle de estoque) em rascunho, em etapas E1 a E6, aguardando aprovação.
 - **Validação:** o CI (GitHub Actions, Node 22 e LTS) é a palavra final. Localmente rodam sempre `typecheck`, `lint` e `format:check` (da **raiz**; de dentro de `backend/` o `format:check` dá falso alarme). Os testes só rodam localmente quando um teste falha no CI ou para verificar uma correção (decisão do dono, 2026-11-03, ver `AGENTS.md`).
 
 ## Passos do dono (a máquina dele)

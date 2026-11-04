@@ -1,6 +1,6 @@
 # 025 — Convites por e-mail e gestão da equipe pelo site
 
-- **Status:** aprovada (2026-11-04, dono: "aprovo a 25", com as 21 recomendações)
+- **Status:** concluída e mergeada (2026-11-04; revisada pelo `reviewer`, sem bloqueador; CI verde nos dois Node; bateria local em Node 24: 1165+65 unitários, 487 integração, 180 browser); aprovada (2026-11-04, dono: "aprovo a 25", com as 21 recomendações)
 - **Branch:** `spec/025-convites-e-equipe`
 - **Depende de:** 007 e 008 (papéis, `canManageRole`, regra do último `OWNER`, auditoria imutável, `lockCompany`), 017 (contas globais, `Membership` por conta, cookie), 019 (SMTP), 020 e 021 (código de 6 dígitos com HMAC, tetos, e-mail em segundo plano, perfil `login` fail-closed), 018 (beUI, modo escuro, contraste), 022 (vocabulário: `Company`/`CompanyId`, `Membership`, `Account`, `contact`; rotas `/admin/companies/:companyId/...`; `X-Soprei-App`), 023 (área `/painel/*`, `request()` com `ApiError`, menu por `permissions`, ponte cookie -> rotas de tenant) e 024 (só `/painel/*` e o menu por `permissions`; **nenhuma outra dependência**: esta spec não lê nada que a 024 crie além disso)
 - **Passa pelo `reviewer` antes do merge:** sim (autenticação, autorização, endpoints públicos com segredo, dado pessoal, auditoria e migration em tabela de tenant).
