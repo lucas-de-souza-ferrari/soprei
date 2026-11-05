@@ -2,7 +2,7 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs, e o detalhe de cada spec no "Registro da implementação" dela.
 
-**Última atualização:** 2026-11-04, por Claude Code (Sonnet 5.5): **spec 026 em implementação na branch `spec/026-conhecimento-e-estoque`** (aprovada pelo dono). **Etapas E1 a E5 prontas (E6, e2e das telas novas, cortada); bateria da E2 verde em Node 24 (1207 unitários, 527 de integração, 180 e2e)**. Pendente do dono: `pnpm db:migrate:deploy` (migrations 024, 025 e 026), o teste do Embedded Signup real e a troca da 022 se ainda não aplicada.
+**Última atualização:** 2026-11-05 (026: ajustes da revisão I-1, S-2 a S-6 aplicados; ver o Registro da spec), por Claude Code (Sonnet 5.5): **spec 026 em implementação na branch `spec/026-conhecimento-e-estoque`** (aprovada pelo dono). **Etapas E1 a E5 prontas (E6, e2e das telas novas, cortada); bateria da E2 verde em Node 24 (1207 unitários, 527 de integração, 180 e2e)**. Pendente do dono: `pnpm db:migrate:deploy` (migrations 024, 025 e 026), o teste do Embedded Signup real e a troca da 022 se ainda não aplicada.
 
 ## Onde estamos
 
