@@ -16,7 +16,10 @@ import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { createLogger } from '../logger/logger.js';
 import { createDatabase, type Database } from './database.js';
 import { PrismaKnowledgeDocumentRepository } from './repositories/knowledge-document.repository.js';
-import { PrismaKnowledgeRetriever } from './repositories/knowledge-retriever.js';
+import {
+  PrismaKnowledgeRetriever,
+  withStatementTimeout,
+} from './repositories/knowledge-retriever.js';
 import { PrismaMembershipRepository } from './repositories/membership.repository.js';
 
 const config = loadIntegrationConfig();
@@ -306,5 +309,32 @@ describe('índice GIN (E1)', () => {
     assert.match(text, /Bitmap Index Scan on knowledge_chunks_search_idx/);
     // Limpa os 6.000 trechos criados por SQL direto (o cleanup do fixture também os removeria).
     await sql.query('DELETE FROM knowledge_chunks WHERE company_id = $1', [company.id]);
+  });
+});
+
+describe('prazo cancelado no banco (statement_timeout)', () => {
+  it('uma consulta lenta é cancelada pelo banco no prazo e o ajuste não vaza para fora da transação', async () => {
+    const started = Date.now();
+    await assert.rejects(
+      withStatementTimeout(database.prisma, 150, (db) => db.$queryRaw`SELECT pg_sleep(3)`),
+    );
+    assert.ok(Date.now() - started < 2_500, 'cancelada bem antes dos 3 s da consulta');
+    // Dentro da transação o prazo vale; fora dela, não.
+    const inside = await withStatementTimeout(
+      database.prisma,
+      1500,
+      (db) =>
+        db.$queryRaw<{ value: string }[]>`SELECT current_setting('statement_timeout') AS value`,
+    );
+    assert.equal(inside[0]?.value, '1500ms');
+    const outside = await sql.query<{ value: string }>(
+      "SELECT current_setting('statement_timeout') AS value",
+    );
+    assert.notEqual(outside.rows[0]?.value, '1500ms');
+  });
+
+  it('a recuperação continua devolvendo resultado dentro do prazo', async () => {
+    const found = await retriever.retrieve(companyA.id, 'troca');
+    assert.ok(found.passages.length > 0);
   });
 });
