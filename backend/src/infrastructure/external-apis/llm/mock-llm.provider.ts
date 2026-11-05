@@ -11,6 +11,11 @@ import {
   KNOWLEDGE_BLOCK_OPEN,
   KNOWLEDGE_HEADER_MARKER,
 } from '../../../application/attendance/knowledge-prompt.js';
+import {
+  SCHEDULE_BLOCK_CLOSE,
+  SCHEDULE_BLOCK_OPEN,
+  SCHEDULE_HEADER_MARKER,
+} from '../../../application/attendance/schedule-prompt.js';
 import { ExternalServiceError } from '../../../shared/errors/index.js';
 import { Result } from '../../../shared/types/index.js';
 
@@ -93,7 +98,7 @@ export class MockLlmProvider implements LlmProvider {
     const persona = personaText.slice(0, PERSONA_PREVIEW_CHARS);
     const echo = text.slice(0, ECHO_MAX_CHARS);
     return Result.ok({
-      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}`,
+      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}`,
     });
   }
 }
@@ -111,6 +116,19 @@ function knowledgeSummary(systemPrompt: string): string {
   const passages = block.match(/^\[Documento\] /gm)?.length ?? 0;
   const products = block.match(/^\[Produto\] /gm)?.length ?? 0;
   return ` (conhecimento: ${String(passages)} trechos, ${String(products)} produtos)`;
+}
+
+/**
+ * Quando o `systemPrompt` traz o bloco de agenda (spec 027, E3), conta as linhas `[Serviço]` dentro dos
+ * delimitadores, para a demonstração e os testes determinísticos. Sem bloco, nada é acrescentado.
+ */
+function scheduleSummary(systemPrompt: string): string {
+  if (!systemPrompt.includes(SCHEDULE_HEADER_MARKER)) return '';
+  const open = systemPrompt.indexOf(SCHEDULE_BLOCK_OPEN);
+  const close = systemPrompt.indexOf(SCHEDULE_BLOCK_CLOSE);
+  const block = open === -1 || close < open ? '' : systemPrompt.slice(open, close);
+  const services = block.match(/^\[Serviço\] /gm)?.length ?? 0;
+  return ` (agenda: ${String(services)} serviços)`;
 }
 
 /** Nunca responde, mas termina (como um provedor de verdade) quando a chamada é cancelada. */

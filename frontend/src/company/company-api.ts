@@ -39,7 +39,7 @@ export const personaSchema = z.object({ persona: z.string().nullable() });
 
 /** De onde veio a resposta (spec 026): só rótulos; o servidor nunca manda o conteúdo. */
 export const sourceSchema = z.object({
-  kind: z.enum(['document', 'product']),
+  kind: z.enum(['document', 'product', 'schedule']),
   label: z.string().max(200),
 });
 export type AnswerSource = z.infer<typeof sourceSchema>;

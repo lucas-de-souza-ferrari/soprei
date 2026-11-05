@@ -8,7 +8,7 @@ import type { KnowledgeRetrieval } from '../ports/knowledge-retriever.js';
 
 /** O que o simulador mostra como origem da resposta: só rótulos, nunca conteúdo. */
 export interface KnowledgeSource {
-  readonly kind: 'document' | 'product';
+  readonly kind: 'document' | 'product' | 'schedule';
   readonly label: string;
 }
 
@@ -58,7 +58,7 @@ export function neutralize(text: string): string {
   let previous: string;
   do {
     previous = current;
-    current = current.replace(/<\s*\/?\s*conhecimento\s*>/gi, '');
+    current = current.replace(/<\s*\/?\s*(?:conhecimento|agenda)\s*>/gi, '');
   } while (current !== previous);
   return current.replace(/\s+/g, ' ').trim();
 }

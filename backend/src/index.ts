@@ -28,6 +28,7 @@ import {
   PrismaAppointmentRepository,
   PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
+  PrismaScheduleAvailabilityReader,
   PrismaScheduleResourceRepository,
   PrismaScheduleServiceRepository,
   PrismaScheduleSettingsRepository,
@@ -149,6 +150,8 @@ async function main(): Promise<void> {
     },
     // Base de conhecimento da empresa (spec 026): recuperação por busca textual, fail-open.
     knowledge: new PrismaKnowledgeRetriever(prisma),
+    // Horários livres da agenda (spec 027): só leitura, fail-open.
+    schedule: new PrismaScheduleAvailabilityReader(prisma),
   });
   const documents = new PrismaKnowledgeDocumentRepository(prisma);
   const products = new PrismaProductRepository(prisma);

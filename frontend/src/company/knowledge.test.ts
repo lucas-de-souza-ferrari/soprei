@@ -110,6 +110,11 @@ test('fontes do "Testar": só rótulos; sem fontes, "Nenhuma informação da emp
     ]),
     'Fontes usadas: Política de trocas (documento), Camiseta Azul (produto)',
   );
+  // Fonte da agenda (spec 027, E3): só o rótulo fixo.
+  assert.equal(
+    sourcesText([{ kind: 'schedule', label: 'Agenda: horários livres' }]),
+    'Fontes usadas: Agenda: horários livres',
+  );
   assert.equal(sourcesText([]), 'Nenhuma informação da empresa usada');
   // Servidor antigo (sem o campo) continua válido.
   const parsed = attendanceResultSchema.parse({ reply: { text: 'oi', isFallback: false } });

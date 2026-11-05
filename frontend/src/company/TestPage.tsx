@@ -16,12 +16,12 @@ interface Line {
 
 const NOTICE =
   'É um teste: a conversa fica gravada no Soprei e, com o modelo real ligado, o texto é enviado ao provedor de IA. Nada é enviado ao WhatsApp.';
-const KIND_LABELS = { document: 'documento', product: 'produto' } as const;
+const KIND_LABELS = { document: 'documento', product: 'produto', schedule: 'agenda' } as const;
 
 /** Linha de fontes da resposta (spec 026): só rótulos. */
 export function sourcesText(sources: readonly AnswerSource[]): string {
   if (sources.length === 0) return 'Nenhuma informação da empresa usada';
-  return `Fontes usadas: ${sources.map((source) => `${source.label} (${KIND_LABELS[source.kind]})`).join(', ')}`;
+  return `Fontes usadas: ${sources.map((source) => (source.kind === 'schedule' ? source.label : `${source.label} (${KIND_LABELS[source.kind]})`)).join(', ')}`;
 }
 
 const FALLBACK_MARK = 'resposta padrão (houve falha ao gerar)';

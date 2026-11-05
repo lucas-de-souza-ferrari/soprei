@@ -56,3 +56,4 @@ export {
   PrismaScheduleServiceRepository,
   PrismaScheduleSettingsRepository,
 } from './repositories/schedule.repository.js';
+export { PrismaScheduleAvailabilityReader } from './repositories/schedule-availability-reader.js';

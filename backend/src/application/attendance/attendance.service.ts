@@ -11,7 +11,11 @@ import type {
   MessageRepository,
   Page,
 } from '../../domain/index.js';
-import { KNOWLEDGE_RETRIEVAL_TIMEOUT_MS, MESSAGE_CONTENT_MAX_LENGTH } from '../../domain/index.js';
+import {
+  KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
+  MESSAGE_CONTENT_MAX_LENGTH,
+  SCHEDULE_RETRIEVAL_TIMEOUT_MS,
+} from '../../domain/index.js';
 import { ConflictError, ExternalServiceError, ForbiddenError } from '../../shared/errors/index.js';
 import { TimeoutError, withTimeout } from '../../shared/utils/index.js';
 import {
@@ -30,7 +34,14 @@ import {
 } from '../ports/llm-provider.js';
 import { buildKnowledgeQuery } from '../knowledge/query.js';
 import type { KnowledgeRetriever } from '../ports/knowledge-retriever.js';
+import type { ScheduleAvailabilityReader } from '../ports/schedule-availability-reader.js';
+import { hasScheduleIntent, scheduleIntentText } from '../schedule/intent.js';
 import { buildKnowledgePrompt, type KnowledgeSource } from './knowledge-prompt.js';
+import {
+  buildSchedulePrompt,
+  buildScheduleUnavailablePrompt,
+  SCHEDULE_SOURCE_LABEL,
+} from './schedule-prompt.js';
 
 /** Quantas mensagens anteriores da conversa vão ao modelo. */
 export const ATTENDANCE_HISTORY_LIMIT = 20;
@@ -74,6 +85,8 @@ export interface AttendanceMetrics {
   countUnsentReply?(): void;
   /** Uma recuperação da base de conhecimento terminou (spec 026). Conjunto fixo; nunca a consulta. */
   countKnowledgeRetrieval?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
+  /** Uma consulta de horários livres para o prompt terminou (spec 027, E3). Conjunto fixo. */
+  countScheduleContext?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
 }
 
 export type BatchResult = 'answered' | 'empty' | 'capped';
@@ -98,6 +111,8 @@ export interface AttendanceOptions {
   readonly now?: () => Date;
   /** Prazo da recuperação da base de conhecimento (spec 026); padrão 1.500 ms. */
   readonly knowledgeTimeoutMs?: number;
+  /** Prazo da leitura da agenda (spec 027, E3); padrão 1.500 ms. */
+  readonly scheduleTimeoutMs?: number;
 }
 
 /** Uma página do histórico mais a conversa a que ela pertence (o painel abre o histórico pelo id). */
@@ -117,7 +132,18 @@ export interface AttendanceDeps {
   readonly options: AttendanceOptions;
   /** Base de conhecimento da empresa (spec 026). Sem isto, o atendimento é o de sempre. */
   readonly knowledge?: KnowledgeRetriever;
+  /** Horários livres da empresa para o prompt (spec 027, E3). Sem isto, o atendimento é o de sempre. */
+  readonly schedule?: ScheduleAvailabilityReader;
 }
+
+/** Um bloco do `systemPrompt` (conhecimento ou agenda) com as fontes e os números que ele traz. */
+interface PromptPart {
+  readonly block: string;
+  readonly sources: readonly KnowledgeSource[];
+  readonly stats: object;
+}
+
+const EMPTY_PART: PromptPart = { block: '', sources: [], stats: {} };
 
 export interface AttendanceReply {
   readonly id: string;
@@ -763,10 +789,11 @@ export class AttendanceService {
   }
 
   /**
-   * Monta o `systemPrompt` do turno (spec 026): persona + estilo e, se a empresa tem base e a
-   * pergunta acha algo, o bloco de conhecimento. **Fail-open**: falha ou prazo da recuperação
-   * atende sem contexto (nunca bloqueia nem vira fallback). Roda fora de qualquer transação. A
-   * consulta, os títulos e os trechos nunca vão a log nem a métrica: só ids, números e o motivo.
+   * Monta o `systemPrompt` do turno: persona + estilo e, nesta ordem, o bloco de conhecimento (spec 026)
+   * e o bloco de agenda (spec 027, E3), cada um só se a empresa tem o que mostrar. **Fail-open** nos
+   * dois: falha ou prazo atende sem contexto (nunca bloqueia nem vira fallback). Roda fora de qualquer
+   * transação. A consulta, os títulos, nomes de serviço, trechos e horários nunca vão a log nem a
+   * métrica: só ids, números e o motivo. O texto do contato nunca entra aqui.
    */
   private async buildPrompt(
     company: Company,
@@ -779,15 +806,28 @@ export class AttendanceService {
     readonly stats: object;
   }> {
     const base = buildSystemPrompt(company);
-    const plain = { systemPrompt: base, sources: [] as readonly KnowledgeSource[], stats: {} };
-    const retriever = this.deps.knowledge;
-    if (retriever === undefined) return plain;
-
     const lastUserTurn = history.findLast((turn) => turn.role === 'user')?.content;
+    const knowledge = await this.knowledgePart(company, subject, queryText, lastUserTurn);
+    const schedule = await this.schedulePart(company, subject, queryText, lastUserTurn);
+    return {
+      systemPrompt: base + knowledge.block + schedule.block,
+      sources: [...knowledge.sources, ...schedule.sources],
+      stats: { ...knowledge.stats, ...schedule.stats },
+    };
+  }
+
+  private async knowledgePart(
+    company: Company,
+    subject: { readonly conversationId: string; readonly messageId: string },
+    queryText: string,
+    lastUserTurn: string | undefined,
+  ): Promise<PromptPart> {
+    const retriever = this.deps.knowledge;
+    if (retriever === undefined) return EMPTY_PART;
     const tsquery = buildKnowledgeQuery(queryText, lastUserTurn);
     if (tsquery === null) {
       this.recordKnowledge('skipped');
-      return plain;
+      return EMPTY_PART;
     }
     try {
       const retrieval = await withTimeout(
@@ -798,12 +838,12 @@ export class AttendanceService {
       const prompt = buildKnowledgePrompt(retrieval);
       if (prompt.block === null) {
         this.recordKnowledge('skipped');
-        return plain;
+        return EMPTY_PART;
       }
       const hit = prompt.passages + prompt.products > 0;
       this.recordKnowledge(hit ? 'hit' : 'empty');
       return {
-        systemPrompt: base + prompt.block,
+        block: prompt.block,
         sources: prompt.sources,
         stats: {
           knowledgePassages: prompt.passages,
@@ -825,7 +865,71 @@ export class AttendanceService {
         },
         'recuperação de conhecimento indisponível; atendendo sem contexto',
       );
-      return plain;
+      return EMPTY_PART;
+    }
+  }
+
+  /**
+   * Bloco de agenda (spec 027, E3): só com palavra de intenção no texto do contato (o lote e, se ele é
+   * curto, o último turno). Só leitura: a IA informa os horários livres, não marca. Erro ou prazo: a IA
+   * recebe a linha "a agenda não pôde ser consultada" e o atendimento segue.
+   */
+  private async schedulePart(
+    company: Company,
+    subject: { readonly conversationId: string; readonly messageId: string },
+    queryText: string,
+    lastUserTurn: string | undefined,
+  ): Promise<PromptPart> {
+    const reader = this.deps.schedule;
+    if (reader === undefined) return EMPTY_PART;
+    if (!hasScheduleIntent(scheduleIntentText(queryText, lastUserTurn))) {
+      this.recordSchedule('skipped');
+      return EMPTY_PART;
+    }
+    try {
+      const availability = await withTimeout(
+        reader.read(company.id),
+        this.deps.options.scheduleTimeoutMs ?? SCHEDULE_RETRIEVAL_TIMEOUT_MS,
+        'schedule',
+      );
+      const prompt = buildSchedulePrompt(availability);
+      if (prompt.block === null) {
+        this.recordSchedule('skipped');
+        return EMPTY_PART;
+      }
+      this.recordSchedule(prompt.services > 0 ? 'hit' : 'empty');
+      return {
+        block: prompt.block,
+        sources: prompt.services > 0 ? [{ kind: 'schedule', label: SCHEDULE_SOURCE_LABEL }] : [],
+        stats: {
+          scheduleServices: prompt.services,
+          scheduleSlots: prompt.slots,
+          scheduleChars: prompt.chars,
+        },
+      };
+    } catch (error) {
+      const timedOut = error instanceof TimeoutError;
+      this.recordSchedule(timedOut ? 'timeout' : 'error');
+      // Só ids e o motivo: nunca nome de serviço, horário nem texto do contato.
+      this.deps.logger.warn(
+        {
+          companyId: company.id,
+          conversationId: subject.conversationId,
+          messageId: subject.messageId,
+          reason: timedOut ? 'timeout' : 'error',
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+        'agenda indisponível; atendendo sem os horários',
+      );
+      return { block: buildScheduleUnavailablePrompt(), sources: [], stats: {} };
+    }
+  }
+
+  private recordSchedule(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void {
+    try {
+      this.deps.metrics?.countScheduleContext?.(result);
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de agenda');
     }
   }
 
