@@ -2,13 +2,13 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs, e o detalhe de cada spec no "Registro da implementação" dela.
 
-**Última atualização:** 2026-11-05 (026: ajustes da revisão I-1, S-2 a S-6 aplicados; ver o Registro da spec), por Claude Code (Sonnet 5.5): **spec 026 em implementação na branch `spec/026-conhecimento-e-estoque`** (aprovada pelo dono). **Etapas E1 a E5 prontas (E6, e2e das telas novas, cortada); bateria da E2 verde em Node 24 (1207 unitários, 527 de integração, 180 e2e)**. Pendente do dono: `pnpm db:migrate:deploy` (migrations 024, 025 e 026), o teste do Embedded Signup real e a troca da 022 se ainda não aplicada.
+**Última atualização:** 2026-11-05, por Claude Code (Sonnet 5.5): spec 026 (conhecimento da IA e estoque) mergeada com o CI verde nos dois Node (E6 cortada). Spec 027 (agendamento) aprovada e na branch `spec/027-agendamento`, pronta para implementar. Pendente do dono: teste manual da 026 com a API real, `pnpm db:migrate:deploy` e a troca da 022 se ainda não aplicadas, e o domínio HTTPS na Meta para o Embedded Signup real.
 
 ## Onde estamos
 
 - **Concluídas e mergeadas:** specs 001 a 005, 007, 008 e 010 a 021 (ver "Roadmap" em `docs/context.md`). O canal WhatsApp funciona de ponta a ponta com o número de teste da Meta; cada empresa tem credencial própria cifrada (015); contas globais com cadastro, confirmação de e-mail por **código de 6 dígitos** e cookie HttpOnly (017, 020); e-mail por SMTP genérico (019); site com componentes beUI e modo escuro (018). O atendimento usa o `LlmProvider` `mock` por padrão e o Claude Haiku 5.5 com `LLM_PROVIDER=anthropic`.
 - **Ajustes da revisão da 023 (reviewer aprovou):** erro e carga da persona por status, comentários do renome em que o chamador (HTTP, SDK) virou empresa, máscaras no gate de vocabulário e documentação de que `CHANNEL_MANUAL_CONNECT_ENABLED` só controla a seção da interface (o `PUT` do canal segue como API).
-- **Em andamento (spec 026, branch `spec/026-conhecimento-e-estoque`, sem push):** **E1 pronta** (documentos de texto em `/painel/conhecimento`, busca textual `portuguese`, bloco de conhecimento no prompt, fail-open, fontes no "Testar") e **E2 pronta** (estoque em `/painel/estoque`, ajuste atômico por `delta`, livro imutável, produtos no prompt); E3 (exemplo com "Carregar/Remover exemplo"), E4 (importação CSV no Estoque) e E5 (histórico na tela) também; só a E6 (e2e das telas novas) foi cortada. A branch é demonstrável a cada etapa fechada.
+- **Em andamento:** spec 027 (agendamento: serviços, regras de disponibilidade, reservas com `EXCLUDE` e `btree_gist`, painel `/painel/agenda` em lista por dia, a IA só lê os horários livres), aprovada em 2026-11-04, na branch `spec/027-agendamento`.
 - **Validação:** o CI (GitHub Actions, Node 22 e LTS) é a palavra final. Localmente rodam sempre `typecheck`, `lint` e `format:check` (da **raiz**; de dentro de `backend/` o `format:check` dá falso alarme). Os testes só rodam localmente quando um teste falha no CI ou para verificar uma correção (decisão do dono, 2026-11-03, ver `AGENTS.md`).
 
 ## Passos do dono (a máquina dele)
@@ -45,6 +45,8 @@
 
 ## Armadilhas já encontradas
 
+- **Teste com prazo e promessa que nunca resolve (Node 22):** o timer de `withTimeout` é `unref()` de propósito; sem nada mais vivo, o Node 22 cancela a suíte ("Promise resolution is still pending but the event loop has already resolved") e leva junto os testes vizinhos, enquanto o Node 24 tolera. Use `t.after(keepEventLoopAlive())` (`test-support/keep-alive.ts`) em teste unitário que espera um timeout; em integração nova não use.
+- **Log do CI:** `pnpm test` e `pnpm test:integration` rodam com o repórter `dot` (só os que falham aparecem, em "Failed tests"); procure por `Failed tests` no log. O Playwright tem uma retentativa no CI, rastreamento das tentativas que falham e artefato `playwright-traces-0` (Node 22) e `-1` (LTS) por 7 dias; abra com `npx playwright show-trace <zip>` (pasta `frontend`); teste que aparece como "flaky" precisa ser corrigido, não ignorado. Nome de artefato não pode ter `/` nem `*` (o valor da matriz do LTS é `lts/*`).
 - O que se grava em `whatsappPhoneNumberId` é o **ID do número de telefone** da Meta, não o telefone; a URL de callback termina em `/webhooks/whatsapp` (sem barra).
 - O token temporário do número de teste da Meta expira em cerca de 24 h (erro 190 no log do envio); use o token permanente de um usuário do sistema.
 - Erro do ioredis e do BullMQ não pode ir inteiro ao log (carrega `command.args` com chave e IP): use `describeRedisError`.

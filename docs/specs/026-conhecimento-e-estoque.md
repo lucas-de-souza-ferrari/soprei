@@ -1,6 +1,6 @@
 # 026 — Base de conhecimento para a IA e controle de estoque (MVP)
 
-- **Status:** aprovada (2026-11-04, dono: "Aprovo tudo", com as 15 recomendações, entrega em etapas E1 a E6)
+- **Status:** concluída e mergeada (2026-11-05; revisada pelo `reviewer`, sem bloqueador; CI verde nos dois Node; E6 (e2e das telas novas) cortada; falta o teste manual do dono com a API real); aprovada (2026-11-04, dono: "Aprovo tudo", com as 15 recomendações, entrega em etapas E1 a E6)
 - **Branch:** `spec/026-conhecimento-e-estoque`
 - **Depende de:** 010, 013 e 014 (`AttendanceService`, lote, `LlmProvider`), 008 (permissões fixas, `requirePermission`), 018 (beUI, modo escuro, contraste), 022 (vocabulário `Company`/`CompanyId`, `Membership`, `contact`, rotas `/admin/companies/:companyId/...`, `X-Soprei-App`), 023 ("Testar o atendimento", `request()`/`ApiError`, menu por `permissions`, ponte cookie -> rotas de tenant), 024 (`/painel/*`) e **025** (`company-nav.ts`, `CompanyArea.tsx`, `ConfirmDialog.tsx`, `contrast.test.ts` e o inventário de rotas foram editados por ela: **esta branch sai da `main` depois do merge da 025**, ou rebaseia nela)
 - **Passa pelo `reviewer` antes do merge:** sim (dado de empresa em tabelas novas de tenant, SQL cru, permissões novas, injeção de prompt e dado que vai a terceiro, a Anthropic).
