@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installApi, SENTINEL } from './company-fixture';
+import { installApi, menuItems, SENTINEL } from './company-fixture';
 import { appointment, installAgendaApi, newAgenda, type FakeAgenda } from './agenda-fixture';
 
 type Role = 'OWNER' | 'AGENT' | 'VIEWER';
@@ -52,8 +52,7 @@ for (const theme of ['light', 'dark'] as const) {
       },
       theme,
     );
-    const tabs = page.getByRole('tablist', { name: 'Menu da empresa' });
-    const labels = (await tabs.innerText()).replace(/\s+/g, ' ');
+    const labels = await menuItems(page);
     expect(labels.indexOf('Conversas')).toBeLessThan(labels.indexOf('Agenda'));
     await expect(page.getByRole('heading', { level: 2, name: '9 a 15 de novembro' })).toBeVisible();
     await expect(page.getByRole('status')).toContainText('4 agendamentos de 9 a 15 de novembro');
@@ -242,7 +241,7 @@ test('bloquear horário avisa quando há agendamento no período', async ({ page
 
 test('configurar agenda: seções, fuso salvo no servidor e voltar à agenda', async ({ page }) => {
   const agenda = await open(page, 'OWNER', () => undefined, 'light', '/painel/agenda/configurar');
-  await expect(page.getByRole('heading', { name: 'Configurar agenda' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'Configurar agenda' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Geral' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Serviços' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Horários de atendimento' })).toBeVisible();

@@ -1,12 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
+  closeMenu,
   company,
   conversation,
   holdList,
   installApi,
+  menuItems,
   message,
+  openMenu,
   PERMISSIONS,
   SENTINEL,
+  switchTo,
   type FakeApi,
   type FakeConversation,
   type FakeMessage,
@@ -71,7 +75,12 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(links.nth(1)).toContainText('Teste');
     await expect(links.nth(2)).toContainText('Simulador a1b2');
     await expect(links.nth(0)).toHaveAttribute('href', `/painel/conversas/${first.id}`);
-    await expect(page.getByRole('tab', { name: 'Conversas', selected: true })).toBeVisible();
+    const nav = await openMenu(page);
+    await expect(nav.getByRole('link', { name: 'Conversas' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await closeMenu(page);
     // Sem prévia nem contagem por conversa; só rótulo, selo e data/hora.
     expect(await links.nth(0).locator('time').getAttribute('datetime')).toBe(first.updatedAt);
 
@@ -327,7 +336,7 @@ test('mensagens estranhas: 4000 caracteres, emoji, RTL e HTML aparecem como text
   expect(
     await page.evaluate(() => (window as unknown as { __pwned?: boolean }).__pwned),
   ).toBeUndefined();
-  await expect(page.locator('li b, li a, li script')).toHaveCount(0);
+  await expect(page.locator('main li b, main li a, main li script')).toHaveCount(0);
   await expect(page.locator('p[dir="auto"]').first()).toHaveAttribute('dir', 'auto');
   // Quebras de linha preservadas.
   const multi = page.locator('p[dir="auto"]').filter({ hasText: 'linha 4' });
@@ -420,7 +429,7 @@ for (const role of ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as Role[]) {
     await page.getByRole('button', { name: 'Abrir painel' }).click();
     // A página inicial do painel é a de Conversas.
     await expect(page.getByRole('heading', { level: 2, name: 'Conversas' })).toBeVisible();
-    await expect(page.getByRole('tab').first()).toContainText('Conversas');
+    expect((await menuItems(page))[0]).toBe('Conversas');
     await expect(page).toHaveURL(/\/painel\/conversas$/);
   });
 }
@@ -431,8 +440,9 @@ test('sem conversation:read: a aba some e a URL forçada mostra "sem permissão"
   const limited = { ...company('Empresa A', 'AGENT'), permissions: ['conversation:simulate'] };
   const api = await installApi(page, { companies: [limited], selected: limited.companyId });
   await page.goto('/painel/conversas');
-  await expect(page.getByRole('tab', { name: 'Conversas' })).toHaveCount(0);
-  await expect(page.getByRole('tab', { name: 'Testar' })).toBeVisible();
+  const limitedMenu = await menuItems(page);
+  expect(limitedMenu).not.toContain('Conversas');
+  expect(limitedMenu).toContain('Testar');
   await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
   await page.goto(`/painel/conversas/018f3c1e-5b7a-7c3e-9f10-2a4b6c8d0e1f`);
   await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
@@ -454,17 +464,10 @@ test('trocar de empresa durante o carregamento descarta a resposta tardia', asyn
   holdList(api);
   await page.goto('/painel/conversas');
   await expect(page.getByText('Carregando conversas…')).toBeVisible();
-  await page.getByRole('button', { name: 'Trocar de empresa' }).click();
-  await expect(page.getByText('Suas empresas')).toBeVisible();
-  await page
-    .getByRole('listitem')
-    .filter({ hasText: 'Empresa B' })
-    .getByRole('button', { name: 'Selecionar', exact: true })
-    .click();
+  await switchTo(page, 'Empresa B');
   // A empresa B tem outra conversa; a resposta tardia da A não pode aparecer na B.
   seed(api, [conversation('Contato final 2222', 'whatsapp', 1)]);
   api.releaseList();
-  await page.getByRole('button', { name: 'Abrir painel' }).click();
   await expect(page.getByRole('link', { name: /Contato final 2222/ })).toBeVisible();
   await page.waitForTimeout(300);
   await expect(page.getByText('Contato final 1111')).toHaveCount(0);
@@ -485,14 +488,18 @@ test('voltar e avançar do navegador preservam a empresa e a seleção sobrevive
   await page.goBack();
   await expect(page).toHaveURL(/\/painel\/conversas$/);
   await expect(page.getByRole('link', { name: /Contato final 1234/ })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 1, name: 'Empresa B' })).toBeVisible();
+  await openMenu(page);
+  await expect(page.getByRole('button', { name: /Trocar de empresa/ })).toContainText('Empresa B');
+  await closeMenu(page);
   await page.goForward();
   await expect(page).toHaveURL(new RegExp(`/painel/conversas/${target.id}$`));
   await expect(page.getByText('Olá da B')).toBeVisible();
 
   // Atualizar a página na conversa: a empresa selecionada é a mesma e o cabeçalho vem da API.
   await page.reload();
-  await expect(page.getByRole('heading', { level: 1, name: 'Empresa B' })).toBeVisible();
+  await openMenu(page);
+  await expect(page.getByRole('button', { name: /Trocar de empresa/ })).toContainText('Empresa B');
+  await closeMenu(page);
   await expect(page.getByRole('heading', { level: 2, name: 'Contato final 1234' })).toBeVisible();
   await expect(page.getByText('Olá da B')).toBeVisible();
   expect(api.selected).toBe(second.companyId);
@@ -533,9 +540,11 @@ test('foco por teclado percorre menu, lista, Carregar mais, Atualizar e Voltar',
   await page.goto('/painel/conversas');
   const links = page.getByRole('list', { name: /Conversas, da mais recente/ }).getByRole('link');
   await expect(links).toHaveCount(30);
-  await page.getByRole('button', { name: 'Trocar de empresa' }).focus();
+  const nav = await openMenu(page);
+  await page.getByRole('button', { name: /Trocar de empresa/ }).focus();
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('tab', { name: 'Conversas' })).toBeFocused();
+  await expect(nav.getByRole('link', { name: 'Conversas' })).toBeFocused();
+  await closeMenu(page);
   await page.getByRole('button', { name: 'Atualizar' }).focus();
   await expect(page.getByRole('button', { name: 'Atualizar' })).toBeFocused();
   await page.keyboard.press('Tab');

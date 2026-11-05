@@ -1,5 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
-import { company, installApi, SENTINEL, type FakeApi, type Role } from './company-fixture';
+import {
+  company,
+  goTo,
+  installApi,
+  menuItems,
+  SENTINEL,
+  switchTo,
+  type FakeApi,
+  type Role,
+} from './company-fixture';
 import {
   holdMembers,
   installTeamApi,
@@ -60,13 +69,12 @@ for (const theme of ['light', 'dark'] as const) {
       },
       theme,
     );
-    const tabs = page.getByRole('tablist', { name: 'Menu da empresa' });
+    const items = await menuItems(page);
     for (const label of ['Conversas', 'Canal', 'Persona', 'Equipe', 'Testar']) {
-      await expect(tabs).toContainText(label);
+      expect(items).toContain(label);
     }
-    const text = (await tabs.innerText()).replace(/\s+/g, ' ');
-    expect(text.indexOf('Persona')).toBeLessThan(text.indexOf('Equipe'));
-    expect(text.indexOf('Equipe')).toBeLessThan(text.indexOf('Testar'));
+    expect(items.indexOf('Persona')).toBeLessThan(items.indexOf('Equipe'));
+    expect(items.indexOf('Equipe')).toBeLessThan(items.indexOf('Testar'));
 
     await expect(rows(page, 'membro')).toHaveCount(3);
     await expect(rows(page, 'membro').first()).toContainText('eu@example.test');
@@ -331,9 +339,7 @@ for (const role of ['AGENT', 'VIEWER'] as const) {
     page,
   }) => {
     const { team } = await open(page, role);
-    await expect(page.getByRole('tablist', { name: 'Menu da empresa' })).not.toContainText(
-      'Equipe',
-    );
+    expect(await menuItems(page)).not.toContain('Equipe');
     await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
     expect(team.calls).toEqual([]);
   });
@@ -362,10 +368,8 @@ test('trocar de empresa durante o carregamento: a resposta tardia da outra empre
   await page.goto('/painel/equipe');
   await expect(page.getByText('Carregando a equipe…')).toBeVisible();
   // Troca para a empresa B enquanto a leitura da A está presa.
-  await page.getByRole('button', { name: 'Trocar de empresa' }).click();
-  await page.getByRole('button', { name: 'Selecionar' }).last().click();
-  await page.getByRole('button', { name: 'Abrir painel' }).click();
-  await page.getByRole('tab', { name: 'Equipe' }).first().click();
+  await switchTo(page, 'Empresa B');
+  await goTo(page, 'Equipe');
   await expect(page.locator('strong', { hasText: 'so-da-empresa-b@example.test' })).toBeVisible();
   team.release();
   await page.waitForTimeout(150);

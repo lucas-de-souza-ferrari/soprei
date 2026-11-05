@@ -6,12 +6,16 @@ import {
   CONNECTED,
   APP_ID,
   finishEvent,
+  goTo,
   hold,
   installApi,
+  menuItems,
+  openMenu,
   NOT_CONNECTED,
   PHONE_NUMBER_ID,
   postFromPopup,
   SENTINEL,
+  switchTo,
   WABA_ID,
   type FakeApi,
 } from './company-fixture';
@@ -56,9 +60,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByText('Nenhum número conectado.')).toBeVisible();
     // O SDK não é requisitado ao abrir o site, a lista de empresas nem a aba Canal.
     expect(sdkRequests(api)).toBe(0);
-    await expect(page.getByRole('tab', { name: 'Canal' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Persona' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Testar' })).toBeVisible();
+    expect(await menuItems(page)).toEqual(expect.arrayContaining(['Canal', 'Persona', 'Testar']));
 
     // Clique 1: painel explicativo (com o aviso de WABA compartilhada) e o SDK, uma única vez.
     await page.getByRole('button', { name: 'Conectar com a Meta', exact: true }).click();
@@ -294,17 +296,17 @@ test('code com mais de 20 s sem envio e descartado sem enviar (relogio)', async 
 test('AGENT e VIEWER nao veem as abas; forcar a URL nao chama a API de canal', async ({ page }) => {
   const agent = await installApi(page, { role: 'AGENT' });
   await page.goto('/painel/canal');
-  await expect(page.getByRole('tab', { name: 'Testar' })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Canal' })).toHaveCount(0);
-  await expect(page.getByRole('tab', { name: 'Persona' })).toHaveCount(0);
+  const agentMenu = await menuItems(page);
+  expect(agentMenu).toContain('Testar');
+  expect(agentMenu).not.toContain('Canal');
+  expect(agentMenu).not.toContain('Persona');
   await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
   expect(channelCalls(agent)).toHaveLength(0);
 
   const viewer = await installApi(page, { role: 'VIEWER' });
   await page.goto('/painel/persona');
   // Somente leitura vê só Conversas (spec 024).
-  await expect(page.getByRole('tab')).toHaveCount(1);
-  await expect(page.getByRole('tab', { name: 'Conversas' })).toBeVisible();
+  expect(await menuItems(page)).toEqual(['Conversas']);
   await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
   expect(viewer.calls.filter((call) => call.path.includes('/persona'))).toHaveLength(0);
   expect(viewer.calls.filter((call) => call.path.includes('/messages'))).toHaveLength(0);
@@ -426,15 +428,8 @@ test('resposta tardia do teste depois de trocar de empresa nao aparece na outra'
   await page.getByLabel('Mensagem de teste').fill('Pergunta da A');
   await page.getByRole('button', { name: 'Enviar', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Aguardando resposta…' })).toBeVisible();
-  await page.getByRole('button', { name: 'Trocar de empresa' }).click();
-  await expect(page.getByText('Suas empresas')).toBeVisible();
-  await page
-    .getByRole('listitem')
-    .filter({ hasText: 'Empresa B' })
-    .getByRole('button', { name: 'Selecionar', exact: true })
-    .click();
-  await page.getByRole('button', { name: 'Abrir painel' }).click();
-  await page.getByRole('tab', { name: 'Testar' }).click();
+  await switchTo(page, 'Empresa B');
+  await goTo(page, 'Testar');
   api.release();
   await page.waitForTimeout(300);
   await expect(page.getByText('RESPOSTA-DA-EMPRESA-A')).toHaveCount(0);
@@ -483,10 +478,13 @@ test('foco por teclado percorre o menu da empresa e a ordem de tabulacao e natur
 }) => {
   await installApi(page, { channel: NOT_CONNECTED });
   await page.goto('/painel/canal');
-  await expect(page.getByRole('tab', { name: 'Canal' })).toBeVisible();
-  await page.getByRole('button', { name: 'Trocar de empresa' }).focus();
+  const nav = await openMenu(page);
+  await expect(nav.getByRole('link', { name: 'Canal' })).toBeVisible();
+  await page.getByRole('button', { name: /Trocar de empresa/ }).focus();
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('tab', { name: 'Canal' })).toBeFocused();
-  await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('tab', { name: 'Persona' })).toBeFocused();
+  await expect(nav.getByRole('link', { name: 'Conversas' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(nav.getByRole('link', { name: 'Canal' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(nav.getByRole('link', { name: 'Persona' })).toBeFocused();
 });

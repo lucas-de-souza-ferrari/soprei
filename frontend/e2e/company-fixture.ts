@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
 /** Texto que a API falsa põe em toda `message` de erro: nunca pode aparecer na tela. */
@@ -156,6 +156,8 @@ export interface FakeApi {
   /** Segura a próxima leitura da lista até `releaseList()`. */
   listGate: Promise<void> | null;
   releaseList: () => void;
+  /** Status de erro do `select` (spec 029); `undefined` = 204. */
+  selectStatus?: number;
   /** Segura as respostas do simulador até `release()`. */
   gate: Promise<void> | null;
   calls: Call[];
@@ -256,6 +258,9 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
       return reply(200, { items: state.companies });
     }
     const selecting = /^\/account\/companies\/([^/]+)\/select$/.exec(path);
+    if (selecting && state.selectStatus !== undefined) {
+      return fail(state.selectStatus, 'INTERNAL_ERROR');
+    }
     if (selecting) {
       state.selected = selecting[1] ?? null;
       return reply(204);
@@ -389,4 +394,44 @@ export async function answerLogin(page: Page, code: string | null): Promise<void
       value === null ? { authResponse: null } : { authResponse: { code: value } },
     );
   }, code);
+}
+
+/**
+ * Menu lateral da empresa (spec 029): fixo no computador; no celular abre pelo botão "Abrir menu".
+ * Devolve a navegação visível. Chame só com o painel fechado.
+ */
+export async function openMenu(page: Page): Promise<Locator> {
+  const button = page.getByRole('button', { name: 'Abrir menu' });
+  const nav = page.getByRole('navigation', { name: 'Menu da empresa' });
+  await expect(nav.or(button).first()).toBeVisible();
+  if (!(await nav.isVisible())) await button.click();
+  await expect(nav).toBeVisible();
+  return nav;
+}
+
+/** Vai a uma tela pelo menu lateral (abre o painel no celular). */
+export async function goTo(page: Page, label: string): Promise<void> {
+  const nav = await openMenu(page);
+  await nav.getByRole('link', { name: label, exact: true }).click();
+}
+
+/** Troca de empresa pelo seletor do menu lateral. */
+export async function switchTo(page: Page, name: string): Promise<void> {
+  await openMenu(page);
+  await page.getByRole('button', { name: /Trocar de empresa/ }).click();
+  await page.getByRole('menuitemradio', { name }).click();
+}
+
+/** Fecha o painel do menu no celular (no computador não há o que fechar). */
+export async function closeMenu(page: Page): Promise<void> {
+  const close = page.getByRole('button', { name: 'Fechar menu' });
+  if (await close.isVisible()) await close.click();
+}
+
+/** Confere os itens do menu (abre e fecha o painel no celular) e devolve o texto da navegação na ordem. */
+export async function menuItems(page: Page): Promise<string[]> {
+  const nav = await openMenu(page);
+  const labels = await nav.getByRole('link').allInnerTexts();
+  await closeMenu(page);
+  return labels.map((label) => label.trim());
 }

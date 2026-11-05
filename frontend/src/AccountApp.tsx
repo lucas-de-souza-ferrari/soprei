@@ -10,11 +10,13 @@ import { Input } from './components/motion/input';
 import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
+import { AppShell } from './company/AppShell';
 import { CompanyArea } from './company/CompanyArea';
 import { InvitePage } from './invite/InvitePage';
 import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
 import {
   allowedPages,
+  AREA_LABELS,
   type ConversasRoute,
   conversasPath,
   conversasRouteForPath,
@@ -123,12 +125,20 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
     history.replaceState(null, '', pathForPage(next));
   };
 
-  const load = async (stamp: number, landing: Page = 'companies', replaceUrl = false) => {
+  const load = async (stamp: number, landing: Page | 'auto' = 'companies', replaceUrl = false) => {
     const current = sessionSchema.parse(await api('/auth/session'));
     const list = companiesSchema.parse(await api('/account/companies'));
     if (generation.current !== stamp) return;
     setSession(current);
     setCompanies(list.items);
+    const selected = list.items.find((item) => item.companyId === current.selectedCompanyId);
+    if (landing === 'auto') {
+      // Troca de empresa (spec 029): abre a primeira tela permitida da empresa selecionada.
+      const first = selected === undefined ? undefined : allowedPages(selected.permissions)[0];
+      setRoute({ kind: 'list' });
+      landing = first ?? 'companies';
+      replaceUrl = true;
+    }
     const target =
       landing === 'invite'
         ? 'invite'
@@ -503,6 +513,58 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
     </form>
   );
 
+  const noticeNode = notice && (
+    <Alert variant={notice.tone === 'error' ? 'destructive' : notice.tone}>
+      <AlertIcon />
+      <AlertContent>
+        <AlertDescription className="text-inherit">{notice.text}</AlertDescription>
+      </AlertContent>
+    </Alert>
+  );
+  const areaCompany = isAreaPage(page) && !booting && session ? selectedCompany : undefined;
+  const switcherItem = (item: Company) => ({
+    companyId: item.companyId,
+    name: item.name,
+    roleLabel: roles[item.role],
+  });
+  const switchCompany = (companyId: string) =>
+    void perform(async (stamp) => {
+      await api(`/account/companies/${companyId}/select`, {});
+      await load(stamp, 'auto');
+    });
+
+  // Área da empresa (spec 029): tela inteira com menu lateral, sem o cartão centrado.
+  if (areaCompany !== undefined && session) {
+    return (
+      <AppShell
+        title={AREA_LABELS[isAreaPage(page) ? page : 'conversas']}
+        banner={noticeNode}
+        current={switcherItem(areaCompany)}
+        companies={companies.map(switcherItem)}
+        pages={allowedPages(areaCompany.permissions)}
+        page={isAreaPage(page) ? page : 'conversas'}
+        email={session.email}
+        busy={busy}
+        onNavigate={openArea}
+        onSelectCompany={switchCompany}
+        onManage={() => openArea('companies')}
+        onLogout={logout}
+      >
+        <CompanyArea
+          key={areaCompany.companyId}
+          company={areaCompany}
+          page={isAreaPage(page) ? page : 'conversas'}
+          route={route}
+          onOpenConversation={(id) => goConversations({ kind: 'detail', id })}
+          onBackToConversations={() => goConversations({ kind: 'list' })}
+          onNavigate={openArea}
+          onSession={sessionLost}
+          onChanged={companyChanged}
+        />
+      </AppShell>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[radial-gradient(ellipse_at_top_right,var(--tint),transparent_55%)] px-5 py-10">
       <header
@@ -541,32 +603,12 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-5 px-8 max-sm:px-5">
-            {notice && (
-              <Alert variant={notice.tone === 'error' ? 'destructive' : notice.tone}>
-                <AlertIcon />
-                <AlertContent>
-                  <AlertDescription className="text-inherit">{notice.text}</AlertDescription>
-                </AlertContent>
-              </Alert>
-            )}
+            {noticeNode}
             {booting ? (
               <div className="grid place-items-center gap-3 py-10 text-sm text-muted-foreground">
                 <Loader variant="spinner" size={28} label="Verificando sua sessão" />
                 <span aria-hidden="true">Verificando sua sessão…</span>
               </div>
-            ) : isAreaPage(page) && session && selectedCompany ? (
-              <CompanyArea
-                key={selectedCompany.companyId}
-                company={selectedCompany}
-                page={page}
-                route={route}
-                onOpenConversation={(id) => goConversations({ kind: 'detail', id })}
-                onBackToConversations={() => goConversations({ kind: 'list' })}
-                onNavigate={openArea}
-                onSwitch={() => openArea('companies')}
-                onSession={sessionLost}
-                onChanged={companyChanged}
-              />
             ) : page === 'invite' ? (
               <InvitePage
                 token={inviteToken}

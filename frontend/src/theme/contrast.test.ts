@@ -82,6 +82,13 @@ const textPairs: [string, string][] = [
   ['card-foreground', 'card'],
   ['color-success', 'muted'],
   ['muted-foreground', 'muted'],
+  // Spec 029 (E1): menu lateral sobre `card`: item ativo (foreground em muted), item inativo
+  // (muted-foreground em card; em foco/hover foreground em muted), e-mail do rodapé (muted-foreground em
+  // card), seletor de empresa (card-foreground em card; papel em muted-foreground em card) e ícone de
+  // fechar o painel do celular (foreground em card).
+  ['foreground', 'card'],
+  ['foreground', 'muted'],
+  ['muted-foreground', 'card'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],
