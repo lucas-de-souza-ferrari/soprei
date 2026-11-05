@@ -89,7 +89,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright-traces-node-${{ matrix.node }}
+          # O valor da matriz do LTS é "lts/*" (barra e asterisco não são aceitos em nome de artefato):
+          # 0 = Node 22, 1 = LTS.
+          name: playwright-traces-${{ strategy.job-index }}
           path: frontend/test-results
           if-no-files-found: ignore
           retention-days: 7
