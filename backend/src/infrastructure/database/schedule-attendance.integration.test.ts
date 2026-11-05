@@ -231,3 +231,32 @@ describe('atendimento com agenda, contra o PostgreSQL (spec 027, E3)', () => {
     );
   });
 });
+
+describe('leitura da agenda com prazo no banco (spec 027, sugestão da revisão)', () => {
+  it('a leitura roda numa transação com statement_timeout local definido uma vez', async () => {
+    const statements: string[] = [];
+    const spied = Object.create(database.prisma) as typeof database.prisma;
+    const original = database.prisma.$transaction.bind(database.prisma) as (
+      fn: (tx: Record<string, unknown>) => Promise<unknown>,
+      options?: unknown,
+    ) => Promise<unknown>;
+    (spied as unknown as { $transaction: unknown }).$transaction = (
+      fn: (tx: Record<string, unknown>) => Promise<unknown>,
+      options?: unknown,
+    ) =>
+      original((tx) => {
+        const raw = tx['$executeRaw'] as (...args: unknown[]) => unknown;
+        const wrapped = Object.create(tx) as Record<string, unknown>;
+        wrapped['$executeRaw'] = (strings: TemplateStringsArray, ...values: unknown[]) => {
+          statements.push(`${strings.join('?')}|${values.map(String).join(',')}`);
+          return raw.call(tx, strings, ...values);
+        };
+        return fn(wrapped);
+      }, options);
+    const reader = new PrismaScheduleAvailabilityReader(spied, () => NOW, 1_500);
+    const result = await reader.read(companyA.id);
+    assert.equal(result.hasSchedule, true);
+    assert.equal(statements.length, 1);
+    assert.match(statements[0] ?? '', /set_config\('statement_timeout'.*\|1500/);
+  });
+});

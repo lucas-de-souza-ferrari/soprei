@@ -16,8 +16,10 @@ import {
   SCHEDULE_DEFAULT_TIMEZONE,
   SCHEDULE_MAX_RESOURCES,
   SCHEDULE_PROMPT_WINDOW_DAYS,
+  SCHEDULE_RETRIEVAL_TIMEOUT_MS,
 } from '../../../domain/index.js';
-import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import { withStatementTimeout } from './knowledge-retriever.js';
 import { withRepositoryErrors } from './repository-errors.js';
 
 const DAY_MS = 86_400_000;
@@ -35,12 +37,22 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
   constructor(
     private readonly prisma: TenantScopedPrisma,
     private readonly now: () => Date = () => new Date(),
+    private readonly statementTimeoutMs: number = SCHEDULE_RETRIEVAL_TIMEOUT_MS,
   ) {}
 
   read(companyId: CompanyId): Promise<ScheduleAvailability> {
-    return withRepositoryErrors('ScheduleAvailability.read', async () => {
+    return withRepositoryErrors('ScheduleAvailability.read', () =>
+      // Transação curta com `statement_timeout` local: estourado o prazo, o banco cancela a consulta.
+      withStatementTimeout(this.prisma, this.statementTimeoutMs, (db) =>
+        this.readIn(db, companyId),
+      ),
+    );
+  }
+
+  private async readIn(db: TenantScopedDb, companyId: CompanyId): Promise<ScheduleAvailability> {
+    {
       const now = this.now();
-      const settings = await this.prisma.scheduleSettings.findFirst({ where: { companyId } });
+      const settings = await db.scheduleSettings.findFirst({ where: { companyId } });
       const timezone = settings?.timezone ?? SCHEDULE_DEFAULT_TIMEZONE;
       const today = localPartsOf(now, timezone).date;
       const empty: ScheduleAvailability = {
@@ -50,14 +62,14 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
         services: [],
         hasSchedule: false,
       };
-      const services = await this.prisma.scheduleService.findMany({
+      const services = await db.scheduleService.findMany({
         where: { companyId, active: true },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
         take: MAX_SERVICES_READ,
       });
       if (services.length === 0) return empty;
 
-      const resources = await this.prisma.scheduleResource.findMany({
+      const resources = await db.scheduleResource.findMany({
         where: { companyId, active: true },
         orderBy: [{ position: 'asc' }, { id: 'asc' }],
         take: SCHEDULE_MAX_RESOURCES,
@@ -66,7 +78,7 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
       const rules =
         ids.length === 0
           ? []
-          : await this.prisma.availabilityRule.findMany({
+          : await db.availabilityRule.findMany({
               where: { companyId, resourceId: { in: ids } },
               take: 1_000,
             });
@@ -79,7 +91,7 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
       const busy =
         ids.length === 0
           ? []
-          : await this.prisma.appointment.findMany({
+          : await db.appointment.findMany({
               where: {
                 companyId,
                 resourceId: { in: ids },
@@ -125,7 +137,7 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
           slots: distinctSlots(slots),
         })),
       };
-    });
+    }
   }
 }
 
