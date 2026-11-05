@@ -1,3 +1,4 @@
+import { MessageBubble, MessageBubbleContent } from '../components/motion/message-bubble';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertContent, AlertDescription, AlertIcon } from '../components/motion/alert';
 import { Button } from '../components/motion/button';
@@ -94,25 +95,27 @@ export function TestPage({ companyId, settle }: PageProps) {
         className="grid max-h-96 gap-3 overflow-y-auto"
       >
         {lines.map((line) => (
-          <div
+          // Bolha do beUI (spec 029): "você" faz o papel do contato (esquerda); o assistente fica à direita.
+          <MessageBubble
             key={line.id}
-            className={
-              line.from === 'you'
-                ? 'ml-auto max-w-[85%] rounded-2xl bg-bubble px-4 py-2 text-foreground'
-                : 'mr-auto max-w-[85%] rounded-2xl border border-border bg-card px-4 py-2 text-card-foreground'
-            }
+            align={line.from === 'you' ? 'start' : 'end'}
+            variant={line.from === 'you' ? 'outline' : 'tint'}
           >
-            <span className="sr-only">{line.from === 'you' ? 'Você: ' : 'Assistente: '}</span>
-            <span className="[overflow-wrap:anywhere] whitespace-pre-wrap">{line.text}</span>
-            {line.from === 'assistant' && line.sources !== undefined && (
-              <small className="mt-1 block text-xs text-muted-foreground">
-                {sourcesText(line.sources)}
-              </small>
-            )}
-            {line.fallback && (
-              <small className="mt-1 block text-xs text-muted-foreground">{FALLBACK_MARK}</small>
-            )}
-          </div>
+            <MessageBubbleContent className="min-w-0">
+              <span className="sr-only">{line.from === 'you' ? 'Você: ' : 'Assistente: '}</span>
+              <span dir="auto" className="[overflow-wrap:anywhere] whitespace-pre-wrap">
+                {line.text}
+              </span>
+              {line.from === 'assistant' && line.sources !== undefined && (
+                <small className="mt-1 block text-xs text-muted-foreground">
+                  {sourcesText(line.sources)}
+                </small>
+              )}
+              {line.fallback && (
+                <small className="mt-1 block text-xs text-muted-foreground">{FALLBACK_MARK}</small>
+              )}
+            </MessageBubbleContent>
+          </MessageBubble>
         ))}
         {busy && (
           <p className="m-0 text-sm text-muted-foreground">O assistente está respondendo…</p>

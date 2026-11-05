@@ -1,3 +1,4 @@
+import { MessageBubble, MessageBubbleContent } from '../components/motion/message-bubble';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
@@ -372,33 +373,32 @@ function Bubble({
   const fromContact = message.role === 'USER';
   const indicator = sendIndicator(message, channel, now);
   return (
-    <div
-      className={
-        fromContact
-          ? 'max-w-[85%] min-w-0 rounded-2xl border border-border bg-card px-4 py-2 text-card-foreground'
-          : 'max-w-[85%] min-w-0 rounded-2xl bg-bubble px-4 py-2 text-foreground'
-      }
-    >
-      <p className="m-0 text-xs font-semibold">{fromContact ? 'Contato' : 'Assistente'}</p>
-      <p dir="auto" className="m-0 [overflow-wrap:anywhere] whitespace-pre-wrap">
-        {message.content}
-      </p>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
-        {message.isFallback && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-foreground">
-            Resposta padrão: houve falha ao gerar a resposta
-          </span>
-        )}
-        {indicator === 'sending' && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">Enviando…</span>
-        )}
-        {indicator === 'not-sent' && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-destructive">
-            Não enviada ao WhatsApp. Confira o estado do canal em Canal.
-          </span>
-        )}
-      </div>
-    </div>
+    // Bolha do beUI (spec 029): contato à esquerda, assistente (o nosso lado) à direita.
+    <MessageBubble align={fromContact ? 'start' : 'end'} variant={fromContact ? 'outline' : 'tint'}>
+      <MessageBubbleContent className="min-w-0">
+        <p className="m-0 text-xs font-semibold">{fromContact ? 'Contato' : 'Assistente'}</p>
+        <p dir="auto" className="m-0 [overflow-wrap:anywhere] whitespace-pre-wrap">
+          {message.content}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
+          {message.isFallback && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-foreground">
+              Resposta padrão: houve falha ao gerar a resposta
+            </span>
+          )}
+          {indicator === 'sending' && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+              Enviando…
+            </span>
+          )}
+          {indicator === 'not-sent' && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-destructive">
+              Não enviada ao WhatsApp. Confira o estado do canal em Canal.
+            </span>
+          )}
+        </div>
+      </MessageBubbleContent>
+    </MessageBubble>
   );
 }
