@@ -75,7 +75,8 @@ test('celular: abrir menu, foco, Esc, escolher tela e Tab preso no painel', asyn
   await open.click();
   const nav = page.getByRole('navigation', { name: 'Menu da empresa' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('link', { name: 'Conversas' })).toBeFocused();
+  // O foco vai para dentro da gaveta (no botão de fechar).
+  await expect(page.getByRole('button', { name: 'Fechar menu' })).toBeFocused();
   // Tab nunca sai do painel.
   for (let index = 0; index < 20; index++) {
     await page.keyboard.press('Tab');
@@ -122,19 +123,29 @@ test('movimento reduzido: o painel do celular abre sem animação; sem a prefer�
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await installApi(page);
-  const duration = () =>
-    page.evaluate(() => {
-      const dialog = document.querySelector('dialog.mobile-menu');
-      return dialog === null ? null : getComputedStyle(dialog).animationDuration;
+  // A gaveta do Dashboard Shell anima por transform (motion): logo depois do clique, sem a preferência ela
+  // ainda está deslocada; com `prefers-reduced-motion` já abre no lugar, sem transição.
+  const transformRightAfterOpen = () =>
+    page.evaluate(async () => {
+      const button = document.querySelector<HTMLElement>('button[aria-label="Abrir menu"]');
+      button?.click();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const drawer = document.querySelector('[role="dialog"][aria-modal="true"]');
+      return drawer === null ? null : getComputedStyle(drawer).transform;
     });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/painel/conversas');
-  await openMenu(page);
-  expect(parseFloat((await duration()) ?? '1')).toBeLessThan(0.001);
+  await expect(page.getByRole('button', { name: 'Abrir menu' })).toBeVisible();
+  const reduced = await transformRightAfterOpen();
+  expect(reduced === 'none' || reduced === 'matrix(1, 0, 0, 1, 0, 0)').toBe(true);
   await closeMenu(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await openMenu(page);
-  expect(await duration()).toBe('0.2s');
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Abrir menu' })).toBeVisible();
+  const animated = await transformRightAfterOpen();
+  expect(animated !== null && animated !== 'none' && animated !== 'matrix(1, 0, 0, 1, 0, 0)').toBe(
+    true,
+  );
   await closeMenu(page);
 });
 
@@ -151,15 +162,15 @@ test('seletor de empresa: teclado, troca com remontagem e dado da outra empresa 
   const trigger = page.getByRole('button', { name: /Trocar de empresa/ });
   await trigger.focus();
   await page.keyboard.press('Enter');
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('menu')).toBeVisible();
   await expect(page.getByRole('menuitemradio', { name: /Empresa A/ })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.getByRole('menuitemradio', { name: /Empresa B/ })).toBeFocused();
   await page.keyboard.press('Escape');
-  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await page.keyboard.press('Space');
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('menu')).toBeVisible();
   await page.keyboard.press('ArrowDown');
   api.conversations = [conversation('Contato final 2222', 'whatsapp', 1)];
   await page.keyboard.press('Enter');

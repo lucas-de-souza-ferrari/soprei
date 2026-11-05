@@ -68,7 +68,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(
       page.getByRole('heading', { level: 3, name: /terça-feira, 10 de novembro/ }),
     ).toBeVisible();
-    const tuesday = page.locator('section', {
+    const tuesday = page.locator('main section', {
       has: page.getByRole('heading', { name: /terça-feira/ }),
     });
     const buttons = tuesday.getByRole('button');
@@ -96,7 +96,7 @@ test.describe('navegador em outro fuso', () => {
     await open(page, 'OWNER', (agenda) => {
       agenda.appointments.push(appointment(agenda, '2026-11-10', '23:30', '23:59'));
     });
-    const tuesday = page.locator('section', {
+    const tuesday = page.locator('main section', {
       has: page.getByRole('heading', { name: /terça-feira/ }),
     });
     await expect(tuesday.getByRole('button').first()).toContainText('23:30 às 23:59');
@@ -140,7 +140,7 @@ test('marcar: escolhe o horário livre, envia o horário local e mostra na lista
     localStart: '2026-11-09T09:30',
     customerLabel: 'Carlos',
   });
-  const monday = page.locator('section', {
+  const monday = page.locator('main section', {
     has: page.getByRole('heading', { name: /segunda-feira/ }),
   });
   await expect(monday.getByRole('button').first()).toContainText('09:30');

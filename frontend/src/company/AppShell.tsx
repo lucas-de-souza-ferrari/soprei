@@ -1,127 +1,147 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Menu, X } from 'lucide-react';
+import type { ComponentProps, ReactNode } from 'react';
+import {
+  BookOpen,
+  CalendarDays,
+  FlaskConical,
+  MessageSquare,
+  Package,
+  Radio,
+  UserRound,
+  Users,
+  type LucideIcon,
+} from 'lucide-react';
 import { Logo } from '../components/logo';
-import { Sidebar, type SidebarProps } from './Sidebar';
+import { Button } from '../components/motion/button';
+import { ThemeToggle } from '../components/motion/theme-toggle';
+import { DashboardShell } from '../components/dashboard-shell/dashboard-shell';
+import { AREA_LABELS, areaPath, isAreaPage, type AreaPage } from './company-nav';
+import { CompanySwitcher, type SwitcherCompany } from './CompanySwitcher';
 
-export interface AppShellProps extends SidebarProps {
+const ICONS: Readonly<Record<AreaPage, LucideIcon>> = {
+  conversas: MessageSquare,
+  agenda: CalendarDays,
+  agendaConfig: CalendarDays,
+  canal: Radio,
+  persona: UserRound,
+  conhecimento: BookOpen,
+  estoque: Package,
+  equipe: Users,
+  testar: FlaskConical,
+};
+
+export interface AppShellProps {
   /** Título da tela (`h1`). */
   readonly title: string;
   /** Aviso do site (erro, informação) acima do conteúdo. */
   readonly banner?: ReactNode;
   readonly children: ReactNode;
+  readonly current: SwitcherCompany;
+  readonly companies: readonly SwitcherCompany[];
+  /** Telas permitidas pela `permissions` (o menu mostra só elas). */
+  readonly pages: readonly AreaPage[];
+  /** Tela atual (`agendaConfig` conta como Agenda). */
+  readonly page: AreaPage;
+  readonly email: string;
+  readonly busy: boolean;
+  readonly onNavigate: (page: AreaPage) => void;
+  readonly onSelectCompany: (companyId: string) => void;
+  readonly onManage: () => void;
+  readonly onLogout: () => void;
+}
+
+/** Link do menu: clique simples navega pelo site sem recarregar; com Ctrl, Cmd ou Shift o navegador decide. */
+function ShellLink({ onClick, ...props }: ComponentProps<'a'>) {
+  return (
+    <a
+      {...props}
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+        event.preventDefault();
+        onClick?.(event);
+      }}
+    />
+  );
 }
 
 /**
- * Moldura da área da empresa (spec 029, plano B da D11: shell próprio, sem código de terceiros): menu
- * lateral fixo a partir de 768 px; abaixo disso, barra superior com o botão "Abrir menu" que abre o
- * mesmo conteúdo num `<dialog>` modal (foco preso, Esc fecha, o conteúdo de trás fica inerte). A
- * animação de abrir só existe sem `prefers-reduced-motion` (regra em `style.css`).
+ * Moldura da área da empresa (spec 029): o Dashboard Shell da Obsidian UI (MIT, copiado e adaptado; ver
+ * `NOTICE.md`): menu lateral fixo a partir de 768 px e, abaixo disso, gaveta com foco preso, Esc e conteúdo de
+ * trás inerte. O seletor de empresa, o e-mail, o tema e "Sair" ficam no menu; trocar de empresa remonta tudo
+ * (`key`), então a gaveta fecha e nada da empresa anterior sobra.
  */
-export function AppShell({ title, banner, children, ...sidebar }: AppShellProps) {
-  const [open, setOpen] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const panelId = useId();
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return;
-    if (open && !dialog.open) {
-      dialog.showModal();
-      dialog.querySelector<HTMLElement>('[data-nav]')?.focus();
-    } else if (!open && dialog.open) {
-      dialog.close();
-    }
-  }, [open]);
-
-  // Se a janela passar a ser larga com o painel aberto, fecha (o menu fixo assume).
-  useEffect(() => {
-    if (!open) return;
-    const query = window.matchMedia('(min-width: 768px)');
-    const onChange = () => {
-      if (query.matches) setOpen(false);
-    };
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, [open]);
-
-  const close = () => {
-    setOpen(false);
-    buttonRef.current?.focus();
-  };
-
+export function AppShell({
+  title,
+  banner,
+  children,
+  current,
+  companies,
+  pages,
+  page,
+  email,
+  busy,
+  onNavigate,
+  onSelectCompany,
+  onManage,
+  onLogout,
+}: AppShellProps) {
+  const active = page === 'agendaConfig' ? 'agenda' : page;
   return (
-    <div className="flex h-dvh overflow-hidden bg-background text-foreground">
-      <aside className="hidden w-64 shrink-0 border-r border-border bg-card md:block">
-        <Sidebar {...sidebar} />
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-3 md:hidden">
-          <button
-            ref={buttonRef}
-            type="button"
-            aria-label="Abrir menu"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen(true)}
-            className="grid size-10 place-items-center rounded-lg border border-input text-foreground hover:bg-muted"
-          >
-            <Menu aria-hidden="true" className="size-5" />
-          </button>
-          <Logo alt="Soprei" className="w-[96px]" />
-        </header>
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto grid w-full max-w-5xl gap-5 px-4 py-6 sm:px-6">
-            <h1 className="m-0 font-[Manrope] text-3xl leading-tight tracking-[-0.04em] [overflow-wrap:anywhere] max-sm:text-2xl">
-              {title}
-            </h1>
-            {banner}
-            {children}
+    <div className="h-dvh">
+      <DashboardShell
+        key={current.companyId}
+        brand={{
+          name: '',
+          logo: (
+            <a href="/" className="block w-[120px]">
+              <Logo alt="Soprei — início" className="w-full" />
+            </a>
+          ),
+        }}
+        sidebarHeader={
+          <CompanySwitcher
+            current={current}
+            companies={companies}
+            disabled={busy}
+            onSelect={onSelectCompany}
+            onManage={onManage}
+          />
+        }
+        navigation={[
+          {
+            id: 'menu',
+            items: pages.map((item) => ({
+              id: item,
+              label: AREA_LABELS[item],
+              icon: ICONS[item],
+              href: areaPath(item),
+            })),
+          },
+        ]}
+        linkComponent={ShellLink}
+        activeItemId={active}
+        onActiveItemChange={(id) => {
+          if (isAreaPage(id)) onNavigate(id);
+        }}
+        title={title}
+        sidebarFooter={
+          <div className="grid gap-3">
+            <p className="m-0 truncate text-xs text-muted-foreground" title={email}>
+              {email}
+            </p>
+            <div className="flex items-center justify-between gap-2">
+              <ThemeToggle />
+              <Button variant="outline" size="sm" onClick={onLogout} disabled={busy}>
+                Sair
+              </Button>
+            </div>
           </div>
-        </main>
-      </div>
-      <dialog
-        id={panelId}
-        ref={dialogRef}
-        aria-label="Menu"
-        onCancel={(event) => {
-          event.preventDefault();
-          close();
-        }}
-        onClick={(event) => {
-          // Clique no fundo escurecido (o próprio `<dialog>`, fora do painel) fecha.
-          if (event.target === event.currentTarget) close();
-        }}
-        className="mobile-menu fixed inset-y-0 left-0 m-0 h-dvh max-h-none w-[min(20rem,85vw)] max-w-none overflow-visible border-r border-border bg-card p-0 text-card-foreground backdrop:bg-foreground/50 md:hidden"
+        }
       >
-        {open && (
-          <div className="relative h-full">
-            <button
-              type="button"
-              aria-label="Fechar menu"
-              onClick={close}
-              className="absolute right-3 top-3 z-10 grid size-9 place-items-center rounded-lg hover:bg-muted"
-            >
-              <X aria-hidden="true" className="size-5" />
-            </button>
-            <Sidebar
-              {...sidebar}
-              onNavigate={(next) => {
-                setOpen(false);
-                sidebar.onNavigate(next);
-              }}
-              onManage={() => {
-                setOpen(false);
-                sidebar.onManage();
-              }}
-              onSelectCompany={(id) => {
-                setOpen(false);
-                sidebar.onSelectCompany(id);
-              }}
-            />
-          </div>
-        )}
-      </dialog>
+        <main className="mx-auto grid w-full max-w-5xl grid-cols-[minmax(0,1fr)] gap-5 px-4 py-6 sm:px-6">
+          {banner}
+          {children}
+        </main>
+      </DashboardShell>
     </div>
   );
 }
