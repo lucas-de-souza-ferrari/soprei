@@ -159,6 +159,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           movements: () => Promise.reject(new Error('inventário')),
           importRows: () => Promise.reject(new Error('inventário')),
         },
+        scheduleSample: {
+          load: () => Promise.reject(new Error('inventário')),
+          remove: () => Promise.reject(new Error('inventário')),
+        },
         schedule: {
           getSettings: () => Promise.reject(new Error('inventário')),
           updateSettings: () => Promise.reject(new Error('inventário')),
@@ -251,6 +255,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/schedule/appointments/:appointmentId',
       '/admin/companies/:companyId/schedule/blocks',
       '/admin/companies/:companyId/schedule/blocks/:blockId',
+      '/admin/companies/:companyId/schedule/sample',
       '/admin/companies/:companyId/memberships/:membershipId',
       '/admin/companies/:companyId/memberships/:membershipId/password',
       '/auth/login',
@@ -379,6 +384,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     ]);
     assert.deepEqual(declared(schedule + '/blocks'), ['POST:schedule:manage']);
     assert.deepEqual(declared(schedule + '/blocks/:blockId'), ['DELETE:schedule:manage']);
+    assert.deepEqual(declared(schedule + '/sample'), [
+      'DELETE:schedule:configure',
+      'POST:schedule:configure',
+    ]);
     assert.deepEqual(declared('/admin/companies/:companyId/persona'), [
       'GET:persona:manage',
       'PUT:persona:manage',

@@ -64,6 +64,8 @@ export interface AdminRoutesParams {
   >;
   /** Agenda da empresa (spec 027); sem isto as rotas `.../schedule/*` não existem. */
   readonly schedule?: AdminScheduleControllerOptions['schedule'];
+  /** Exemplo da agenda (spec 027, E4); sem isto as rotas `.../schedule/sample` não existem. */
+  readonly scheduleSample?: AdminScheduleControllerOptions['sample'];
   /** Valores públicos do Embedded Signup para o site (spec 023); sem isto `.../channel/setup` não existe. */
   readonly channelSetup?: ChannelSetupInfo;
 }
@@ -291,6 +293,7 @@ export function buildServer({
         auth,
         metrics,
         schedule: admin.schedule,
+        sample: admin.scheduleSample,
       });
     }
     if (admin.attendance !== undefined) {

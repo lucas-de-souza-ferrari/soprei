@@ -334,7 +334,7 @@ Fontes a consultar pelo implementador antes de seguir: documentação do Postgre
 
 ## Registro da implementação
 
-**Status por etapa:** E1 pronta (backend) | E2 pronta (painel) | E3 pronta (a IA lê a agenda) | E4 pendente | E5 parcial (e2e do painel feito junto com a E2; ver abaixo) | E6 não iniciada (cortável).
+**Status por etapa:** E1 pronta (backend) | E2 pronta (painel) | E3 pronta (a IA lê a agenda) | E4 pronta (exemplo) | E5 parcial (e2e do painel feito junto com a E2; ver abaixo) | E6 não iniciada (cortável).
 
 **E1 (núcleo do backend): implementada na branch, tudo verde localmente em Node 24** (bateria no `docs/handoff.md`). Pastas: `domain/schedule.ts` (constantes `SCHEDULE_*`, tipos, interfaces dos cinco repositórios, `canTransition`); `application/schedule/` (`zoned-time.ts`, `availability.ts` com `computeSlots`, `schedule.schemas.ts`, `schedule.service.ts`); `infrastructure/database/repositories/schedule.repository.ts` (os cinco repositórios; **único** ponto que traduz a violação de exclusão em `SLOT_TAKEN`, via `isExclusionViolation` em `database-errors.ts`); `presentation/admin/schedule.controller.ts`; métricas `schedule_actions_total{action,result}` e `schedule_context_total{result}` (esta última só é usada na E3); migration `20261105100000_schedule_appointments` (cria `btree_gist`, quatro enums, cinco tabelas, FKs compostas, CHECKs e a restrição `appointments_no_overlap`); permissões `schedule:read|manage|configure` no mapa fixo.
 
@@ -373,3 +373,12 @@ Decisões e desvios da E3 (com motivo):
 - **`neutralize` ficou compartilhado:** a função da 026 agora remove também `<agenda>` e `</agenda>` (e as de largura total, NFKC); o texto do cabeçalho do bloco é fixo e o fuso entra neutralizado.
 - **Teto de 5.200:** 4.000 de conteúdo do conhecimento mais 1.200 da agenda; o teste de coexistência prova que os dois blocos aparecem uma vez e que a soma do conteúdo não passa disso.
 - **Critérios [U] de fail-open** usam leitor falso que lança e que nunca resolve (com `scheduleTimeoutMs` curto e `keepEventLoopAlive`); o teste [I] ponta a ponta usa Postgres real, o `mock`, o simulador e `respondToPending`, e compara os horários do prompt com `availability` no mesmo "agora".
+
+**E4 (botão "Carregar exemplo"): implementada na branch, verde localmente em Node 24.** Pastas: `application/schedule/sample.service.ts` (`ScheduleSampleService`), rotas `POST` e `DELETE /admin/companies/:companyId/schedule/sample` no `schedule.controller.ts` (permissão `schedule:configure`, só existem quando o serviço de exemplo é injetado), `index.ts`/`server.ts`, e no site o bloco "Exemplo" de `AgendaConfigPage.tsx` (`agenda-api.ts`: `loadSample` e `removeSample`).
+
+Decisões e desvios da E4 (com motivo):
+- **Só em agenda sem serviço seu:** o exemplo recusa com 409 `SAMPLE_REQUIRES_EMPTY` se existe qualquer serviço que não seja de exemplo (a coluna `is_sample` de `schedule_services` já estava na migration da E1); com o serviço de exemplo já presente é idempotente (`created: false`), e com ele desativado, reativa.
+- **O que cria:** o serviço "Corte de cabelo" (30 min, sem intervalo) e, **só se a "Agenda principal" ainda não tem horários**, segunda a sexta das 9h às 18h; cargas simultâneas da mesma empresa são serializadas no processo (como na 026).
+- **"Com remoção":** serviço não é apagado (agendamentos o referenciam), então remover **desativa** o serviço de exemplo; as janelas só são limpas se a empresa não tem serviço seu e as janelas ainda são exatamente as do exemplo (nunca apaga o que a empresa editou).
+- **Tela:** "Carregar exemplo" aparece quando não há serviço seu nem exemplo ativo; "Remover exemplo", quando há exemplo ativo.
+- **Testes:** integração em `schedule-sample.integration.test.ts` (carga, idempotência, concorrência, recusa com serviço real, remoção e reativação, janelas editadas, isolamento entre empresas), matriz de permissões das duas rotas no teste de rotas, inventário de rotas e um e2e do botão. A ponte do cookie (`site-bridge`) não registra o serviço de exemplo de propósito (a varredura mandaria `POST` e alteraria a agenda da empresa de teste); o inventário de rotas e a matriz de papéis cobrem a permissão.

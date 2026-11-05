@@ -310,3 +310,26 @@ test('bloquear horário: envia o intervalo local e o bloqueio aparece como Bloqu
   });
   await expect(page.getByRole('button', { name: /12:00 às 13:00/ })).toContainText('Bloqueado');
 });
+
+test('exemplo: "Carregar exemplo" só em agenda sem serviço; depois aparece "Remover exemplo"', async ({
+  page,
+}) => {
+  const agenda = await open(
+    page,
+    'OWNER',
+    (seed) => {
+      seed.noServices = true;
+    },
+    'light',
+    '/painel/agenda/configurar',
+  );
+  await expect(page.getByText('Nenhum serviço ainda.')).toBeVisible();
+  await page.getByRole('button', { name: 'Carregar exemplo' }).click();
+  await expect(page.getByText(/Exemplo carregado/)).toBeVisible();
+  expect(agenda.calls.some((call) => call.method === 'POST' && call.path === '/sample')).toBe(true);
+  await expect(page.getByText('Corte de cabelo').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Remover exemplo' }).click();
+  await expect(page.getByText('Exemplo removido.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toBeVisible();
+});

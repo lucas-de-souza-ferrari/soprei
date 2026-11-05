@@ -1,5 +1,6 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
+import { ScheduleSampleService } from './application/schedule/sample.service.js';
 import { ScheduleService } from './application/schedule/schedule.service.js';
 import { KnowledgeService } from './application/knowledge/knowledge.service.js';
 import { SampleDataService } from './application/knowledge/sample.service.js';
@@ -163,11 +164,21 @@ async function main(): Promise<void> {
   });
   const sample = new SampleDataService({ documents, products, knowledge, inventory });
   // Agenda da empresa (spec 027): a dupla reserva é impedida pelo banco (restrição de exclusão).
+  const scheduleSettings = new PrismaScheduleSettingsRepository(prisma);
+  const scheduleResources = new PrismaScheduleResourceRepository(prisma);
+  const scheduleServices = new PrismaScheduleServiceRepository(prisma);
+  const scheduleRules = new PrismaAvailabilityRuleRepository(prisma);
+  const scheduleSample = new ScheduleSampleService({
+    settings: scheduleSettings,
+    resources: scheduleResources,
+    services: scheduleServices,
+    rules: scheduleRules,
+  });
   const schedule = new ScheduleService({
-    settings: new PrismaScheduleSettingsRepository(prisma),
-    resources: new PrismaScheduleResourceRepository(prisma),
-    services: new PrismaScheduleServiceRepository(prisma),
-    rules: new PrismaAvailabilityRuleRepository(prisma),
+    settings: scheduleSettings,
+    resources: scheduleResources,
+    services: scheduleServices,
+    rules: scheduleRules,
     appointments: new PrismaAppointmentRepository(prisma),
     logger,
     metrics,
@@ -357,6 +368,7 @@ async function main(): Promise<void> {
       inventory,
       sample,
       schedule,
+      scheduleSample,
       ...(channelService === undefined ? {} : { channel: channelService }),
       ...(whatsapp === undefined
         ? {}

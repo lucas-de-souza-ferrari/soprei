@@ -1,6 +1,7 @@
 import type { FastifyPluginCallback } from 'fastify';
 import { z } from 'zod';
 import type { AuthService } from '../../application/auth/auth.service.js';
+import type { ScheduleSampleService } from '../../application/schedule/sample.service.js';
 import type {
   AppointmentView,
   ResourceView,
@@ -32,6 +33,8 @@ import { companyIdSchema } from './company.validators.js';
 
 export interface AdminScheduleControllerOptions {
   readonly auth: Pick<AuthService, 'authenticate'>;
+  /** Exemplo da agenda (E4); sem isto as rotas `.../schedule/sample` não existem. */
+  readonly sample?: Pick<ScheduleSampleService, 'load' | 'remove'> | undefined;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   readonly schedule: Pick<
     ScheduleService,
@@ -152,7 +155,7 @@ const toSlotResponse = (slot: SlotView): Record<string, unknown> => ({
  */
 export const adminScheduleController: FastifyPluginCallback<AdminScheduleControllerOptions> = (
   app,
-  { auth, metrics, schedule },
+  { auth, metrics, schedule, sample },
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
@@ -287,6 +290,25 @@ export const adminScheduleController: FastifyPluginCallback<AdminScheduleControl
     await schedule.cancelBlock(companyId, membershipId, blockId);
     return reply.status(204).send();
   });
+
+  if (sample !== undefined) {
+    app.post(`${base}/sample`, configure, async (request, reply) => {
+      const { companyId, membershipId } = membershipAuth(request);
+      const result = await sample.load(companyId);
+      request.log.info(
+        { companyId, membershipId, created: result.created },
+        'exemplo da agenda carregado',
+      );
+      return reply.status(result.created ? 201 : 200).send({ created: result.created });
+    });
+
+    app.delete(`${base}/sample`, configure, async (request) => {
+      const { companyId, membershipId } = membershipAuth(request);
+      const removed = await sample.remove(companyId);
+      request.log.info({ companyId, membershipId, ...removed }, 'exemplo da agenda removido');
+      return removed;
+    });
+  }
 
   done();
 };

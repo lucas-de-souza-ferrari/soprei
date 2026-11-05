@@ -158,7 +158,17 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
         redis: () => Promise.resolve(Result.ok(undefined)),
       },
       auth: testAuth.service,
-      admin: { companies: new CompanyService(companies), schedule },
+      admin: {
+        companies: new CompanyService(companies),
+        schedule,
+        scheduleSample: {
+          load: (...args: unknown[]) => {
+            calls.push({ method: 'sampleLoad', args });
+            return Promise.resolve({ created: true });
+          },
+          remove: () => Promise.resolve({ services: 1 }),
+        },
+      },
     });
     await app.ready();
     companyA = await companies.create({ name: 'A', slug: 'empresa-a' });
@@ -235,6 +245,8 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
       'manage',
     ],
     ['DELETE', `/blocks/${id}`, undefined, 'manage'],
+    ['POST', '/sample', undefined, 'configure'],
+    ['DELETE', '/sample', undefined, 'configure'],
   ];
   const allowed: Record<MembershipRole, ReadonlySet<string>> = {
     OWNER: new Set(['read', 'manage', 'configure']),

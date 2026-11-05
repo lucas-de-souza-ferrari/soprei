@@ -441,6 +441,23 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
       reload();
     }, 'page');
 
+  const loadSample = (): Promise<void> =>
+    run(async () => {
+      await agendaApi.loadSample(companyId);
+      setNotice({
+        tone: 'success',
+        text: 'Exemplo carregado: serviço “Corte de cabelo” e horários de segunda a sexta, das 9h às 18h.',
+      });
+      reload();
+    }, 'page');
+
+  const removeSample = (): Promise<void> =>
+    run(async () => {
+      await agendaApi.removeSample(companyId);
+      setNotice({ tone: 'success', text: 'Exemplo removido.' });
+      reload();
+    }, 'page');
+
   const saveRules = (resource: AgendaResource, windows: AgendaWindow[]): Promise<void> =>
     run(async () => {
       await agendaApi.saveRules(companyId, resource.id, windows);
@@ -471,6 +488,9 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
   }
 
   const single = resources.length <= 1;
+  // Exemplo: carrega quando não há serviço seu nem exemplo ativo; remove quando há exemplo ativo.
+  const showLoad = services.every((service) => service.isSample && !service.active);
+  const showRemove = services.some((service) => service.isSample && service.active);
 
   return (
     <div className="grid gap-6">
@@ -490,6 +510,44 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
           </Alert>
         )}
       </div>
+
+      {(showLoad || showRemove) && (
+        <section
+          className="grid gap-2 rounded-2xl border border-border bg-muted p-3"
+          aria-label="Exemplo"
+        >
+          {showLoad ? (
+            <>
+              <p className="m-0 text-sm text-foreground">
+                Quer ver funcionando? Carregue um exemplo: um serviço de 30 minutos e horários de
+                segunda a sexta, das 9h às 18h. Você pode remover depois.
+              </p>
+              <div>
+                <Button size="sm" disabled={busy} onClick={() => void loadSample()}>
+                  Carregar exemplo
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="m-0 text-sm text-foreground">
+                Os dados de exemplo estão carregados. Remover desativa o serviço de exemplo e limpa
+                os horários do exemplo.
+              </p>
+              <div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void removeSample()}
+                >
+                  Remover exemplo
+                </Button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="grid gap-3" aria-labelledby="cfg-geral">
         <h3 id="cfg-geral" className="m-0 text-lg font-semibold">

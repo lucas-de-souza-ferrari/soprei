@@ -228,10 +228,17 @@ export const agendaApi = {
     companyId: string,
     body: { resourceIds: readonly string[]; localStart: string; localEnd: string },
   ) => blocksSchema.parse(await request(`${base(companyId)}/blocks`, { method: 'POST', body })),
+  loadSample: async (companyId: string) =>
+    sampleLoadSchema.parse(await request(`${base(companyId)}/sample`, { method: 'POST' })),
+  removeSample: async (companyId: string) =>
+    sampleRemoveSchema.parse(await request(`${base(companyId)}/sample`, { method: 'DELETE' })),
   deleteBlock: async (companyId: string, blockId: string): Promise<void> => {
     await request(`${base(companyId)}/blocks/${part(blockId)}`, { method: 'DELETE' });
   },
 };
+
+export const sampleLoadSchema = z.strictObject({ created: z.boolean() });
+export const sampleRemoveSchema = z.strictObject({ services: z.number().int().min(0) });
 
 export const SLOT_TAKEN_MESSAGE = 'Esse horário acabou de ser ocupado; escolha outro.';
 export const AGENDA_INVALID_MESSAGE = 'Confira os campos e tente de novo.';
@@ -251,6 +258,7 @@ const CODE_MESSAGES: Readonly<Record<string, string>> = {
   INVALID_WINDOWS: 'Os horários do mesmo dia não podem se sobrepor.',
   INVALID_LOCAL_TIME: 'Esse horário não existe nessa data (mudança de horário de verão).',
   INVALID_RANGE: 'O fim deve ser depois do início.',
+  SAMPLE_REQUIRES_EMPTY: 'O exemplo só carrega em uma agenda sem serviços seus.',
 };
 
 /**

@@ -34,6 +34,10 @@ export interface FakeAgenda {
   /** Chamadas às rotas da agenda. */
   calls: Call[];
   availabilityReads: number;
+  /** Agenda sem serviço (o exemplo ainda não foi carregado). */
+  noServices: boolean;
+  /** O serviço que existe é o de exemplo. */
+  sample: boolean;
 }
 
 export function newAgenda(): FakeAgenda {
@@ -46,6 +50,8 @@ export function newAgenda(): FakeAgenda {
     takeNext: false,
     calls: [],
     availabilityReads: 0,
+    noServices: false,
+    sample: false,
   };
 }
 
@@ -139,7 +145,18 @@ export async function installAgendaApi(
         ],
       });
     }
+    if (path === '/sample' && method === 'POST') {
+      agenda.noServices = false;
+      agenda.sample = true;
+      return reply(201, { created: true });
+    }
+    if (path === '/sample' && method === 'DELETE') {
+      agenda.noServices = true;
+      agenda.sample = false;
+      return reply(200, { services: 1 });
+    }
     if (path === '/services' && method === 'GET') {
+      if (agenda.noServices) return reply(200, { items: [] });
       return reply(200, {
         items: [
           {
@@ -148,7 +165,7 @@ export async function installAgendaApi(
             durationMinutes: 30,
             bufferMinutes: 0,
             active: true,
-            isSample: false,
+            isSample: agenda.sample,
           },
         ],
       });
