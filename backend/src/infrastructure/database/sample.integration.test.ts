@@ -153,3 +153,17 @@ describe('dados de exemplo (E3)', () => {
     assert.equal(await products.count(company.id), SAMPLE_PRODUCTS.length);
   });
 });
+
+describe('dados de exemplo sob concorrência (E3)', () => {
+  it('duas cargas simultâneas: só uma cria e não há documentos nem produtos duplicados', async () => {
+    const { company, owner } = await newCompany('smp-conc');
+    const results = await Promise.all([
+      sample.load(company.id, owner.id),
+      sample.load(company.id, owner.id),
+      sample.load(company.id, owner.id),
+    ]);
+    assert.equal(results.filter((result) => result.created).length, 1);
+    assert.equal(await documents.countDocuments(company.id), SAMPLE_DOCUMENTS.length);
+    assert.equal(await products.count(company.id), SAMPLE_PRODUCTS.length);
+  });
+});

@@ -29,9 +29,31 @@ export interface SampleDeps {
  * reativa e restaura preço e quantidade). O `CompanyId` vem da identidade; nada do conteúdo é logado.
  */
 export class SampleDataService {
+  /** Cauda de execução por empresa: duas cargas simultâneas da mesma empresa rodam uma depois da outra. */
+  private readonly queues = new Map<string, Promise<unknown>>();
+
   constructor(private readonly deps: SampleDeps) {}
 
-  async load(companyId: CompanyId, membershipId: string): Promise<SampleLoadResult> {
+  /**
+   * Serializa as cargas da mesma empresa neste processo: a segunda enxerga o que a primeira criou e
+   * responde "nada criado" (sem documentos duplicados). Os produtos já são protegidos pelo SKU único
+   * do banco; entre processos, só documentos repetidos seriam possíveis (o servidor roda em um processo).
+   */
+  load(companyId: CompanyId, membershipId: string): Promise<SampleLoadResult> {
+    const previous = this.queues.get(companyId) ?? Promise.resolve();
+    const run = previous.then(
+      () => this.loadNow(companyId, membershipId),
+      () => this.loadNow(companyId, membershipId),
+    );
+    const tail = run.catch(() => undefined);
+    this.queues.set(companyId, tail);
+    void tail.then(() => {
+      if (this.queues.get(companyId) === tail) this.queues.delete(companyId);
+    });
+    return run;
+  }
+
+  private async loadNow(companyId: CompanyId, membershipId: string): Promise<SampleLoadResult> {
     const { documents, products, knowledge, inventory } = this.deps;
     const [docTotal, docSamples, productTotal, productSamples] = await Promise.all([
       documents.countDocuments(companyId),
