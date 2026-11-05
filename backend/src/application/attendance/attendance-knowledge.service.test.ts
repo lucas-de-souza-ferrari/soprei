@@ -4,6 +4,7 @@ import type { CompanyId } from '../../domain/index.js';
 import { MockLlmProvider } from '../../infrastructure/external-apis/llm/mock-llm.provider.js';
 import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance.js';
 import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
+import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import type { KnowledgeRetrieval, KnowledgeRetriever } from '../ports/knowledge-retriever.js';
 import {
@@ -162,7 +163,8 @@ describe('AttendanceService com base de conhecimento (spec 026)', () => {
     assert.equal(logContains(h.logs.raw(), SECRET_QUERY), false);
   });
 
-  it('fail-open: recuperação que não termina estoura o prazo (timeout) e o atendimento segue', async () => {
+  it('fail-open: recuperação que não termina estoura o prazo (timeout) e o atendimento segue', async (t) => {
+    t.after(keepEventLoopAlive()); // o timer de withTimeout é unref(): sem isto o Node 22 cancela a suíte
     const retriever = new FakeRetriever(
       () =>
         new Promise<KnowledgeRetrieval>(() => {
