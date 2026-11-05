@@ -6,7 +6,7 @@ import {
 
 /** Aviso fixo da tela (spec 026): o que a empresa não deve pôr na base e para onde o texto vai. */
 export const KNOWLEDGE_PRIVACY_NOTICE =
-  'Não coloque dados pessoais de clientes nem segredos aqui: a IA pode citar o que está nos documentos. Os trechos usados são enviados ao provedor de IA.';
+  'Não coloque dados pessoais das pessoas que escrevem para a empresa nem segredos aqui: a IA pode citar o que está nos documentos. Os trechos usados são enviados ao provedor de IA.';
 
 export type FileProblem = 'too-large' | 'empty' | 'not-utf8' | 'content-too-large' | 'wrong-type';
 

@@ -3,7 +3,8 @@
  * servidor devolve em `GET /account/companies`. É só conveniência de tela: o backend continua sendo a
  * barreira (uma aba escondida não protege nada).
  */
-export type AreaPage = 'conversas' | 'canal' | 'persona' | 'conhecimento' | 'equipe' | 'testar';
+export type AreaPage =
+  'conversas' | 'canal' | 'persona' | 'conhecimento' | 'estoque' | 'equipe' | 'testar';
 
 /** Ordem do menu: Conversas é a primeira aba e a página inicial de quem pode ler (spec 024). */
 export const AREA_PAGES: readonly AreaPage[] = [
@@ -11,6 +12,7 @@ export const AREA_PAGES: readonly AreaPage[] = [
   'canal',
   'persona',
   'conhecimento',
+  'estoque',
   'equipe',
   'testar',
 ];
@@ -21,6 +23,8 @@ const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   persona: '/painel/persona',
   // Base de conhecimento da IA (spec 026): depois de Persona, só com `knowledge:manage`.
   conhecimento: '/painel/conhecimento',
+  // Estoque (spec 026, E2): depois de Conhecimento, só com `inventory:manage`.
+  estoque: '/painel/estoque',
   // Equipe (spec 025): depois de Persona e antes de Testar, só com `membership:read`.
   equipe: '/painel/equipe',
   testar: '/painel/testar',
@@ -31,6 +35,7 @@ export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   canal: 'Canal',
   persona: 'Persona',
   conhecimento: 'Conhecimento',
+  estoque: 'Estoque',
   equipe: 'Equipe',
   testar: 'Testar',
 };
@@ -41,6 +46,7 @@ const REQUIRED: Readonly<Record<AreaPage, string>> = {
   canal: 'channel:read',
   persona: 'persona:manage',
   conhecimento: 'knowledge:manage',
+  estoque: 'inventory:manage',
   equipe: 'membership:read',
   testar: 'conversation:simulate',
 };

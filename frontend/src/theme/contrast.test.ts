@@ -69,6 +69,12 @@ const textPairs: [string, string][] = [
   // muted-foreground, Pendente = primary, Vencido = destructive), texto secundário das linhas em card
   // (muted-foreground/card) e o diálogo de confirmação (card-foreground/card e background/destructive).
   ['color-success', 'muted'],
+  // Spec 026: selos de texto da base de conhecimento e do estoque sobre `muted` (Exemplo e Desativado =
+  // muted-foreground; Sem estoque = destructive; Estoque baixo = primary; Em estoque = color-success),
+  // aviso fixo de privacidade (foreground em muted) e linhas de lista em card (card-foreground em card).
+  ['destructive', 'muted'],
+  ['primary', 'muted'],
+  ['foreground', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],

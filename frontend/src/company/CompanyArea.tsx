@@ -11,6 +11,7 @@ import {
   type AreaPage,
 } from './company-nav';
 import { ConversationPage } from './ConversationPage';
+import { EstoquePage } from './EstoquePage';
 import { KnowledgePage } from './KnowledgePage';
 import { ConversationsPage } from './ConversationsPage';
 import { failureOf } from './company-api';
@@ -147,6 +148,8 @@ export function CompanyArea({
             <PersonaPage key={company.companyId} companyId={company.companyId} settle={settle} />
           ) : page === 'conhecimento' ? (
             <KnowledgePage key={company.companyId} companyId={company.companyId} settle={settle} />
+          ) : page === 'estoque' ? (
+            <EstoquePage key={company.companyId} companyId={company.companyId} settle={settle} />
           ) : page === 'equipe' ? (
             <TeamPage
               key={company.companyId}
