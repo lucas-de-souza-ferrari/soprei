@@ -225,6 +225,15 @@ export async function installAgendaApi(
       }
       return reply(200, found);
     }
+    const blockOne = /^\/blocks\/([^/]+)$/.exec(path);
+    if (blockOne !== null && method === 'DELETE') {
+      const index = agenda.appointments.findIndex(
+        (item) => item.id === blockOne[1] && item.kind === 'BLOCK',
+      );
+      if (index < 0) return fail(404, 'NOT_FOUND');
+      agenda.appointments.splice(index, 1);
+      return reply(204);
+    }
     if (path === '/blocks' && method === 'POST') {
       const input = body as { resourceIds: string[]; localStart: string; localEnd: string };
       const [date = '', start = '00:00'] = input.localStart.split('T');

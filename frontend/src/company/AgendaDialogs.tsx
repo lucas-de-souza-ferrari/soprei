@@ -159,6 +159,8 @@ export interface NewAppointmentDialogProps {
   readonly slotsVersion: number;
   readonly settle: (error: unknown) => string | null;
   readonly canConfigure: boolean;
+  /** Data (`YYYY-MM-DD`) ou data e hora (`YYYY-MM-DDTHH:mm`) vindas de um clique no calendário. */
+  readonly initialStart?: string | undefined;
   readonly onSubmit: (values: {
     serviceId: string;
     resourceId: string;
@@ -178,16 +180,20 @@ export function NewAppointmentDialog({
   slotsVersion,
   settle,
   canConfigure,
+  initialStart,
   onSubmit,
 }: NewAppointmentDialogProps) {
   const activeServices = services.filter((service) => service.active);
   const activeResources = resources.filter((resource) => resource.active);
   const [serviceId, setServiceId] = useState(activeServices[0]?.id ?? '');
   const [resourceId, setResourceId] = useState(activeResources[0]?.id ?? '');
-  const [date, setDate] = useState(today);
+  // Aberto pelo calendário (spec 029): a data (e a hora, quando veio da faixa da semana) já preenchidas; o
+  // servidor continua sendo quem valida (a lista de horários livres é só sugestão).
+  const preset = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?$/.exec(initialStart ?? '');
+  const [date, setDate] = useState(preset?.[1] ?? today);
   const [picked, setPicked] = useState<string | null>(null);
-  const [fit, setFit] = useState(false);
-  const [fitTime, setFitTime] = useState('');
+  const [fit, setFit] = useState(preset?.[2] !== undefined);
+  const [fitTime, setFitTime] = useState(preset?.[2] ?? '');
   const [name, setName] = useState('');
   const [local, setLocal] = useState<string | null>(null);
 

@@ -89,6 +89,12 @@ const textPairs: [string, string][] = [
   ['foreground', 'card'],
   ['foreground', 'muted'],
   ['muted-foreground', 'card'],
+  // Spec 029 (E3 e E4): texto das bolhas (foreground em bubble e em card) e do calendário da agenda: bloco e
+  // item do mês (card-foreground em card), cabeçalho do dia de hoje (foreground em muted), dia de outro mês
+  // (muted-foreground em muted) e "Agendar" no cabeçalho (muted-foreground em card e em muted).
+  ['foreground', 'bubble'],
+  ['card-foreground', 'card'],
+  ['muted-foreground', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],

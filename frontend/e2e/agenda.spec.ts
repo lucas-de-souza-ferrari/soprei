@@ -17,6 +17,10 @@ async function open(
   seed(agenda);
   await installAgendaApi(page, api, agenda, role);
   await page.goto(path);
+  // O padrão no computador é a Semana (spec 029); estes testes cobrem a Lista, que continua completa.
+  if (path === '/painel/agenda') {
+    await page.getByRole('button', { name: 'Lista', exact: true }).click();
+  }
   return agenda;
 }
 

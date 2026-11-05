@@ -45,12 +45,26 @@ import {
   PrivacyNote,
   Problem,
 } from './AgendaDialogs';
+import { AgendaCalendar } from './AgendaCalendar';
+import {
+  addMonths,
+  type AgendaView,
+  monthAnnouncement,
+  monthLabel,
+  monthRange,
+  monthStart,
+  RANGE_TOO_LARGE_MONTH_MESSAGE,
+} from './calendar-rules';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 import type { PageProps } from './PersonaPage';
 
 type Notice = { tone: 'error' | 'success'; text: string } | null;
-type Dialog = { kind: 'new' } | { kind: 'item'; item: Appointment } | { kind: 'block' } | null;
+type Dialog =
+  | { kind: 'new'; initialStart?: string }
+  | { kind: 'item'; item: Appointment }
+  | { kind: 'block' }
+  | null;
 
 export const AGENDA_SAVE_FAILED = 'Não foi possível salvar agora. Tente de novo.';
 const OWN_MESSAGE_STATUSES = [403, 429, 502, 503];
@@ -95,6 +109,26 @@ function Chip({ children }: { children: ReactNode }) {
   );
 }
 
+const NARROW_QUERY = '(max-width: 767px)';
+
+/** Tela estreita (abaixo de 768 px), acompanhando mudanças de tamanho. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches);
+  useEffect(() => {
+    const query = window.matchMedia(NARROW_QUERY);
+    const onChange = () => setNarrow(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
+const VIEW_LABELS: Readonly<Record<AgendaView, string>> = {
+  list: 'Lista',
+  week: 'Semana',
+  month: 'Mês',
+};
+
 export interface AgendaPageProps extends PageProps {
   readonly permissions: readonly string[];
   readonly onConfigure: () => void;
@@ -111,7 +145,13 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
   const canConfigure = permissions.includes('schedule:configure');
   const [timezone, setTimezone] = useState('');
   const [today, setToday] = useState('');
-  const [start, setStart] = useState<string | null>(null);
+  // Qualquer dia do período mostrado: a semana (lista e semana) e o mês saem dele.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const narrow = useNarrow();
+  // Visão só em memória (nada em armazenamento, URL ou título): Lista no celular e Semana no computador.
+  const [view, setView] = useState<AgendaView>(() => (narrow ? 'list' : 'week'));
+  const [tooLarge, setTooLarge] = useState(false);
+  const [focusDay, setFocusDay] = useState<string | null>(null);
   const [resources, setResources] = useState<readonly AgendaResource[]>([]);
   const [services, setServices] = useState<readonly AgendaService[]>([]);
   const [items, setItems] = useState<readonly Appointment[]>([]);
@@ -143,7 +183,7 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
         if (stamp !== generation.current) return;
         setTimezone(settings.timezone);
         setToday(settings.today);
-        setStart((current) => current ?? weekStart(settings.today));
+        setCursor((current) => current ?? settings.today);
         setResources(resourceList);
         setServices(serviceList);
       })
@@ -157,15 +197,27 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
     };
   }, [companyId, settle, attempt]);
 
-  // 2) Os itens da semana e dos filtros.
+  const start = cursor === null ? null : weekStart(cursor);
+  const month = cursor === null ? null : monthStart(cursor);
+  const range =
+    start === null || month === null
+      ? null
+      : view === 'month'
+        ? monthRange(month)
+        : { from: start, to: addDays(start, 6) };
+  const rangeFrom = range?.from ?? null;
+  const rangeTo = range?.to ?? null;
+
+  // 2) Os itens do período (semana ou mês) e dos filtros.
   useEffect(() => {
-    if (start === null) return;
+    if (rangeFrom === null || rangeTo === null) return;
     const stamp = ++generation.current;
     setLoadError(null);
+    setTooLarge(false);
     agendaApi
       .appointments(companyId, {
-        from: start,
-        to: addDays(start, 6),
+        from: rangeFrom,
+        to: rangeTo,
         resourceId: resourceFilter === '' ? undefined : resourceFilter,
         serviceId: serviceFilter === '' ? undefined : serviceFilter,
         status: statusFilter === '' ? undefined : statusFilter,
@@ -175,10 +227,22 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
         setItems(result.items);
         setToday(result.today);
         setLoaded(true);
-        setAnnouncement(weekAnnouncement(start, result.items.length));
+        setAnnouncement(
+          view === 'month' && month !== null
+            ? monthAnnouncement(month, result.items.length)
+            : weekAnnouncement(weekStart(rangeFrom), result.items.length),
+        );
       })
       .catch((error: unknown) => {
         if (stamp !== generation.current) return;
+        // Mês com itens demais: mensagem constante e a saída pela Semana; nada é truncado em silêncio.
+        if (view === 'month' && error instanceof ApiError && error.code === 'RANGE_TOO_LARGE') {
+          setItems([]);
+          setLoaded(true);
+          setTooLarge(true);
+          setAnnouncement('');
+          return;
+        }
         const own = agendaMessageOf(error);
         const text = own ?? settle(error);
         if (text !== null) setLoadError(text);
@@ -186,7 +250,27 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
     return () => {
       generation.current++;
     };
-  }, [companyId, settle, start, resourceFilter, serviceFilter, statusFilter, attempt]);
+  }, [
+    companyId,
+    settle,
+    rangeFrom,
+    rangeTo,
+    view,
+    resourceFilter,
+    serviceFilter,
+    statusFilter,
+    attempt,
+  ]);
+
+  // Depois de abrir um dia na lista (toque no mês), leva o foco ao título do dia.
+  useEffect(() => {
+    if (focusDay === null || view !== 'list' || !loaded) return;
+    const heading = document.getElementById(`dia-${focusDay}`);
+    if (heading === null) return;
+    heading.focus();
+    heading.scrollIntoView({ block: 'start' });
+    setFocusDay(null);
+  }, [focusDay, view, loaded, items]);
 
   const failure = useCallback(
     (error: unknown, inDialog: boolean): void => {
@@ -299,7 +383,7 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
       </div>
     );
   }
-  if (!loaded || start === null) {
+  if (!loaded || start === null || month === null || cursor === null) {
     return (
       <div className="grid place-items-center gap-3 py-10 text-sm text-muted-foreground">
         <Loader variant="spinner" size={28} label="Carregando a agenda" />
@@ -309,6 +393,18 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
   }
 
   const days = groupByDay(items, weekDates(start));
+  const step = (direction: 1 | -1): void =>
+    setCursor(view === 'month' ? addMonths(month, direction) : addDays(start, 7 * direction));
+  const openDay = (date: string, target: 'week' | 'list'): void => {
+    setCursor(date);
+    setView(target);
+    if (target === 'list') setFocusDay(date);
+  };
+  const newAt = (initialStart: string): void => {
+    setDialogProblem(null);
+    setSlotsVersion(0);
+    setDialog({ kind: 'new', initialStart });
+  };
   const activeResources = resources.filter((resource) => resource.active);
   const openItem = (item: Appointment): void => {
     setDialogProblem(null);
@@ -317,7 +413,7 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
   };
 
   return (
-    <div className="grid gap-5">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       <div aria-live="polite">
         {notice && (
           <Alert variant={notice.tone === 'error' ? 'destructive' : 'success'}>
@@ -329,29 +425,40 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
         )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Semana">
-          <Button variant="outline" size="sm" onClick={() => setStart(addDays(start, -7))}>
-            Semana anterior
+        <div
+          className="flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label={view === 'month' ? 'Mês' : 'Semana'}
+        >
+          <Button variant="outline" size="sm" onClick={() => step(-1)}>
+            {view === 'month' ? 'Mês anterior' : 'Semana anterior'}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setStart(weekStart(today))}>
+          <Button variant="outline" size="sm" onClick={() => setCursor(today)}>
             Hoje
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setStart(addDays(start, 7))}>
-            Próxima semana
+          <Button variant="outline" size="sm" onClick={() => step(1)}>
+            {view === 'month' ? 'Próximo mês' : 'Próxima semana'}
           </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canManage && (
+        <div
+          className="flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Visão da agenda"
+        >
+          {(['list', 'week', 'month'] as const).map((option) => (
             <Button
-              onClick={() => {
-                setDialogProblem(null);
-                setSlotsVersion(0);
-                setDialog({ kind: 'new' });
-              }}
+              key={option}
+              variant={view === option ? 'primary' : 'outline'}
+              size="sm"
+              aria-pressed={view === option}
+              onClick={() => setView(option)}
             >
-              Novo agendamento
+              {VIEW_LABELS[option]}
             </Button>
-          )}
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {canManage && <Button onClick={() => newAt('')}>Novo agendamento</Button>}
           {canManage && (
             <Button
               variant="outline"
@@ -371,7 +478,9 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
         </div>
       </div>
 
-      <h2 className="m-0 text-xl font-semibold">{weekLabel(start)}</h2>
+      <h2 className="m-0 text-xl font-semibold first-letter:uppercase">
+        {view === 'month' ? monthLabel(month) : weekLabel(start)}
+      </h2>
       <p role="status" aria-live="polite" className="m-0 text-sm text-muted-foreground">
         {announcement}
       </p>
@@ -426,12 +535,36 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
         </Field>
       </div>
 
-      <div className="grid gap-4">
+      {view !== 'list' && tooLarge && (
+        <div className="grid gap-3">
+          <Problem text={RANGE_TOO_LARGE_MONTH_MESSAGE} />
+          <div>
+            <Button variant="outline" size="sm" onClick={() => setView('week')}>
+              Ver a semana
+            </Button>
+          </div>
+        </div>
+      )}
+      {view !== 'list' && !tooLarge && (
+        <AgendaCalendar
+          view={view}
+          cursor={cursor}
+          today={today}
+          items={items}
+          canManage={canManage}
+          narrow={narrow}
+          onOpenItem={openItem}
+          onNewAt={newAt}
+          onOpenDay={openDay}
+        />
+      )}
+      <div className={view === 'list' ? 'grid gap-4' : 'hidden'}>
         {days.map((group) => (
           <section key={group.date} aria-labelledby={`dia-${group.date}`} className="grid gap-2">
             <h3
               id={`dia-${group.date}`}
-              className="m-0 flex items-center gap-2 text-base font-semibold"
+              tabIndex={-1}
+              className="m-0 flex items-center gap-2 text-base font-semibold outline-none focus-visible:outline-3 focus-visible:outline-ring"
             >
               <span className="first-letter:uppercase">{dayHeading(group.date)}</span>
               {group.date === today && <Chip>Hoje</Chip>}
@@ -476,6 +609,7 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
           <NewAppointmentDialog
             companyId={companyId}
             today={today}
+            initialStart={dialog.initialStart}
             services={services}
             resources={resources}
             busy={busy}
