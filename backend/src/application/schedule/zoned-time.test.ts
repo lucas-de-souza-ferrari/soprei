@@ -87,6 +87,21 @@ describe('zoned-time (spec 027)', () => {
     assert.equal(isValidTimeZone('Mars/Olympus'), false);
     assert.equal(isValidTimeZone(''), false);
     assert.equal(isValidTimeZone('x'.repeat(65)), false);
+    for (const bad of [
+      '+03:00',
+      '-03:00',
+      'Etc/GMT+3',
+      'Etc/GMT-3',
+      'GMT',
+      'EST',
+      'America',
+      'America/',
+      '/Sao_Paulo',
+    ]) {
+      assert.equal(isValidTimeZone(bad), false, bad);
+    }
+    assert.equal(isValidTimeZone('America/Argentina/Buenos_Aires'), true);
+    assert.equal(isValidTimeZone('Europe/Lisbon'), true);
   });
 
   it('parseLocalDateTime recusa formato e valores impossíveis', () => {
