@@ -181,28 +181,28 @@ Cada etapa fecha com `typecheck`, `lint`, `format:check` e os testes dela verdes
 
 **Dupla reserva e atomicidade (E1)**
 
-- [ ] [I] **Concorrência, mesmo horário:** 20 criações simultâneas (`Promise.all` em conexões distintas do pool) do **mesmo recurso e horário**: exatamente **1** sucesso e **19** `SLOT_TAKEN` (409), 1 linha ativa no banco, nenhum 500, nenhuma linha parcial.
-- [ ] [I] **Concorrência, sobreposição parcial:** 10:00-10:30 contra 10:15-10:45 ao mesmo tempo: um ganha. Adjacentes (10:00-10:30 e 10:30-11:00) **ambos** passam quando o buffer é 0; com buffer de 10 min, 10:30 colide e 10:40 passa (limite semiaberto `[)`).
-- [ ] [I] **Recursos e empresas independentes:** mesmo horário em **recursos diferentes** da mesma empresa passa; mesmo horário e **mesmo `resource_id` lógico** em **empresas diferentes** passa (cada empresa tem os seus recursos); o isolamento não depende da restrição.
-- [ ] [I] **Cancelar libera:** depois do cancelamento, o mesmo horário é reservável; cancelamento duplicado e concorrente é idempotente (um `cancelled_at`); `COMPLETED`/`NO_SHOW`/`CANCELLED` não seguram o intervalo; `PENDING` e `CONFIRMED` seguram.
-- [ ] [I] **Remarcar:** para horário livre, muda a mesma linha; para horário ocupado, 409 e **o horário antigo continua do contato**; remarcação concorrente de dois agendamentos para o mesmo destino: um ganha; remarcações cruzadas (A para o lugar de B e B para o de A) terminam sem deadlock pendente (um sucesso ou ambos 409).
-- [ ] [I] **Bloqueio contra reserva:** bloqueio sobre horário reservado = 409; reserva sobre bloqueio = 409; criar bloqueio para vários recursos é tudo ou nada.
-- [ ] [I] A restrição vale **fora da aplicação**: um `INSERT` direto por SQL que sobrepõe é recusado pelo banco com `23P01`; CHECKs recusam `ends <= starts`, bloqueio com serviço e reserva sem serviço.
+- [x] [I] **Concorrência, mesmo horário:** 20 criações simultâneas (`Promise.all` em conexões distintas do pool) do **mesmo recurso e horário**: exatamente **1** sucesso e **19** `SLOT_TAKEN` (409), 1 linha ativa no banco, nenhum 500, nenhuma linha parcial.
+- [x] [I] **Concorrência, sobreposição parcial:** 10:00-10:30 contra 10:15-10:45 ao mesmo tempo: um ganha. Adjacentes (10:00-10:30 e 10:30-11:00) **ambos** passam quando o buffer é 0; com buffer de 10 min, 10:30 colide e 10:40 passa (limite semiaberto `[)`).
+- [x] [I] **Recursos e empresas independentes:** mesmo horário em **recursos diferentes** da mesma empresa passa; mesmo horário e **mesmo `resource_id` lógico** em **empresas diferentes** passa (cada empresa tem os seus recursos); o isolamento não depende da restrição.
+- [x] [I] **Cancelar libera:** depois do cancelamento, o mesmo horário é reservável; cancelamento duplicado e concorrente é idempotente (um `cancelled_at`); `COMPLETED`/`NO_SHOW`/`CANCELLED` não seguram o intervalo; `PENDING` e `CONFIRMED` seguram.
+- [x] [I] **Remarcar:** para horário livre, muda a mesma linha; para horário ocupado, 409 e **o horário antigo continua do contato**; remarcação concorrente de dois agendamentos para o mesmo destino: um ganha; remarcações cruzadas (A para o lugar de B e B para o de A) terminam sem deadlock pendente (um sucesso ou ambos 409).
+- [x] [I] **Bloqueio contra reserva:** bloqueio sobre horário reservado = 409; reserva sobre bloqueio = 409; criar bloqueio para vários recursos é tudo ou nada.
+- [x] [I] A restrição vale **fora da aplicação**: um `INSERT` direto por SQL que sobrepõe é recusado pelo banco com `23P01`; CHECKs recusam `ends <= starts`, bloqueio com serviço e reserva sem serviço.
 
 **Tempo e disponibilidade (E1)**
 
-- [ ] [U] `zoned-time`: ida e volta local <-> UTC em `America/Sao_Paulo`, `America/Manaus`, `America/New_York` e `Europe/Lisbon`; **lacuna** do horário de verão (2026-03-08 02:30 em Nova York) não gera candidato; **repetição** (2026-11-01 01:30 em Nova York) usa a primeira ocorrência; virada de dia e de mês e ano bissexto; fuso inválido recusado.
-- [ ] [U] `computeSlots` com relógio injetado: respeita janelas (várias por dia), duração e buffer, antecedência mínima (slot de "daqui a 30 min" some com mínimo de 120), teto de dias, passo, bloqueios e agendamentos ativos (cancelados não contam); serviço que não cabe na janela não gera slot; dia sem regra vazio; janela 9h-12h com serviço de 60 min e passo 30 gera 9:00, 9:30, 10:00, 10:30, 11:00 (e não 11:30).
-- [ ] [I] Dois fusos: a mesma regra "9h-12h" produz instantes UTC diferentes em empresas com fusos diferentes e o `localStart` devolvido bate com a regra; trocar o fuso **não move** agendamento já gravado (continua o mesmo instante).
-- [ ] [R] Entrada `startsAt` sem deslocamento = 400; `localStart` é interpretado no fuso da empresa (não do servidor: o teste roda com `TZ` diferente).
+- [x] [U] `zoned-time`: ida e volta local <-> UTC em `America/Sao_Paulo`, `America/Manaus`, `America/New_York` e `Europe/Lisbon`; **lacuna** do horário de verão (2026-03-08 02:30 em Nova York) não gera candidato; **repetição** (2026-11-01 01:30 em Nova York) usa a primeira ocorrência; virada de dia e de mês e ano bissexto; fuso inválido recusado.
+- [x] [U] `computeSlots` com relógio injetado: respeita janelas (várias por dia), duração e buffer, antecedência mínima (slot de "daqui a 30 min" some com mínimo de 120), teto de dias, passo, bloqueios e agendamentos ativos (cancelados não contam); serviço que não cabe na janela não gera slot; dia sem regra vazio; janela 9h-12h com serviço de 60 min e passo 30 gera 9:00, 9:30, 10:00, 10:30, 11:00 (e não 11:30).
+- [x] [I] Dois fusos: a mesma regra "9h-12h" produz instantes UTC diferentes em empresas com fusos diferentes e o `localStart` devolvido bate com a regra; trocar o fuso **não move** agendamento já gravado (continua o mesmo instante).
+- [x] [R] Entrada `startsAt` sem deslocamento = 400; `localStart` é interpretado no fuso da empresa (não do servidor: o teste roda com `TZ` diferente).
 
 **Isolamento e permissões (E1)**
 
-- [ ] [I] **Isolamento A×B** para todos os repositórios novos: empresa A não enxerga serviço, recurso, regra, agendamento nem bloqueio da B; `PATCH`/`DELETE`/remarcar com **id da outra empresa** = 404 igual a inexistente; `serviceId` ou `resourceId` da B num agendamento da A = recusado (FK composta, também por `INSERT` direto); `availability` da A ignora agendamentos da B no **mesmo** horário; listas com cursor/intervalo não vazam.
-- [ ] [R] `OWNER` e `ADMIN` operam tudo; `AGENT` lê e gerencia agendamentos mas recebe 403 em `settings`/`services`/`resources`/`rules`; `VIEWER` só lê (403 nas escritas); `PlatformAdmin` 403; sem token 401; `:companyId` divergente 404 **antes** do 403; com cookie vale o hook de `Origin`/`X-Soprei-App` e a ponte da 023.
-- [ ] [U] Snapshot de `ROLE_PERMISSIONS` com `schedule:read|manage|configure` como na tabela; inventário de rotas (`rate-limit.test.ts`) cobre as rotas novas (perfil `admin` e `requirePermission`).
-- [ ] [R] Validação Zod `strict`: campo extra, `durationMinutes` não múltiplo de 5, `weekday` fora de 1..7, janela invertida ou sobreposta, intervalo `availability` > 14 dias, `appointments` > 42 dias e `customerLabel` > 60 = 400; erro **não ecoa o valor**; no passado = `IN_THE_PAST`.
-- [ ] [R] Transições: `CANCELLED -> CONFIRMED` = 409 `INVALID_TRANSITION`; `COMPLETED` antes de `starts_at` = 409; desativar recurso com agendamento futuro ativo = 409 `RESOURCE_HAS_APPOINTMENTS`; serviço desativado continua nos agendamentos existentes.
+- [x] [I] **Isolamento A×B** para todos os repositórios novos: empresa A não enxerga serviço, recurso, regra, agendamento nem bloqueio da B; `PATCH`/`DELETE`/remarcar com **id da outra empresa** = 404 igual a inexistente; `serviceId` ou `resourceId` da B num agendamento da A = recusado (FK composta, também por `INSERT` direto); `availability` da A ignora agendamentos da B no **mesmo** horário; listas com cursor/intervalo não vazam.
+- [x] [R] `OWNER` e `ADMIN` operam tudo; `AGENT` lê e gerencia agendamentos mas recebe 403 em `settings`/`services`/`resources`/`rules`; `VIEWER` só lê (403 nas escritas); `PlatformAdmin` 403; sem token 401; `:companyId` divergente 404 **antes** do 403; com cookie vale o hook de `Origin`/`X-Soprei-App` e a ponte da 023.
+- [x] [U] Snapshot de `ROLE_PERMISSIONS` com `schedule:read|manage|configure` como na tabela; inventário de rotas (`rate-limit.test.ts`) cobre as rotas novas (perfil `admin` e `requirePermission`).
+- [x] [R] Validação Zod `strict`: campo extra, `durationMinutes` não múltiplo de 5, `weekday` fora de 1..7, janela invertida ou sobreposta, intervalo `availability` > 14 dias, `appointments` > 42 dias e `customerLabel` > 60 = 400; erro **não ecoa o valor**; no passado = `IN_THE_PAST`.
+- [x] [R] Transições: `CANCELLED -> CONFIRMED` = 409 `INVALID_TRANSITION`; `COMPLETED` antes de `starts_at` = 409; desativar recurso com agendamento futuro ativo = 409 `RESOURCE_HAS_APPOINTMENTS`; serviço desativado continua nos agendamentos existentes.
 
 **IA (E3)**
 
@@ -221,7 +221,7 @@ Cada etapa fecha com `typecheck`, `lint`, `format:check` e os testes dela verdes
 
 **Migration (E1)**
 
-- [ ] [I] Migration em **schema temporário** (padrão 017/020/021/025/026): aplica sobre o schema anterior (com o `search_path` incluindo o schema onde `btree_gist` está instalado, ou instalando a extensão no temporário), cria as tabelas, enums, FKs compostas, CHECKs e a restrição `EXCLUDE`; o teste de drift (`schema-catalog.integration.test.ts`) continua verde com a exceção do `EXCLUDE` documentada **com o motivo**; `EXPLAIN` da consulta de agendamentos por intervalo usa índice.
+- [x] [I] Migration em **schema temporário** (padrão 017/020/021/025/026): aplica sobre o schema anterior (com o `search_path` incluindo o schema onde `btree_gist` está instalado, ou instalando a extensão no temporário), cria as tabelas, enums, FKs compostas, CHECKs e a restrição `EXCLUDE`; o teste de drift (`schema-catalog.integration.test.ts`) continua verde com a exceção do `EXCLUDE` documentada **com o motivo**; `EXPLAIN` da consulta de agendamentos por intervalo usa índice.
 
 **Frontend (E2; E5 para o e2e)**
 
@@ -334,4 +334,19 @@ Fontes a consultar pelo implementador antes de seguir: documentação do Postgre
 
 ## Registro da implementação
 
-(vazio; preenchido pelo implementador ao terminar cada etapa)
+**Status por etapa:** E1 pronta (backend) | E2 pendente | E3 pendente | E4 pendente | E5 e E6 não iniciadas (cortáveis).
+
+**E1 (núcleo do backend): implementada na branch, tudo verde localmente em Node 24** (bateria no `docs/handoff.md`). Pastas: `domain/schedule.ts` (constantes `SCHEDULE_*`, tipos, interfaces dos cinco repositórios, `canTransition`); `application/schedule/` (`zoned-time.ts`, `availability.ts` com `computeSlots`, `schedule.schemas.ts`, `schedule.service.ts`); `infrastructure/database/repositories/schedule.repository.ts` (os cinco repositórios; **único** ponto que traduz a violação de exclusão em `SLOT_TAKEN`, via `isExclusionViolation` em `database-errors.ts`); `presentation/admin/schedule.controller.ts`; métricas `schedule_actions_total{action,result}` e `schedule_context_total{result}` (esta última só é usada na E3); migration `20261105100000_schedule_appointments` (cria `btree_gist`, quatro enums, cinco tabelas, FKs compostas, CHECKs e a restrição `appointments_no_overlap`); permissões `schedule:read|manage|configure` no mapa fixo.
+
+Decisões e desvios da E1 (com motivo):
+- **`btree_gist`:** o `CREATE EXTENSION IF NOT EXISTS btree_gist` da própria migration funcionou em `soprei_test` (extensão trusted, role `soprei` dona do banco). O Prisma não representa `EXCLUDE`; o `migrate diff` do teste de drift **nem a enxerga**, então não foi preciso acrescentar exceção à lista `KNOWN_DRIFT`; o teste novo no mesmo arquivo prova que `appointments_no_overlap` existe no banco migrado (exceção declarada com o motivo no comentário).
+- **Forma do erro 23P01 no Prisma 7:** `PrismaClientKnownRequestError` de código `P2039` com `meta.driverAdapterError.cause.originalCode = '23P01'` (a mensagem do Postgres é localizada e traz a chave em conflito, por isso nunca é copiada). `isExclusionViolation` olha o código, não o texto; deadlock (`P2034`) esgotado vira `SLOT_TAKEN` também. Criar é um único `INSERT` fora de transação (atômico por si); remarcar e criar vários bloqueios usam `runInTransaction` (repete P2034).
+- **Recurso das regras:** o `PUT .../rules` trava a linha do recurso com `SELECT ... FOR NO KEY UPDATE` (SQL controlado, `company_id` na cláusula; `NO KEY UPDATE` e não `FOR UPDATE` para não bloquear o `KEY SHARE` do `INSERT` de um agendamento).
+- **Leitura das janelas:** a spec lista só o `PUT`; para a tela de configuração ler as janelas atuais, `GET .../resources` devolve cada recurso com `windows` (`[{ weekday, start, end }]`), sem rota nova.
+- **Campos extras (aditivos):** a lista de agendamentos devolve também `timezone` (o rodapé da tela usa) e cada horário livre/agendamento leva `weekday`; `POST .../blocks` devolve `{ items }`.
+- **Códigos de erro:** `SLOT_TAKEN`, `IN_THE_PAST`, `INVALID_TRANSITION`, `RESOURCE_HAS_APPOINTMENTS`, `SCHEDULE_LIMIT_REACHED`, `SERVICE_INACTIVE`, `RESOURCE_INACTIVE`, `RANGE_TOO_LARGE`, `INVALID_TIMEZONE` (como na spec) e, a mais, `INVALID_WINDOWS`, `INVALID_LOCAL_TIME` (horário local inexistente, como a lacuna do horário de verão) e `INVALID_RANGE`. Repetir o mesmo estado (confirmar ou cancelar de novo) é idempotente e devolve o agendamento atual.
+- **Teto de ativos futuros e desativar recurso** são de melhor esforço sob concorrência (contagem antes da escrita), como os tetos da 026; a dupla reserva não depende deles. Bloqueios entram na contagem do teto; só reservas (`BOOKING`) impedem desativar o recurso.
+- **Remarcar** mantém duração e intervalo gravados (o `blocked_until` histórico), sem reconsultar o serviço (que pode ter mudado ou estar desativado).
+- **`ScheduleService` importa só tipos de métricas** de `infrastructure/metrics` (o ESLint aceita); o log do serviço leva só ids, ação e resultado (nunca nome, rótulo, contato nem horário).
+- **Testes de rota** usam serviço simulado (permissões, validação, privacidade) e o comportamento real fica nos de integração (`infrastructure/database/schedule.integration.test.ts`, `schedule-migration.integration.test.ts`); o `site-bridge` e o inventário de rotas incluem as rotas novas.
+- **`localStart` no fuso do processo:** não há conversão em hora local do processo em lugar nenhum (só `Intl` com o fuso da empresa); o teste de Nova York prova o instante UTC esperado.
