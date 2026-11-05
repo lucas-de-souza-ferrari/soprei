@@ -1,6 +1,8 @@
 import { useCallback, useRef } from 'react';
 import { Button } from '../components/motion/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/motion/tabs';
+import { AgendaConfigPage } from './AgendaConfigPage';
+import { AgendaPage } from './AgendaPage';
 import { ChannelPage } from './ChannelPage';
 import {
   allowedPages,
@@ -91,7 +93,7 @@ export function CompanyArea({
         </Button>
       </div>
       <Tabs
-        value={page}
+        value={page === 'agendaConfig' ? 'agenda' : page}
         onValueChange={(value) => {
           if (isAreaPage(value)) onNavigate(value);
         }}
@@ -109,7 +111,7 @@ export function CompanyArea({
             ))}
           </TabsList>
         )}
-        <TabsContent value={page}>
+        <TabsContent value={page === 'agendaConfig' ? 'agenda' : page}>
           {!allowed ? (
             <p className="m-0 py-2">
               {pages.length === 0
@@ -136,6 +138,21 @@ export function CompanyArea({
                 onBack={onBackToConversations}
               />
             )
+          ) : page === 'agenda' ? (
+            <AgendaPage
+              key={company.companyId}
+              companyId={company.companyId}
+              settle={settle}
+              permissions={company.permissions}
+              onConfigure={() => onNavigate('agendaConfig')}
+            />
+          ) : page === 'agendaConfig' ? (
+            <AgendaConfigPage
+              key={company.companyId}
+              companyId={company.companyId}
+              settle={settle}
+              onBack={() => onNavigate('agenda')}
+            />
           ) : page === 'canal' ? (
             <ChannelPage
               key={company.companyId}

@@ -16,7 +16,7 @@ import { bearer, buildTestAuth, type TestAuth } from '../../test-support/in-memo
 import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { captureLogs, logContains, type LogCapture } from '../../test-support/log-capture.js';
 
-const SECRET_LABEL = `Cliente secreto ${randomUUID()}`;
+const SECRET_LABEL = `Pessoa secreta ${randomUUID()}`;
 const SECRET_NAME = `Servico secreto ${randomUUID()}`;
 const SECRET_CONTACT = '5511987654321';
 
@@ -80,6 +80,7 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
       getSettings: record('getSettings', () => ({
         companyId: 'x',
         timezone: 'America/Sao_Paulo',
+        today: '2026-11-09',
         slotStepMinutes: 30,
         minNoticeMinutes: 120,
         maxAdvanceDays: 60,
@@ -87,6 +88,7 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
       updateSettings: record('updateSettings', () => ({
         companyId: 'x',
         timezone: 'America/Sao_Paulo',
+        today: '2026-11-09',
         slotStepMinutes: 30,
         minNoticeMinutes: 120,
         maxAdvanceDays: 60,
@@ -130,6 +132,7 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
       })),
       listAppointments: record('listAppointments', () => ({
         timezone: 'America/Sao_Paulo',
+        today: '2026-11-09',
         items: [view()],
       })),
       createAppointment: (...args: unknown[]) => {

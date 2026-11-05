@@ -32,7 +32,7 @@ const HASH = 'scrypt$1024$8$1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoa
 // Segunda-feira 2026-11-09, 08:00 em São Paulo. Os agendamentos dos testes ficam em dezembro de 2026.
 const NOW = new Date('2026-11-09T11:00:00.000Z');
 const SECRET_SERVICE = `Servico secreto ${randomBytes(6).toString('hex')}`;
-const SECRET_LABEL = `Cliente secreto ${randomBytes(6).toString('hex')}`;
+const SECRET_LABEL = `Pessoa secreta ${randomBytes(6).toString('hex')}`;
 const SECRET_CONTACT = `5511${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}`;
 
 let database: Database;
@@ -863,5 +863,8 @@ describe('intervalos máximos (spec 027, E1)', () => {
       to: '2027-01-11',
     });
     assert.deepEqual(ok.items, []);
+    // `today` é a data local da empresa (o navegador não calcula fuso): 08:00 em São Paulo, segunda 2026-11-09.
+    assert.equal(ok.today, '2026-11-09');
+    assert.equal((await schedule.getSettings(w.company.id)).today, '2026-11-09');
   });
 });

@@ -183,16 +183,22 @@ export class ScheduleService {
 
   /* ------------------------------- configurações ------------------------------- */
 
-  getSettings(companyId: CompanyId): Promise<ScheduleSettings> {
-    return this.deps.settings.ensure(companyId);
+  /** Configurações mais a data de hoje no fuso da empresa (`today`: o navegador não calcula fuso). */
+  async getSettings(companyId: CompanyId): Promise<ScheduleSettings & { readonly today: string }> {
+    const settings = await this.deps.settings.ensure(companyId);
+    return { ...settings, today: localPartsOf(this.now(), settings.timezone).date };
   }
 
-  updateSettings(companyId: CompanyId, body: SettingsBody): Promise<ScheduleSettings> {
+  updateSettings(
+    companyId: CompanyId,
+    body: SettingsBody,
+  ): Promise<ScheduleSettings & { readonly today: string }> {
     return this.track('configure', async () => {
       if (!isValidTimeZone(body.timezone)) {
         throw new ValidationError('Fuso horário inválido', { code: 'INVALID_TIMEZONE' });
       }
-      return this.deps.settings.update(companyId, body);
+      const updated = await this.deps.settings.update(companyId, body);
+      return { ...updated, today: localPartsOf(this.now(), updated.timezone).date };
     });
   }
 
@@ -365,7 +371,7 @@ export class ScheduleService {
   async listAppointments(
     companyId: CompanyId,
     query: AppointmentsQuery,
-  ): Promise<{ timezone: string; items: AppointmentView[] }> {
+  ): Promise<{ timezone: string; today: string; items: AppointmentView[] }> {
     const settings = await this.deps.settings.ensure(companyId);
     const span = daysBetween(query.from, query.to);
     if (span < 0) throw new ValidationError('Intervalo inválido');
@@ -383,7 +389,7 @@ export class ScheduleService {
       status: query.status,
       limit: SCHEDULE_APPOINTMENTS_MAX_ITEMS + 1,
     });
-    // Nunca truncar em silêncio: acima do teto, o cliente estreita o intervalo.
+    // Nunca truncar em silêncio: acima do teto, quem consulta estreita o intervalo.
     if (rows.length > SCHEDULE_APPOINTMENTS_MAX_ITEMS) {
       throw new ValidationError('Muitos agendamentos no período', { code: RANGE_TOO_LARGE });
     }
@@ -393,6 +399,7 @@ export class ScheduleService {
     ]);
     return {
       timezone: settings.timezone,
+      today: localPartsOf(this.now(), settings.timezone).date,
       items: rows.map((row) => this.toView(row, settings.timezone, resources, services)),
     };
   }
@@ -519,7 +526,7 @@ export class ScheduleService {
     });
   }
 
-  /** Um só tipo de mudança por chamada: estado, remarcação ou rótulo do cliente. */
+  /** Um só tipo de mudança por chamada: estado, remarcação ou rótulo do agendamento. */
   async updateAppointment(
     companyId: CompanyId,
     membershipId: string,

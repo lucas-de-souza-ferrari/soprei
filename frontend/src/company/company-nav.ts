@@ -4,11 +4,21 @@
  * barreira (uma aba escondida não protege nada).
  */
 export type AreaPage =
-  'conversas' | 'canal' | 'persona' | 'conhecimento' | 'estoque' | 'equipe' | 'testar';
+  | 'conversas'
+  | 'agenda'
+  | 'agendaConfig'
+  | 'canal'
+  | 'persona'
+  | 'conhecimento'
+  | 'estoque'
+  | 'equipe'
+  | 'testar';
 
 /** Ordem do menu: Conversas é a primeira aba e a página inicial de quem pode ler (spec 024). */
 export const AREA_PAGES: readonly AreaPage[] = [
   'conversas',
+  // Agenda (spec 027): depois de Conversas, só com `schedule:read`.
+  'agenda',
   'canal',
   'persona',
   'conhecimento',
@@ -17,8 +27,16 @@ export const AREA_PAGES: readonly AreaPage[] = [
   'testar',
 ];
 
+/**
+ * Telas da área que não são aba do menu (spec 027): a configuração da agenda abre por um botão da própria
+ * Agenda e só com `schedule:configure`.
+ */
+const HIDDEN_PAGES: readonly AreaPage[] = ['agendaConfig'];
+
 const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   conversas: '/painel/conversas',
+  agenda: '/painel/agenda',
+  agendaConfig: '/painel/agenda/configurar',
   canal: '/painel/canal',
   persona: '/painel/persona',
   // Base de conhecimento da IA (spec 026): depois de Persona, só com `knowledge:manage`.
@@ -32,6 +50,8 @@ const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
 
 export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   conversas: 'Conversas',
+  agenda: 'Agenda',
+  agendaConfig: 'Configurar agenda',
   canal: 'Canal',
   persona: 'Persona',
   conhecimento: 'Conhecimento',
@@ -43,6 +63,8 @@ export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
 /** Permissão que dá acesso a cada aba. */
 const REQUIRED: Readonly<Record<AreaPage, string>> = {
   conversas: 'conversation:read',
+  agenda: 'schedule:read',
+  agendaConfig: 'schedule:configure',
   canal: 'channel:read',
   persona: 'persona:manage',
   conhecimento: 'knowledge:manage',
@@ -82,11 +104,11 @@ export function conversasPath(route: ConversasRoute): string {
 
 export function areaPageForPath(pathname: string): AreaPage | null {
   if (conversasRouteForPath(pathname) !== null) return 'conversas';
-  return AREA_PAGES.find((page) => AREA_PATHS[page] === pathname) ?? null;
+  return [...AREA_PAGES, ...HIDDEN_PAGES].find((page) => AREA_PATHS[page] === pathname) ?? null;
 }
 
 export function isAreaPage(value: string): value is AreaPage {
-  return (AREA_PAGES as readonly string[]).includes(value);
+  return ([...AREA_PAGES, ...HIDDEN_PAGES] as readonly string[]).includes(value);
 }
 
 export function canOpen(page: AreaPage, permissions: readonly string[]): boolean {

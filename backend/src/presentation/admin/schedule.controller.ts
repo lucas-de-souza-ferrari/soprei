@@ -61,14 +61,16 @@ const serviceParams = z.object({ companyId: companyIdSchema, serviceId: z.string
 const appointmentParams = z.object({ companyId: companyIdSchema, appointmentId: z.string() });
 const blockParams = z.object({ companyId: companyIdSchema, blockId: z.string() });
 
-function toSettingsResponse(settings: ScheduleSettings): {
+function toSettingsResponse(settings: ScheduleSettings & { readonly today: string }): {
   timezone: string;
+  today: string;
   slotStepMinutes: number;
   minNoticeMinutes: number;
   maxAdvanceDays: number;
 } {
   return {
     timezone: settings.timezone,
+    today: settings.today,
     slotStepMinutes: settings.slotStepMinutes,
     minNoticeMinutes: settings.minNoticeMinutes,
     maxAdvanceDays: settings.maxAdvanceDays,
@@ -145,7 +147,7 @@ const toSlotResponse = (slot: SlotView): Record<string, unknown> => ({
 /**
  * Agenda da própria empresa (spec 027). Registre com `prefix: '/admin/companies'`. O `:companyId` do
  * caminho é conferido contra a identidade pelo `requirePermission` (404 antes de 403) e descartado: o
- * service recebe só o `CompanyId` da identidade. Nome de serviço, rótulo do cliente, contato e horários
+ * service recebe só o `CompanyId` da identidade. Nome de serviço, rótulo do agendamento, contato e horários
  * **nunca** vão a log nem a métrica (só ids e a ação). O corpo de erro de validação não ecoa o valor.
  */
 export const adminScheduleController: FastifyPluginCallback<AdminScheduleControllerOptions> = (
@@ -249,7 +251,11 @@ export const adminScheduleController: FastifyPluginCallback<AdminScheduleControl
     const { companyId } = membershipAuth(request);
     const query = appointmentsQuerySchema.parse(request.query);
     const result = await schedule.listAppointments(companyId, query);
-    return { timezone: result.timezone, items: result.items.map(toAppointmentResponse) };
+    return {
+      timezone: result.timezone,
+      today: result.today,
+      items: result.items.map(toAppointmentResponse),
+    };
   });
 
   app.post(`${base}/appointments`, manage, async (request, reply) => {

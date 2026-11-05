@@ -215,9 +215,9 @@ Cada etapa fecha com `typecheck`, `lint`, `format:check` e os testes dela verdes
 **Privacidade (todas as etapas)**
 
 - [ ] [I] Com `captureLogs` e `logContains`: nome de serviço, `customerLabel`, `contactRef`, horário de um agendamento e texto de mensagem secretos **não** aparecem em **nenhum** log (criação, conflito, cancelamento, atendimento com agenda, erros 4xx/5xx); o log traz só ids, `companyId`, ação e resultado; **`startsAt` não vai a log** associado a um agendamento.
-- [ ] [I] `GET /metrics` tem só os labels esperados (`action`, `result`, `status`) e nenhum valor com id, nome de serviço, contato ou horário; corpo de erro verificado **só por `code` e `message`** (o `requestId` muda).
-- [ ] [R] Nenhuma resposta traz `contactRef`; `contactLabel` é sempre o rótulo mascarado da 024.
-- [ ] [U] O front não grava agendamento nem rótulo em `localStorage`/`sessionStorage`.
+- [x] [I] `GET /metrics` tem só os labels esperados (`action`, `result`, `status`) e nenhum valor com id, nome de serviço, contato ou horário; corpo de erro verificado **só por `code` e `message`** (o `requestId` muda).
+- [x] [R] Nenhuma resposta traz `contactRef`; `contactLabel` é sempre o rótulo mascarado da 024.
+- [x] [U] O front não grava agendamento nem rótulo em `localStorage`/`sessionStorage`.
 
 **Migration (E1)**
 
@@ -225,8 +225,8 @@ Cada etapa fecha com `typecheck`, `lint`, `format:check` e os testes dela verdes
 
 **Frontend (E2; E5 para o e2e)**
 
-- [ ] [U] Menu por `permissions` (aba Agenda só com `schedule:read`; configuração só com `schedule:configure`); mapeamento de `code` para mensagem (`SLOT_TAKEN`, `IN_THE_PAST`, `RESOURCE_HAS_APPOINTMENTS`, `INVALID_TRANSITION`); agrupamento por `localDate` e semana (início na segunda); estado com texto e ícone.
-- [ ] [U] Contraste: pares novos (selos de estado, bloqueio, "hoje", aviso de privacidade) em `contrast.test.ts` com mínimo 4,5:1 nos dois temas.
+- [x] [U] Menu por `permissions` (aba Agenda só com `schedule:read`; configuração só com `schedule:configure`); mapeamento de `code` para mensagem (`SLOT_TAKEN`, `IN_THE_PAST`, `RESOURCE_HAS_APPOINTMENTS`, `INVALID_TRANSITION`); agrupamento por `localDate` e semana (início na segunda); estado com texto e ícone.
+- [x] [U] Contraste: pares novos (selos de estado, bloqueio, "hoje", aviso de privacidade) em `contrast.test.ts` com mínimo 4,5:1 nos dois temas.
 - [ ] [E] (E5) Playwright, desktop e 360 px, claro e escuro, navegador com `timezoneId` diferente da empresa: marcar, 409 `SLOT_TAKEN` recarrega os horários, cancelar com diálogo, remarcar, bloquear; `VIEWER` não vê botões de escrita; `AGENT` não vê configuração; teclado percorre a lista e abre o diálogo; região `aria-live` anuncia a semana.
 
 Todos os testes novos usam relógio injetável e `waitFor` com prazo (nada de sleep fixo), regex com `\S`/`\d` (com barra) e **não** chamam `keepEventLoopAlive()`.
@@ -334,7 +334,7 @@ Fontes a consultar pelo implementador antes de seguir: documentação do Postgre
 
 ## Registro da implementação
 
-**Status por etapa:** E1 pronta (backend) | E2 pendente | E3 pendente | E4 pendente | E5 e E6 não iniciadas (cortáveis).
+**Status por etapa:** E1 pronta (backend) | E2 pronta (painel) | E3 pendente | E4 pendente | E5 parcial (e2e do painel feito junto com a E2; ver abaixo) | E6 não iniciada (cortável).
 
 **E1 (núcleo do backend): implementada na branch, tudo verde localmente em Node 24** (bateria no `docs/handoff.md`). Pastas: `domain/schedule.ts` (constantes `SCHEDULE_*`, tipos, interfaces dos cinco repositórios, `canTransition`); `application/schedule/` (`zoned-time.ts`, `availability.ts` com `computeSlots`, `schedule.schemas.ts`, `schedule.service.ts`); `infrastructure/database/repositories/schedule.repository.ts` (os cinco repositórios; **único** ponto que traduz a violação de exclusão em `SLOT_TAKEN`, via `isExclusionViolation` em `database-errors.ts`); `presentation/admin/schedule.controller.ts`; métricas `schedule_actions_total{action,result}` e `schedule_context_total{result}` (esta última só é usada na E3); migration `20261105100000_schedule_appointments` (cria `btree_gist`, quatro enums, cinco tabelas, FKs compostas, CHECKs e a restrição `appointments_no_overlap`); permissões `schedule:read|manage|configure` no mapa fixo.
 
@@ -350,3 +350,15 @@ Decisões e desvios da E1 (com motivo):
 - **`ScheduleService` importa só tipos de métricas** de `infrastructure/metrics` (o ESLint aceita); o log do serviço leva só ids, ação e resultado (nunca nome, rótulo, contato nem horário).
 - **Testes de rota** usam serviço simulado (permissões, validação, privacidade) e o comportamento real fica nos de integração (`infrastructure/database/schedule.integration.test.ts`, `schedule-migration.integration.test.ts`); o `site-bridge` e o inventário de rotas incluem as rotas novas.
 - **`localStart` no fuso do processo:** não há conversão em hora local do processo em lugar nenhum (só `Intl` com o fuso da empresa); o teste de Nova York prova o instante UTC esperado.
+
+**E2 (painel `/painel/agenda`): implementada na branch, verde localmente em Node 24** (bateria no `docs/handoff.md`). Pastas (`frontend/src/company/`): `agenda-api.ts` (contratos Zod estritos, sem `contactRef`; mensagens por `status` e `error.code`), `agenda-rules.ts` (puro: semana começando na segunda, agrupamento por `localDate`, ações por estado, validações), `AgendaPage.tsx` (lista agrupada por dia), `AgendaDialogs.tsx` (novo agendamento, item, bloqueio e o seletor de horários livres), `AgendaConfigPage.tsx` (fuso, serviços, recursos e horários da semana), `company-nav.ts` (`agenda` depois de Conversas, `schedule:read`; `agendaConfig` é tela escondida em `/painel/agenda/configurar`, `schedule:configure`), `CompanyArea.tsx`, `account-flow.ts`; e2e em `frontend/e2e/agenda.spec.ts` e `agenda-fixture.ts`.
+
+Decisões e desvios da E2 (com motivo):
+- **"Hoje" vem do servidor:** o navegador não calcula fuso, então `GET .../schedule/settings` e `GET .../schedule/appointments` passaram a devolver também `today` (data local da empresa); a semana inicial, o botão "Hoje" e o destaque do dia usam só ele (e aritmética de calendário em `Date.UTC`, sem fuso). Acréscimo aditivo ao contrato da spec.
+- **Configuração como tela escondida:** `/painel/agenda/configurar` é uma segunda `AreaPage` que não entra no menu (a aba Agenda fica selecionada); abre pelo botão "Configurar agenda" e só com `schedule:configure` (forçar a URL sem a permissão mostra "sem permissão" e não chama a API).
+- **Recursos múltiplos:** a tela de configuração inclui adicionar, renomear, ativar/desativar recurso e editar horários por recurso (pequeno o bastante para não cortar); com um só recurso ele fica oculto nos formulários e filtros.
+- **Encaixe:** no diálogo de novo agendamento, o botão "Encaixe fora do horário configurado" troca a lista de horários livres por um campo de hora livre, com o aviso na tela (o servidor aceita fora das regras e recusa o passado e a sobreposição).
+- **Aviso de bloqueio sobre agendamento:** comparado no navegador só por texto local (`YYYY-MM-DDTHH:mm`), com os itens da semana já carregados; é só dica, o servidor decide (`SLOT_TAKEN`).
+- **Vocabulário (gate da 022):** o gate também pega "cliente" (contém "client"); a tela usa "Nome de quem será atendido" e "Atendido:".
+- **E2E (E5 parcial):** o Playwright desktop e celular (390 px, mais uma verificação a 360 px) cobre: semana em lista com "Hoje", estados com texto, fuso do navegador diferente (`Pacific/Auckland`), navegação de semana e anúncio `aria-live`, marcar, `SLOT_TAKEN` (mensagem e releitura dos horários), cancelar com diálogo e Esc, remarcar, bloquear, teclado, `VIEWER` somente leitura, `AGENT` sem configuração, nada em armazenamento do navegador. Fica para a E5 completa a bateria em claro e escuro de todos os fluxos.
+- **Critérios do frontend:** [U] menu por permissões, mapeamento de `code` para mensagem, agrupamento por `localDate`, semana na segunda e estados com texto cobertos em `agenda.test.ts`; contraste: os pares novos (selos de estado sobre `muted`, "Hoje", aviso de privacidade, itens em `card`) estão em `contrast.test.ts`; [U] "o front não grava agendamento nem rótulo" coberto por teste de leitura do código-fonte e por um e2e.

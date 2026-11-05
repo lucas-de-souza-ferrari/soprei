@@ -75,6 +75,13 @@ const textPairs: [string, string][] = [
   ['destructive', 'muted'],
   ['primary', 'muted'],
   ['foreground', 'muted'],
+  // Spec 027: selos de estado da agenda sobre `muted` (Pendente e "Hoje" = primary, Confirmado =
+  // color-success, Cancelado e Bloqueado = muted-foreground, Concluído = foreground, Faltou =
+  // destructive), aviso fixo de privacidade (foreground em muted) e itens da lista em card
+  // (card-foreground e muted-foreground em card): todos cobertos pelos pares acima ou explícitos aqui.
+  ['card-foreground', 'card'],
+  ['color-success', 'muted'],
+  ['muted-foreground', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],
