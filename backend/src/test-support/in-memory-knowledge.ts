@@ -66,6 +66,25 @@ export class InMemoryKnowledgeDocumentRepository implements KnowledgeDocumentRep
     return Promise.resolve(this.rows.filter((row) => row.document.companyId === companyId).length);
   }
 
+  countSamples(companyId: CompanyId): Promise<number> {
+    return Promise.resolve(
+      this.rows.filter((row) => row.document.companyId === companyId && row.document.isSample)
+        .length,
+    );
+  }
+
+  deleteSamples(companyId: CompanyId): Promise<number> {
+    let removed = 0;
+    for (let index = this.rows.length - 1; index >= 0; index -= 1) {
+      const row = this.rows[index];
+      if (row?.document.companyId === companyId && row.document.isSample) {
+        this.rows.splice(index, 1);
+        removed += 1;
+      }
+    }
+    return Promise.resolve(removed);
+  }
+
   countChunks(companyId: CompanyId): Promise<number> {
     return Promise.resolve(
       this.rows

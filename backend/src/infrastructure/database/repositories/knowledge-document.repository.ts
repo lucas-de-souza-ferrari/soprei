@@ -114,6 +114,21 @@ export class PrismaKnowledgeDocumentRepository implements KnowledgeDocumentRepos
     );
   }
 
+  countSamples(companyId: CompanyId): Promise<number> {
+    return withRepositoryErrors('KnowledgeDocument.countSamples', () =>
+      this.db.knowledgeDocument.count({ where: { companyId, isSample: true } }),
+    );
+  }
+
+  deleteSamples(companyId: CompanyId): Promise<number> {
+    return withRepositoryErrors('KnowledgeDocument.deleteSamples', async () => {
+      const { count } = await this.db.knowledgeDocument.deleteMany({
+        where: { companyId, isSample: true },
+      });
+      return count;
+    });
+  }
+
   countChunks(companyId: CompanyId): Promise<number> {
     return withRepositoryErrors('KnowledgeChunk.count', () =>
       this.db.knowledgeChunk.count({ where: { companyId } }),

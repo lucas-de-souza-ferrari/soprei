@@ -33,7 +33,21 @@ export const documentsPageSchema = z.strictObject({
 
 const companyPath = (companyId: string): string => `/admin/companies/${companyId}`;
 
+const sampleLoadSchema = z.strictObject({ created: z.boolean() });
+const sampleRemoveSchema = z.strictObject({
+  documents: z.number().int().min(0),
+  products: z.number().int().min(0),
+});
+
 export const knowledgeApi = {
+  loadSample: async (companyId: string) =>
+    sampleLoadSchema.parse(
+      await request(`${companyPath(companyId)}/knowledge/sample`, { method: 'POST' }),
+    ),
+  removeSample: async (companyId: string) =>
+    sampleRemoveSchema.parse(
+      await request(`${companyPath(companyId)}/knowledge/sample`, { method: 'DELETE' }),
+    ),
   documents: async (companyId: string, cursor?: string) =>
     documentsPageSchema.parse(
       await request(
@@ -62,11 +76,14 @@ export const KNOWLEDGE_TOO_LARGE_MESSAGE =
   'O documento é grande demais. Divida o texto em documentos menores.';
 export const KNOWLEDGE_INVALID_MESSAGE =
   'Confira o título e o texto do documento (os dois são obrigatórios).';
+export const SAMPLE_REQUIRES_EMPTY_MESSAGE =
+  'O exemplo só carrega em uma empresa vazia (sem documentos nem produtos).';
 export const KNOWLEDGE_STALE_MESSAGE = 'Este documento não existe mais. A lista foi atualizada.';
 
 const CODE_MESSAGES: Readonly<Record<string, string>> = {
   KNOWLEDGE_LIMIT_REACHED: KNOWLEDGE_LIMIT_MESSAGE,
   KNOWLEDGE_DOCUMENT_TOO_LARGE: KNOWLEDGE_TOO_LARGE_MESSAGE,
+  SAMPLE_REQUIRES_EMPTY: SAMPLE_REQUIRES_EMPTY_MESSAGE,
 };
 
 /**

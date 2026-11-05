@@ -105,6 +105,8 @@ export interface ProductRepository {
   findById(companyId: CompanyId, productId: string): Promise<Product>;
   update(companyId: CompanyId, productId: string, data: ProductUpdate): Promise<Product>;
   count(companyId: CompanyId): Promise<number>;
+  /** Os produtos de exemplo (ativos ou não) da empresa (spec 026, E3). */
+  listSamples(companyId: CompanyId): Promise<Product[]>;
   /** SKUs que já existem na empresa, entre os pedidos (importação). */
   findExistingSkus(companyId: CompanyId, skus: readonly string[]): Promise<ReadonlySet<string>>;
 }

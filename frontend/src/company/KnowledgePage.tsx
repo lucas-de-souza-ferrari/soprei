@@ -25,6 +25,7 @@ import {
 } from './knowledge-rules';
 import type { PageProps } from './PersonaPage';
 import { RetryAlert } from './RetryAlert';
+import { SampleControls } from './SampleControls';
 
 type Notice = { tone: 'error' | 'success'; text: string } | null;
 
@@ -58,7 +59,11 @@ function readFile(file: File): Promise<ArrayBuffer> {
  * devolve só tamanho, trechos e pré-visualização. Resposta que chega depois de trocar de empresa é
  * descartada.
  */
-export function KnowledgePage({ companyId, settle }: PageProps) {
+export function KnowledgePage({
+  companyId,
+  settle,
+  canSample,
+}: PageProps & { readonly canSample: boolean }) {
   const [items, setItems] = useState<KnowledgeDocumentItem[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -239,6 +244,16 @@ export function KnowledgePage({ companyId, settle }: PageProps) {
           </Alert>
         )}
       </div>
+
+      {canSample && (
+        <SampleControls
+          companyId={companyId}
+          isEmpty={items.length === 0}
+          hasSample={items.some((item) => item.isSample)}
+          settle={settle}
+          onChanged={() => setAttempt((value) => value + 1)}
+        />
+      )}
 
       <form
         className="grid gap-3"

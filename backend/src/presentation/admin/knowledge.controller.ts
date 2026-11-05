@@ -1,7 +1,9 @@
 import type { FastifyPluginCallback } from 'fastify';
 import type { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
+import type { SampleDataService } from '../../application/knowledge/sample.service.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
-import type { KnowledgeDocument } from '../../domain/index.js';
+import { hasPermission, type KnowledgeDocument } from '../../domain/index.js';
+import { ForbiddenError } from '../../shared/errors/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, membershipAuth, requirePermission } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
@@ -13,6 +15,8 @@ export interface AdminKnowledgeControllerOptions {
   readonly auth: Pick<AuthService, 'authenticate'>;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   readonly knowledge: Pick<KnowledgeService, 'list' | 'create' | 'delete'>;
+  /** Dados de exemplo (spec 026, E3); sem isto as rotas `.../knowledge/sample` não existem. */
+  readonly sample?: Pick<SampleDataService, 'load' | 'remove'> | undefined;
 }
 
 /** Documento para o navegador: tamanho, trechos e pré-visualização; nunca o texto inteiro. */
@@ -44,7 +48,7 @@ function toDocumentResponse(document: KnowledgeDocument): {
  */
 export const adminKnowledgeController: FastifyPluginCallback<AdminKnowledgeControllerOptions> = (
   app,
-  { auth, metrics, knowledge },
+  { auth, metrics, knowledge, sample },
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
@@ -83,6 +87,28 @@ export const adminKnowledgeController: FastifyPluginCallback<AdminKnowledgeContr
       return reply.status(204).send();
     },
   );
+
+  if (sample !== undefined) {
+    // Carregar o exemplo cria documentos E produtos: exige as duas permissões (hoje, os mesmos papéis).
+    app.post('/:companyId/knowledge/sample', { config, onRequest }, async (request, reply) => {
+      const { companyId, membershipId, role } = membershipAuth(request);
+      if (!hasPermission(role, 'inventory:manage')) throw new ForbiddenError();
+      const result = await sample.load(companyId, membershipId);
+      request.log.info(
+        { companyId, membershipId, created: result.created },
+        'dados de exemplo carregados',
+      );
+      return reply.status(result.created ? 201 : 200).send({ created: result.created });
+    });
+
+    app.delete('/:companyId/knowledge/sample', { config, onRequest }, async (request) => {
+      const { companyId, membershipId, role } = membershipAuth(request);
+      if (!hasPermission(role, 'inventory:manage')) throw new ForbiddenError();
+      const removed = await sample.remove(companyId);
+      request.log.info({ companyId, membershipId, ...removed }, 'dados de exemplo removidos');
+      return removed;
+    });
+  }
 
   done();
 };

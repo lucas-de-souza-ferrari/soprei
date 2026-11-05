@@ -311,4 +311,6 @@ Desvios e decisões da E1 (com motivo):
 
 Desvios da E2: o SKU digitado pela pessoa é achado pela mesma `tsquery` (o `to_tsvector` quebra `CAM-001` em `cam-001`, `cam` e `001`), sem o termo exato extra; o teste de fixture com o SKU passou. O limite de 500 produtos e a ordem por nome (cursor `[nome, id]`) são de melhor esforço/ordem do banco.
 
+**E3 (exemplo) e E4 (importação CSV): implementadas.** `application/knowledge/sample-data.ts` e `sample.service.ts`, rotas `.../knowledge/sample`, `company/SampleControls.tsx`; `company/csv.ts`, `ImportCsv.tsx`. Testes: `sample.integration.test.ts`, rotas do exemplo em `knowledge.controller.test.ts`, `inventory-import.integration.test.ts`, `csv.test.ts`. **E5** (histórico na tela) já veio com a E2; **E6** (Playwright das telas novas) **cortada** (os 180 e2e existentes seguem verdes; as telas novas têm só testes unitários). A bateria completa da E2 fechou verde (1207 unitários, 81 do site, 527 de integração, build, 180 e2e); a de E3/E4 está no handoff.
+
 - Testes: `knowledge.test.ts`, `attendance-knowledge.service.test.ts`, `knowledge.controller.test.ts`, `knowledge.integration.test.ts` (busca, isolamento, cascata, GIN por `EXPLAIN`), `knowledge-attendance.integration.test.ts` (simulador e lote, privacidade), `knowledge-migration.integration.test.ts` (schema temporário) e, no site, `knowledge.test.ts`.

@@ -1,6 +1,7 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
 import { KnowledgeService } from './application/knowledge/knowledge.service.js';
+import { SampleDataService } from './application/knowledge/sample.service.js';
 import { ChannelConnectionService } from './application/channel/channel-connection.service.js';
 import { ChannelCredentialsService } from './application/channel/channel-credentials.service.js';
 import { ChannelInboundProcessor } from './application/channel/channel-inbound.processor.js';
@@ -143,12 +144,15 @@ async function main(): Promise<void> {
     // Base de conhecimento da empresa (spec 026): recuperação por busca textual, fail-open.
     knowledge: new PrismaKnowledgeRetriever(prisma),
   });
-  const knowledge = new KnowledgeService(new PrismaKnowledgeDocumentRepository(prisma));
+  const documents = new PrismaKnowledgeDocumentRepository(prisma);
+  const products = new PrismaProductRepository(prisma);
+  const knowledge = new KnowledgeService(documents);
   const inventory = new InventoryService({
-    products: new PrismaProductRepository(prisma),
+    products,
     movements: new PrismaStockMovementRepository(prisma),
     ledger: new PrismaInventoryLedger(prisma),
   });
+  const sample = new SampleDataService({ documents, products, knowledge, inventory });
 
   let whatsappRoutes: WhatsappRoutesParams | undefined;
   let channelService: ChannelConnectionService | undefined;
@@ -332,6 +336,7 @@ async function main(): Promise<void> {
       attendance,
       knowledge,
       inventory,
+      sample,
       ...(channelService === undefined ? {} : { channel: channelService }),
       ...(whatsapp === undefined
         ? {}

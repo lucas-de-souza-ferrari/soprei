@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
+import { ConflictError } from '../../shared/errors/index.js';
 import { CompanyService } from '../../application/companies/company.service.js';
 import { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import {
@@ -29,6 +30,7 @@ function errorOf(body: string): { code: string; message: string } {
 }
 
 describe('API da base de conhecimento (spec 026)', () => {
+  let sampleCalls = 0;
   let app: FastifyInstance;
   let testAuth: TestAuth;
   let logs: LogCapture;
@@ -58,6 +60,16 @@ describe('API da base de conhecimento (spec 026)', () => {
       admin: {
         companies: new CompanyService(companies),
         knowledge: new KnowledgeService(repository),
+        sample: {
+          load: () => {
+            sampleCalls += 1;
+            if (sampleCalls === 3) {
+              return Promise.reject(new ConflictError('x', { code: 'SAMPLE_REQUIRES_EMPTY' }));
+            }
+            return Promise.resolve({ created: sampleCalls === 1 });
+          },
+          remove: () => Promise.resolve({ documents: 2, products: 8 }),
+        },
       },
     });
     await app.ready();
@@ -217,6 +229,29 @@ describe('API da base de conhecimento (spec 026)', () => {
     const over = await call('POST', base(company), headers, { title: 'a mais', content: 'texto' });
     assert.equal(over.statusCode, 409);
     assert.equal(errorOf(over.body).code, 'KNOWLEDGE_LIMIT_REACHED');
+  });
+
+  it('exemplo: 201 ao criar, 200 ao repetir, 409 SAMPLE_REQUIRES_EMPTY; só OWNER e ADMIN; remover devolve contagens', async () => {
+    const url = `/admin/companies/${companyA.id}/knowledge/sample`;
+    const post = (headers?: { authorization: string }) =>
+      app.inject({ method: 'POST', url, ...(headers === undefined ? {} : { headers }) });
+    assert.equal((await post(owner())).statusCode, 201);
+    assert.equal((await post(tokens.get('ADMIN'))).statusCode, 200);
+    const conflict = await post(owner());
+    assert.equal(conflict.statusCode, 409);
+    assert.equal(errorOf(conflict.body).code, 'SAMPLE_REQUIRES_EMPTY');
+    for (const role of ['AGENT', 'VIEWER'] as const) {
+      assert.equal((await post(tokens.get(role))).statusCode, 403);
+    }
+    assert.equal((await post()).statusCode, 401);
+    const removed = await app.inject({ method: 'DELETE', url, headers: owner() });
+    assert.deepEqual(removed.json(), { documents: 2, products: 8 });
+    const other = await app.inject({
+      method: 'DELETE',
+      url: `/admin/companies/${companyB.id}/knowledge/sample`,
+      headers: owner(),
+    });
+    assert.equal(other.statusCode, 404);
   });
 
   it('nenhum título nem texto vai a log', () => {

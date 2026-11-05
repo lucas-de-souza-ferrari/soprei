@@ -137,6 +137,10 @@ before(async () => {
       companies: new CompanyService(companyRepository),
       // Spec 026: conhecimento e estoque pela ponte do cookie.
       knowledge: new KnowledgeService(new PrismaKnowledgeDocumentRepository(db.prisma)),
+      sample: {
+        load: () => Promise.resolve({ created: false }),
+        remove: () => Promise.resolve({ documents: 0, products: 0 }),
+      },
       inventory: new InventoryService({
         products: new PrismaProductRepository(db.prisma),
         movements: new PrismaStockMovementRepository(db.prisma),

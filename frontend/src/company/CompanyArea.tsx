@@ -147,9 +147,19 @@ export function CompanyArea({
           ) : page === 'persona' ? (
             <PersonaPage key={company.companyId} companyId={company.companyId} settle={settle} />
           ) : page === 'conhecimento' ? (
-            <KnowledgePage key={company.companyId} companyId={company.companyId} settle={settle} />
+            <KnowledgePage
+              key={company.companyId}
+              companyId={company.companyId}
+              settle={settle}
+              canSample={company.permissions.includes('inventory:manage')}
+            />
           ) : page === 'estoque' ? (
-            <EstoquePage key={company.companyId} companyId={company.companyId} settle={settle} />
+            <EstoquePage
+              key={company.companyId}
+              companyId={company.companyId}
+              settle={settle}
+              canSample={company.permissions.includes('knowledge:manage')}
+            />
           ) : page === 'equipe' ? (
             <TeamPage
               key={company.companyId}

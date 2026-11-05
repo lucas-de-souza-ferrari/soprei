@@ -11,6 +11,7 @@ import {
   KNOWLEDGE_LIMIT_MESSAGE,
   KNOWLEDGE_TOO_LARGE_MESSAGE,
   knowledgeMessageOf,
+  SAMPLE_REQUIRES_EMPTY_MESSAGE,
 } from './knowledge-api';
 import {
   checkFileName,
@@ -80,6 +81,13 @@ test('mensagens por code: limite, grande demais e 400; o texto do servidor nunca
   }
 });
 
+test('exemplo: o 409 SAMPLE_REQUIRES_EMPTY vira a mensagem de empresa vazia', () => {
+  assert.equal(
+    knowledgeMessageOf(new ApiError(409, 'TEXTO-DO-SERVIDOR', 'SAMPLE_REQUIRES_EMPTY')),
+    SAMPLE_REQUIRES_EMPTY_MESSAGE,
+  );
+});
+
 test('contratos estritos: documento com campo desconhecido (ex.: content) é recusado', () => {
   const base = {
     id: '0190a8b0-7c1e-7000-8000-000000000001',
@@ -109,7 +117,12 @@ test('fontes do "Testar": só rótulos; sem fontes, "Nenhuma informação da emp
 });
 
 test('o front não grava documento nem texto de arquivo em localStorage/sessionStorage/console', () => {
-  for (const file of ['KnowledgePage.tsx', 'knowledge-api.ts', 'knowledge-rules.ts']) {
+  for (const file of [
+    'KnowledgePage.tsx',
+    'SampleControls.tsx',
+    'knowledge-api.ts',
+    'knowledge-rules.ts',
+  ]) {
     const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
     assert.doesNotMatch(
       source,

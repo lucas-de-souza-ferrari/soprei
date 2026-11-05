@@ -27,8 +27,10 @@ import {
 } from './inventory-rules';
 import { formatMoney, moneyInputValue, parseMoney } from './money';
 import { formatDateTime } from './team-rules';
+import { ImportCsv } from './ImportCsv';
 import { Modal } from './Modal';
 import type { PageProps } from './PersonaPage';
+import { SampleControls } from './SampleControls';
 
 type Notice = { tone: 'error' | 'success'; text: string } | null;
 type Dialog =
@@ -36,6 +38,7 @@ type Dialog =
   | { kind: 'edit'; product: Product }
   | { kind: 'adjust'; product: Product }
   | { kind: 'history'; product: Product }
+  | { kind: 'import' }
   | null;
 
 export const INVENTORY_SAVE_FAILED = 'Não foi possível salvar agora. Tente de novo.';
@@ -248,7 +251,11 @@ function AdjustForm({ product, busy, problem, onSubmit }: AdjustFormProps) {
  * histórico. SKU, nome, descrição e preço só vivem no estado desta tela (nada em URL, armazenamento
  * do navegador nem log); resposta que chega depois de trocar de empresa é descartada.
  */
-export function EstoquePage({ companyId, settle }: PageProps) {
+export function EstoquePage({
+  companyId,
+  settle,
+  canSample,
+}: PageProps & { readonly canSample: boolean }) {
   const [items, setItems] = useState<Product[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -453,6 +460,15 @@ export function EstoquePage({ companyId, settle }: PageProps) {
           </Alert>
         )}
       </div>
+      {canSample && (
+        <SampleControls
+          companyId={companyId}
+          isEmpty={items.length === 0 && applied === ''}
+          hasSample={items.some((item) => item.isSample)}
+          settle={settle}
+          onChanged={() => setAttempt((value) => value + 1)}
+        />
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <form
           className="flex min-w-0 flex-1 flex-wrap items-end gap-2"
@@ -474,6 +490,9 @@ export function EstoquePage({ companyId, settle }: PageProps) {
             Buscar
           </Button>
         </form>
+        <Button variant="outline" onClick={() => setDialog({ kind: 'import' })}>
+          Importar CSV
+        </Button>
         <Button
           onClick={() => {
             setDialogProblem(null);
@@ -633,6 +652,17 @@ export function EstoquePage({ companyId, settle }: PageProps) {
             onSubmit={(delta, reason) => void adjust(dialog.product, delta, reason)}
           />
         )}
+      </Modal>
+      <Modal
+        open={dialog?.kind === 'import'}
+        title="Importar produtos (CSV)"
+        onClose={() => setDialog(null)}
+      >
+        <ImportCsv
+          companyId={companyId}
+          settle={settle}
+          onImported={() => setAttempt((value) => value + 1)}
+        />
       </Modal>
       <Modal
         open={dialog?.kind === 'history'}

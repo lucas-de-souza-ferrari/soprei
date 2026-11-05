@@ -72,4 +72,8 @@ export interface KnowledgeDocumentRepository {
   delete(companyId: CompanyId, documentId: string): Promise<void>;
   countDocuments(companyId: CompanyId): Promise<number>;
   countChunks(companyId: CompanyId): Promise<number>;
+  /** Quantos documentos de exemplo a empresa tem (spec 026, E3). */
+  countSamples(companyId: CompanyId): Promise<number>;
+  /** Apaga os documentos de exemplo (e os trechos, por cascata). Devolve quantos. */
+  deleteSamples(companyId: CompanyId): Promise<number>;
 }

@@ -27,6 +27,7 @@ import { adminKnowledgeController } from '../../presentation/admin/knowledge.con
 import { adminPersonaController } from '../../presentation/admin/persona.controller.js';
 import { adminInventoryController } from '../../presentation/admin/inventory.controller.js';
 import type { InventoryService } from '../../application/inventory/inventory.service.js';
+import type { SampleDataService } from '../../application/knowledge/sample.service.js';
 import type { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import { metricsController } from '../../presentation/system/metrics.controller.js';
 import { whatsappWebhookController } from '../../presentation/webhooks/whatsapp-webhook.controller.js';
@@ -50,6 +51,8 @@ export interface AdminRoutesParams {
   >;
   /** Documentos da base de conhecimento (spec 026); sem isto as rotas `.../knowledge/*` não existem. */
   readonly knowledge?: Pick<KnowledgeService, 'list' | 'create' | 'delete'>;
+  /** Dados de exemplo (spec 026, E3); sem isto as rotas `.../knowledge/sample` não existem. */
+  readonly sample?: Pick<SampleDataService, 'load' | 'remove'>;
   /** Estoque da empresa (spec 026, E2); sem isto as rotas `.../inventory/*` não existem. */
   readonly inventory?: Pick<
     InventoryService,
@@ -265,6 +268,7 @@ export function buildServer({
         auth,
         metrics,
         knowledge: admin.knowledge,
+        sample: admin.sample,
       });
     }
     if (admin.inventory !== undefined) {

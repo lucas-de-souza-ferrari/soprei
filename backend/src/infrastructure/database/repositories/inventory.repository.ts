@@ -176,6 +176,17 @@ export class PrismaProductRepository implements ProductRepository {
     );
   }
 
+  listSamples(companyId: CompanyId): Promise<Product[]> {
+    return withRepositoryErrors('Product.listSamples', async () => {
+      const rows = await this.db.product.findMany({
+        where: { companyId, isSample: true },
+        orderBy: [{ sku: 'asc' }],
+        take: 50,
+      });
+      return rows.map(toProduct);
+    });
+  }
+
   findExistingSkus(companyId: CompanyId, skus: readonly string[]): Promise<ReadonlySet<string>> {
     return withRepositoryErrors('Product.findExistingSkus', async () => {
       if (skus.length === 0) return new Set<string>();

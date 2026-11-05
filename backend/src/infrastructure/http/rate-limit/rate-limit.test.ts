@@ -147,6 +147,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           graphApiVersion: 'v26.0',
           manualConnect: false,
         },
+        sample: {
+          load: () => Promise.reject(new Error('inventário')),
+          remove: () => Promise.reject(new Error('inventário')),
+        },
         inventory: {
           list: () => Promise.reject(new Error('inventário')),
           create: () => Promise.reject(new Error('inventário')),
@@ -211,6 +215,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/persona',
       '/admin/companies/:companyId/knowledge/documents',
       '/admin/companies/:companyId/knowledge/documents/:documentId',
+      '/admin/companies/:companyId/knowledge/sample',
       '/admin/companies/:companyId/inventory/products',
       '/admin/companies/:companyId/inventory/products/import',
       '/admin/companies/:companyId/inventory/products/:productId',
@@ -292,6 +297,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     ]);
     assert.deepEqual(declared('/admin/companies/:companyId/knowledge/documents/:documentId'), [
       'DELETE:knowledge:manage',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/knowledge/sample'), [
+      'DELETE:knowledge:manage',
+      'POST:knowledge:manage',
     ]);
     assert.deepEqual(declared('/admin/companies/:companyId/inventory/products'), [
       'GET:inventory:manage',
