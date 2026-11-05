@@ -374,7 +374,7 @@ function Bubble({
   const indicator = sendIndicator(message, channel, now);
   return (
     // Bolha do beUI (spec 029): contato à esquerda, assistente (o nosso lado) à direita.
-    <MessageBubble align={fromContact ? 'start' : 'end'} variant={fromContact ? 'outline' : 'tint'}>
+    <MessageBubble align={fromContact ? 'start' : 'end'} variant={fromContact ? 'soft' : 'tint'}>
       <MessageBubbleContent className="min-w-0">
         <p className="m-0 text-xs font-semibold">{fromContact ? 'Contato' : 'Assistente'}</p>
         <p dir="auto" className="m-0 [overflow-wrap:anywhere] whitespace-pre-wrap">

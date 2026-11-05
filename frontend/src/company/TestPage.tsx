@@ -99,7 +99,7 @@ export function TestPage({ companyId, settle }: PageProps) {
           <MessageBubble
             key={line.id}
             align={line.from === 'you' ? 'start' : 'end'}
-            variant={line.from === 'you' ? 'outline' : 'tint'}
+            variant={line.from === 'you' ? 'soft' : 'tint'}
           >
             <MessageBubbleContent className="min-w-0">
               <span className="sr-only">{line.from === 'you' ? 'Você: ' : 'Assistente: '}</span>
