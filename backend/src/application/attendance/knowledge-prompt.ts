@@ -36,13 +36,25 @@ const HEADER = [
 const NOTHING_FOUND =
   'Nenhuma informação da empresa foi encontrada para esta pergunta; se ela depender de dado da empresa (preço, estoque, política, horário), diga que vai confirmar.';
 
+/** Caracteres de largura zero e de direção, joiners, word joiner e BOM. */
+const INVISIBLE = new RegExp(
+  '[' +
+    [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0xfeff, 0x00ad]
+      .map((c) => String.fromCharCode(c))
+      .join('') +
+    ']',
+  'g',
+);
+
 /**
  * Texto da empresa é dado semi-confiável: sai qualquer `<conhecimento>` ou `</conhecimento>` (em
  * qualquer caixa e com espaços) para não fechar o bloco, e as quebras de linha viram espaço, para
  * o conteúdo não forjar linhas `[Documento]`/`[Produto]` nem instruções em linha própria.
  */
 export function neutralize(text: string): string {
-  let current = text;
+  // NFKC leva "＜/conhecimento＞" (largura total) a "</conhecimento>"; caracteres invisíveis (largura zero,
+  // marcas de direção, joiner, BOM) sairiam de dentro da tag e a esconderiam do filtro.
+  let current = text.normalize('NFKC').replace(INVISIBLE, '');
   let previous: string;
   do {
     previous = current;
