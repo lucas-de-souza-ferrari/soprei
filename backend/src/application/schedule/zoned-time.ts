@@ -46,7 +46,8 @@ export function isValidTimeZone(timeZone: string): boolean {
   // Só nomes IANA de região (`Area/Cidade`) ou `UTC`: o `Intl` também aceita deslocamentos (`+03:00`) e
   // `Etc/GMT+3`, que não são fusos de empresa (e `Etc/GMT+3` tem o sinal invertido). Nem o
   // `Intl.supportedValuesOf` serve de lista (não traz `UTC` nem apelidos antigos).
-  if (timeZone !== 'UTC' && !/^(?!Etc\/)[A-Za-z]+(?:\/[A-Za-z0-9_-]+)+$/.test(timeZone)) return false;
+  if (timeZone !== 'UTC' && !/^(?!Etc\/)[A-Za-z]+(?:\/[A-Za-z0-9_-]+)+$/.test(timeZone))
+    return false;
   try {
     formatterFor(timeZone).format(0);
     return true;
