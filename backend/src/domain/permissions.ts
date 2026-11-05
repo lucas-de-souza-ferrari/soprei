@@ -15,6 +15,7 @@ export const PERMISSIONS = [
   'channel:manage',
   'persona:manage',
   'knowledge:manage',
+  'inventory:manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -29,6 +30,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'channel:manage',
     'persona:manage',
     'knowledge:manage',
+    'inventory:manage',
   ],
   ADMIN: [
     'conversation:read',
@@ -40,6 +42,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'channel:manage',
     'persona:manage',
     'knowledge:manage',
+    'inventory:manage',
   ],
   AGENT: ['conversation:read', 'conversation:simulate'],
   VIEWER: ['conversation:read'],

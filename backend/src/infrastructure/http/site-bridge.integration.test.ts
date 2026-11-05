@@ -5,6 +5,8 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { AccountService } from '../../application/auth/account.service.js';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
 import { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
+import { InventoryService } from '../../application/inventory/inventory.service.js';
+import { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import { CompanyService } from '../../application/companies/company.service.js';
 import type { AccountSessionStore } from '../../application/ports/account-session.js';
 import {
@@ -37,6 +39,12 @@ import {
   PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
+} from '../database/index.js';
+import {
+  PrismaInventoryLedger,
+  PrismaKnowledgeDocumentRepository,
+  PrismaProductRepository,
+  PrismaStockMovementRepository,
 } from '../database/index.js';
 import { MockLlmProvider } from '../external-apis/llm/mock-llm.provider.js';
 import { WhatsappGraphAdminClient } from '../external-apis/whatsapp/whatsapp-graph-admin.client.js';
@@ -127,6 +135,13 @@ before(async () => {
     membershipAdmin: auth.membershipAdmin,
     admin: {
       companies: new CompanyService(companyRepository),
+      // Spec 026: conhecimento e estoque pela ponte do cookie.
+      knowledge: new KnowledgeService(new PrismaKnowledgeDocumentRepository(db.prisma)),
+      inventory: new InventoryService({
+        products: new PrismaProductRepository(db.prisma),
+        movements: new PrismaStockMovementRepository(db.prisma),
+        ledger: new PrismaInventoryLedger(db.prisma),
+      }),
       attendance: new AttendanceService({
         companies: companyRepository,
         conversations: new PrismaConversationRepository(db.prisma),
@@ -320,6 +335,10 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
       '/admin/companies/:companyId/channel/embedded-signup',
       '/admin/companies/:companyId/persona',
       '/admin/companies/:companyId/messages',
+      '/admin/companies/:companyId/knowledge/documents',
+      '/admin/companies/:companyId/knowledge/documents/:documentId',
+      '/admin/companies/:companyId/inventory/products',
+      '/admin/companies/:companyId/inventory/products/:productId/adjustments',
     ]) {
       assert.ok(
         tenantRoutes.some((route) => route.url === url),
@@ -330,7 +349,9 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
       url
         .replace(':companyId', companyId)
         .replace(':membershipId', randomUUID())
-        .replace(':conversationId', randomUUID());
+        .replace(':conversationId', randomUUID())
+        .replace(':documentId', randomUUID())
+        .replace(':productId', randomUUID());
     const request = (route: (typeof tenantRoutes)[number], companyId: string) =>
       route.method === 'GET'
         ? get(resolve(route.url, companyId), alice)

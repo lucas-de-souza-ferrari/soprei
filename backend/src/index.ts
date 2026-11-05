@@ -1,4 +1,5 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { InventoryService } from './application/inventory/inventory.service.js';
 import { KnowledgeService } from './application/knowledge/knowledge.service.js';
 import { ChannelConnectionService } from './application/channel/channel-connection.service.js';
 import { ChannelCredentialsService } from './application/channel/channel-credentials.service.js';
@@ -22,10 +23,13 @@ import {
   PrismaChannelConnectionRepository,
   PrismaChannelUnitOfWork,
   PrismaCompanyRepository,
+  PrismaInventoryLedger,
   PrismaKnowledgeDocumentRepository,
   PrismaKnowledgeRetriever,
   PrismaConversationRepository,
   PrismaMessageRepository,
+  PrismaProductRepository,
+  PrismaStockMovementRepository,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
 import { WhatsappGraphAdminClient } from './infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.js';
@@ -140,6 +144,11 @@ async function main(): Promise<void> {
     knowledge: new PrismaKnowledgeRetriever(prisma),
   });
   const knowledge = new KnowledgeService(new PrismaKnowledgeDocumentRepository(prisma));
+  const inventory = new InventoryService({
+    products: new PrismaProductRepository(prisma),
+    movements: new PrismaStockMovementRepository(prisma),
+    ledger: new PrismaInventoryLedger(prisma),
+  });
 
   let whatsappRoutes: WhatsappRoutesParams | undefined;
   let channelService: ChannelConnectionService | undefined;
@@ -322,6 +331,7 @@ async function main(): Promise<void> {
       companies: new CompanyService(companyRepository),
       attendance,
       knowledge,
+      inventory,
       ...(channelService === undefined ? {} : { channel: channelService }),
       ...(whatsapp === undefined
         ? {}

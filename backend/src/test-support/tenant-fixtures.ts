@@ -46,6 +46,8 @@ export class TestTenants {
       // Convites antes dos vínculos (as chaves estrangeiras compostas apontam para eles) e depois da auditoria.
       await this.db.companyInvitation.deleteMany({ where: { companyId: id } });
       // Trechos e documentos da base de conhecimento antes dos vínculos (o autor é chave estrangeira composta).
+      await this.db.stockMovement.deleteMany({ where: { companyId: id } });
+      await this.db.product.deleteMany({ where: { companyId: id } });
       await this.db.knowledgeChunk.deleteMany({ where: { companyId: id } });
       await this.db.knowledgeDocument.deleteMany({ where: { companyId: id } });
       await this.db.membership.deleteMany({ where: { companyId: id } });

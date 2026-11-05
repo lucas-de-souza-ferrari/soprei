@@ -25,6 +25,8 @@ import {
 } from '../../presentation/system/health.controller.js';
 import { adminKnowledgeController } from '../../presentation/admin/knowledge.controller.js';
 import { adminPersonaController } from '../../presentation/admin/persona.controller.js';
+import { adminInventoryController } from '../../presentation/admin/inventory.controller.js';
+import type { InventoryService } from '../../application/inventory/inventory.service.js';
 import type { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import { metricsController } from '../../presentation/system/metrics.controller.js';
 import { whatsappWebhookController } from '../../presentation/webhooks/whatsapp-webhook.controller.js';
@@ -48,6 +50,11 @@ export interface AdminRoutesParams {
   >;
   /** Documentos da base de conhecimento (spec 026); sem isto as rotas `.../knowledge/*` não existem. */
   readonly knowledge?: Pick<KnowledgeService, 'list' | 'create' | 'delete'>;
+  /** Estoque da empresa (spec 026, E2); sem isto as rotas `.../inventory/*` não existem. */
+  readonly inventory?: Pick<
+    InventoryService,
+    'list' | 'create' | 'update' | 'adjust' | 'movements' | 'importRows'
+  >;
   /** Valores públicos do Embedded Signup para o site (spec 023); sem isto `.../channel/setup` não existe. */
   readonly channelSetup?: ChannelSetupInfo;
 }
@@ -258,6 +265,14 @@ export function buildServer({
         auth,
         metrics,
         knowledge: admin.knowledge,
+      });
+    }
+    if (admin.inventory !== undefined) {
+      void app.register(adminInventoryController, {
+        prefix: '/admin/companies',
+        auth,
+        metrics,
+        inventory: admin.inventory,
       });
     }
     if (admin.attendance !== undefined) {

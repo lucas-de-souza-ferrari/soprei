@@ -147,6 +147,14 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           graphApiVersion: 'v26.0',
           manualConnect: false,
         },
+        inventory: {
+          list: () => Promise.reject(new Error('inventário')),
+          create: () => Promise.reject(new Error('inventário')),
+          update: () => Promise.reject(new Error('inventário')),
+          adjust: () => Promise.reject(new Error('inventário')),
+          movements: () => Promise.reject(new Error('inventário')),
+          importRows: () => Promise.reject(new Error('inventário')),
+        },
         knowledge: {
           list: () => Promise.reject(new Error('inventário')),
           create: () => Promise.reject(new Error('inventário')),
@@ -203,6 +211,11 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/persona',
       '/admin/companies/:companyId/knowledge/documents',
       '/admin/companies/:companyId/knowledge/documents/:documentId',
+      '/admin/companies/:companyId/inventory/products',
+      '/admin/companies/:companyId/inventory/products/import',
+      '/admin/companies/:companyId/inventory/products/:productId',
+      '/admin/companies/:companyId/inventory/products/:productId/adjustments',
+      '/admin/companies/:companyId/inventory/products/:productId/movements',
       '/admin/companies/:companyId/memberships/:membershipId',
       '/admin/companies/:companyId/memberships/:membershipId/password',
       '/auth/login',
@@ -280,6 +293,24 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     assert.deepEqual(declared('/admin/companies/:companyId/knowledge/documents/:documentId'), [
       'DELETE:knowledge:manage',
     ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/inventory/products'), [
+      'GET:inventory:manage',
+      'POST:inventory:manage',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/inventory/products/import'), [
+      'POST:inventory:manage',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/inventory/products/:productId'), [
+      'PATCH:inventory:manage',
+    ]);
+    assert.deepEqual(
+      declared('/admin/companies/:companyId/inventory/products/:productId/adjustments'),
+      ['POST:inventory:manage'],
+    );
+    assert.deepEqual(
+      declared('/admin/companies/:companyId/inventory/products/:productId/movements'),
+      ['GET:inventory:manage'],
+    );
     assert.deepEqual(declared('/admin/companies/:companyId/persona'), [
       'GET:persona:manage',
       'PUT:persona:manage',

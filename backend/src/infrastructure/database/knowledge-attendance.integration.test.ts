@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
+import { InventoryService } from '../../application/inventory/inventory.service.js';
 import { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import type { Company, Membership } from '../../domain/index.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
@@ -13,6 +14,11 @@ import { createDatabase, type Database } from './database.js';
 import { PrismaAttendanceUnitOfWork } from './repositories/attendance-unit-of-work.js';
 import { PrismaCompanyRepository } from './repositories/company.repository.js';
 import { PrismaConversationRepository } from './repositories/conversation.repository.js';
+import {
+  PrismaInventoryLedger,
+  PrismaProductRepository,
+  PrismaStockMovementRepository,
+} from './repositories/inventory.repository.js';
 import { PrismaKnowledgeDocumentRepository } from './repositories/knowledge-document.repository.js';
 import { PrismaKnowledgeRetriever } from './repositories/knowledge-retriever.js';
 import { PrismaMembershipRepository } from './repositories/membership.repository.js';
@@ -28,6 +34,7 @@ let database: Database;
 let tenants: TestTenants;
 let service: AttendanceService;
 let knowledge: KnowledgeService;
+let inventory: InventoryService;
 let llm: MockLlmProvider;
 let companyA: Company;
 let companyB: Company;
@@ -49,6 +56,11 @@ before(async () => {
     knowledge: new PrismaKnowledgeRetriever(database.prisma),
   });
   knowledge = new KnowledgeService(new PrismaKnowledgeDocumentRepository(database.prisma));
+  inventory = new InventoryService({
+    products: new PrismaProductRepository(database.prisma),
+    movements: new PrismaStockMovementRepository(database.prisma),
+    ledger: new PrismaInventoryLedger(database.prisma),
+  });
   const memberships = new PrismaMembershipRepository(database.prisma);
   companyA = await tenants.createCompany('ka-a');
   companyB = await tenants.createCompany('ka-b');
@@ -122,6 +134,55 @@ describe('atendimento com base de conhecimento, contra o PostgreSQL (spec 026, E
     assert.equal(first.sources.length, 1);
     assert.equal(again.duplicate, true);
     assert.deepEqual(again.sources, []);
+  });
+
+  it('estoque: o produto entra no prompt com preço, quantidade e hora; fonte é só o nome; inativo e outra empresa não', async () => {
+    const sold = await inventory.create(companyA.id, ownerA.id, {
+      sku: 'ZZ-ASPIRADOR',
+      name: 'Aspirador Turbo Zeta',
+      description: 'Potente',
+      priceCents: 45990,
+      quantity: 4,
+    });
+    const result = await service.handleInboundMessage(companyA.id, {
+      contactRef: 'ka-prod',
+      text: 'quanto custa o aspirador turbo zeta?',
+    });
+    assert.ok(result.reply.text.endsWith(' trechos, 1 produtos)'));
+    assert.ok(
+      result.sources.some(
+        (source) => source.kind === 'product' && source.label === 'Aspirador Turbo Zeta',
+      ),
+    );
+    const call = llm.calls.findLast((entry) => entry.userMessage.includes('aspirador turbo zeta'));
+    assert.ok(call !== undefined);
+    assert.ok(call.systemPrompt.includes('R$ 459,90; 4 unidades em estoque'));
+    // Sem estoque continua aparecendo, como "sem estoque no momento".
+    await inventory.adjust(companyA.id, ownerA.id, sold.id, { delta: -4, reason: 'EXIT' });
+    await service.handleInboundMessage(companyA.id, {
+      contactRef: 'ka-prod',
+      text: 'ainda tem o aspirador turbo zeta?',
+    });
+    const empty = llm.calls.findLast((entry) =>
+      entry.userMessage.includes('ainda tem o aspirador'),
+    );
+    assert.ok(empty?.systemPrompt.includes('sem estoque no momento'));
+    // A outra empresa não vê o produto da A.
+    const other = await service.handleInboundMessage(companyB.id, {
+      contactRef: 'ka-prod-b',
+      text: 'quanto custa o aspirador turbo zeta?',
+    });
+    assert.deepEqual(other.sources, []);
+    // Inativo não é usado.
+    await inventory.update(companyA.id, sold.id, { active: false });
+    const inactive = await service.handleInboundMessage(companyA.id, {
+      contactRef: 'ka-prod',
+      text: 'e o aspirador turbo zeta, tem?',
+    });
+    assert.ok(!inactive.sources.some((source) => source.kind === 'product'));
+    for (const secret of ['Aspirador Turbo Zeta', 'ZZ-ASPIRADOR', '459,90']) {
+      assert.equal(logContains(logs.raw(), secret), false, secret);
+    }
   });
 
   it('privacidade: título, texto do documento e da pergunta não aparecem em nenhum log', () => {

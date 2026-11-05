@@ -39,6 +39,11 @@ export { extendWithTenantScope, MODEL_SCOPES } from './extensions/tenant-scope.j
 export type { ModelScope, TenantScopedDb, TenantScopedPrisma } from './extensions/tenant-scope.js';
 export { PrismaAccountRepository } from './repositories/account.repository.js';
 export { PrismaKnowledgeDocumentRepository } from './repositories/knowledge-document.repository.js';
+export {
+  PrismaInventoryLedger,
+  PrismaProductRepository,
+  PrismaStockMovementRepository,
+} from './repositories/inventory.repository.js';
 export { PrismaKnowledgeRetriever } from './repositories/knowledge-retriever.js';
 export { PrismaCompanyInvitationRepository } from './repositories/company-invitation.repository.js';
 export { PrismaInvitationExpiryRepository } from './repositories/invitation-expiry.repository.js';

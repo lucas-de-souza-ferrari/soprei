@@ -120,6 +120,32 @@ export {
   KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
   KNOWLEDGE_TITLE_MAX_LENGTH,
 } from './knowledge.js';
+export {
+  ADJUSTMENT_REASONS,
+  INVENTORY_IMPORT_MAX_ROWS,
+  INVENTORY_MAX_PRODUCTS,
+  INVENTORY_SEARCH_MAX_LENGTH,
+  PRODUCT_DESCRIPTION_MAX_LENGTH,
+  PRODUCT_NAME_MAX_LENGTH,
+  PRODUCT_PRICE_MAX_CENTS,
+  PRODUCT_QUANTITY_MAX,
+  PRODUCT_SKU_PATTERN,
+  PRODUCT_THRESHOLD_MAX,
+  STOCK_ADJUSTMENT_MAX,
+  STOCK_REASONS,
+} from './inventory.js';
+export type {
+  AdjustmentReason,
+  NewProduct,
+  NewStockMovement,
+  Product,
+  ProductListOptions,
+  ProductRepository,
+  ProductUpdate,
+  StockMovement,
+  StockMovementRepository,
+  StockReason,
+} from './inventory.js';
 export type {
   KnowledgeDocument,
   KnowledgeDocumentRepository,

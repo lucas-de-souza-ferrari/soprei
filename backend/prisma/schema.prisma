@@ -44,6 +44,8 @@ model Company {
   invitations       CompanyInvitation[]
   knowledgeDocuments KnowledgeDocument[]
   knowledgeChunks    KnowledgeChunk[]
+  products           Product[]
+  stockMovements     StockMovement[]
 
   @@map("companies")
 }
@@ -151,6 +153,7 @@ model Membership {
   invitationsSent    CompanyInvitation[] @relation("InvitationInviter")
   invitationAccepted CompanyInvitation[] @relation("InvitationAccepted")
   knowledgeDocuments KnowledgeDocument[] @relation("KnowledgeDocumentCreator")
+  stockMovements     StockMovement[]     @relation("StockMovementCreator")
 
   // `[id, companyId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
   @@unique([id, companyId])
@@ -347,4 +350,63 @@ model KnowledgeChunk {
 
   @@index([companyId, documentId, position])
   @@map("knowledge_chunks")
+}
+
+enum StockReason {
+  INITIAL
+  ENTRY
+  EXIT
+  LOSS
+  COUNT_CORRECTION
+  IMPORT
+
+  @@map("stock_reason")
+}
+
+/// Produto do estoque da empresa (TENANT, spec 026). SKU único por empresa (maiúsculas). A quantidade só muda
+/// por `delta` com movimento no livro (atômico, nunca negativa: CHECK 0 a 1.000.000). Produto não é apagado:
+/// "remover" é `active = false`. O índice GIN de expressão em `search_text` só existe na migration.
+/// Nome, SKU, descrição e preço nunca vão a log nem a label de métrica.
+model Product {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  companyId         String   @map("company_id") @db.Uuid
+  sku               String
+  name              String
+  description       String   @default("")
+  priceCents        Int      @map("price_cents")
+  quantity          Int
+  lowStockThreshold Int      @default(0) @map("low_stock_threshold")
+  active            Boolean  @default(true)
+  isSample          Boolean  @default(false) @map("is_sample")
+  searchText        String   @map("search_text")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company   Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  movements StockMovement[]
+
+  @@unique([companyId, sku])
+  @@unique([id, companyId])
+  @@index([companyId, name, id])
+  @@map("products")
+}
+
+/// Livro de movimentações de estoque (TENANT, spec 026): imutável (a API só cria e lista) e sem texto livre
+/// (o motivo é enum). FKs COMPOSTAS com `companyId`; produto e vínculo nunca são apagados (Restrict).
+model StockMovement {
+  id                    String      @id @default(uuid(7)) @db.Uuid
+  companyId             String      @map("company_id") @db.Uuid
+  productId             String      @map("product_id") @db.Uuid
+  delta                 Int
+  quantityAfter         Int         @map("quantity_after")
+  reason                StockReason
+  createdByMembershipId String      @map("created_by_membership_id") @db.Uuid
+  createdAt             DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  product   Product    @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict)
+  createdBy Membership @relation("StockMovementCreator", fields: [createdByMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@index([companyId, productId, createdAt, id])
+  @@map("stock_movements")
 }
