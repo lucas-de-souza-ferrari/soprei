@@ -11,6 +11,7 @@ import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
 import { AppShell } from './company/AppShell';
+import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
 import { InvitePage } from './invite/InvitePage';
 import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
@@ -84,6 +85,14 @@ function PasswordToggle({
   );
 }
 
+/**
+ * Tela do primeiro carregamento: um endereço da área ou de empresas/convite vale como está; qualquer outro
+ * (entrar, cadastro...) com sessão abre a empresa (spec 029).
+ */
+function bootLanding(initial: Page): Page | 'auto' {
+  return initial === 'companies' || initial === 'invite' || isAreaPage(initial) ? initial : 'auto';
+}
+
 export interface AccountAppProps {
   /** Token do convite lido do fragmento pelo `main.tsx` (spec 025); só vive em memória. */
   readonly initialInviteToken?: string | null;
@@ -125,20 +134,44 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
     history.replaceState(null, '', pathForPage(next));
   };
 
-  const load = async (stamp: number, landing: Page | 'auto' = 'companies', replaceUrl = false) => {
-    const current = sessionSchema.parse(await api('/auth/session'));
+  /**
+   * Lê a sessão e as empresas e decide a tela. `landing`: `companies` fica na tela de empresas (gerenciar);
+   * `invite` volta ao convite; uma tela da área abre se a empresa selecionada existe; `auto` (e uma tela da
+   * área sem empresa selecionada) abre a empresa **sempre** que dá (spec 029, E2): a selecionada pelo
+   * servidor no login (a última usada), ou a única que a conta tem. Só mostra a tela de empresas se há
+   * várias e nenhuma selecionada, ou nenhuma (criar a primeira).
+   */
+  const load = async (
+    stamp: number,
+    requested: Page | 'auto' = 'companies',
+    requestedReplace = false,
+  ) => {
+    let landing = requested;
+    let replaceUrl = requestedReplace;
+    let current = sessionSchema.parse(await api('/auth/session'));
     const list = companiesSchema.parse(await api('/account/companies'));
     if (generation.current !== stamp) return;
+    const hasSelected = list.items.some((item) => item.companyId === current.selectedCompanyId);
+    if (landing === 'auto' || (isAreaPage(landing) && !hasSelected)) {
+      const choice = pickCompanyToOpen(list.items, current.selectedCompanyId);
+      if (choice.kind === 'select') {
+        // Sessão sem empresa (anterior ao deploy ou pré-seleção que falhou): seleciona a única.
+        try {
+          await api(`/account/companies/${choice.companyId}/select`, {});
+          current = { ...current, selectedCompanyId: choice.companyId };
+        } catch {
+          // Sem seleção: cai na tela de empresas, com a sessão intacta.
+        }
+        if (generation.current !== stamp) return;
+      }
+      const opened = list.items.find((item) => item.companyId === current.selectedCompanyId);
+      landing =
+        opened === undefined ? 'companies' : (allowedPages(opened.permissions)[0] ?? 'conversas');
+      replaceUrl = true;
+      setRoute({ kind: 'list' });
+    }
     setSession(current);
     setCompanies(list.items);
-    const selected = list.items.find((item) => item.companyId === current.selectedCompanyId);
-    if (landing === 'auto') {
-      // Troca de empresa (spec 029): abre a primeira tela permitida da empresa selecionada.
-      const first = selected === undefined ? undefined : allowedPages(selected.permissions)[0];
-      setRoute({ kind: 'list' });
-      landing = first ?? 'companies';
-      replaceUrl = true;
-    }
     const target =
       landing === 'invite'
         ? 'invite'
@@ -153,12 +186,12 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   };
   useEffect(() => {
     const stamp = ++generation.current;
-    void load(stamp, initialPage.current)
+    void load(stamp, bootLanding(initialPage.current))
       .catch(() => {
         if (generation.current === stamp) {
           setSession(null);
           setCompanies([]);
-          if (isAreaPage(initialPage.current)) {
+          if (isAreaPage(initialPage.current) || initialPage.current === 'companies') {
             setPage('login');
             history.replaceState(null, '', pathForPage('login'));
           }
@@ -289,7 +322,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       if (stamp === generation.current) {
         setPassword('');
         // Com um convite aberto em memória, o login volta a ele (`/convite`) em vez de ir às empresas.
-        await load(stamp, inviteToken === null ? 'companies' : 'invite');
+        await load(stamp, inviteToken === null ? 'auto' : 'invite');
       }
     }
   };
@@ -690,9 +723,13 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
                   onSubmit={(event) => {
                     event.preventDefault();
                     void perform(async (stamp) => {
-                      companySchema.parse(await api('/account/companies', { name }));
+                      const created = companySchema.parse(
+                        await api('/account/companies', { name }),
+                      );
                       if (generation.current === stamp) setName('');
-                      await load(stamp);
+                      // Criar seleciona e abre a empresa nova, sem o clique extra (spec 029).
+                      await api(`/account/companies/${created.companyId}/select`, {});
+                      await load(stamp, 'auto');
                     });
                   }}
                 >

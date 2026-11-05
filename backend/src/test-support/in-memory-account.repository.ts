@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type CompanyId,
   AccountId,
   RESET_DAILY_FAILURE_CAP,
   RESET_FAILURE_WINDOW_MS,
@@ -343,5 +344,16 @@ export class InMemoryAccountRepository implements AccountRepository {
 
   createCompany(): Promise<AccountMembership> {
     return Promise.reject(new Error('não suportado no repositório em memória'));
+  }
+
+  private readonly lastCompanies = new Map<string, string>();
+
+  lastCompanyId(accountId: string): Promise<string | null> {
+    return Promise.resolve(this.lastCompanies.get(accountId) ?? null);
+  }
+
+  setLastCompany(accountId: string, companyId: CompanyId): Promise<void> {
+    this.lastCompanies.set(accountId, companyId);
+    return Promise.resolve();
   }
 }

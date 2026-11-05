@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { openMenu } from './company-fixture';
 
 for (const theme of ['light', 'dark'] as const) {
   test(`cadastro, confirmação, sessão após reload, empresas e saída (tema ${theme})`, async ({
@@ -59,10 +60,14 @@ for (const theme of ['light', 'dark'] as const) {
           membershipId: randomUUID(),
           name: (body as { name: string }).name,
           role: 'OWNER',
+          permissions: ['conversation:read'],
         };
         companies.push(json as (typeof companies)[number]);
       } else if (path.endsWith('/select')) selectedCompanyId = path.split('/')[3] ?? null;
-      else status = 404;
+      else if (/^\/admin\/companies\/[^/]+\/conversations$/.test(path)) {
+        status = 200;
+        json = { items: [], nextCursor: null };
+      } else status = 404;
       await route.fulfill({ status, ...(status === 204 ? {} : { json: json ?? {} }) });
     });
     await page.goto('/criar-conta');
@@ -111,11 +116,15 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByText('Você ainda não tem empresas.', { exact: false })).toBeVisible();
     await page.getByLabel('Nome da empresa').fill('Minha primeira empresa');
     await page.getByRole('button', { name: 'Criar empresa', exact: true }).click();
-    await expect(page.getByText('Minha primeira empresa')).toBeVisible();
-    await page.getByRole('button', { name: 'Selecionar', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Selecionada ✓' })).toBeVisible();
+    // Criar a empresa a seleciona e abre o painel, sem o clique extra (spec 029).
+    await expect(page).toHaveURL(/\/painel\/conversas$/);
+    const switcher = page.getByRole('button', { name: /Trocar de empresa/ });
+    await openMenu(page);
+    await expect(switcher).toContainText('Minha primeira empresa');
     await page.reload();
-    await expect(page.getByText('Minha primeira empresa')).toBeVisible();
+    await expect(page).toHaveURL(/\/painel\/conversas$/);
+    await openMenu(page);
+    await expect(switcher).toContainText('Minha primeira empresa');
     await page.screenshot({
       path: `test-results/accounts-${testInfo.project.name}-${theme}.png`,
       fullPage: true,
@@ -125,6 +134,10 @@ for (const theme of ['light', 'dark'] as const) {
     expect(
       await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]),
     ).toEqual(['soprei-theme']);
+    // Gerenciar empresas: a tela de escolher e criar continua disponível pelo seletor.
+    await switcher.click();
+    await page.getByRole('menuitem', { name: 'Gerenciar empresas' }).click();
+    await expect(page.getByText('Suas empresas')).toBeVisible();
     let releaseList: (() => void) | undefined;
     pending.list = new Promise<void>((resolve) => {
       releaseList = resolve;

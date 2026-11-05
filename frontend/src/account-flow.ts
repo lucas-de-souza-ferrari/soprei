@@ -51,6 +51,8 @@ export function pageForPath(pathname: string): AccountPage {
       return 'reset';
     case PATHS.invite:
       return 'invite';
+    case PATHS.companies:
+      return 'companies';
     default:
       // As telas da empresa (spec 023) só abrem com sessão: o AccountApp decide depois de ler a sessão.
       return areaPageForPath(pathname) ?? 'login';

@@ -19,7 +19,7 @@ test('navegação: cada página tem caminho próprio e o caminho abre a página 
   }
   assert.equal(pathForPage('forgot'), '/recuperar-senha');
   assert.equal(pathForPage('reset'), '/redefinir-senha');
-  assert.equal(pageForPath('/painel/empresas'), 'login');
+  assert.equal(pageForPath('/painel/empresas'), 'companies');
   assert.equal(pageForPath('/qualquer'), 'login');
 });
 

@@ -347,6 +347,17 @@ export class PrismaAccountRepository implements AccountRepository {
           };
     });
   }
+  async lastCompanyId(accountId: string): Promise<string | null> {
+    const row = await withRepositoryErrors('Account.lastCompanyId', () =>
+      this.db.account.findFirst({ where: { id: accountId }, select: { lastCompanyId: true } }),
+    );
+    return row?.lastCompanyId ?? null;
+  }
+  async setLastCompany(accountId: string, companyId: CompanyId): Promise<void> {
+    await withRepositoryErrors('Account.setLastCompany', () =>
+      this.db.account.updateMany({ where: { id: accountId }, data: { lastCompanyId: companyId } }),
+    );
+  }
   async createCompany(accountId: string, name: string): Promise<AccountMembership> {
     return withRepositoryErrors('Account.createCompany', () =>
       runInTransaction(this.db, async (tx) => {

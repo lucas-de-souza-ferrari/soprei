@@ -315,7 +315,11 @@ async function main(): Promise<void> {
               onWarning: (event, accountId) => {
                 logger.warn(
                   { accountId, event },
-                  'bloqueio de login não zerado depois da redefinição',
+                  event === 'login_lock_reset_failed'
+                    ? 'bloqueio de login não zerado depois da redefinição'
+                    : event === 'preselect_failed'
+                      ? 'empresa não pré-selecionada no login'
+                      : 'última empresa não gravada',
                 );
               },
               mailer: accountMailer,

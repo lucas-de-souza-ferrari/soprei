@@ -21,6 +21,7 @@ import type { SessionStore } from '../ports/session-store.js';
 import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { AccountMailer, AccountSessionStore } from '../ports/account-session.js';
 import type { MembershipIdentity } from './identity.js';
+import { pickCompanyToOpen } from './company-pick.js';
 import { normalizeEmail } from './credentials.js';
 import { deriveResetKey, resetDigest } from './reset-code.js';
 import {
@@ -80,7 +81,10 @@ export class AccountService {
         accountId: string,
       ) => void;
       /** Aviso operacional que não derruba a operação (só id da conta, nunca e-mail). */
-      onWarning?: (event: 'login_lock_reset_failed', accountId: string) => void;
+      onWarning?: (
+        event: 'login_lock_reset_failed' | 'preselect_failed' | 'last_company_failed',
+        accountId: string,
+      ) => void;
     },
   ) {
     this.verificationKey = deriveVerificationKey(deps.loginSecret);
@@ -349,7 +353,29 @@ export class AccountService {
     const account = await this.credentials(email, password);
     if (account.emailVerifiedAt === null)
       throw new ForbiddenError('Confirme seu e-mail antes de entrar');
-    return this.deps.sessions.create(account.id);
+    const secret = await this.deps.sessions.create(account.id);
+    await this.preselectCompany(secret, account.id);
+    return secret;
+  }
+
+  /**
+   * Abre a empresa já no login (spec 029): a última usada, se a conta ainda tem vínculo ativo nela e a empresa
+   * está ativa; senão a primeira da lista (que é a única, quando há uma só). Melhor esforço: qualquer falha
+   * deixa a sessão sem empresa, como antes, e nunca derruba o login. A dica é só leitura da própria conta
+   * e é conferida contra a lista de vínculos ativos (`listMemberships`) antes de ser usada.
+   */
+  private async preselectCompany(secret: string, accountId: AccountId): Promise<void> {
+    try {
+      const memberships = await this.deps.accounts.listMemberships(accountId);
+      if (memberships.length === 0) return;
+      const target = pickCompanyToOpen(
+        memberships,
+        await this.deps.accounts.lastCompanyId(accountId),
+      );
+      if (target !== null) await this.deps.sessions.select(secret, target);
+    } catch {
+      this.observe(() => this.deps.onWarning?.('preselect_failed', accountId));
+    }
   }
 
   private async session(secret: string) {
@@ -380,6 +406,12 @@ export class AccountService {
     if ((await this.deps.accounts.membership(account.id, companyId)) === null)
       throw new NotFoundError('Empresa não encontrada');
     await this.deps.sessions.select(secret, companyId);
+    // Dica da última empresa (spec 029): melhor esforço, nunca falha a seleção já feita.
+    try {
+      await this.deps.accounts.setLastCompany(account.id, companyId);
+    } catch {
+      this.observe(() => this.deps.onWarning?.('last_company_failed', account.id));
+    }
   }
   async tenantIdentity(secret: string): Promise<MembershipIdentity | null> {
     const { account, session } = await this.session(secret);

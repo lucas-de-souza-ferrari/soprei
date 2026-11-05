@@ -51,6 +51,7 @@ model Company {
   scheduleServices   ScheduleService[]
   availabilityRules  AvailabilityRule[]
   appointments       Appointment[]
+  lastUsedByAccounts Account[] @relation("AccountLastCompany")
 
   @@map("companies")
 }
@@ -187,10 +188,15 @@ model Account {
   resetAttempts             Int          @default(0) @map("reset_attempts") @db.SmallInt
   resetFailuresDay          Int          @default(0) @map("reset_failures_day") @db.SmallInt
   resetFailuresSince        DateTime?    @map("reset_failures_since") @db.Timestamptz(6)
+  /// Última empresa que a conta selecionou (spec 029): só uma dica de conveniência para abrir a empresa
+  /// certa depois do login; nunca é autoridade (o `select` e o login revalidam o vínculo ativo).
+  lastCompanyId             String?      @map("last_company_id") @db.Uuid
   createdAt                 DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   memberships               Membership[]
+  lastCompany               Company?     @relation("AccountLastCompany", fields: [lastCompanyId], references: [id], onDelete: SetNull)
 
+  @@index([lastCompanyId])
   @@map("accounts")
 }
 

@@ -1,6 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { company, installApi, SENTINEL, type Call, type FakeApi } from './company-fixture';
+import {
+  closeMenu,
+  company,
+  installApi,
+  openMenu,
+  SENTINEL,
+  type Call,
+  type FakeApi,
+} from './company-fixture';
 
 const FAILURE = 'Este convite é inválido, venceu ou foi enviado para outro e-mail.';
 const COMPANY_NAME = 'Padaria do Convite';
@@ -139,7 +147,9 @@ test('caso (a): logada com o mesmo e-mail aceita e cai em Conversas da empresa n
 
   await page.getByRole('button', { name: `Entrar na empresa ${COMPANY_NAME}` }).click();
   await expect(page).toHaveURL(/\/painel\/conversas$/);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText(COMPANY_NAME);
+  await openMenu(page);
+  await expect(page.getByRole('button', { name: /Trocar de empresa/ })).toContainText(COMPANY_NAME);
+  await closeMenu(page);
   expect(inviteCalls(invite).map((call) => `${call.method} ${call.path}`)).toEqual(
     expect.arrayContaining(['POST /auth/invitations/preview', 'POST /auth/invitations/accept']),
   );

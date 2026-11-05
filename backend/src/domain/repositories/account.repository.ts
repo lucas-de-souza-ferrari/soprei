@@ -114,6 +114,10 @@ export interface AccountRepository {
   listMemberships(accountId: string): Promise<readonly AccountMembership[]>;
   membership(accountId: string, companyId: CompanyId): Promise<AccountMembership | null>;
   createCompany(accountId: string, name: string): Promise<AccountMembership>;
+  /** Última empresa selecionada pela conta (spec 029): só uma dica, sempre revalidada contra os vínculos. */
+  lastCompanyId(accountId: string): Promise<string | null>;
+  /** Grava a dica da última empresa (spec 029); quem chama já conferiu o vínculo. */
+  setLastCompany(accountId: string, companyId: CompanyId): Promise<void>;
 }
 
 /** Expurgo de contas nunca confirmadas (spec 021). */
