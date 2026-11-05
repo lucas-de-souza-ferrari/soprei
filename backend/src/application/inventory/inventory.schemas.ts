@@ -78,7 +78,16 @@ export const adjustmentSchema = z
       .refine((value) => value !== 0, 'delta não pode ser zero'),
     reason: z.enum(ADJUSTMENT_REASONS),
   })
-  .strict();
+  .strict()
+  // O sinal tem de combinar com o motivo: entrada soma, saída e perda subtraem; a correção de contagem
+  // aceita os dois sentidos.
+  .superRefine((value, ctx) => {
+    const wrong =
+      (value.reason === 'ENTRY' && value.delta <= 0) ||
+      ((value.reason === 'EXIT' || value.reason === 'LOSS') && value.delta >= 0);
+    if (wrong)
+      ctx.addIssue({ code: 'custom', path: ['delta'], message: 'sinal incompatível com o motivo' });
+  });
 export type Adjustment = z.infer<typeof adjustmentSchema>;
 
 export const searchSchema = z.string().trim().max(INVENTORY_SEARCH_MAX_LENGTH).refine(noNul);

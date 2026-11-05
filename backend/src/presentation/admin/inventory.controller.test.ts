@@ -206,6 +206,9 @@ describe('API de estoque (spec 026, E2): permissões e validação', () => {
       ['POST', `/${productId}/adjustments`, { delta: 1, reason: 'INITIAL' }],
       ['POST', `/${productId}/adjustments`, { delta: 1, reason: 'ENTRY', note: SECRET_NAME }],
       ['POST', `/${productId}/adjustments`, { delta: 100_001, reason: 'ENTRY' }],
+      ['POST', `/${productId}/adjustments`, { delta: -1, reason: 'ENTRY' }],
+      ['POST', `/${productId}/adjustments`, { delta: 1, reason: 'EXIT' }],
+      ['POST', `/${productId}/adjustments`, { delta: 1, reason: 'LOSS' }],
       ['POST', '/import', { rows: [] }],
       ['POST', '/import', { rows: Array.from({ length: 201 }, () => ({})) }],
     ];
