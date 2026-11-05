@@ -250,3 +250,17 @@ test('spec 029 E4: o código novo do calendário não converte fuso nem usa a ho
     assert.doesNotMatch(source, forbidden, file);
   }
 });
+
+test('spec 029 E4: item que termina exatamente à meia-noite ("00:00") vai até o fim do dia, sem continuação', () => {
+  const byDay = weekBlocks([item('2026-11-14', '23:30', '00:00')], WEEK);
+  const saturday = byDay.get('2026-11-14') ?? [];
+  assert.equal(saturday.length, 1);
+  assert.equal(saturday[0]?.startMin, 1410);
+  assert.equal(saturday[0]?.endMin, 1440);
+  assert.equal(saturday[0]?.continuesToNext, false);
+  assert.equal((byDay.get('2026-11-15') ?? []).length, 0);
+  const range = visibleRange(saturday);
+  assert.deepEqual(range, { start: 420, end: 1440 });
+  const position = blockPosition(saturday[0] as (typeof saturday)[number], range);
+  assert.ok(position.height > 0 && position.top + position.height <= 100 + 1e-9);
+});

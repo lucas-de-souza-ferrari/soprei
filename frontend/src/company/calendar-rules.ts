@@ -112,14 +112,18 @@ function blocksFor(item: Appointment, dates: ReadonlySet<string>): DayBlock[] {
   const start = minutesOf(item.localStart);
   const end = minutesOf(item.localEnd);
   if (start === null || end === null) return [];
-  const crosses = end <= start;
+  // O servidor devolve "00:00" quando o item termina exatamente à meia-noite (ex.: 23:30 a 00:00): isso é fim
+  // do dia (1440), não travessia. Só atravessa quem termina depois da meia-noite (ex.: 22:00 a 01:00).
+  const endsAtMidnight = end === 0 && start > 0;
+  const crosses = end > 0 && end <= start;
+  const lastMinute = endsAtMidnight ? MINUTES_PER_DAY : end;
   const result: DayBlock[] = [];
   if (dates.has(item.localDate)) {
     result.push({
       item,
       date: item.localDate,
       startMin: start,
-      endMin: crosses ? MINUTES_PER_DAY : end,
+      endMin: crosses ? MINUTES_PER_DAY : lastMinute,
       continuesFromPrevious: false,
       continuesToNext: crosses,
       column: 0,

@@ -420,3 +420,20 @@ test('privacidade: nada de serviço, atendido ou horário em console, título, U
   for (const value of [state.local, state.session, state.title, state.href, ...state.data, ...logs])
     expect(value).not.toContain('SEGREDO-ATENDIDO');
 });
+
+test('item que termina à meia-noite ("00:00") fica no dia e não gera bloco no seguinte', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === 'mobile', 'blocos da semana só no computador');
+  await open(
+    page,
+    'OWNER',
+    (agenda) => {
+      agenda.appointments.push(appointment(agenda, '2026-11-14', '23:30', '00:00'));
+    },
+    'Semana',
+  );
+  await expect(items(page, '2026-11-14')).toHaveCount(1);
+  await expect(items(page, '2026-11-14')).toContainText('23:30 às 00:00');
+  await expect(items(page, '2026-11-15')).toHaveCount(0);
+});
