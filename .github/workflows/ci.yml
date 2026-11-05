@@ -70,9 +70,15 @@ jobs:
 
       - run: pnpm db:migrate:deploy
 
+      # Repórter "dot": um ponto por teste e, no fim, só os testes que falharam ou foram
+      # cancelados (com nome e erro). O log completo de 1200+ testes escondia o que importa.
       - run: pnpm test
+        env:
+          NODE_OPTIONS: --test-reporter=dot
 
       - run: pnpm test:integration
+        env:
+          NODE_OPTIONS: --test-reporter=dot
 
       - run: pnpm --filter soprei-frontend exec playwright install --with-deps chromium
 
