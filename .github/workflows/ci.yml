@@ -83,3 +83,13 @@ jobs:
       - run: pnpm --filter soprei-frontend exec playwright install --with-deps chromium
 
       - run: pnpm --filter soprei-frontend test:browser
+
+      # Rastreamento (linha do tempo, DOM e rede) das tentativas que falharam, mesmo as que passaram na
+      # retentativa. Baixe em "Artifacts" na página da execução e abra com: npx playwright show-trace <zip>.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-traces-node-${{ matrix.node }}
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7

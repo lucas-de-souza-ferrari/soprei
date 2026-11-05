@@ -3,9 +3,12 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
-  retries: 0,
+  // No CI uma retentativa: um teste que só passa na segunda tentativa aparece como "flaky" no
+  // relatório (não some), e o rastreamento da tentativa que falhou fica guardado em test-results.
+  retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: 'http://127.0.0.1:5186',
+    trace: 'retain-on-failure',
     ...(process.platform === 'win32' ? { channel: 'msedge' } : {}),
   },
   projects: [
