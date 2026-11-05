@@ -6,6 +6,7 @@ import { AccountService } from '../../application/auth/account.service.js';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
 import { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
 import { InventoryService } from '../../application/inventory/inventory.service.js';
+import { ScheduleService } from '../../application/schedule/schedule.service.js';
 import { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import { CompanyService } from '../../application/companies/company.service.js';
 import type { AccountSessionStore } from '../../application/ports/account-session.js';
@@ -41,8 +42,13 @@ import {
   PrismaMessageRepository,
 } from '../database/index.js';
 import {
+  PrismaAppointmentRepository,
+  PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
   PrismaKnowledgeDocumentRepository,
+  PrismaScheduleResourceRepository,
+  PrismaScheduleServiceRepository,
+  PrismaScheduleSettingsRepository,
   PrismaProductRepository,
   PrismaStockMovementRepository,
 } from '../database/index.js';
@@ -145,6 +151,15 @@ before(async () => {
         products: new PrismaProductRepository(db.prisma),
         movements: new PrismaStockMovementRepository(db.prisma),
         ledger: new PrismaInventoryLedger(db.prisma),
+      }),
+      // Spec 027: a agenda pela ponte do cookie.
+      schedule: new ScheduleService({
+        settings: new PrismaScheduleSettingsRepository(db.prisma),
+        resources: new PrismaScheduleResourceRepository(db.prisma),
+        services: new PrismaScheduleServiceRepository(db.prisma),
+        rules: new PrismaAvailabilityRuleRepository(db.prisma),
+        appointments: new PrismaAppointmentRepository(db.prisma),
+        logger: logs.logger,
       }),
       attendance: new AttendanceService({
         companies: companyRepository,
@@ -343,6 +358,10 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
       '/admin/companies/:companyId/knowledge/documents/:documentId',
       '/admin/companies/:companyId/inventory/products',
       '/admin/companies/:companyId/inventory/products/:productId/adjustments',
+      '/admin/companies/:companyId/schedule/settings',
+      '/admin/companies/:companyId/schedule/appointments',
+      '/admin/companies/:companyId/schedule/appointments/:appointmentId',
+      '/admin/companies/:companyId/schedule/blocks/:blockId',
     ]) {
       assert.ok(
         tenantRoutes.some((route) => route.url === url),
@@ -355,7 +374,11 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
         .replace(':membershipId', randomUUID())
         .replace(':conversationId', randomUUID())
         .replace(':documentId', randomUUID())
-        .replace(':productId', randomUUID());
+        .replace(':productId', randomUUID())
+        .replace(':resourceId', randomUUID())
+        .replace(':serviceId', randomUUID())
+        .replace(':appointmentId', randomUUID())
+        .replace(':blockId', randomUUID());
     const request = (route: (typeof tenantRoutes)[number], companyId: string) =>
       route.method === 'GET'
         ? get(resolve(route.url, companyId), alice)

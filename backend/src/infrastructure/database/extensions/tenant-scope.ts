@@ -24,6 +24,11 @@ export const MODEL_SCOPES = {
   KnowledgeChunk: 'tenant',
   Product: 'tenant',
   StockMovement: 'tenant',
+  ScheduleSettings: 'tenant',
+  ScheduleResource: 'tenant',
+  ScheduleService: 'tenant',
+  AvailabilityRule: 'tenant',
+  Appointment: 'tenant',
   PlatformAdmin: 'global',
   Account: 'global',
 } as const satisfies Record<Prisma.ModelName, ModelScope>;

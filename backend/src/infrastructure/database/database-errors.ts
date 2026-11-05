@@ -30,6 +30,31 @@ export function isRecoverableTransactionError(error: unknown): boolean {
   );
 }
 
+/**
+ * Violação da restrição de exclusão (SQLSTATE 23P01), do jeito que o adaptador `pg` do Prisma 7 a entrega:
+ * `PrismaClientKnownRequestError` (código P2039) com o código original em
+ * `meta.driverAdapterError.cause.originalCode`. Também aceita o erro cru do `pg` e olha a cadeia de `cause`.
+ * É o **único** lugar que conhece essa forma (spec 027: dupla reserva).
+ */
+export function isExclusionViolation(error: unknown, depth = 0): boolean {
+  if (depth > 4 || typeof error !== 'object' || error === null) return false;
+  if (errorCode(error) === '23P01') return true;
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    const meta: unknown = error.meta;
+    if (typeof meta === 'object' && meta !== null && 'driverAdapterError' in meta) {
+      const adapter: unknown = meta.driverAdapterError;
+      if (typeof adapter === 'object' && adapter !== null && 'cause' in adapter) {
+        const cause: unknown = adapter.cause;
+        if (typeof cause === 'object' && cause !== null) {
+          const record = cause as Record<string, unknown>;
+          if (record['originalCode'] === '23P01' || record['code'] === '23P01') return true;
+        }
+      }
+    }
+  }
+  return 'cause' in error && isExclusionViolation(error.cause, depth + 1);
+}
+
 /** Erro que veio do Prisma ou do driver `pg` (e não de regra de negócio). */
 export function isDatabaseFailure(error: unknown): boolean {
   if (error instanceof DatabaseError) return true;

@@ -49,3 +49,10 @@ export { PrismaCompanyInvitationRepository } from './repositories/company-invita
 export { PrismaInvitationExpiryRepository } from './repositories/invitation-expiry.repository.js';
 export { PrismaInvitationUnitOfWork } from './repositories/invitation-unit-of-work.js';
 export { PrismaUnverifiedAccountPurgeRepository } from './repositories/unverified-account-purge.repository.js';
+export {
+  PrismaAppointmentRepository,
+  PrismaAvailabilityRuleRepository,
+  PrismaScheduleResourceRepository,
+  PrismaScheduleServiceRepository,
+  PrismaScheduleSettingsRepository,
+} from './repositories/schedule.repository.js';

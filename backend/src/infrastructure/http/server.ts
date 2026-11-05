@@ -26,6 +26,10 @@ import {
 import { adminKnowledgeController } from '../../presentation/admin/knowledge.controller.js';
 import { adminPersonaController } from '../../presentation/admin/persona.controller.js';
 import { adminInventoryController } from '../../presentation/admin/inventory.controller.js';
+import {
+  adminScheduleController,
+  type AdminScheduleControllerOptions,
+} from '../../presentation/admin/schedule.controller.js';
 import type { InventoryService } from '../../application/inventory/inventory.service.js';
 import type { SampleDataService } from '../../application/knowledge/sample.service.js';
 import type { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
@@ -58,6 +62,8 @@ export interface AdminRoutesParams {
     InventoryService,
     'list' | 'create' | 'update' | 'adjust' | 'movements' | 'importRows'
   >;
+  /** Agenda da empresa (spec 027); sem isto as rotas `.../schedule/*` não existem. */
+  readonly schedule?: AdminScheduleControllerOptions['schedule'];
   /** Valores públicos do Embedded Signup para o site (spec 023); sem isto `.../channel/setup` não existe. */
   readonly channelSetup?: ChannelSetupInfo;
 }
@@ -277,6 +283,14 @@ export function buildServer({
         auth,
         metrics,
         inventory: admin.inventory,
+      });
+    }
+    if (admin.schedule !== undefined) {
+      void app.register(adminScheduleController, {
+        prefix: '/admin/companies',
+        auth,
+        metrics,
+        schedule: admin.schedule,
       });
     }
     if (admin.attendance !== undefined) {

@@ -152,3 +152,4 @@ export type {
   NewKnowledgeChunk,
   NewKnowledgeDocument,
 } from './knowledge.js';
+export * from './schedule.js';

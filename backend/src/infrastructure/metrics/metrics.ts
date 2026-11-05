@@ -130,6 +130,23 @@ export type AccountPurgeRunResult = 'ok' | 'error';
 /** Recuperação da base de conhecimento (spec 026). Conjunto fixo: vai a label. */
 export type KnowledgeRetrievalResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
 
+/** Operações da agenda (spec 027). Conjuntos fixos: nunca id, nome de serviço, contato nem horário. */
+export type ScheduleAction =
+  | 'create'
+  | 'reschedule'
+  | 'confirm'
+  | 'cancel'
+  | 'complete'
+  | 'no_show'
+  | 'label'
+  | 'block'
+  | 'unblock'
+  | 'configure';
+export type ScheduleActionResult = 'ok' | 'slot_taken' | 'conflict' | 'invalid';
+
+/** Consulta de horários livres para o prompt da IA (spec 027, E3). */
+export type ScheduleContextResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
+
 export interface DbQuerySample {
   readonly model: string;
   readonly operation: string;
@@ -161,6 +178,10 @@ export interface Metrics {
   countUnsentReply(): void;
   /** Uma recuperação da base de conhecimento terminou (spec 026). Conjunto fixo; nunca a consulta. */
   countKnowledgeRetrieval(result: KnowledgeRetrievalResult): void;
+  /** Uma operação da agenda terminou (spec 027). Conjunto fixo de labels. */
+  countScheduleAction(action: ScheduleAction, result: ScheduleActionResult): void;
+  /** Uma consulta de horários livres para o prompt terminou (spec 027). Conjunto fixo. */
+  countScheduleContext(result: ScheduleContextResult): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
   /** O destino de uma mensagem de entrada do canal. */
@@ -309,6 +330,20 @@ export function createMetrics(): Metrics {
   const knowledgeRetrievals = new Counter({
     name: 'knowledge_retrievals_total',
     help: 'Recuperações da base de conhecimento por resultado (spec 026, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
+  const scheduleActions = new Counter({
+    name: 'schedule_actions_total',
+    help: 'Operações da agenda por ação e resultado (spec 027, conjuntos fixos)',
+    labelNames: ['action', 'result'] as const,
+    registers: [registry],
+  });
+
+  const scheduleContext = new Counter({
+    name: 'schedule_context_total',
+    help: 'Consultas de horários livres para o prompt da IA por resultado (spec 027, conjunto fixo)',
     labelNames: ['result'] as const,
     registers: [registry],
   });
@@ -530,6 +565,12 @@ export function createMetrics(): Metrics {
     },
     countKnowledgeRetrieval(result) {
       knowledgeRetrievals.inc({ result });
+    },
+    countScheduleAction(action, result) {
+      scheduleActions.inc({ action, result });
+    },
+    countScheduleContext(result) {
+      scheduleContext.inc({ result });
     },
     countWebhookRequest(channel, result) {
       webhookRequests.inc({ channel, result });

@@ -1,5 +1,6 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
+import { ScheduleService } from './application/schedule/schedule.service.js';
 import { KnowledgeService } from './application/knowledge/knowledge.service.js';
 import { SampleDataService } from './application/knowledge/sample.service.js';
 import { ChannelConnectionService } from './application/channel/channel-connection.service.js';
@@ -24,7 +25,12 @@ import {
   PrismaChannelConnectionRepository,
   PrismaChannelUnitOfWork,
   PrismaCompanyRepository,
+  PrismaAppointmentRepository,
+  PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
+  PrismaScheduleResourceRepository,
+  PrismaScheduleServiceRepository,
+  PrismaScheduleSettingsRepository,
   PrismaKnowledgeDocumentRepository,
   PrismaKnowledgeRetriever,
   PrismaConversationRepository,
@@ -153,6 +159,16 @@ async function main(): Promise<void> {
     ledger: new PrismaInventoryLedger(prisma),
   });
   const sample = new SampleDataService({ documents, products, knowledge, inventory });
+  // Agenda da empresa (spec 027): a dupla reserva é impedida pelo banco (restrição de exclusão).
+  const schedule = new ScheduleService({
+    settings: new PrismaScheduleSettingsRepository(prisma),
+    resources: new PrismaScheduleResourceRepository(prisma),
+    services: new PrismaScheduleServiceRepository(prisma),
+    rules: new PrismaAvailabilityRuleRepository(prisma),
+    appointments: new PrismaAppointmentRepository(prisma),
+    logger,
+    metrics,
+  });
 
   let whatsappRoutes: WhatsappRoutesParams | undefined;
   let channelService: ChannelConnectionService | undefined;
@@ -337,6 +353,7 @@ async function main(): Promise<void> {
       knowledge,
       inventory,
       sample,
+      schedule,
       ...(channelService === undefined ? {} : { channel: channelService }),
       ...(whatsapp === undefined
         ? {}

@@ -159,6 +159,25 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           movements: () => Promise.reject(new Error('inventário')),
           importRows: () => Promise.reject(new Error('inventário')),
         },
+        schedule: {
+          getSettings: () => Promise.reject(new Error('inventário')),
+          updateSettings: () => Promise.reject(new Error('inventário')),
+          listResources: () => Promise.reject(new Error('inventário')),
+          createResource: () => Promise.reject(new Error('inventário')),
+          updateResource: () => Promise.reject(new Error('inventário')),
+          setRules: () => Promise.reject(new Error('inventário')),
+          listServices: () => Promise.reject(new Error('inventário')),
+          createService: () => Promise.reject(new Error('inventário')),
+          updateService: () => Promise.reject(new Error('inventário')),
+          availability: () => Promise.reject(new Error('inventário')),
+          listAppointments: () => Promise.reject(new Error('inventário')),
+          createAppointment: () => Promise.reject(new Error('inventário')),
+          updateAppointment: () => Promise.reject(new Error('inventário')),
+          createBlocks: () => Promise.reject(new Error('inventário')),
+          cancelBlock: () => Promise.reject(new Error('inventário')),
+          view: () => Promise.reject(new Error('inventário')),
+          viewMany: () => Promise.reject(new Error('inventário')),
+        },
         knowledge: {
           list: () => Promise.reject(new Error('inventário')),
           create: () => Promise.reject(new Error('inventário')),
@@ -221,6 +240,17 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/inventory/products/:productId',
       '/admin/companies/:companyId/inventory/products/:productId/adjustments',
       '/admin/companies/:companyId/inventory/products/:productId/movements',
+      '/admin/companies/:companyId/schedule/settings',
+      '/admin/companies/:companyId/schedule/resources',
+      '/admin/companies/:companyId/schedule/resources/:resourceId',
+      '/admin/companies/:companyId/schedule/resources/:resourceId/rules',
+      '/admin/companies/:companyId/schedule/services',
+      '/admin/companies/:companyId/schedule/services/:serviceId',
+      '/admin/companies/:companyId/schedule/availability',
+      '/admin/companies/:companyId/schedule/appointments',
+      '/admin/companies/:companyId/schedule/appointments/:appointmentId',
+      '/admin/companies/:companyId/schedule/blocks',
+      '/admin/companies/:companyId/schedule/blocks/:blockId',
       '/admin/companies/:companyId/memberships/:membershipId',
       '/admin/companies/:companyId/memberships/:membershipId/password',
       '/auth/login',
@@ -320,6 +350,35 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       declared('/admin/companies/:companyId/inventory/products/:productId/movements'),
       ['GET:inventory:manage'],
     );
+    // Spec 027: a agenda tem três permissões (ler, gerenciar agendamentos, configurar).
+    const schedule = '/admin/companies/:companyId/schedule';
+    assert.deepEqual(declared(schedule + '/settings'), [
+      'GET:schedule:read',
+      'PUT:schedule:configure',
+    ]);
+    assert.deepEqual(declared(schedule + '/resources'), [
+      'GET:schedule:read',
+      'POST:schedule:configure',
+    ]);
+    assert.deepEqual(declared(schedule + '/resources/:resourceId'), ['PATCH:schedule:configure']);
+    assert.deepEqual(declared(schedule + '/resources/:resourceId/rules'), [
+      'PUT:schedule:configure',
+    ]);
+    assert.deepEqual(declared(schedule + '/services'), [
+      'GET:schedule:read',
+      'POST:schedule:configure',
+    ]);
+    assert.deepEqual(declared(schedule + '/services/:serviceId'), ['PATCH:schedule:configure']);
+    assert.deepEqual(declared(schedule + '/availability'), ['GET:schedule:read']);
+    assert.deepEqual(declared(schedule + '/appointments'), [
+      'GET:schedule:read',
+      'POST:schedule:manage',
+    ]);
+    assert.deepEqual(declared(schedule + '/appointments/:appointmentId'), [
+      'PATCH:schedule:manage',
+    ]);
+    assert.deepEqual(declared(schedule + '/blocks'), ['POST:schedule:manage']);
+    assert.deepEqual(declared(schedule + '/blocks/:blockId'), ['DELETE:schedule:manage']);
     assert.deepEqual(declared('/admin/companies/:companyId/persona'), [
       'GET:persona:manage',
       'PUT:persona:manage',

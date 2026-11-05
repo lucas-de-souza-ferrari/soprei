@@ -46,6 +46,11 @@ model Company {
   knowledgeChunks    KnowledgeChunk[]
   products           Product[]
   stockMovements     StockMovement[]
+  scheduleSettings   ScheduleSettings?
+  scheduleResources  ScheduleResource[]
+  scheduleServices   ScheduleService[]
+  availabilityRules  AvailabilityRule[]
+  appointments       Appointment[]
 
   @@map("companies")
 }
@@ -154,6 +159,7 @@ model Membership {
   invitationAccepted CompanyInvitation[] @relation("InvitationAccepted")
   knowledgeDocuments KnowledgeDocument[] @relation("KnowledgeDocumentCreator")
   stockMovements     StockMovement[]     @relation("StockMovementCreator")
+  appointmentsCreated Appointment[]      @relation("AppointmentCreator")
 
   // `[id, companyId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
   @@unique([id, companyId])
@@ -409,4 +415,141 @@ model StockMovement {
 
   @@index([companyId, productId, createdAt, id])
   @@map("stock_movements")
+}
+
+enum AppointmentKind {
+  BOOKING
+  BLOCK
+
+  @@map("appointment_kind")
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+
+  @@map("appointment_status")
+}
+
+enum AppointmentSource {
+  PANEL
+  CHANNEL
+
+  @@map("appointment_source")
+}
+
+enum AppointmentCancelledBy {
+  PANEL
+  CONTACT
+
+  @@map("appointment_cancelled_by")
+}
+
+/// Configuração da agenda da empresa (TENANT, spec 027): uma linha por empresa, criada sob demanda.
+model ScheduleSettings {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  companyId        String   @unique @map("company_id") @db.Uuid
+  timezone         String   @default("America/Sao_Paulo")
+  slotStepMinutes  Int      @default(30) @map("slot_step_minutes")
+  minNoticeMinutes Int      @default(120) @map("min_notice_minutes")
+  maxAdvanceDays   Int      @default(60) @map("max_advance_days")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@map("schedule_settings")
+}
+
+/// Recurso da agenda (TENANT, spec 027): profissional, sala ou "Agenda principal".
+model ScheduleResource {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String
+  active    Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company      Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  rules        AvailabilityRule[]
+  appointments Appointment[]
+
+  @@unique([id, companyId])
+  @@index([companyId, position, id])
+  @@map("schedule_resources")
+}
+
+/// Serviço agendável (TENANT, spec 027). Não é apagado (agendamentos o referenciam): só `active = false`.
+model ScheduleService {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  companyId       String   @map("company_id") @db.Uuid
+  name            String
+  durationMinutes Int      @map("duration_minutes")
+  bufferMinutes   Int      @default(0) @map("buffer_minutes")
+  active          Boolean  @default(true)
+  isSample        Boolean  @default(false) @map("is_sample")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  appointments Appointment[]
+
+  @@unique([id, companyId])
+  @@index([companyId, name, id])
+  @@map("schedule_services")
+}
+
+/// Janela semanal de atendimento de um recurso (TENANT, spec 027), em minutos do relógio local da empresa.
+model AvailabilityRule {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  resourceId  String   @map("resource_id") @db.Uuid
+  weekday     Int
+  startMinute Int      @map("start_minute")
+  endMinute   Int      @map("end_minute")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  resource ScheduleResource @relation(fields: [resourceId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@index([companyId, resourceId, weekday])
+  @@map("availability_rules")
+}
+
+/// Agendamento ou bloqueio (TENANT, spec 027). A restrição de exclusão (`EXCLUDE USING gist`, extensão
+/// `btree_gist`) que impede dois itens ativos (PENDING/CONFIRMED) sobrepostos no mesmo recurso só existe na
+/// migration (o Prisma não a representa). Nome de serviço, `customerLabel`, `contactRef` e horários nunca vão a log.
+model Appointment {
+  id                    String                  @id @default(uuid(7)) @db.Uuid
+  companyId             String                  @map("company_id") @db.Uuid
+  resourceId            String                  @map("resource_id") @db.Uuid
+  serviceId             String?                 @map("service_id") @db.Uuid
+  kind                  AppointmentKind
+  status                AppointmentStatus
+  startsAt              DateTime                @map("starts_at") @db.Timestamptz(6)
+  endsAt                DateTime                @map("ends_at") @db.Timestamptz(6)
+  /// `endsAt` mais o intervalo (buffer) do serviço na hora da reserva: o que bloqueia o recurso.
+  blockedUntil          DateTime                @map("blocked_until") @db.Timestamptz(6)
+  customerLabel         String?                 @map("customer_label")
+  /// Só o canal preenche (Anexo B da spec); nunca sai em resposta de API.
+  contactRef            String?                 @map("contact_ref")
+  source                AppointmentSource
+  createdByMembershipId String?                 @map("created_by_membership_id") @db.Uuid
+  cancelledAt           DateTime?               @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy           AppointmentCancelledBy? @map("cancelled_by")
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  resource  ScheduleResource  @relation(fields: [resourceId, companyId], references: [id, companyId], onDelete: Restrict)
+  service   ScheduleService?  @relation(fields: [serviceId, companyId], references: [id, companyId], onDelete: Restrict)
+  createdBy Membership?       @relation("AppointmentCreator", fields: [createdByMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@index([companyId, startsAt, id])
+  @@index([companyId, resourceId, startsAt])
+  @@map("appointments")
 }

@@ -46,6 +46,12 @@ export class TestTenants {
       // Convites antes dos vínculos (as chaves estrangeiras compostas apontam para eles) e depois da auditoria.
       await this.db.companyInvitation.deleteMany({ where: { companyId: id } });
       // Trechos e documentos da base de conhecimento antes dos vínculos (o autor é chave estrangeira composta).
+      // Agenda (spec 027): agendamentos antes de recursos e serviços (chaves estrangeiras compostas) e dos vínculos.
+      await this.db.appointment.deleteMany({ where: { companyId: id } });
+      await this.db.availabilityRule.deleteMany({ where: { companyId: id } });
+      await this.db.scheduleService.deleteMany({ where: { companyId: id } });
+      await this.db.scheduleResource.deleteMany({ where: { companyId: id } });
+      await this.db.scheduleSettings.deleteMany({ where: { companyId: id } });
       await this.db.stockMovement.deleteMany({ where: { companyId: id } });
       await this.db.product.deleteMany({ where: { companyId: id } });
       await this.db.knowledgeChunk.deleteMany({ where: { companyId: id } });

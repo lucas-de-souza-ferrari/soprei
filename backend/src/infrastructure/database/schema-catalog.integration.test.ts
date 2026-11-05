@@ -82,3 +82,23 @@ test('drift: o banco migrado bate com o schema.prisma (salvo as duas diferenças
     .filter((statement) => statement !== '');
   assert.deepEqual(statements, KNOWN_DRIFT);
 });
+
+// Spec 027: o Prisma não representa a restrição de exclusão `appointments_no_overlap` (EXCLUDE USING gist,
+// extensão btree_gist): ela existe só na migration e o `migrate diff` acima não a vê. Esta exceção é declarada
+// (como o índice parcial da 013 e os índices GIN de busca): o teste prova que ela está no banco.
+test('a restrição de exclusão da 027 (que o Prisma não representa) existe no banco migrado', async () => {
+  const client = new pg.Client({ connectionString: config.DATABASE_URL });
+  await client.connect();
+  try {
+    const found = await client.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint
+        WHERE contype = 'x' AND connamespace = 'public'::regnamespace AND conrelid = 'public.appointments'::regclass`,
+    );
+    assert.deepEqual(
+      found.rows.map((row) => row.conname),
+      ['appointments_no_overlap'],
+    );
+  } finally {
+    await client.end();
+  }
+});
