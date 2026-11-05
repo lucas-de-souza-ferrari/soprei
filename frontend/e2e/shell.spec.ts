@@ -171,7 +171,10 @@ test('seletor de empresa: teclado, troca com remontagem e dado da outra empresa 
   await expect(trigger).toBeFocused();
   await page.keyboard.press('Space');
   await expect(page.getByRole('menu')).toBeVisible();
+  // Espera o foco chegar ao primeiro item antes de cada tecla (no CI o foco do Radix demora e a tecla se perderia).
+  await expect(page.getByRole('menuitemradio', { name: /Empresa A/ })).toBeFocused();
   await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitemradio', { name: /Empresa B/ })).toBeFocused();
   api.conversations = [conversation('Contato final 2222', 'whatsapp', 1)];
   await page.keyboard.press('Enter');
   await expect(page.getByRole('link', { name: /Contato final 2222/ })).toBeVisible();
