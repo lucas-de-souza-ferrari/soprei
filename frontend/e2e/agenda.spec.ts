@@ -243,18 +243,18 @@ test('bloquear horário avisa quando há agendamento no período', async ({ page
   await expect(dialog).not.toContainText('Há 1 agendamento');
 });
 
-test('configurar agenda: seções, fuso salvo no servidor e voltar à agenda', async ({ page }) => {
+test('configurar agenda: seções, fuso fixo (sem campo) e voltar à agenda', async ({ page }) => {
   const agenda = await open(page, 'OWNER', () => undefined, 'light', '/painel/agenda/configurar');
   await expect(page.getByRole('heading', { level: 2, name: 'Configurar agenda' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Geral' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Serviços' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Horários de atendimento' })).toBeVisible();
   await expect(page.getByText('Corte de cabelo')).toBeVisible();
-  await page.getByLabel('Fuso horário da empresa').fill('America/Manaus');
+  await expect(page.getByLabel('Fuso horário da empresa')).toHaveCount(0);
   await page.getByRole('button', { name: 'Salvar configurações' }).click();
   await expect(page.getByText('Configurações salvas.')).toBeVisible();
   const put = agenda.calls.find((call) => call.method === 'PUT' && call.path === '/settings');
-  expect(put?.body).toMatchObject({ timezone: 'America/Manaus' });
+  expect(put?.body).toMatchObject({ timezone: 'America/Sao_Paulo' });
   await noHorizontalScroll(page);
   await page.getByRole('button', { name: 'Voltar à agenda' }).click();
   await expect(page).toHaveURL(/\/painel\/agenda$/);

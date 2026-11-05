@@ -33,19 +33,6 @@ type Dialog =
 
 const SAVE_FAILED = 'Não foi possível salvar agora. Tente de novo.';
 const OWN_MESSAGE_STATUSES = [403, 429, 502, 503];
-const COMMON_ZONES = [
-  'America/Sao_Paulo',
-  'America/Manaus',
-  'America/Fortaleza',
-  'America/Bahia',
-  'America/Cuiaba',
-  'America/Campo_Grande',
-  'America/Belem',
-  'America/Recife',
-  'America/Rio_Branco',
-  'America/Noronha',
-  'Europe/Lisbon',
-];
 
 function ServiceForm({
   service,
@@ -554,22 +541,6 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
           Geral
         </h3>
         <Problem text={generalProblem} />
-        <Input
-          label="Fuso horário da empresa"
-          list="agenda-fusos"
-          value={timezone}
-          maxLength={64}
-          onChange={setTimezone}
-        />
-        <datalist id="agenda-fusos">
-          {COMMON_ZONES.map((zone) => (
-            <option key={zone} value={zone} />
-          ))}
-        </datalist>
-        <p className="m-0 text-sm text-muted-foreground">
-          Mudar o fuso não move agendamentos já feitos: eles continuam no mesmo instante e só a hora
-          mostrada muda.
-        </p>
         <Field id="cfg-passo" label="Passo entre horários (minutos)">
           <select
             id="cfg-passo"
