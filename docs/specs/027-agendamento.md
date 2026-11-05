@@ -1,6 +1,6 @@
 # 027 — Agendamento (agenda da empresa, horários livres para a IA e painel)
 
-- **Status:** aprovada (2026-11-04, dono: "Aprovo tudo", com as 16 recomendações; IA só leitura nesta spec, tool use na 028); confirmado em 2026-11-05 que `btree_gist` 1.8 está disponível no PostgreSQL 18.2 local do dono
+- **Status:** concluída e mergeada (2026-11-05, CI verde; E5 parcial, E6 cortada); aprovada (2026-11-04, dono: "Aprovo tudo", com as 16 recomendações; IA só leitura nesta spec, tool use na 028); confirmado em 2026-11-05 que `btree_gist` 1.8 está disponível no PostgreSQL 18.2 local do dono
 - **Branch:** `spec/027-agendamento`
 - **Depende de:** 010, 013 e 014 (`AttendanceService`, lote, `LlmProvider`), 008 (permissões fixas, `requirePermission`), 011 e 015 (canal: `MessageSender` só envia texto livre), 018 (beUI, modo escuro, contraste), 022 (vocabulário `Company`/`CompanyId`, `Membership`, `contact`, rotas `/admin/companies/:companyId/...`, `X-Soprei-App`), 023 (menu por `permissions`, ponte cookie -> rotas de tenant), 024 (`/painel/*`, `describeContact`: contato mascarado), 025 (`ConfirmDialog`) e **026** (porta `KnowledgeRetriever`, bloco delimitado no `systemPrompt`, fail-open, `sources`; **esta branch sai da `main` depois do merge da 026**, ou rebaseia nela).
 - **Passa pelo `reviewer` antes do merge:** sim (tabelas novas de tenant, SQL e restrição de exclusão no banco, permissões novas, dado pessoal e potencialmente sensível, superfície de prompt; se a etapa de tool use entrar, injeção de prompt com escrita).
