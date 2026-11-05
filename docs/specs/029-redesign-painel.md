@@ -241,3 +241,13 @@ Linguagem simples; **recomendação** em primeiro lugar.
 - **Critérios deixados sem `[x]`:** rolagem horizontal em 360/390 px de **Estoque e Equipe** (verificadas: Conversas, Testar, Canal, Persona e Agenda; sem fixture de Estoque); "convite aceito vira a última usada" (o `accept` chama o mesmo `selectCompany`, mas não há teste específico); setas entre dias no calendário (estrutura sem `role="grid"`).
 - **Não verificado:** nenhuma execução contra o Postgres de desenvolvimento, nem com navegador real fora do Playwright (Edge no Windows); CI do GitHub (Node 22 e LTS) e a validação em Node 24 do que mudou; `pnpm test:integration` completo (só as suítes das áreas tocadas, em Node 22).
 - **Passos do dono:** `pnpm db:migrate:deploy` (migration aditiva `20261105200000_accounts_last_company`) e reiniciar backend e frontend juntos; passar a E2 pelo `reviewer`; o teste manual é entrar com uma conta de várias empresas, trocar pelo seletor, sair e entrar de novo (abre a última usada).
+
+### Pendências aceitas (revisão da 029)
+
+- **Meia-noite:** o servidor devolve `localEnd` "00:00" para item que termina exatamente à meia-noite (`formatLocalTime`). O calendário trata isso como fim do dia (1440), sem continuação nem bloco no dia seguinte; só atravessa quem termina depois da meia-noite (ex.: 22:00 a 01:00). Corrigido, com testes unitário e e2e.
+- **Item que começou antes da janela:** a API filtra por `starts_at` dentro de `[from, to)` (`schedule.repository.ts`), então um item que começou antes da janela só aparece se o início estiver nela; a continuação de uma travessia no último dia da semana não aparece na semana seguinte. Aceito.
+- **"Gerenciar empresas" e "Criar empresa"** levam à mesma tela (`/painel/empresas`, onde está o formulário).
+- **Clique fora do menu** do seletor de empresa fecha sem devolver o foco ao botão (Esc, Tab e escolha devolvem).
+- **Convite aceito e `last_company_id`:** o `POST /auth/invitations/accept` chama `service.selectCompany`, que grava a dica; não há teste específico disso (conferido no controller). Se na prática a próxima entrada abrir a empresa anterior ou a primeira, tratar como bug; o fluxo do site seleciona a empresa nova de qualquer modo.
+- **Calendário sem setas entre dias** (só Tab, estrutura sem `role="grid"`).
+- **Rolagem a 360/390 px em Estoque e Equipe** não verificada.
