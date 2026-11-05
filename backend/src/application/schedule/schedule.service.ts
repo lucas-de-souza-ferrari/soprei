@@ -564,25 +564,30 @@ export class ScheduleService {
             ? 'complete'
             : 'no_show';
     return this.track(action, async () => {
-      // Repetir o mesmo estado é idempotente (cancelamento duplicado, confirmação duplicada).
-      if (current.status === target) return current;
       const now = this.now();
-      const allowed =
-        canTransition(current.status, target) &&
-        (current.kind === 'BOOKING' || target === 'CANCELLED') &&
-        ((target !== 'COMPLETED' && target !== 'NO_SHOW') ||
-          current.startsAt.getTime() <= now.getTime());
-      if (!allowed) throw invalidTransition();
-      const changed = await this.deps.appointments.transition(companyId, current.id, {
-        from: current.status,
-        to: target,
-        now,
-        ...(target === 'CANCELLED' ? { cancelledBy: 'PANEL' as const } : {}),
-      });
+      let seen = current;
+      let changed: Appointment | null = null;
+      // Até duas tentativas: se outra mudança chegou no meio, reavalia a transição sobre o estado novo
+      // (ex.: PENDING virou CONFIRMED durante um cancelamento) em vez de responder 409 espúrio.
+      for (let attempt = 0; attempt < 2 && changed === null; attempt += 1) {
+        // Repetir o mesmo estado é idempotente (cancelamento duplicado, confirmação duplicada).
+        if (seen.status === target) return seen;
+        const allowed =
+          canTransition(seen.status, target) &&
+          (seen.kind === 'BOOKING' || target === 'CANCELLED') &&
+          ((target !== 'COMPLETED' && target !== 'NO_SHOW') ||
+            seen.startsAt.getTime() <= now.getTime());
+        if (!allowed) throw invalidTransition();
+        changed = await this.deps.appointments.transition(companyId, seen.id, {
+          from: seen.status,
+          to: target,
+          now,
+          ...(target === 'CANCELLED' ? { cancelledBy: 'PANEL' as const } : {}),
+        });
+        if (changed === null) seen = await this.deps.appointments.findById(companyId, seen.id);
+      }
       if (changed === null) {
-        // Outra mudança chegou primeiro: se já está no estado pedido, é o mesmo resultado.
-        const latest = await this.deps.appointments.findById(companyId, current.id);
-        if (latest.status === target) return latest;
+        if (seen.status === target) return seen;
         throw invalidTransition();
       }
       this.deps.logger.info(
