@@ -333,3 +333,21 @@ describe('métricas da recuperação de senha e do expurgo (spec 021)', () => {
     }
   });
 });
+
+describe('métricas das ferramentas de agenda da IA (spec 028)', () => {
+  it('contam chamadas, turnos e rodadas só com labels de conjunto fixo', async () => {
+    const metrics = createMetrics();
+    metrics.countScheduleToolCall('listar_horarios', 'ok');
+    metrics.countScheduleToolCall('unknown', 'error');
+    metrics.countScheduleToolTurn('used');
+    metrics.countScheduleToolTurn('round_cap');
+    metrics.observeScheduleToolRounds(2);
+    const body = await metrics.render();
+    assert.match(body, /schedule_tool_calls_total\{tool="listar_horarios",result="ok"\} 1/);
+    assert.match(body, /schedule_tool_calls_total\{tool="unknown",result="error"\} 1/);
+    assert.match(body, /schedule_tool_turns_total\{result="used"\} 1/);
+    assert.match(body, /schedule_tool_turns_total\{result="round_cap"\} 1/);
+    assert.match(body, /schedule_tool_rounds_count 1/);
+    assert.match(body, /schedule_tool_rounds_bucket\{le="2"\} 1/);
+  });
+});

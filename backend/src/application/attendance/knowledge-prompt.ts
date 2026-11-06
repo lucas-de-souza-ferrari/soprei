@@ -58,7 +58,7 @@ export function neutralize(text: string): string {
   let previous: string;
   do {
     previous = current;
-    current = current.replace(/<\s*\/?\s*(?:conhecimento|agenda)\s*>/gi, '');
+    current = current.replace(/<\s*\/?\s*(?:conhecimento|agenda|meus_agendamentos)\s*>/gi, '');
   } while (current !== previous);
   return current.replace(/\s+/g, ' ').trim();
 }

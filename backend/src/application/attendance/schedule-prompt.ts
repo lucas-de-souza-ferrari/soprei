@@ -30,7 +30,7 @@ export interface SchedulePrompt {
 const WEEKDAYS = ['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom'] as const;
 
 /** `dd/MM/yyyy HH:mm` no fuso da empresa (a hora da leitura). */
-function formatReadAt(date: Date, timezone: string): string {
+export function formatReadAt(date: Date, timezone: string): string {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('pt-BR', {
       timeZone: timezone,
@@ -48,7 +48,7 @@ function formatReadAt(date: Date, timezone: string): string {
 }
 
 /** `ter 10/11` de uma data local `YYYY-MM-DD`. */
-function dayLabel(localDate: string): string {
+export function dayLabel(localDate: string): string {
   const [, month = '00', day = '00'] = localDate.split('-');
   return `${WEEKDAYS[isoWeekday(localDate) - 1] ?? ''} ${day}/${month}`;
 }
@@ -64,7 +64,7 @@ function header(availability: ScheduleAvailability): string {
 }
 
 /** Agrupa os horários por dia: `ter 10/11 09:00, 09:30; qua 11/11 14:00`. */
-function slotsText(slots: readonly { localDate: string; localStart: string }[]): string {
+export function slotsText(slots: readonly { localDate: string; localStart: string }[]): string {
   const days: { date: string; times: string[] }[] = [];
   for (const slot of slots) {
     const last = days.at(-1);

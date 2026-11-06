@@ -14,6 +14,8 @@ import type {
 import {
   KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
   MESSAGE_CONTENT_MAX_LENGTH,
+  SCHEDULE_AI_MAX_MY_APPOINTMENTS,
+  SCHEDULE_AI_TURN_TIMEOUT_MS,
   SCHEDULE_RETRIEVAL_TIMEOUT_MS,
 } from '../../domain/index.js';
 import { ConflictError, ExternalServiceError, ForbiddenError } from '../../shared/errors/index.js';
@@ -37,6 +39,15 @@ import type { KnowledgeRetriever } from '../ports/knowledge-retriever.js';
 import type { ScheduleAvailabilityReader } from '../ports/schedule-availability-reader.js';
 import { hasScheduleIntent, scheduleIntentText } from '../schedule/intent.js';
 import { buildKnowledgePrompt, type KnowledgeSource } from './knowledge-prompt.js';
+import { describeContact } from './contact-label.js';
+import {
+  type ScheduleToolSet,
+  buildMyAppointmentsPrompt,
+  buildScheduleToolsPrompt,
+  createScheduleToolSet,
+  type ScheduleToolLabel,
+  type ScheduleToolResult,
+} from './schedule-tools.js';
 import {
   buildSchedulePrompt,
   buildScheduleUnavailablePrompt,
@@ -87,7 +98,16 @@ export interface AttendanceMetrics {
   countKnowledgeRetrieval?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027, E3). Conjunto fixo. */
   countScheduleContext?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
+  /** Uma chamada de ferramenta da agenda terminou (spec 028). Conjuntos fixos; nunca argumento nem resultado. */
+  countScheduleToolCall?(tool: ScheduleToolLabel, result: ScheduleToolResult): void;
+  /** Um turno com ferramentas terminou (spec 028). Conjunto fixo. */
+  countScheduleToolTurn?(result: ScheduleToolTurnResult): void;
+  /** Rodadas de ferramenta de um turno com ferramentas oferecidas (spec 028). */
+  observeScheduleToolRounds?(rounds: number): void;
 }
+
+/** `used` (alguma ferramenta rodou), `round_cap` (passou do teto de rodadas) e `provider_error`. */
+export type ScheduleToolTurnResult = 'used' | 'round_cap' | 'provider_error';
 
 export type BatchResult = 'answered' | 'empty' | 'capped';
 
@@ -113,6 +133,22 @@ export interface AttendanceOptions {
   readonly knowledgeTimeoutMs?: number;
   /** Prazo da leitura da agenda (spec 027, E3); padrão 1.500 ms. */
   readonly scheduleTimeoutMs?: number;
+  /**
+   * Chave global das ferramentas de agenda da IA (`SCHEDULE_AI_ENABLED`, spec 028); padrão desligada.
+   * Desligada, o pedido ao provedor é idêntico ao da spec 027.
+   */
+  readonly scheduleAiEnabled?: boolean;
+  /** Prazo total do laço de ferramentas (spec 028); padrão `SCHEDULE_AI_TURN_TIMEOUT_MS`. */
+  readonly scheduleAiTurnTimeoutMs?: number;
+}
+
+/** De onde veio a mensagem: o canal real ou o simulador do painel (spec 028). */
+export type AttendanceOrigin = 'channel' | 'simulator';
+
+interface ContactSubject {
+  /** Do job do canal ou do corpo do simulador; **nunca** de argumento de ferramenta. */
+  readonly contactRef: string;
+  readonly origin: AttendanceOrigin;
 }
 
 /** Uma página do histórico mais a conversa a que ela pertence (o painel abre o histórico pelo id). */
@@ -141,6 +177,8 @@ interface PromptPart {
   readonly block: string;
   readonly sources: readonly KnowledgeSource[];
   readonly stats: object;
+  /** A agenda tem serviço ativo e foi lida: o turno pode oferecer as ferramentas (spec 028). */
+  readonly toolsEligible?: boolean;
 }
 
 const EMPTY_PART: PromptPart = { block: '', sources: [], stats: {} };
@@ -220,7 +258,13 @@ interface LlmSubject {
 }
 
 type LlmOutcome =
-  | { readonly ok: true; readonly text: string; readonly usage: LlmUsage | undefined }
+  | {
+      readonly ok: true;
+      readonly text: string;
+      readonly usage: LlmUsage | undefined;
+      readonly toolRounds: number | undefined;
+      readonly toolCalls: number | undefined;
+    }
   | { readonly ok: false };
 
 /**
@@ -272,7 +316,10 @@ export class AttendanceService {
     const pending = await this.acceptMessage(companyId, input);
     if (pending.kind === 'done') return pending.result;
 
-    return this.respond(company, pending.message);
+    return this.respond(company, pending.message, {
+      contactRef: input.contactRef,
+      origin: 'simulator',
+    });
   }
 
   /**
@@ -389,6 +436,7 @@ export class AttendanceService {
       { conversationId: conversation.id, messageId: last.id },
       userMessage,
       history,
+      { contactRef, origin: 'channel' },
     );
     const outcome = await this.callProvider(
       companyId,
@@ -400,6 +448,7 @@ export class AttendanceService {
         history,
         userMessage,
       },
+      prompt.tools,
     );
     const replyText = outcome.ok ? outcome.text : ATTENDANCE_FALLBACK_TEXT;
     if (!outcome.ok) this.recordFallback();
@@ -463,6 +512,7 @@ export class AttendanceService {
         hasMorePending,
         ...prompt.stats,
         ...usageFields(outcome),
+        ...toolFields(outcome),
         durationMs: Math.round(performance.now() - startedAt),
       },
       'lote de mensagens atendido',
@@ -719,7 +769,11 @@ export class AttendanceService {
   }
 
   /** Passos 3 a 6: histórico, chamada ao LLM (com prazo), gravação da resposta ou do fallback. */
-  private async respond(company: Company, message: Message): Promise<AttendanceResult> {
+  private async respond(
+    company: Company,
+    message: Message,
+    contact: ContactSubject,
+  ): Promise<AttendanceResult> {
     const companyId = company.id;
     const startedAt = performance.now();
 
@@ -729,6 +783,7 @@ export class AttendanceService {
       { conversationId: message.conversationId, messageId: message.id },
       message.content,
       history,
+      contact,
     );
     const input: LlmGenerateInput = {
       // Persona, estilo e (spec 026) o bloco de conhecimento vão no systemPrompt; o texto do
@@ -745,6 +800,7 @@ export class AttendanceService {
         inputChars: message.content.length,
       },
       input,
+      prompt.tools,
     );
 
     const replyText = outcome.ok ? outcome.text : ATTENDANCE_FALLBACK_TEXT;
@@ -781,6 +837,7 @@ export class AttendanceService {
         isFallback: reply.isFallback,
         ...prompt.stats,
         ...usageFields(outcome),
+        ...toolFields(outcome),
         durationMs: Math.round(performance.now() - startedAt),
       },
       'mensagem atendida',
@@ -800,20 +857,86 @@ export class AttendanceService {
     subject: { readonly conversationId: string; readonly messageId: string },
     queryText: string,
     history: readonly LlmTurn[],
+    contact: ContactSubject,
   ): Promise<{
     readonly systemPrompt: string;
     readonly sources: readonly KnowledgeSource[];
     readonly stats: object;
+    /** Ferramentas do turno (spec 028); ausente = o pedido ao provedor é o de sempre. */
+    readonly tools: ScheduleToolSet | undefined;
   }> {
     const base = buildSystemPrompt(company);
     const lastUserTurn = history.findLast((turn) => turn.role === 'user')?.content;
     const knowledge = await this.knowledgePart(company, subject, queryText, lastUserTurn);
     const schedule = await this.schedulePart(company, subject, queryText, lastUserTurn);
+    const tooling = await this.toolsPart(company, subject, contact, schedule);
     return {
-      systemPrompt: base + knowledge.block + schedule.block,
+      systemPrompt: base + knowledge.block + schedule.block + tooling.block,
       sources: [...knowledge.sources, ...schedule.sources],
       stats: { ...knowledge.stats, ...schedule.stats },
+      tools: tooling.tools,
     };
+  }
+
+  /**
+   * Ferramentas de agenda do turno (spec 028, E1: só consulta). Só com a chave global ligada, o leitor
+   * da agenda e uma agenda lida com serviço ativo e intenção de agenda (já checada por `schedulePart`).
+   * Acrescenta as instruções e, se o contato é um contato real do canal (ou um contato de teste do
+   * simulador, nunca um telefone digitado no simulador), a lista `<meus_agendamentos>` dele. Fail-open:
+   * a falha da lista só a omite. Sem as condições, nada muda no `systemPrompt`.
+   */
+  private async toolsPart(
+    company: Company,
+    subject: { readonly conversationId: string; readonly messageId: string },
+    contact: ContactSubject,
+    schedule: PromptPart,
+  ): Promise<{ readonly block: string; readonly tools: ScheduleToolSet | undefined }> {
+    const reader = this.deps.schedule;
+    if (
+      this.deps.options.scheduleAiEnabled !== true ||
+      reader === undefined ||
+      schedule.toolsEligible !== true
+    ) {
+      return { block: '', tools: undefined };
+    }
+    let block = buildScheduleToolsPrompt();
+    // O simulador com um `contactRef` que parece telefone não enxerga os agendamentos de um contato real.
+    const mayListOwn =
+      contact.origin === 'channel' ||
+      describeContact(company.id, contact.contactRef).channel === 'simulator';
+    if (mayListOwn) {
+      try {
+        const mine = await withTimeout(
+          reader.readContactAppointments(
+            company.id,
+            contact.contactRef,
+            SCHEDULE_AI_MAX_MY_APPOINTMENTS,
+          ),
+          this.deps.options.scheduleTimeoutMs ?? SCHEDULE_RETRIEVAL_TIMEOUT_MS,
+          'schedule',
+        );
+        block += buildMyAppointmentsPrompt(mine) ?? '';
+      } catch (error) {
+        this.deps.logger.warn(
+          {
+            companyId: company.id,
+            conversationId: subject.conversationId,
+            messageId: subject.messageId,
+            reason: error instanceof TimeoutError ? 'timeout' : 'error',
+            errorName: error instanceof Error ? error.name : typeof error,
+          },
+          'agendamentos do contato indisponíveis; atendendo sem a lista',
+        );
+      }
+    }
+    const tools = createScheduleToolSet({
+      reader,
+      companyId: company.id,
+      conversationId: subject.conversationId,
+      logger: this.deps.logger,
+      metrics: this.deps.metrics,
+    });
+    return { block, tools };
   }
 
   private async knowledgePart(
@@ -906,6 +1029,7 @@ export class AttendanceService {
           scheduleSlots: prompt.slots,
           scheduleChars: prompt.chars,
         },
+        toolsEligible: prompt.services > 0,
       };
     } catch (error) {
       const timedOut = error instanceof TimeoutError;
@@ -974,6 +1098,7 @@ export class AttendanceService {
     companyId: CompanyId,
     subject: LlmSubject,
     input: LlmGenerateInput,
+    tools?: ScheduleToolSet,
   ): Promise<LlmOutcome> {
     const provider = this.deps.llm.name;
     const startedAt = performance.now();
@@ -982,13 +1107,21 @@ export class AttendanceService {
     let cause: Error | undefined;
     let text: string | undefined;
     let usage: LlmUsage | undefined;
+    let toolRounds: number | undefined;
+    let toolCalls: number | undefined;
     // Estourou o prazo (ou terminou): aborta, para o provedor não seguir rodando e gastando cota.
     const controller = new AbortController();
 
     try {
       const outcome = await withTimeout(
-        this.deps.llm.generate(input, { signal: controller.signal }),
-        this.deps.options.llmTimeoutMs,
+        this.deps.llm.generate(input, {
+          signal: controller.signal,
+          ...(tools === undefined ? {} : { tools: tools.toolSet }),
+        }),
+        // Com ferramentas, o prazo é o do laço inteiro; cada chamada ao modelo segue com o seu.
+        tools === undefined
+          ? this.deps.options.llmTimeoutMs
+          : (this.deps.options.scheduleAiTurnTimeoutMs ?? SCHEDULE_AI_TURN_TIMEOUT_MS),
         'llm',
       );
       if (!outcome.ok) {
@@ -1006,6 +1139,8 @@ export class AttendanceService {
         result = 'ok';
         text = outcome.value.text;
         usage = outcome.value.usage;
+        toolRounds = outcome.value.toolRounds;
+        toolCalls = outcome.value.toolCalls;
       }
     } catch (error) {
       if (error instanceof TimeoutError) {
@@ -1025,10 +1160,11 @@ export class AttendanceService {
 
     const durationSeconds = (performance.now() - startedAt) / 1000;
     this.observe({ provider, result, durationSeconds });
+    if (tools !== undefined) this.recordToolTurn(result, cause, toolRounds ?? 0);
 
     if (result === 'ok' && text !== undefined) {
       this.recordTokens(provider, usage);
-      return { ok: true, text, usage };
+      return { ok: true, text, usage, toolRounds, toolCalls };
     }
 
     this.deps.logger.warn(
@@ -1046,6 +1182,24 @@ export class AttendanceService {
       'LLM sem resposta utilizável; respondendo com o texto padrão',
     );
     return { ok: false };
+  }
+
+  /** Métricas do turno com ferramentas (spec 028): conjuntos fixos, nenhum id nem texto. */
+  private recordToolTurn(result: LlmRequestResult, cause: Error | undefined, rounds: number): void {
+    try {
+      this.deps.metrics?.observeScheduleToolRounds?.(rounds);
+      if (result === 'ok') {
+        if (rounds > 0) this.deps.metrics?.countScheduleToolTurn?.('used');
+        return;
+      }
+      const errorType =
+        cause instanceof ExternalServiceError ? cause.context['errorType'] : undefined;
+      this.deps.metrics?.countScheduleToolTurn?.(
+        errorType === LLM_ERROR_TYPE.toolRoundCap ? 'round_cap' : 'provider_error',
+      );
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica das ferramentas de agenda');
+    }
   }
 
   private observe(sample: Parameters<AttendanceMetrics['observeLlmRequest']>[0]): void {
@@ -1107,6 +1261,12 @@ function usageFields(outcome: LlmOutcome): object {
       ? {}
       : { cacheReadTokens: outcome.usage.cacheReadTokens }),
   };
+}
+
+/** Rodadas e chamadas de ferramenta do turno para o log (só números). */
+function toolFields(outcome: LlmOutcome): object {
+  if (!outcome.ok || outcome.toolRounds === undefined) return {};
+  return { toolRounds: outcome.toolRounds, toolCalls: outcome.toolCalls ?? 0 };
 }
 
 function toReply(reply: Message): AttendanceReply {

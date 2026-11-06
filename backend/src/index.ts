@@ -148,6 +148,7 @@ async function main(): Promise<void> {
     options: {
       llmTimeoutMs: config.LLM_TIMEOUT_MS,
       inFlightTimeoutMs: config.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS,
+      scheduleAiEnabled: config.SCHEDULE_AI_ENABLED,
     },
     // Base de conhecimento da empresa (spec 026): recuperação por busca textual, fail-open.
     knowledge: new PrismaKnowledgeRetriever(prisma),

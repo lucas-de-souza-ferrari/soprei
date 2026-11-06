@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SCHEDULE_AI_TURN_TIMEOUT_MS } from '../../domain/schedule-ai.js';
 import { parseCredentialKeys } from '../security/aes-gcm-credential-cipher.js';
 import { isValidSmtpHost } from './email.js';
 import { parseTrustProxy, type TrustProxySetting } from './trust-proxy.js';
@@ -119,6 +120,9 @@ export const envSchema = z
     // Atendimento (spec 010). Provedor de LLM e prazo máximo de uma chamada ao modelo.
     LLM_PROVIDER: z.enum(LLM_PROVIDERS).default('mock'),
     LLM_TIMEOUT_MS: z.coerce.number().int().min(1).max(120_000).default(15_000),
+    // Ferramentas de agenda da IA (spec 028). Chave global, desligada por padrão: ligada, a IA pode
+    // consultar os horários livres por ferramenta (E1; marcar, cancelar e remarcar vêm nas etapas seguintes).
+    SCHEDULE_AI_ENABLED: booleanLiteral(false),
     // Provedor Anthropic (spec 014). A chave só é exigida com `LLM_PROVIDER=anthropic` e nunca vai
     // a log, métrica, erro nem resposta. `ANTHROPIC_BASE_URL` existe para os testes (servidor falso).
     ANTHROPIC_API_KEY: optionalSecret,
@@ -275,6 +279,17 @@ export const envSchema = z
         code: 'custom',
         path: ['ATTENDANCE_IN_FLIGHT_TIMEOUT_MS'],
         message: `precisa ser maior que LLM_TIMEOUT_MS (${String(env.LLM_TIMEOUT_MS)} ms), senão uma chamada ainda dentro do prazo seria retomada como abandonada`,
+      });
+    }
+    // Com as ferramentas de agenda o laço da IA pode durar `SCHEDULE_AI_TURN_TIMEOUT_MS`: a mesma regra.
+    if (
+      env.SCHEDULE_AI_ENABLED &&
+      env.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS <= SCHEDULE_AI_TURN_TIMEOUT_MS
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ATTENDANCE_IN_FLIGHT_TIMEOUT_MS'],
+        message: `precisa ser maior que o prazo do turno com ferramentas (${String(SCHEDULE_AI_TURN_TIMEOUT_MS)} ms) com SCHEDULE_AI_ENABLED=true`,
       });
     }
     // O teto absoluto da sessão não pode ser menor que o prazo ocioso (senão o ocioso nunca valeria).

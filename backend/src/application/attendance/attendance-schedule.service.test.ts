@@ -12,6 +12,7 @@ import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import type { KnowledgeRetrieval, KnowledgeRetriever } from '../ports/knowledge-retriever.js';
 import type {
+  ContactAppointmentView,
   ScheduleAvailability,
   ScheduleAvailabilityReader,
 } from '../ports/schedule-availability-reader.js';
@@ -52,6 +53,9 @@ class FakeReader implements ScheduleAvailabilityReader {
   read(companyId: CompanyId): Promise<ScheduleAvailability> {
     this.reads.push(companyId);
     return this.behavior();
+  }
+  readContactAppointments(): Promise<readonly ContactAppointmentView[]> {
+    return Promise.resolve([]);
   }
 }
 

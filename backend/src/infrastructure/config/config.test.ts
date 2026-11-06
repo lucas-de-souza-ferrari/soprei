@@ -269,6 +269,48 @@ describe('parseConfig', () => {
       assert.equal(parseConfig({ ...VALID_ENV, LLM_TIMEOUT_MS: '60000' }).ok, false);
     });
 
+    it('SCHEDULE_AI_ENABLED vem desligada por padrão e só aceita true/false literais', () => {
+      const off = parseConfig(VALID_ENV);
+      assert.ok(off.ok);
+      assert.equal(off.value.SCHEDULE_AI_ENABLED, false);
+      const on = parseConfig({ ...VALID_ENV, SCHEDULE_AI_ENABLED: 'true' });
+      assert.ok(on.ok);
+      assert.equal(on.value.SCHEDULE_AI_ENABLED, true);
+      for (const value of ['1', 'yes', 'TRUE', 'sim']) {
+        assert.equal(parseConfig({ ...VALID_ENV, SCHEDULE_AI_ENABLED: value }).ok, false, value);
+      }
+    });
+
+    it('com SCHEDULE_AI_ENABLED, "em andamento" precisa passar do prazo de 30 s do laço', () => {
+      const result = parseConfig({
+        ...VALID_ENV,
+        SCHEDULE_AI_ENABLED: 'true',
+        ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '30000',
+        LLM_TIMEOUT_MS: '10000',
+      });
+      assert.equal(result.ok, false);
+      assert.match(
+        result.error.message,
+        /ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: precisa ser maior que o prazo do turno/,
+      );
+      assert.ok(
+        parseConfig({
+          ...VALID_ENV,
+          SCHEDULE_AI_ENABLED: 'true',
+          ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '30001',
+          LLM_TIMEOUT_MS: '10000',
+        }).ok,
+      );
+      // Desligada, o prazo curto continua valendo como antes.
+      assert.ok(
+        parseConfig({
+          ...VALID_ENV,
+          ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '30000',
+          LLM_TIMEOUT_MS: '10000',
+        }).ok,
+      );
+    });
+
     const invalid: readonly (readonly [string, string])[] = [
       ['LLM_PROVIDER', 'openai'],
       ['LLM_PROVIDER', ''],

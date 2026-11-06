@@ -147,6 +147,20 @@ export type ScheduleActionResult = 'ok' | 'slot_taken' | 'conflict' | 'invalid';
 /** Consulta de horários livres para o prompt da IA (spec 027, E3). */
 export type ScheduleContextResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
 
+/** Ferramentas de agenda da IA (spec 028): conjuntos fixos; nunca argumento, resultado nem id. */
+export type ScheduleToolLabel = 'listar_horarios' | 'unknown';
+export type ScheduleToolCallResult =
+  | 'ok'
+  | 'slot_taken'
+  | 'outside_rules'
+  | 'not_found'
+  | 'limit'
+  | 'invalid_args'
+  | 'unavailable'
+  | 'turn_limit'
+  | 'error';
+export type ScheduleToolTurnResult = 'used' | 'round_cap' | 'provider_error';
+
 export interface DbQuerySample {
   readonly model: string;
   readonly operation: string;
@@ -182,6 +196,12 @@ export interface Metrics {
   countScheduleAction(action: ScheduleAction, result: ScheduleActionResult): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027). Conjunto fixo. */
   countScheduleContext(result: ScheduleContextResult): void;
+  /** Uma chamada de ferramenta da agenda terminou (spec 028). */
+  countScheduleToolCall(tool: ScheduleToolLabel, result: ScheduleToolCallResult): void;
+  /** Um turno com ferramentas de agenda terminou (spec 028). */
+  countScheduleToolTurn(result: ScheduleToolTurnResult): void;
+  /** Rodadas de ferramenta de um turno com ferramentas oferecidas (spec 028). */
+  observeScheduleToolRounds(rounds: number): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
   /** O destino de uma mensagem de entrada do canal. */
@@ -345,6 +365,25 @@ export function createMetrics(): Metrics {
     name: 'schedule_context_total',
     help: 'Consultas de horários livres para o prompt da IA por resultado (spec 027, conjunto fixo)',
     labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
+  const scheduleToolCalls = new Counter({
+    name: 'schedule_tool_calls_total',
+    help: 'Chamadas de ferramenta de agenda da IA por ferramenta e resultado (spec 028, conjuntos fixos)',
+    labelNames: ['tool', 'result'] as const,
+    registers: [registry],
+  });
+  const scheduleToolTurns = new Counter({
+    name: 'schedule_tool_turns_total',
+    help: 'Turnos com ferramentas de agenda por resultado (spec 028, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const scheduleToolRounds = new Histogram({
+    name: 'schedule_tool_rounds',
+    help: 'Rodadas de ferramenta por turno com ferramentas oferecidas (spec 028)',
+    buckets: [0, 1, 2, 3],
     registers: [registry],
   });
 
@@ -571,6 +610,15 @@ export function createMetrics(): Metrics {
     },
     countScheduleContext(result) {
       scheduleContext.inc({ result });
+    },
+    countScheduleToolCall(tool, result) {
+      scheduleToolCalls.inc({ tool, result });
+    },
+    countScheduleToolTurn(result) {
+      scheduleToolTurns.inc({ result });
+    },
+    observeScheduleToolRounds(rounds) {
+      scheduleToolRounds.observe(rounds);
     },
     countWebhookRequest(channel, result) {
       webhookRequests.inc({ channel, result });
