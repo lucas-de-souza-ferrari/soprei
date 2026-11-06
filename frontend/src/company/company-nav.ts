@@ -1,3 +1,5 @@
+import { isWizardPath } from './onboarding-steps';
+
 /**
  * Menu da área da empresa (spec 023): quais abas o papel enxerga, a partir das `permissions` que o
  * servidor devolve em `GET /account/companies`. É só conveniência de tela: o backend continua sendo a
@@ -5,6 +7,7 @@
  */
 export type AreaPage =
   | 'conversas'
+  | 'primeirosPassos'
   | 'agenda'
   | 'agendaConfig'
   | 'canal'
@@ -25,6 +28,9 @@ export const AREA_PAGES: readonly AreaPage[] = [
   'estoque',
   'equipe',
   'testar',
+  // Assistente de primeiros passos (spec 030): só com `onboarding:manage`. Fica por último para nunca ser a
+  // primeira tela permitida (a página inicial continua sendo Conversas).
+  'primeirosPassos',
 ];
 
 /**
@@ -35,6 +41,7 @@ const HIDDEN_PAGES: readonly AreaPage[] = ['agendaConfig'];
 
 const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   conversas: '/painel/conversas',
+  primeirosPassos: '/painel/primeiros-passos',
   agenda: '/painel/agenda',
   agendaConfig: '/painel/agenda/configurar',
   canal: '/painel/canal',
@@ -50,6 +57,7 @@ const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
 
 export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   conversas: 'Conversas',
+  primeirosPassos: 'Primeiros passos',
   agenda: 'Agenda',
   agendaConfig: 'Configurar agenda',
   canal: 'Canal',
@@ -63,6 +71,7 @@ export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
 /** Permissão que dá acesso a cada aba. */
 const REQUIRED: Readonly<Record<AreaPage, string>> = {
   conversas: 'conversation:read',
+  primeirosPassos: 'onboarding:manage',
   agenda: 'schedule:read',
   agendaConfig: 'schedule:configure',
   canal: 'channel:read',
@@ -104,6 +113,8 @@ export function conversasPath(route: ConversasRoute): string {
 
 export function areaPageForPath(pathname: string): AreaPage | null {
   if (conversasRouteForPath(pathname) !== null) return 'conversas';
+  // Qualquer sufixo de /painel/primeiros-passos abre o assistente; a tela decide o passo (spec 030).
+  if (isWizardPath(pathname)) return 'primeirosPassos';
   return [...AREA_PAGES, ...HIDDEN_PAGES].find((page) => AREA_PATHS[page] === pathname) ?? null;
 }
 

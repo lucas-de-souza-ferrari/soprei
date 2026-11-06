@@ -32,10 +32,20 @@ import {
 
 const SENTINEL = 'TEXTO-DO-SERVIDOR-QUE-NAO-PODE-APARECER';
 
-test('a aba Equipe fica depois de Persona e Conhecimento e antes de Testar e só abre com membership:read', () => {
+test('a aba Equipe fica depois de Persona e Conhecimento e antes de Testar (e Primeiros passos, que é o último) e só abre com membership:read', () => {
   assert.deepEqual(
     [...AREA_PAGES],
-    ['conversas', 'agenda', 'canal', 'persona', 'conhecimento', 'estoque', 'equipe', 'testar'],
+    [
+      'conversas',
+      'agenda',
+      'canal',
+      'persona',
+      'conhecimento',
+      'estoque',
+      'equipe',
+      'testar',
+      'primeirosPassos',
+    ],
   );
   assert.equal(areaPageForPath('/painel/equipe'), 'equipe');
   assert.equal(pageForPath('/painel/equipe'), 'equipe');

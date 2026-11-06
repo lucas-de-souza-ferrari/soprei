@@ -8,6 +8,8 @@ import { EstoquePage } from './EstoquePage';
 import { KnowledgePage } from './KnowledgePage';
 import { ConversationsPage } from './ConversationsPage';
 import { failureOf } from './company-api';
+import { OnboardingPage } from './OnboardingPage';
+import type { WizardStepId } from './onboarding-steps';
 import { PersonaPage } from './PersonaPage';
 import { TeamPage } from './TeamPage';
 import type { Role } from './team-rules';
@@ -27,6 +29,9 @@ export interface CompanyAreaProps {
   readonly page: AreaPage;
   /** Dentro da aba Conversas: a lista ou uma conversa (spec 024). */
   readonly route: ConversasRoute;
+  /** Passo do assistente pedido pelo endereço (spec 030); `null` = o primeiro pendente. */
+  readonly wizardStep: WizardStepId | null;
+  readonly onWizardStep: (step: WizardStepId, replace: boolean) => void;
   readonly onOpenConversation: (conversationId: string) => void;
   readonly onBackToConversations: () => void;
   readonly onNavigate: (page: AreaPage) => void;
@@ -45,6 +50,8 @@ export function CompanyArea({
   company,
   page,
   route,
+  wizardStep,
+  onWizardStep,
   onOpenConversation,
   onBackToConversations,
   onNavigate,
@@ -99,6 +106,16 @@ export function CompanyArea({
             onBack={onBackToConversations}
           />
         )
+      ) : page === 'primeirosPassos' ? (
+        <OnboardingPage
+          key={company.companyId}
+          companyId={company.companyId}
+          permissions={company.permissions}
+          settle={settle}
+          step={wizardStep}
+          onStep={onWizardStep}
+          onNavigate={onNavigate}
+        />
       ) : page === 'agenda' ? (
         <AgendaPage
           key={company.companyId}

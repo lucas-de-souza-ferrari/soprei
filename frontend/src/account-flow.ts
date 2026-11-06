@@ -14,6 +14,7 @@ const PATHS: Record<AccountPage, string> = {
   invite: '/convite',
   companies: '/painel/empresas',
   conversas: areaPath('conversas'),
+  primeirosPassos: areaPath('primeirosPassos'),
   agenda: areaPath('agenda'),
   agendaConfig: areaPath('agendaConfig'),
   canal: areaPath('canal'),

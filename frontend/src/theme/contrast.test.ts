@@ -104,6 +104,11 @@ const textPairs: [string, string][] = [
   ['muted-foreground', 'muted'],
   ['foreground', 'background'],
   ['muted-foreground', 'background'],
+  // Spec 030: assistente de primeiros passos. Passo atual (foreground em muted), "Feito" (color-success em
+  // card e em muted), "Pendente"/"Pulado"/"opcional" e o texto de apoio (muted-foreground em card e em muted),
+  // aviso fixo do exemplo (foreground em muted) e cartão "Configuração" (card-foreground em card).
+  ['color-success', 'card'],
+  ['color-success', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],
@@ -111,6 +116,8 @@ const controlPairs: [string, string][] = [
   ['border-strong', 'card'],
   ['ring', 'background'],
   ['ring', 'card'],
+  // Spec 030: preenchimento da barra de progresso (não texto).
+  ['primary', 'muted'],
 ];
 
 for (const [name, selector] of [

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { z } from 'zod';
 import { api, ApiError } from './api';
@@ -14,10 +14,12 @@ import { AppShell } from './company/AppShell';
 import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
 import { InvitePage } from './invite/InvitePage';
+import { wizardPath, wizardStepForPath, type WizardStepId } from './company/onboarding-steps';
 import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
 import {
   allowedPages,
   AREA_LABELS,
+  canOpen,
   type ConversasRoute,
   conversasPath,
   conversasRouteForPath,
@@ -121,6 +123,9 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   const [route, setRoute] = useState<ConversasRoute>(
     conversasRouteForPath(location.pathname) ?? { kind: 'list' },
   );
+  const [wizardStep, setWizardStep] = useState<WizardStepId | null>(
+    wizardStepForPath(location.pathname),
+  );
   const generation = useRef(0);
   // Página em que o site abriu: um endereço da área da empresa só vale com sessão e empresa selecionada.
   const initialPage = useRef<Page>(pageForPath(location.pathname));
@@ -143,7 +148,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
    */
   const load = async (
     stamp: number,
-    requested: Page | 'auto' = 'companies',
+    requested: Page | 'auto' | 'afterCreate' = 'companies',
     requestedReplace = false,
   ) => {
     let landing = requested;
@@ -152,6 +157,15 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
     const list = companiesSchema.parse(await api('/account/companies'));
     if (generation.current !== stamp) return;
     const hasSelected = list.items.some((item) => item.companyId === current.selectedCompanyId);
+    if (landing === 'afterCreate') {
+      // Empresa recém-criada (spec 030): abre o assistente de primeiros passos se a pessoa pode usá-lo.
+      const created = list.items.find((item) => item.companyId === current.selectedCompanyId);
+      landing =
+        created !== undefined && canOpen('primeirosPassos', created.permissions)
+          ? 'primeirosPassos'
+          : 'auto';
+      replaceUrl = true;
+    }
     if (landing === 'auto' || (isAreaPage(landing) && !hasSelected)) {
       const choice = pickCompanyToOpen(list.items, current.selectedCompanyId);
       if (choice.kind === 'select') {
@@ -169,6 +183,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
         opened === undefined ? 'companies' : (allowedPages(opened.permissions)[0] ?? 'conversas');
       replaceUrl = true;
       setRoute({ kind: 'list' });
+      setWizardStep(null);
     }
     setSession(current);
     setCompanies(list.items);
@@ -357,6 +372,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   const openArea = (next: Page) => {
     setPage(next);
     setRoute({ kind: 'list' });
+    setWizardStep(null);
     setNotice(null);
     history.replaceState(null, '', pathForPage(next));
   };
@@ -368,6 +384,15 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
     setNotice(null);
     history.pushState(null, '', conversasPath(next));
   };
+  // Assistente de primeiros passos (spec 030): cada passo é um endereço; trocar entra no histórico (o voltar
+  // do navegador funciona) e normalizar o endereço só o substitui.
+  const goWizard = useCallback((step: WizardStepId, replace: boolean) => {
+    setPage('primeirosPassos');
+    setWizardStep(step);
+    setNotice(null);
+    if (replace) history.replaceState(null, '', wizardPath(step));
+    else history.pushState(null, '', wizardPath(step));
+  }, []);
   // Convite (spec 025). Aceito: o painel da empresa nova abre em Conversas. Conta criada: login com aviso.
   const inviteAccepted = () => {
     setInviteToken(null);
@@ -424,6 +449,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       if (!isAreaPage(next)) return;
       setPage(next);
       setRoute(conversasRouteForPath(location.pathname) ?? { kind: 'list' });
+      setWizardStep(wizardStepForPath(location.pathname));
       setNotice(null);
     };
     window.addEventListener('popstate', onPop);
@@ -588,6 +614,8 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
           company={areaCompany}
           page={isAreaPage(page) ? page : 'conversas'}
           route={route}
+          wizardStep={wizardStep}
+          onWizardStep={goWizard}
           onOpenConversation={(id) => goConversations({ kind: 'detail', id })}
           onBackToConversations={() => goConversations({ kind: 'list' })}
           onNavigate={openArea}
@@ -729,7 +757,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
                       if (generation.current === stamp) setName('');
                       // Criar seleciona e abre a empresa nova, sem o clique extra (spec 029).
                       await api(`/account/companies/${created.companyId}/select`, {});
-                      await load(stamp, 'auto');
+                      await load(stamp, 'afterCreate');
                     });
                   }}
                 >

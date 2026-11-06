@@ -3,6 +3,7 @@ import {
   BookOpen,
   CalendarDays,
   FlaskConical,
+  ListChecks,
   MessageSquare,
   Package,
   Radio,
@@ -19,6 +20,7 @@ import { CompanySwitcher, type SwitcherCompany } from './CompanySwitcher';
 
 const ICONS: Readonly<Record<AreaPage, LucideIcon>> = {
   conversas: MessageSquare,
+  primeirosPassos: ListChecks,
   agenda: CalendarDays,
   agendaConfig: CalendarDays,
   canal: Radio,

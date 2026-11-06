@@ -5,6 +5,7 @@ import { Loader } from '../components/motion/loader';
 import { Textarea } from '../components/textarea';
 import { ApiError } from '../api';
 import { companyApi, PERSONA_MAX_LENGTH } from './company-api';
+import { PERSONA_TEMPLATE, type StepBridge } from './onboarding-steps';
 
 export interface PageProps {
   readonly companyId: string;
@@ -26,9 +27,17 @@ const HINT =
  * Persona do assistente, editada pela própria empresa (spec 023). O texto só trafega entre esta tela e
  * o servidor: nunca vai a URL, `localStorage`, `sessionStorage` nem `console`.
  */
-export function PersonaPage({ companyId, settle }: PageProps) {
+export function PersonaPage({
+  companyId,
+  settle,
+  onProgress,
+  onDraft,
+  withTemplate = false,
+}: PageProps & StepBridge & { readonly withTemplate?: boolean }) {
   const [loaded, setLoaded] = useState(false);
   const [value, setValue] = useState('');
+  // O que está gravado no servidor: o rascunho é a diferença (só em memória, spec 030).
+  const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
@@ -44,6 +53,7 @@ export function PersonaPage({ companyId, settle }: PageProps) {
       .then((result) => {
         if (stamp !== generation.current) return;
         setValue(result.persona ?? '');
+        setSaved(result.persona ?? '');
         setLoaded(true);
       })
       .catch((error: unknown) => {
@@ -57,39 +67,59 @@ export function PersonaPage({ companyId, settle }: PageProps) {
   }, [companyId, settle, attempt]);
 
   const save = useCallback(
-    async (next: string | null): Promise<void> => {
+    async (next: string | null): Promise<boolean> => {
       const stamp = ++generation.current;
       setBusy(true);
       setNotice(null);
       setFieldError(undefined);
       try {
         const result = await companyApi.savePersona(companyId, next);
-        if (stamp !== generation.current) return;
+        if (stamp !== generation.current) return false;
         setValue(result.persona ?? '');
+        setSaved(result.persona ?? '');
+        onProgress?.();
         setNotice({
           tone: 'success',
           text: result.persona === null ? 'Persona padrão restaurada.' : 'Persona salva.',
         });
+        return true;
       } catch (error) {
-        if (stamp !== generation.current) return;
+        if (stamp !== generation.current) return false;
         // Só o 400 (texto recusado pelo servidor) fica ligado ao campo; o resto tem mensagem própria.
         if (error instanceof ApiError && error.status === 400) {
           setFieldError(
             `A persona não foi aceita. Use de 1 a ${String(PERSONA_MAX_LENGTH)} caracteres.`,
           );
-          return;
+          return false;
         }
         const text = settle(error);
         if (text !== null) {
           const own = error instanceof ApiError && OWN_MESSAGE_STATUSES.includes(error.status);
           setNotice({ tone: 'error', text: own ? text : SAVE_FAILED_MESSAGE });
         }
+        return false;
       } finally {
         if (stamp === generation.current) setBusy(false);
       }
     },
-    [companyId, settle],
+    [companyId, settle, onProgress],
   );
+
+  // Rascunho (spec 030): texto diferente do gravado. O assistente o salva ou o descarta; só em memória.
+  const dirty = loaded && value !== saved;
+  const draftSave = useRef<() => Promise<boolean>>(() => Promise.resolve(false));
+  draftSave.current = (): Promise<boolean> => {
+    if (value.trim().length === 0 || value.includes(NUL)) {
+      setFieldError('Escreva a persona ou use "Voltar ao padrão".');
+      return Promise.resolve(false);
+    }
+    return save(value);
+  };
+  useEffect(() => {
+    if (onDraft === undefined) return;
+    onDraft(dirty ? { save: () => draftSave.current() } : null);
+    return () => onDraft(null);
+  }, [dirty, onDraft]);
 
   if (loadError !== null) {
     return (
@@ -175,6 +205,19 @@ export function PersonaPage({ companyId, settle }: PageProps) {
         >
           Voltar ao padrão
         </Button>
+        {withTemplate && value.length === 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy || !loaded}
+            onClick={() => {
+              setValue(PERSONA_TEMPLATE);
+              setFieldError(undefined);
+            }}
+          >
+            Usar modelo
+          </Button>
+        )}
       </div>
     </form>
   );
