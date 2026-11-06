@@ -46,6 +46,8 @@ const PERSONA_PREVIEW_CHARS = 60;
 export interface MockToolScript {
   readonly rounds: readonly (readonly LlmToolCall[])[];
   readonly finalText: string | ((outputs: readonly LlmToolOutput[]) => string);
+  /** Depois das rodadas, o provedor falha (erro genérico): prova o que o servidor faz se o laço cai depois de gravar. */
+  readonly failAfterRounds?: boolean;
 }
 
 export interface MockLlmProviderOptions {
@@ -172,6 +174,13 @@ async function runToolScript(
     }
   }
   if (isAborted(signal)) return aborted();
+  if (script.failAfterRounds === true) {
+    return Result.err(
+      new ExternalServiceError('Falha simulada do provedor mock depois das ferramentas', {
+        context: { provider: 'mock', retryable: true },
+      }),
+    );
+  }
   const text = typeof script.finalText === 'string' ? script.finalText : script.finalText(outputs);
   return Result.ok({ text, toolRounds: script.rounds.length, toolCalls });
 }

@@ -80,7 +80,7 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
           },
           orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
           take: limit,
-          select: { serviceId: true, startsAt: true, status: true },
+          select: { id: true, serviceId: true, startsAt: true, status: true },
         });
         const serviceIds = [
           ...new Set(rows.flatMap((row) => (row.serviceId === null ? [] : [row.serviceId]))),
@@ -97,6 +97,7 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
           if (row.status !== 'PENDING' && row.status !== 'CONFIRMED') return [];
           return [
             {
+              id: row.id,
               serviceName: row.serviceId === null ? '' : (names.get(row.serviceId) ?? ''),
               localDate: localPartsOf(row.startsAt, timezone).date,
               localStart: formatLocalTime(row.startsAt, timezone),
@@ -124,6 +125,10 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
         today,
         services: [],
         hasSchedule: false,
+        ai: {
+          bookingEnabled: settings?.aiBookingEnabled ?? false,
+          autoConfirm: settings?.aiAutoConfirm ?? false,
+        },
       };
       const services = await db.scheduleService.findMany({
         where: { companyId, active: true },

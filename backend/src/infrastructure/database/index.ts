@@ -56,4 +56,5 @@ export {
   PrismaScheduleServiceRepository,
   PrismaScheduleSettingsRepository,
 } from './repositories/schedule.repository.js';
+export { PrismaContactScheduleUnitOfWork } from './repositories/contact-schedule-unit-of-work.js';
 export { PrismaScheduleAvailabilityReader } from './repositories/schedule-availability-reader.js';

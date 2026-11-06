@@ -148,7 +148,12 @@ export type ScheduleActionResult = 'ok' | 'slot_taken' | 'conflict' | 'invalid';
 export type ScheduleContextResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
 
 /** Ferramentas de agenda da IA (spec 028): conjuntos fixos; nunca argumento, resultado nem id. */
-export type ScheduleToolLabel = 'listar_horarios' | 'unknown';
+export type ScheduleToolLabel =
+  | 'listar_horarios'
+  | 'solicitar_agendamento'
+  | 'cancelar_agendamento'
+  | 'remarcar_agendamento'
+  | 'unknown';
 export type ScheduleToolCallResult =
   | 'ok'
   | 'slot_taken'
@@ -159,7 +164,13 @@ export type ScheduleToolCallResult =
   | 'unavailable'
   | 'turn_limit'
   | 'error';
-export type ScheduleToolTurnResult = 'used' | 'round_cap' | 'provider_error';
+export type ScheduleToolTurnResult =
+  | 'used'
+  | 'round_cap'
+  | 'provider_error'
+  | 'deterministic_summary'
+  | 'guard_replaced'
+  | 'disabled_fail_safe';
 
 export interface DbQuerySample {
   readonly model: string;

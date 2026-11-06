@@ -25,6 +25,8 @@ export interface ScheduleAvailability {
   readonly services: readonly ServiceAvailability[];
   /** A empresa tem agenda configurada (ao menos um serviço ativo). Sem ela o prompt não muda. */
   readonly hasSchedule: boolean;
+  /** Opções da empresa para a IA (spec 028): sem `enabled`, a IA não solicita, cancela nem remarca. */
+  readonly ai?: { readonly bookingEnabled: boolean; readonly autoConfirm: boolean };
 }
 
 /**
@@ -45,7 +47,7 @@ export interface ScheduleAvailabilityReader {
   /**
    * Agendamentos **ativos e futuros do contato** (`company_id` e `contact_ref` no `where`), os mais
    * próximos primeiro, até `limit`. Só serviço, data/hora local e estado: nunca `customer_label`,
-   * `contact_ref`, ids nem recurso (spec 028, `<meus_agendamentos>`).
+   * `contact_ref` nem recurso (spec 028, `<meus_agendamentos>`); o `id` só alimenta o mapa do turno.
    */
   readContactAppointments(
     companyId: CompanyId,
@@ -55,6 +57,11 @@ export interface ScheduleAvailabilityReader {
 }
 
 export interface ContactAppointmentView {
+  /**
+   * Id do agendamento: **só** para o mapa `número -> id` do turno (spec 028). Nunca vai ao prompt, a log, a
+   * métrica nem ao modelo.
+   */
+  readonly id: string;
   /** Nome do serviço (dado da empresa: quem monta o prompt o neutraliza). */
   readonly serviceName: string;
   /** `YYYY-MM-DD` e `HH:mm` no fuso da empresa. */

@@ -188,7 +188,13 @@ describe('AttendanceService com ferramentas de agenda (spec 028, E1)', () => {
 
   it('o lote do canal (respondToPending) oferece as ferramentas e lista os agendamentos do contato', async () => {
     const mine: ContactAppointmentView[] = [
-      { serviceName: 'Corte', localDate: '2026-11-12', localStart: '14:00', status: 'PENDING' },
+      {
+        id: 'a1',
+        serviceName: 'Corte',
+        localDate: '2026-11-12',
+        localStart: '14:00',
+        status: 'PENDING',
+      },
     ];
     const reader = new FakeReader(undefined, () => Promise.resolve(mine));
     const h = await setup(reader);
@@ -211,7 +217,13 @@ describe('AttendanceService com ferramentas de agenda (spec 028, E1)', () => {
   it('simulador com contactRef que parece telefone não lê os agendamentos de um contato real', async () => {
     const reader = new FakeReader(undefined, () =>
       Promise.resolve([
-        { serviceName: 'Corte', localDate: '2026-11-12', localStart: '14:00', status: 'PENDING' },
+        {
+          id: 'a2',
+          serviceName: 'Corte',
+          localDate: '2026-11-12',
+          localStart: '14:00',
+          status: 'PENDING',
+        },
       ]),
     );
     const h = await setup(reader);

@@ -70,6 +70,8 @@ function toSettingsResponse(settings: ScheduleSettings & { readonly today: strin
   slotStepMinutes: number;
   minNoticeMinutes: number;
   maxAdvanceDays: number;
+  aiBookingEnabled: boolean;
+  aiAutoConfirm: boolean;
 } {
   return {
     timezone: settings.timezone,
@@ -77,6 +79,8 @@ function toSettingsResponse(settings: ScheduleSettings & { readonly today: strin
     slotStepMinutes: settings.slotStepMinutes,
     minNoticeMinutes: settings.minNoticeMinutes,
     maxAdvanceDays: settings.maxAdvanceDays,
+    aiBookingEnabled: settings.aiBookingEnabled,
+    aiAutoConfirm: settings.aiAutoConfirm,
   };
 }
 
@@ -132,6 +136,7 @@ function toAppointmentResponse(view: AppointmentView): Record<string, unknown> {
     localEnd: view.localEnd,
     weekday: view.weekday,
     customerLabel: view.customerLabel,
+    cancelledBy: view.cancelledBy,
     contactLabel: view.contactLabel,
     createdAt: view.createdAt.toISOString(),
   };

@@ -162,12 +162,26 @@ describe('readContactAppointments: isolamento por empresa e por contato (spec 02
 
   it('devolve só os ativos e futuros do contato, mais próximos primeiro, só nome, data, hora e estado', async () => {
     const list = await reader.readContactAppointments(companyA.id, CONTACT, 3);
-    assert.deepEqual(list, [
-      { serviceName: SERVICE_A, localDate: '2026-11-10', localStart: '14:00', status: 'PENDING' },
-      { serviceName: SERVICE_A, localDate: '2026-11-11', localStart: '14:00', status: 'CONFIRMED' },
-    ]);
+    assert.deepEqual(
+      list.map((item) => ({
+        serviceName: item.serviceName,
+        localDate: item.localDate,
+        localStart: item.localStart,
+        status: item.status,
+      })),
+      [
+        { serviceName: SERVICE_A, localDate: '2026-11-10', localStart: '14:00', status: 'PENDING' },
+        {
+          serviceName: SERVICE_A,
+          localDate: '2026-11-11',
+          localStart: '14:00',
+          status: 'CONFIRMED',
+        },
+      ],
+    );
     for (const item of list) {
       assert.deepEqual(Object.keys(item).sort(), [
+        'id',
         'localDate',
         'localStart',
         'serviceName',
@@ -178,9 +192,15 @@ describe('readContactAppointments: isolamento por empresa e por contato (spec 02
 
   it('a empresa B, com o mesmo contactRef, só enxerga o que é dela (e a A não vê o da B)', async () => {
     const forB = await reader.readContactAppointments(companyB.id, CONTACT, 3);
-    assert.deepEqual(forB, [
-      { serviceName: SERVICE_B, localDate: '2026-11-10', localStart: '15:00', status: 'PENDING' },
-    ]);
+    assert.deepEqual(
+      forB.map((item) => ({
+        serviceName: item.serviceName,
+        localDate: item.localDate,
+        localStart: item.localStart,
+        status: item.status,
+      })),
+      [{ serviceName: SERVICE_B, localDate: '2026-11-10', localStart: '15:00', status: 'PENDING' }],
+    );
     const forA = await reader.readContactAppointments(companyA.id, CONTACT, 3);
     assert.ok(forA.every((item) => item.serviceName === SERVICE_A));
   });

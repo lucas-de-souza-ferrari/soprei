@@ -45,7 +45,7 @@ const slotTaken = (): ConflictError =>
  * Deadlock (P2034) que sobrou depois das repetições do `runInTransaction` também vira `SLOT_TAKEN`
  * (só aparece em remarcações cruzadas). Qualquer outro erro sobe como está.
  */
-function toSlotTaken(error: unknown): unknown {
+export function toSlotTaken(error: unknown): unknown {
   if (error instanceof ConflictError) return error;
   if (isExclusionViolation(error)) return slotTaken();
   const cause = error instanceof DatabaseError ? error.cause : error;
@@ -71,6 +71,8 @@ interface SettingsRow {
   readonly slotStepMinutes: number;
   readonly minNoticeMinutes: number;
   readonly maxAdvanceDays: number;
+  readonly aiBookingEnabled: boolean;
+  readonly aiAutoConfirm: boolean;
 }
 
 function toSettings(row: SettingsRow): ScheduleSettings {
@@ -80,6 +82,8 @@ function toSettings(row: SettingsRow): ScheduleSettings {
     slotStepMinutes: row.slotStepMinutes,
     minNoticeMinutes: row.minNoticeMinutes,
     maxAdvanceDays: row.maxAdvanceDays,
+    aiBookingEnabled: row.aiBookingEnabled,
+    aiAutoConfirm: row.aiAutoConfirm,
   };
 }
 
@@ -123,6 +127,10 @@ export class PrismaScheduleSettingsRepository implements ScheduleSettingsReposit
             ? {}
             : { minNoticeMinutes: patch.minNoticeMinutes }),
           ...(patch.maxAdvanceDays === undefined ? {} : { maxAdvanceDays: patch.maxAdvanceDays }),
+          ...(patch.aiBookingEnabled === undefined
+            ? {}
+            : { aiBookingEnabled: patch.aiBookingEnabled }),
+          ...(patch.aiAutoConfirm === undefined ? {} : { aiAutoConfirm: patch.aiAutoConfirm }),
         },
       });
       const row = await this.prisma.scheduleSettings.findFirst({ where: { companyId } });

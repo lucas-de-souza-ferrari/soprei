@@ -44,8 +44,15 @@ export const settingsBodySchema = z
     slotStepMinutes: slotStepSchema,
     minNoticeMinutes: z.number().int().min(0).max(SCHEDULE_MAX_MIN_NOTICE_MINUTES),
     maxAdvanceDays: z.number().int().min(1).max(SCHEDULE_MAX_ADVANCE_DAYS),
+    /** Spec 028: opcionais (omitido = não muda). `aiAutoConfirm` exige a IA ligada. */
+    aiBookingEnabled: z.boolean().optional(),
+    aiAutoConfirm: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => !(value.aiAutoConfirm === true && value.aiBookingEnabled === false), {
+    message: 'confirmar automaticamente exige a IA ligada',
+    path: ['aiAutoConfirm'],
+  });
 export type SettingsBody = z.infer<typeof settingsBodySchema>;
 
 export const resourceInputSchema = z.object({ name: nameSchema }).strict();

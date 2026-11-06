@@ -43,6 +43,7 @@ const view = (): AppointmentView => ({
   localEnd: '10:30',
   weekday: 2,
   customerLabel: SECRET_LABEL,
+  cancelledBy: null,
   contactLabel: 'Contato final 4321',
   createdAt: new Date('2026-11-09T11:00:00.000Z'),
 });
@@ -84,6 +85,8 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
         slotStepMinutes: 30,
         minNoticeMinutes: 120,
         maxAdvanceDays: 60,
+        aiBookingEnabled: false,
+        aiAutoConfirm: false,
       })),
       updateSettings: record('updateSettings', () => ({
         companyId: 'x',
@@ -92,6 +95,8 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
         slotStepMinutes: 30,
         minNoticeMinutes: 120,
         maxAdvanceDays: 60,
+        aiBookingEnabled: false,
+        aiAutoConfirm: false,
       })),
       listResources: record('listResources', () => []),
       createResource: (...args: unknown[]) => {
@@ -325,6 +330,29 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
         '/settings',
         { timezone: secret, slotStepMinutes: 25, minNoticeMinutes: 1, maxAdvanceDays: 1 },
       ],
+      [
+        'PUT',
+        '/settings',
+        {
+          timezone: 'America/Sao_Paulo',
+          slotStepMinutes: 30,
+          minNoticeMinutes: 120,
+          maxAdvanceDays: 60,
+          aiBookingEnabled: false,
+          aiAutoConfirm: true,
+        },
+      ],
+      [
+        'PUT',
+        '/settings',
+        {
+          timezone: 'America/Sao_Paulo',
+          slotStepMinutes: 30,
+          minNoticeMinutes: 120,
+          maxAdvanceDays: 60,
+          aiBookingEnabled: 'sim',
+        },
+      ],
       ['POST', '/appointments', { ...goodAppointment, customerLabel: 'x'.repeat(61) }],
       ['POST', '/appointments', { ...goodAppointment, customerLabel: `${secret}\n${secret}` }],
       ['POST', '/appointments', { ...goodAppointment, startsAt: '2026-12-02T10:00:00' }],
@@ -395,8 +423,12 @@ describe('API da agenda (spec 027): permissões, validação e privacidade', () 
       assert.equal(response.body.includes('contactRef'), false, `${method} ${path}`);
     }
     const list = await call('GET', '/appointments?from=2026-12-01&to=2026-12-07', owner);
-    const item = (JSON.parse(list.body) as { items: { contactLabel: string }[] }).items[0];
+    const item = (
+      JSON.parse(list.body) as { items: { contactLabel: string; cancelledBy: unknown }[] }
+    ).items[0];
     assert.equal(item?.contactLabel, 'Contato final 4321');
+    // Spec 028: quem cancelou sai na listagem (campo aditivo); o telefone nunca.
+    assert.ok('cancelledBy' in item);
     const raw = logs.raw();
     for (const secret of [SECRET_LABEL, SECRET_NAME, SECRET_CONTACT, '2026-12-02T10:00']) {
       assert.equal(logContains(raw, secret), false, `vazou em log: ${secret}`);

@@ -9,6 +9,7 @@ import type {
   ScheduleAvailability,
   ScheduleAvailabilityReader,
 } from '../../application/ports/schedule-availability-reader.js';
+import type { ContactScheduling } from '../../application/schedule/contact-scheduling.service.js';
 import {
   FakeAnthropicApi,
   textMessage,
@@ -180,5 +181,137 @@ describe('atendimento com ferramentas de agenda contra o servidor falso da Anthr
     assert.equal(fake.requests.length, 4);
     assert.equal(result.reply.isFallback, true);
     assert.match(await h.metrics.render(), /schedule_tool_turns_total\{result="round_cap"\} 1/);
+  });
+});
+
+describe('escrita da IA contra o servidor falso da Anthropic (spec 028, E2/E3)', () => {
+  const booked = {
+    kind: 'booked',
+    already: false,
+    booked: {
+      serviceName: SECRET_SERVICE,
+      localDate: '2026-11-11',
+      localStart: '09:00',
+      status: 'PENDING',
+    },
+  } as const;
+  const calls: { contactRef: string; serviceName: string }[] = [];
+  const scheduling: ContactScheduling = {
+    isAvailable: () => Promise.resolve(true),
+    request: (_companyId, contactRef, args) => {
+      calls.push({ contactRef, serviceName: args.serviceName });
+      return Promise.resolve(booked);
+    },
+    cancel: () => Promise.resolve({ kind: 'not_found' }),
+    reschedule: () => Promise.resolve({ kind: 'not_found' }),
+  };
+  const writeReader: ScheduleAvailabilityReader = {
+    read: () =>
+      Promise.resolve({ ...AVAILABILITY, ai: { bookingEnabled: true, autoConfirm: false } }),
+    readContactAppointments: () => Promise.resolve([]),
+  };
+
+  async function setupWrite() {
+    const companies = new InMemoryCompanyRepository();
+    const store = new InMemoryAttendanceStore(() => new Date());
+    const logs = captureLogs();
+    const metrics = createMetrics();
+    const service = new AttendanceService({
+      companies,
+      conversations: store.conversations,
+      messages: store.messages,
+      unitOfWork: store,
+      llm: new AnthropicLlmProvider({
+        apiKey: API_KEY,
+        baseUrl: fake.baseUrl,
+        model: 'claude-haiku-5-5',
+        effort: 'low',
+        maxOutputTokens: 1024,
+        maxRetries: 0,
+        timeoutMs: 2_000,
+      }),
+      logger: logs.logger,
+      metrics,
+      options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000, scheduleAiEnabled: true },
+      schedule: writeReader,
+      scheduling,
+    });
+    const company = await companies.create({ name: 'Salão', slug: 'salao' });
+    return { service, logs, metrics, company };
+  }
+
+  it('o pedido leva as quatro ferramentas sem campo de identidade e sem as chaves proibidas', async () => {
+    fake.script(textMessage('Qual serviço você quer?'));
+    const h = await setupWrite();
+    await h.service.handleInboundMessage(h.company.id, {
+      contactRef: 'teste-no-site',
+      text: 'quero agendar',
+    });
+    const body = sent(0) as Sent & Record<string, unknown>;
+    const tools = body.tools as { name: string; input_schema: { properties: object } }[];
+    assert.deepEqual(
+      tools.map((tool) => tool.name),
+      ['listar_horarios', 'solicitar_agendamento', 'cancelar_agendamento', 'remarcar_agendamento'],
+    );
+    for (const tool of tools) {
+      const props = Object.keys(tool.input_schema.properties);
+      for (const forbidden of ['companyId', 'contactRef', 'telefone', 'id', 'agendamentoId']) {
+        assert.equal(props.includes(forbidden), false, `${tool.name} expõe ${forbidden}`);
+      }
+    }
+    for (const key of ['tool_choice', 'temperature', 'top_p', 'top_k', 'thinking']) {
+      assert.equal(key in body, false, key);
+    }
+    assert.equal(JSON.stringify(body).includes(API_KEY), false);
+  });
+
+  it('a IA solicita: o servidor usa o contato do contexto (não o do argumento) e o resumo chega ao contato', async () => {
+    fake.script(
+      toolUseMessage([
+        {
+          id: 'toolu_w1',
+          name: 'solicitar_agendamento',
+          input: { servico: SECRET_SERVICE, inicio: '2026-11-11T09:00' },
+        },
+      ]),
+      textMessage('Combinado, até lá!'),
+    );
+    calls.length = 0;
+    const h = await setupWrite();
+    const result = await h.service.handleInboundMessage(h.company.id, {
+      contactRef: 'teste-no-site',
+      text: 'quero agendar amanhã às 9h',
+    });
+    assert.deepEqual(calls, [{ contactRef: 'teste-no-site', serviceName: SECRET_SERVICE }]);
+    assert.ok(result.reply.text.startsWith('Combinado, até lá!'));
+    assert.ok(result.reply.text.includes('Pedido registrado:'));
+    const toolResult = JSON.stringify(sent(1).messages.at(-1)?.content);
+    assert.ok(
+      toolResult.includes('toolu_w1') && toolResult.includes('estado: aguardando confirmacao'),
+    );
+    assert.equal(toolResult.includes('teste-no-site'), false);
+  });
+
+  it('o provedor falha depois da escrita (erro que ecoa o pedido): resumo do servidor e nada vaza', async () => {
+    fake.script(
+      toolUseMessage([
+        {
+          name: 'solicitar_agendamento',
+          input: { servico: SECRET_SERVICE, inicio: '2026-11-11T09:00', nome: SECRET_ARG },
+        },
+      ]),
+      { kind: 'error', status: 400, echoRequest: true },
+    );
+    const h = await setupWrite();
+    const result = await h.service.handleInboundMessage(h.company.id, {
+      contactRef: SECRET_CONTACT,
+      text: `quero agendar ${SECRET_ARG}`,
+    });
+    assert.equal(result.reply.isFallback, false);
+    assert.ok(result.reply.text.startsWith('Pedido registrado:'));
+    const everything = `${h.logs.raw()}\n${await h.metrics.render()}`;
+    for (const secret of [SECRET_ARG, SECRET_CONTACT, API_KEY, 'pedido recebido']) {
+      assert.equal(logContains(everything, secret), false, `${secret} vazou`);
+    }
   });
 });

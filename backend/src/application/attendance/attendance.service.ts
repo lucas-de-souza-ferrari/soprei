@@ -37,6 +37,7 @@ import {
 import { buildKnowledgeQuery } from '../knowledge/query.js';
 import type { KnowledgeRetriever } from '../ports/knowledge-retriever.js';
 import type { ScheduleAvailabilityReader } from '../ports/schedule-availability-reader.js';
+import type { ContactScheduling } from '../schedule/contact-scheduling.service.js';
 import { hasScheduleIntent, scheduleIntentText } from '../schedule/intent.js';
 import { buildKnowledgePrompt, type KnowledgeSource } from './knowledge-prompt.js';
 import { describeContact } from './contact-label.js';
@@ -51,8 +52,11 @@ import {
 import {
   buildSchedulePrompt,
   buildScheduleUnavailablePrompt,
+  SCHEDULE_NO_BOOKING_LINE,
   SCHEDULE_SOURCE_LABEL,
+  SCHEDULE_WRITE_MODE_LINE,
 } from './schedule-prompt.js';
+import { finalizeScheduleReply, summaryReply } from './schedule-guard.js';
 
 /** Quantas mensagens anteriores da conversa vão ao modelo. */
 export const ATTENDANCE_HISTORY_LIMIT = 20;
@@ -106,8 +110,18 @@ export interface AttendanceMetrics {
   observeScheduleToolRounds?(rounds: number): void;
 }
 
-/** `used` (alguma ferramenta rodou), `round_cap` (passou do teto de rodadas) e `provider_error`. */
-export type ScheduleToolTurnResult = 'used' | 'round_cap' | 'provider_error';
+/**
+ * `used` (alguma ferramenta rodou), `round_cap` (passou do teto de rodadas), `provider_error`,
+ * `deterministic_summary` (o servidor montou o resumo do que gravou), `guard_replaced` (a guarda trocou uma
+ * afirmação sem escrita confirmada) e `disabled_fail_safe` (cotas indisponíveis: turno só de leitura).
+ */
+export type ScheduleToolTurnResult =
+  | 'used'
+  | 'round_cap'
+  | 'provider_error'
+  | 'deterministic_summary'
+  | 'guard_replaced'
+  | 'disabled_fail_safe';
 
 export type BatchResult = 'answered' | 'empty' | 'capped';
 
@@ -170,6 +184,11 @@ export interface AttendanceDeps {
   readonly knowledge?: KnowledgeRetriever;
   /** Horários livres da empresa para o prompt (spec 027, E3). Sem isto, o atendimento é o de sempre. */
   readonly schedule?: ScheduleAvailabilityReader;
+  /**
+   * Escritas da IA na agenda (spec 028, E2 e E3): solicitar, cancelar e remarcar. Sem isto, ou com a
+   * opção da empresa desligada, as ferramentas são só de consulta.
+   */
+  readonly scheduling?: ContactScheduling;
 }
 
 /** Um bloco do `systemPrompt` (conhecimento ou agenda) com as fontes e os números que ele traz. */
@@ -179,6 +198,8 @@ interface PromptPart {
   readonly stats: object;
   /** A agenda tem serviço ativo e foi lida: o turno pode oferecer as ferramentas (spec 028). */
   readonly toolsEligible?: boolean;
+  /** Opções da empresa para a IA (spec 028); só existe quando a agenda foi lida. */
+  readonly ai?: { readonly bookingEnabled: boolean; readonly autoConfirm: boolean };
 }
 
 const EMPTY_PART: PromptPart = { block: '', sources: [], stats: {} };
@@ -450,8 +471,9 @@ export class AttendanceService {
       },
       prompt.tools,
     );
-    const replyText = outcome.ok ? outcome.text : ATTENDANCE_FALLBACK_TEXT;
-    if (!outcome.ok) this.recordFallback();
+    const final = this.finalizeReply(outcome, prompt.tools);
+    const replyText = final.text;
+    if (final.isFallback) this.recordFallback();
 
     let reply: Message;
     try {
@@ -461,7 +483,7 @@ export class AttendanceService {
           conversationId: conversation.id,
           role: 'ASSISTANT',
           content: replyText,
-          isFallback: !outcome.ok,
+          isFallback: final.isFallback,
           replyToId: last.id,
           // Logo depois da última mensagem do lote e antes de qualquer outra que chegou durante o
           // atendimento (ou que sobrou do limite): na ordem da conversa a resposta fica no lugar
@@ -803,8 +825,9 @@ export class AttendanceService {
       prompt.tools,
     );
 
-    const replyText = outcome.ok ? outcome.text : ATTENDANCE_FALLBACK_TEXT;
-    if (!outcome.ok) this.recordFallback();
+    const final = this.finalizeReply(outcome, prompt.tools);
+    const replyText = final.text;
+    if (final.isFallback) this.recordFallback();
 
     let reply: Message;
     try {
@@ -812,7 +835,7 @@ export class AttendanceService {
         conversationId: message.conversationId,
         role: 'ASSISTANT',
         content: replyText,
-        isFallback: !outcome.ok,
+        isFallback: final.isFallback,
         replyToId: message.id,
         // A resposta nunca fica antes da pergunta, mesmo no mesmo milissegundo.
         createdAt: new Date(Math.max(this.now().getTime(), message.createdAt.getTime() + 1)),
@@ -870,8 +893,12 @@ export class AttendanceService {
     const knowledge = await this.knowledgePart(company, subject, queryText, lastUserTurn);
     const schedule = await this.schedulePart(company, subject, queryText, lastUserTurn);
     const tooling = await this.toolsPart(company, subject, contact, schedule);
+    // No modo de escrita, a linha "você NÃO marca" do bloco da agenda dá lugar à da escrita por ferramenta.
+    const scheduleBlock = tooling.write
+      ? schedule.block.replace(SCHEDULE_NO_BOOKING_LINE, SCHEDULE_WRITE_MODE_LINE)
+      : schedule.block;
     return {
-      systemPrompt: base + knowledge.block + schedule.block + tooling.block,
+      systemPrompt: base + knowledge.block + scheduleBlock + tooling.block,
       sources: [...knowledge.sources, ...schedule.sources],
       stats: { ...knowledge.stats, ...schedule.stats },
       tools: tooling.tools,
@@ -890,16 +917,39 @@ export class AttendanceService {
     subject: { readonly conversationId: string; readonly messageId: string },
     contact: ContactSubject,
     schedule: PromptPart,
-  ): Promise<{ readonly block: string; readonly tools: ScheduleToolSet | undefined }> {
+  ): Promise<{
+    readonly block: string;
+    readonly tools: ScheduleToolSet | undefined;
+    /** O turno oferece as ferramentas de escrita. */
+    readonly write: boolean;
+  }> {
     const reader = this.deps.schedule;
     if (
       this.deps.options.scheduleAiEnabled !== true ||
       reader === undefined ||
       schedule.toolsEligible !== true
     ) {
-      return { block: '', tools: undefined };
+      return { block: '', tools: undefined, write: false };
     }
-    let block = buildScheduleToolsPrompt();
+    // A escrita exige a opção da empresa e as cotas no ar (Redis fora = só leitura, sem erro e sem 503).
+    const scheduling = this.deps.scheduling;
+    let writeAllowed = false;
+    if (schedule.ai?.bookingEnabled === true && scheduling !== undefined) {
+      writeAllowed = await scheduling.isAvailable();
+      if (!writeAllowed) {
+        this.recordToolTurnResult('disabled_fail_safe');
+        this.deps.logger.warn(
+          {
+            companyId: company.id,
+            conversationId: subject.conversationId,
+            messageId: subject.messageId,
+          },
+          'cotas da agenda indisponíveis; a IA atende só com consulta de horários',
+        );
+      }
+    }
+    let block = '';
+    let myIds: readonly string[] = [];
     // O simulador com um `contactRef` que parece telefone não enxerga os agendamentos de um contato real.
     const mayListOwn =
       contact.origin === 'channel' ||
@@ -916,6 +966,7 @@ export class AttendanceService {
           'schedule',
         );
         block += buildMyAppointmentsPrompt(mine) ?? '';
+        myIds = mine.slice(0, SCHEDULE_AI_MAX_MY_APPOINTMENTS).map((item) => item.id);
       } catch (error) {
         this.deps.logger.warn(
           {
@@ -929,14 +980,21 @@ export class AttendanceService {
         );
       }
     }
+    // Escrita só para um contato do canal ou um contato de teste do simulador (nunca um telefone digitado).
+    const write = writeAllowed && mayListOwn && scheduling !== undefined;
+    block =
+      buildScheduleToolsPrompt({ write, autoConfirm: schedule.ai?.autoConfirm === true }) + block;
     const tools = createScheduleToolSet({
       reader,
       companyId: company.id,
       conversationId: subject.conversationId,
       logger: this.deps.logger,
       metrics: this.deps.metrics,
+      ...(write
+        ? { write: { scheduling, contactRef: contact.contactRef, myAppointmentIds: myIds } }
+        : {}),
     });
-    return { block, tools };
+    return { block, tools, write };
   }
 
   private async knowledgePart(
@@ -1030,6 +1088,7 @@ export class AttendanceService {
           scheduleChars: prompt.chars,
         },
         toolsEligible: prompt.services > 0,
+        ...(availability.ai === undefined ? {} : { ai: availability.ai }),
       };
     } catch (error) {
       const timedOut = error instanceof TimeoutError;
@@ -1158,6 +1217,10 @@ export class AttendanceService {
       controller.abort();
     }
 
+    // Fecha o turno: nenhuma ferramenta nova roda e uma escrita que já estava no banco termina antes de se
+    // decidir o texto (o servidor nunca abandona uma escrita no meio por prazo de aplicação).
+    if (tools !== undefined) await tools.close();
+
     const durationSeconds = (performance.now() - startedAt) / 1000;
     this.observe({ provider, result, durationSeconds });
     if (tools !== undefined) this.recordToolTurn(result, cause, toolRounds ?? 0);
@@ -1182,6 +1245,37 @@ export class AttendanceService {
       'LLM sem resposta utilizável; respondendo com o texto padrão',
     );
     return { ok: false };
+  }
+
+  /**
+   * Texto final do turno (spec 028, decisão 7), **só com o que o servidor gravou**: (a) o laço falhou depois
+   * de uma escrita confirmada -> o resumo determinístico (nunca o texto padrão); (b) sem escrita e a resposta
+   * afirma ter marcado/cancelado -> o texto seguro; (c) escrita confirmada e a resposta sem a hora gravada ->
+   * o resumo acrescentado. Sem ferramentas no turno o texto é o de sempre.
+   */
+  private finalizeReply(
+    outcome: LlmOutcome,
+    tools: ScheduleToolSet | undefined,
+  ): { readonly text: string; readonly isFallback: boolean } {
+    const writes = tools?.writes() ?? [];
+    if (!outcome.ok) {
+      if (writes.length === 0) return { text: ATTENDANCE_FALLBACK_TEXT, isFallback: true };
+      this.recordToolTurnResult('deterministic_summary');
+      return { text: summaryReply(writes), isFallback: false };
+    }
+    // A guarda vale em todo turno com ferramentas (também no modo só de consulta, em que a IA não marca nada).
+    if (tools === undefined) return { text: outcome.text, isFallback: false };
+    const final = finalizeScheduleReply(outcome.text, writes, MESSAGE_CONTENT_MAX_LENGTH);
+    if (final.kind !== 'as_is') this.recordToolTurnResult(final.kind);
+    return { text: final.text, isFallback: false };
+  }
+
+  private recordToolTurnResult(result: ScheduleToolTurnResult): void {
+    try {
+      this.deps.metrics?.countScheduleToolTurn?.(result);
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica das ferramentas de agenda');
+    }
   }
 
   /** Métricas do turno com ferramentas (spec 028): conjuntos fixos, nenhum id nem texto. */

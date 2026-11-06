@@ -341,12 +341,25 @@ describe('métricas das ferramentas de agenda da IA (spec 028)', () => {
     metrics.countScheduleToolCall('unknown', 'error');
     metrics.countScheduleToolTurn('used');
     metrics.countScheduleToolTurn('round_cap');
+    metrics.countScheduleToolCall('solicitar_agendamento', 'slot_taken');
+    metrics.countScheduleToolCall('remarcar_agendamento', 'limit');
+    metrics.countScheduleToolTurn('deterministic_summary');
+    metrics.countScheduleToolTurn('guard_replaced');
+    metrics.countScheduleToolTurn('disabled_fail_safe');
     metrics.observeScheduleToolRounds(2);
     const body = await metrics.render();
     assert.match(body, /schedule_tool_calls_total\{tool="listar_horarios",result="ok"\} 1/);
     assert.match(body, /schedule_tool_calls_total\{tool="unknown",result="error"\} 1/);
     assert.match(body, /schedule_tool_turns_total\{result="used"\} 1/);
     assert.match(body, /schedule_tool_turns_total\{result="round_cap"\} 1/);
+    assert.match(
+      body,
+      /schedule_tool_calls_total{tool="solicitar_agendamento",result="slot_taken"} 1/,
+    );
+    assert.match(body, /schedule_tool_calls_total{tool="remarcar_agendamento",result="limit"} 1/);
+    for (const result of ['deterministic_summary', 'guard_replaced', 'disabled_fail_safe']) {
+      assert.ok(body.includes(`schedule_tool_turns_total{result="${result}"} 1`), result);
+    }
     assert.match(body, /schedule_tool_rounds_count 1/);
     assert.match(body, /schedule_tool_rounds_bucket\{le="2"\} 1/);
   });

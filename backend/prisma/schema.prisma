@@ -462,6 +462,9 @@ model ScheduleSettings {
   slotStepMinutes  Int      @default(30) @map("slot_step_minutes")
   minNoticeMinutes Int      @default(120) @map("min_notice_minutes")
   maxAdvanceDays   Int      @default(60) @map("max_advance_days")
+  /// Spec 028: a IA pode solicitar, cancelar e remarcar horarios (padrao desligado; CHECK: auto-confirmar implica ligado).
+  aiBookingEnabled Boolean  @default(false) @map("ai_booking_enabled")
+  aiAutoConfirm    Boolean  @default(false) @map("ai_auto_confirm")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 

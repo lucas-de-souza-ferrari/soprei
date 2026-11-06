@@ -1,5 +1,6 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
+import { ContactSchedulingService } from './application/schedule/contact-scheduling.service.js';
 import { ScheduleSampleService } from './application/schedule/sample.service.js';
 import { ScheduleService } from './application/schedule/schedule.service.js';
 import { KnowledgeService } from './application/knowledge/knowledge.service.js';
@@ -29,6 +30,7 @@ import {
   PrismaAppointmentRepository,
   PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
+  PrismaContactScheduleUnitOfWork,
   PrismaScheduleAvailabilityReader,
   PrismaScheduleResourceRepository,
   PrismaScheduleServiceRepository,
@@ -154,6 +156,19 @@ async function main(): Promise<void> {
     knowledge: new PrismaKnowledgeRetriever(prisma),
     // Horários livres da agenda (spec 027): só leitura, fail-open.
     schedule: new PrismaScheduleAvailabilityReader(prisma),
+    // Escritas da IA na agenda (spec 028, E2/E3): só com a chave global e a opção da empresa; cotas no Redis.
+    ...(config.SCHEDULE_AI_ENABLED
+      ? {
+          scheduling: new ContactSchedulingService({
+            unitOfWork: new PrismaContactScheduleUnitOfWork(prisma),
+            quota: new RedisScheduleAiQuotaStore(
+              authRedis.client,
+              versionedAuthPrefix(config.AUTH_REDIS_PREFIX, config.ACCOUNTS_ENABLED),
+            ),
+            quotaSecret: deriveLoginLockSecret(config.JWT_SECRET),
+          }),
+        }
+      : {}),
   });
   const documents = new PrismaKnowledgeDocumentRepository(prisma);
   const products = new PrismaProductRepository(prisma);
@@ -468,6 +483,7 @@ import { RedisInvitationQuotaStore } from './infrastructure/auth/redis-invitatio
 import { startPurgeTimer } from './application/auth/purge-timer.js';
 import { UnverifiedAccountPurger } from './application/auth/unverified-account-purger.js';
 import { versionedAuthPrefix } from './infrastructure/auth/auth-version.js';
+import { RedisScheduleAiQuotaStore } from './infrastructure/auth/redis-schedule-ai-quota.js';
 import { RedisAccountSessionStore } from './infrastructure/auth/redis-account-session-store.js';
 import { smtpMailerOptions } from './infrastructure/config/email.js';
 import { SmtpVerificationMailer } from './infrastructure/external-apis/email/smtp-verification-mailer.js';
