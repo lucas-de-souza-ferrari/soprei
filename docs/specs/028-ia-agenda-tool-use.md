@@ -1,6 +1,6 @@
 # 028 — A IA marca, remarca e cancela horários pelo WhatsApp (tool use)
 
-- **Status:** aprovada (2026-11-06, dono: "pode fazer", com as 16 recomendações; a escrita (E2 em diante) só depois do passo zero E0 com a chave real, feito pelo dono). **E1 implementada e mergeada; E2, E3 e E4 implementadas na branch `spec/028-e2-escrita` (2026-11-06); E0 pendente do dono (obrigatório antes de ligar)**
+- **Status:** código concluído e mergeado (2026-11-06, CI verde; E0 e E5 pendentes do dono); aprovada (2026-11-06, dono: "pode fazer", com as 16 recomendações; a escrita (E2 em diante) só depois do passo zero E0 com a chave real, feito pelo dono). **E1 implementada e mergeada; E2, E3 e E4 implementadas na branch `spec/028-e2-escrita` (2026-11-06); E0 pendente do dono (obrigatório antes de ligar)**
 - **Branch:** `spec/028-ia-agenda-tool-use` (sai da `main` atual)
 - **Depende de:** 027 (agenda, `EXCLUDE`, `computeSlots`, bloco `<agenda>`, anexo B), 014 (`LlmProvider`, `AnthropicLlmProvider`), 013 (`flush`, `respondToPending`), 011 (canal, empresa suspensa não recebe nada), 026 (neutralização de texto da empresa no prompt, fail-open), 024 (`describeContact`), 008/023 (permissões e ponte do cookie).
 - **Passa pelo `reviewer` antes do merge:** **sim, obrigatório** (primeira escrita iniciada por texto de um contato externo; isolamento entre empresas e entre contatos; injeção de prompt; dado pessoal enviado ao provedor).
