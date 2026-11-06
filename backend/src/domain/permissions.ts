@@ -19,6 +19,7 @@ export const PERMISSIONS = [
   'schedule:read',
   'schedule:manage',
   'schedule:configure',
+  'onboarding:manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -37,6 +38,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'schedule:read',
     'schedule:manage',
     'schedule:configure',
+    'onboarding:manage',
   ],
   ADMIN: [
     'conversation:read',
@@ -52,6 +54,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'schedule:read',
     'schedule:manage',
     'schedule:configure',
+    'onboarding:manage',
   ],
   AGENT: ['conversation:read', 'conversation:simulate', 'schedule:read', 'schedule:manage'],
   VIEWER: ['conversation:read', 'schedule:read'],

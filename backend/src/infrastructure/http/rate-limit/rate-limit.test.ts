@@ -135,6 +135,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       },
       admin: {
         companies: new CompanyService(companies),
+        onboarding: {
+          get: () => Promise.reject(new Error('inventário')),
+          setDismissed: () => Promise.reject(new Error('inventário')),
+        },
         channel: {
           getState: () => Promise.reject(new Error('inventário')),
           connect: () => Promise.reject(new Error('inventário')),
@@ -236,6 +240,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/channel/embedded-signup',
       '/admin/companies/:companyId/channel/setup',
       '/admin/companies/:companyId/persona',
+      '/admin/companies/:companyId/onboarding',
       '/admin/companies/:companyId/knowledge/documents',
       '/admin/companies/:companyId/knowledge/documents/:documentId',
       '/admin/companies/:companyId/knowledge/sample',
@@ -387,6 +392,10 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     assert.deepEqual(declared(schedule + '/sample'), [
       'DELETE:schedule:configure',
       'POST:schedule:configure',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/onboarding'), [
+      'GET:onboarding:manage',
+      'PUT:onboarding:manage',
     ]);
     assert.deepEqual(declared('/admin/companies/:companyId/persona'), [
       'GET:persona:manage',

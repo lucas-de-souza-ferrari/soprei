@@ -85,6 +85,8 @@ export type ChannelConnectionResult =
   | 'unsubscribe_failed';
 /** Mudança de persona pela própria empresa (spec 023): conjunto fixo. */
 export type PersonaUpdateAction = 'set' | 'cleared';
+/** Assistente de primeiros passos (spec 030): conjunto fixo; nunca id nem passo. */
+export type OnboardingMetricAction = 'dismissed' | 'reopened';
 
 /** Operação de convite (spec 025). Conjunto fixo; nunca e-mail, id nem token. */
 export type InvitationMetricAction =
@@ -259,6 +261,8 @@ export interface Metrics {
   countMembershipAdminAction(action: AuditAction): void;
   /** A empresa gravou ou limpou a própria persona (spec 023). Nunca o texto nem o tamanho. */
   countCompanyPersonaUpdate(action: PersonaUpdateAction): void;
+  /** A empresa dispensou ou reabriu o assistente de primeiros passos (spec 030). */
+  countCompanyOnboardingAction(action: OnboardingMetricAction): void;
   /** Uma operação de convite terminou (spec 025). A razão detalhada de uma falha uniforme vai só aqui. */
   countCompanyInvitation(action: InvitationMetricAction, result: InvitationMetricResult): void;
   /** O e-mail de convite foi enviado, falhou ou foi pulado pela cota (spec 025). */
@@ -555,6 +559,13 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const companyOnboardingActions = new Counter({
+    name: 'company_onboarding_actions_total',
+    help: 'Assistente de primeiros passos dispensado ou reaberto (spec 030), por ação (conjunto fixo)',
+    labelNames: ['action'] as const,
+    registers: [registry],
+  });
+
   const companyInvitations = new Counter({
     name: 'company_invitations_total',
     help: 'Operações de convite por ação e resultado (spec 025, conjuntos fixos)',
@@ -703,6 +714,9 @@ export function createMetrics(): Metrics {
     },
     countCompanyPersonaUpdate(action) {
       companyPersonaUpdates.inc({ action });
+    },
+    countCompanyOnboardingAction(action) {
+      companyOnboardingActions.inc({ action });
     },
     countCompanyInvitation(action, result) {
       companyInvitations.inc({ action, result });

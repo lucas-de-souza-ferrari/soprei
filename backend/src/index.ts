@@ -1,4 +1,5 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { OnboardingService } from './application/onboarding/onboarding.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
 import { ContactSchedulingService } from './application/schedule/contact-scheduling.service.js';
 import { ScheduleSampleService } from './application/schedule/sample.service.js';
@@ -40,6 +41,7 @@ import {
   PrismaConversationRepository,
   PrismaMessageRepository,
   PrismaProductRepository,
+  PrismaOnboardingStore,
   PrismaStockMovementRepository,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
@@ -384,6 +386,7 @@ async function main(): Promise<void> {
     },
     admin: {
       companies: new CompanyService(companyRepository),
+      onboarding: new OnboardingService(new PrismaOnboardingStore(prisma)),
       attendance,
       knowledge,
       inventory,

@@ -32,6 +32,8 @@ model Company {
   deletedAt             DateTime?     @map("deleted_at")
   /// Persona do assistente (até 4000 caracteres; nulo = persona padrão). Nunca vai para log.
   persona               String?
+  /// Quando a empresa dispensou o assistente de primeiros passos (spec 030); nulo = nao dispensado.
+  onboardingDismissedAt DateTime?     @map("onboarding_dismissed_at") @db.Timestamptz(6)
   /// phone_number_id do número do WhatsApp (Cloud API da Meta) desta empresa: 1 a 32 dígitos, único.
   /// Único ponto do sistema que leva de um identificador externo à empresa (spec 011).
   whatsappPhoneNumberId String?       @unique @map("whatsapp_phone_number_id")

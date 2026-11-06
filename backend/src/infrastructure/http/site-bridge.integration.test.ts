@@ -9,6 +9,7 @@ import { InventoryService } from '../../application/inventory/inventory.service.
 import { ScheduleService } from '../../application/schedule/schedule.service.js';
 import { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import { CompanyService } from '../../application/companies/company.service.js';
+import { OnboardingService } from '../../application/onboarding/onboarding.service.js';
 import type { AccountSessionStore } from '../../application/ports/account-session.js';
 import {
   hasPermission,
@@ -46,6 +47,7 @@ import {
   PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
   PrismaKnowledgeDocumentRepository,
+  PrismaOnboardingStore,
   PrismaScheduleResourceRepository,
   PrismaScheduleServiceRepository,
   PrismaScheduleSettingsRepository,
@@ -141,6 +143,8 @@ before(async () => {
     membershipAdmin: auth.membershipAdmin,
     admin: {
       companies: new CompanyService(companyRepository),
+      // Spec 030: o assistente de primeiros passos pela ponte do cookie.
+      onboarding: new OnboardingService(new PrismaOnboardingStore(db.prisma)),
       // Spec 026: conhecimento e estoque pela ponte do cookie.
       knowledge: new KnowledgeService(new PrismaKnowledgeDocumentRepository(db.prisma)),
       sample: {
@@ -353,6 +357,7 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
       '/admin/companies/:companyId/channel/setup',
       '/admin/companies/:companyId/channel/embedded-signup',
       '/admin/companies/:companyId/persona',
+      '/admin/companies/:companyId/onboarding',
       '/admin/companies/:companyId/messages',
       '/admin/companies/:companyId/knowledge/documents',
       '/admin/companies/:companyId/knowledge/documents/:documentId',
