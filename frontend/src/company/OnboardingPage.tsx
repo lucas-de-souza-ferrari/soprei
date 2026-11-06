@@ -1,10 +1,19 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Check, Circle, MinusCircle } from 'lucide-react';
 import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
 import type { AreaPage } from './company-nav';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EstoquePage } from './EstoquePage';
 import { KnowledgePage } from './KnowledgePage';
+import { OnboardingServices } from './OnboardingServices';
 import { onboardingApi } from './onboarding-api';
 import {
   navigableSteps,
@@ -234,13 +243,33 @@ export function OnboardingPage({
         );
       case 'documentos':
         return (
-          <KnowledgePage
+          <DocumentsStep
             key={companyId}
             companyId={companyId}
             settle={settle}
             canSample={permissions.includes('inventory:manage') && state.steps.inventory !== true}
             onProgress={onProgress}
             onDraft={onDraft}
+          />
+        );
+      case 'servicos':
+        return (
+          <OnboardingServices
+            key={companyId}
+            companyId={companyId}
+            settle={settle}
+            onProgress={onProgress}
+            onConfigure={() => onNavigate('agendaConfig')}
+          />
+        );
+      case 'estoque':
+        return (
+          <StockStep
+            key={companyId}
+            companyId={companyId}
+            settle={settle}
+            canSample={permissions.includes('knowledge:manage') && state.steps.knowledge !== true}
+            onProgress={onProgress}
           />
         );
       default:
@@ -426,4 +455,19 @@ function StepFallback({
       </Button>
     </div>
   );
+}
+
+/**
+ * Se o exemplo pode ser oferecido é decidido **uma vez**, ao entrar no passo: carregar o exemplo muda o
+ * progresso (documentos e produtos passam a existir), mas a mensagem de sucesso e o "Remover exemplo" da
+ * tela precisam continuar visíveis. A regra de verdade (empresa sem documento e sem produto) é do servidor.
+ */
+function DocumentsStep({ canSample, ...rest }: ComponentProps<typeof KnowledgePage>) {
+  const [offer] = useState(canSample);
+  return <KnowledgePage {...rest} canSample={offer} />;
+}
+
+function StockStep({ canSample, ...rest }: ComponentProps<typeof EstoquePage>) {
+  const [offer] = useState(canSample);
+  return <EstoquePage {...rest} canSample={offer} />;
 }

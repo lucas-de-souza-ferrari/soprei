@@ -13,14 +13,8 @@ import {
   agendaApi,
   agendaMessageOf,
 } from './agenda-api';
-import {
-  NAME_MAX_LENGTH,
-  serviceFormProblem,
-  SLOT_STEPS,
-  WEEKDAY_LABELS,
-  windowsProblem,
-} from './agenda-rules';
-import { Field, FIELD_CLASS, Problem } from './AgendaDialogs';
+import { NAME_MAX_LENGTH, SLOT_STEPS, WEEKDAY_LABELS, windowsProblem } from './agenda-rules';
+import { Field, FIELD_CLASS, Problem, ServiceForm } from './AgendaDialogs';
 import { Modal } from './Modal';
 import type { PageProps } from './PersonaPage';
 
@@ -33,79 +27,6 @@ type Dialog =
 
 const SAVE_FAILED = 'Não foi possível salvar agora. Tente de novo.';
 const OWN_MESSAGE_STATUSES = [403, 429, 502, 503];
-
-function ServiceForm({
-  service,
-  busy,
-  problem,
-  onSubmit,
-}: {
-  service: AgendaService | null;
-  busy: boolean;
-  problem: string | null;
-  onSubmit: (values: { name: string; durationMinutes: number; bufferMinutes: number }) => void;
-}) {
-  const [name, setName] = useState(service?.name ?? '');
-  const [duration, setDuration] = useState(String(service?.durationMinutes ?? 30));
-  const [buffer, setBuffer] = useState(String(service?.bufferMinutes ?? 0));
-  const [local, setLocal] = useState<string | null>(null);
-  return (
-    <form
-      className="grid gap-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const found = serviceFormProblem({ name, duration, buffer });
-        if (found !== null) {
-          setLocal(found);
-          return;
-        }
-        onSubmit({
-          name: name.trim(),
-          durationMinutes: Number(duration),
-          bufferMinutes: buffer.trim() === '' ? 0 : Number(buffer),
-        });
-      }}
-    >
-      <Problem text={local ?? problem} />
-      <Input
-        label="Nome do serviço"
-        value={name}
-        maxLength={NAME_MAX_LENGTH}
-        onChange={(value) => {
-          setName(value);
-          setLocal(null);
-        }}
-      />
-      <p className="m-0 text-sm text-muted-foreground">
-        Evite nomes que revelem diagnóstico ou tratamento: o nome pode ser lido pela IA e aparece na
-        agenda.
-      </p>
-      <Input
-        label="Duração (minutos, múltiplos de 5)"
-        inputMode="numeric"
-        value={duration}
-        onChange={(value) => {
-          setDuration(value);
-          setLocal(null);
-        }}
-      />
-      <Input
-        label="Intervalo depois do serviço (minutos)"
-        inputMode="numeric"
-        value={buffer}
-        onChange={(value) => {
-          setBuffer(value);
-          setLocal(null);
-        }}
-      />
-      <div>
-        <Button type="submit" disabled={busy}>
-          {busy ? 'Aguarde…' : 'Salvar'}
-        </Button>
-      </div>
-    </form>
-  );
-}
 
 function ResourceForm({
   resource,

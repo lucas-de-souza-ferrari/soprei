@@ -234,3 +234,127 @@ test('celular: sem rolagem horizontal e lista de passos utilizável', async ({ p
     await noHorizontalScroll(page);
   }
 });
+
+// ---- E2: serviços e estoque ----
+
+const SERVICES = '/painel/primeiros-passos/servicos';
+const STOCK = '/painel/primeiros-passos/estoque';
+
+async function stepItems(page: Page) {
+  const toggle = page.getByRole('button', { name: 'Ver passos' });
+  if (await toggle.isVisible()) await toggle.click();
+  return page.getByRole('navigation', { name: 'Passos' }).getByRole('listitem');
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`serviços: criar um serviço usa a rota existente, o passo fica feito e o aviso de horários aparece (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { onb } = await openWizard(page, { path: SERVICES, theme });
+    await expect(step(page)).toHaveText('Passo 4 de 6');
+    await expect(page.getByText('o atendente não tem o que oferecer')).toBeVisible();
+    await page.getByLabel('Nome do serviço').fill('Corte masculino');
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await expect(page.getByText('Serviço salvo.')).toBeVisible();
+    expect(onb.services).toHaveLength(1);
+    expect(
+      onb.calls.some((c) => c.method === 'POST' && c.path.endsWith('/schedule/services')),
+    ).toBe(true);
+    const items = await stepItems(page);
+    await expect(items.nth(3)).toContainText('Feito');
+    await expect(items.nth(3)).toContainText('opcional');
+    // Com serviço próprio o exemplo não aparece mais.
+    await expect(page.getByRole('button', { name: 'Usar exemplo' })).toHaveCount(0);
+  });
+}
+
+test('serviços: "Usar exemplo" chama a rota do exemplo da agenda e o botão some', async ({
+  page,
+}) => {
+  const { onb } = await openWizard(page, { path: SERVICES });
+  await page.getByRole('button', { name: 'Usar exemplo' }).click();
+  await expect(page.getByText('Exemplo carregado:')).toBeVisible();
+  expect(onb.calls.some((c) => c.method === 'POST' && c.path.endsWith('/schedule/sample'))).toBe(
+    true,
+  );
+  await expect(page.getByRole('button', { name: 'Usar exemplo' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Configurar agenda' })).toBeVisible();
+});
+
+test('serviços: com serviço próprio já cadastrado o exemplo não é oferecido', async ({ page }) => {
+  await openWizard(page, {
+    path: SERVICES,
+    seed: (_api, onb) =>
+      onb.services.push({ id: randomUUID(), name: 'Meu serviço', isSample: false, active: true }),
+  });
+  await expect(page.getByText('Meu serviço')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Usar exemplo' })).toHaveCount(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`estoque: novo produto e importar CSV usam o fluxo existente (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { onb } = await openWizard(page, { path: STOCK, theme });
+    await expect(step(page)).toHaveText('Passo 5 de 6');
+    await page.getByRole('button', { name: 'Novo produto' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('SKU').fill('cam-001');
+    await dialog.getByLabel('Nome', { exact: true }).fill('Camiseta azul');
+    await dialog.getByLabel('Preço (R$)').fill('59,90');
+    await dialog.getByLabel('Quantidade inicial').fill('12');
+    await dialog.getByRole('button', { name: 'Criar produto' }).click();
+    await expect(page.getByText('Produto criado.')).toBeVisible();
+    expect(onb.products).toHaveLength(1);
+    await expect((await stepItems(page)).nth(4)).toContainText('Feito');
+    await page.getByRole('button', { name: 'Importar CSV' }).click();
+    await page.getByLabel('Arquivo CSV').setInputFiles({
+      name: 'produtos.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        'sku;nome;descricao;preco;quantidade\nA-1;Item A;;10,50;3\nA-2;Item B;;5,00;1\n',
+      ),
+    });
+    await page.getByRole('button', { name: 'Importar', exact: true }).click();
+    await expect(page.getByText('produtos criados;')).toBeVisible();
+    expect(
+      onb.calls.some((c) => c.method === 'POST' && c.path.endsWith('/inventory/products/import')),
+    ).toBe(true);
+    expect(onb.products).toHaveLength(3);
+  });
+}
+
+test('estoque: sem documento e sem produto o exemplo é oferecido', async ({ page }) => {
+  await openWizard(page, { path: STOCK });
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toBeVisible();
+});
+
+test('estoque: com um documento cadastrado, o botão de exemplo não aparece', async ({ page }) => {
+  await openWizard(page, {
+    path: STOCK,
+    seed: (_api, onb) => onb.docs.push({ id: randomUUID(), title: 'Doc', isSample: false }),
+  });
+  await expect(page.getByRole('button', { name: 'Novo produto' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toHaveCount(0);
+});
+
+test('exemplo recusado (409) mostra a mensagem fixa e relê o estado', async ({ page }) => {
+  const { onb } = await openWizard(page, { path: '/painel/primeiros-passos/documentos' });
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toBeVisible();
+  // Outra aba cadastrou um documento depois de a tela carregar.
+  onb.docs.push({ id: randomUUID(), title: 'Escrito em outra aba', isSample: false });
+  await page.getByRole('button', { name: 'Carregar exemplo' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Carregar', exact: true }).click();
+  await expect(page.getByText('O exemplo só carrega em uma empresa vazia')).toBeVisible();
+  await expect(page.getByText('TEXTO-DO-SERVIDOR-QUE-NAO-PODE-APARECER')).toHaveCount(0);
+  await expect(page.getByText('Escrito em outra aba')).toBeVisible();
+});
+
+test('pular serviços e estoque não grava nada e leva ao teste final', async ({ page }) => {
+  const { api, onb } = await openWizard(page, { path: SERVICES });
+  await page.getByRole('button', { name: 'Pular' }).click();
+  await expect(page).toHaveURL(/\/estoque$/);
+  await page.getByRole('button', { name: 'Pular' }).click();
+  await expect(page).toHaveURL(/\/testar$/);
+  expect(writes(api, onb)).toHaveLength(0);
+});

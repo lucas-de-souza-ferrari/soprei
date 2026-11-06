@@ -58,6 +58,8 @@ export function SampleControls({
     } catch (error) {
       if (stamp !== generation.current) return;
       const own = knowledgeMessageOf(error);
+      // Recusado por já haver dados (outra aba cadastrou algo): relê a lista para a tela refletir a verdade.
+      if (error instanceof ApiError && error.status === 409) onChanged();
       const text = own ?? settle(error);
       if (text !== null) {
         const known =

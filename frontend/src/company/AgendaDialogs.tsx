@@ -21,6 +21,8 @@ import {
   type ItemAction,
   localStartOf,
   minutesOf,
+  NAME_MAX_LENGTH,
+  serviceFormProblem,
   statusLabelOf,
 } from './agenda-rules';
 
@@ -620,6 +622,83 @@ export function BlockDialog({
       <div>
         <Button type="submit" disabled={busy}>
           {busy ? 'Aguarde…' : 'Bloquear'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Formulário de serviço (nome, duração e intervalo). Compartilhado entre Configurar agenda e o assistente de
+ * primeiros passos (spec 030); o comportamento é o de sempre.
+ */
+export function ServiceForm({
+  service,
+  busy,
+  problem,
+  onSubmit,
+}: {
+  service: AgendaService | null;
+  busy: boolean;
+  problem: string | null;
+  onSubmit: (values: { name: string; durationMinutes: number; bufferMinutes: number }) => void;
+}) {
+  const [name, setName] = useState(service?.name ?? '');
+  const [duration, setDuration] = useState(String(service?.durationMinutes ?? 30));
+  const [buffer, setBuffer] = useState(String(service?.bufferMinutes ?? 0));
+  const [local, setLocal] = useState<string | null>(null);
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const found = serviceFormProblem({ name, duration, buffer });
+        if (found !== null) {
+          setLocal(found);
+          return;
+        }
+        onSubmit({
+          name: name.trim(),
+          durationMinutes: Number(duration),
+          bufferMinutes: buffer.trim() === '' ? 0 : Number(buffer),
+        });
+      }}
+    >
+      <Problem text={local ?? problem} />
+      <Input
+        label="Nome do serviço"
+        value={name}
+        maxLength={NAME_MAX_LENGTH}
+        onChange={(value) => {
+          setName(value);
+          setLocal(null);
+        }}
+      />
+      <p className="m-0 text-sm text-muted-foreground">
+        Evite nomes que revelem diagnóstico ou tratamento: o nome pode ser lido pela IA e aparece na
+        agenda.
+      </p>
+      <Input
+        label="Duração (minutos, múltiplos de 5)"
+        inputMode="numeric"
+        value={duration}
+        onChange={(value) => {
+          setDuration(value);
+          setLocal(null);
+        }}
+      />
+      <Input
+        label="Intervalo depois do serviço (minutos)"
+        inputMode="numeric"
+        value={buffer}
+        onChange={(value) => {
+          setBuffer(value);
+          setLocal(null);
+        }}
+      />
+      <div>
+        <Button type="submit" disabled={busy}>
+          {busy ? 'Aguarde…' : 'Salvar'}
         </Button>
       </div>
     </form>
