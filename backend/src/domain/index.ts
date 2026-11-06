@@ -153,3 +153,4 @@ export type {
   NewKnowledgeDocument,
 } from './knowledge.js';
 export * from './schedule.js';
+export * from './schedule-ai.js';

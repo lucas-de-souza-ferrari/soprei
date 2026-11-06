@@ -1,9 +1,14 @@
 import {
   LLM_ERROR_TYPE,
+  LLM_TOOL_RESULT_TURN_LIMIT,
+  LLM_TOOL_RESULT_UNAVAILABLE,
   type LlmGenerateInput,
   type LlmGenerateOptions,
   type LlmProvider,
   type LlmReply,
+  type LlmToolCall,
+  type LlmToolOutput,
+  type LlmToolSet,
 } from '../../../application/ports/llm-provider.js';
 import { ATTENDANCE_STYLE_INSTRUCTION } from '../../../application/attendance/attendance.service.js';
 import {
@@ -33,6 +38,16 @@ const ECHO_MAX_CHARS = 500;
 /** Quanto da persona o mock cita na resposta. */
 const PERSONA_PREVIEW_CHARS = 60;
 
+/**
+ * Roteiro de um turno com ferramentas (spec 028): `rounds` são as chamadas que o "modelo" pede em cada
+ * rodada (várias na mesma rodada = chamadas paralelas, executadas em sequência) e `finalText` é a
+ * resposta depois das ferramentas (pode usar os resultados). Só vale quando o turno oferece `tools`.
+ */
+export interface MockToolScript {
+  readonly rounds: readonly (readonly LlmToolCall[])[];
+  readonly finalText: string | ((outputs: readonly LlmToolOutput[]) => string);
+}
+
 export interface MockLlmProviderOptions {
   /**
    * Guarda as entradas recebidas em `calls`, para os testes inspecionarem. Desligado por
@@ -53,12 +68,20 @@ export class MockLlmProvider implements LlmProvider {
   readonly name = 'mock';
   /** Entradas recebidas, na ordem (só se `recordCalls`). Somente para testes. */
   readonly calls: LlmGenerateInput[] = [];
+  /** Nomes das ferramentas oferecidas em cada chamada (só se `recordCalls`); `undefined` = sem ferramentas. */
+  readonly toolsOffered: (readonly string[] | undefined)[] = [];
+  private readonly toolScripts: MockToolScript[] = [];
 
   private readonly recordCalls: boolean;
   private gate: Promise<void> | undefined;
 
   constructor(options: MockLlmProviderOptions = {}) {
     this.recordCalls = options.recordCalls ?? false;
+  }
+
+  /** Enfileira o roteiro do próximo turno com ferramentas (spec 028). Só para testes. */
+  scriptTools(...scripts: MockToolScript[]): void {
+    this.toolScripts.push(...scripts);
   }
 
   /** Segura toda chamada nova até a função devolvida ser chamada. Só para testes. */
@@ -77,8 +100,16 @@ export class MockLlmProvider implements LlmProvider {
     input: LlmGenerateInput,
     options: LlmGenerateOptions = {},
   ): Promise<Result<LlmReply, ExternalServiceError>> {
-    if (this.recordCalls) this.calls.push(input);
+    if (this.recordCalls) {
+      this.calls.push(input);
+      this.toolsOffered.push(options.tools?.definitions.map((definition) => definition.name));
+    }
     if (this.gate !== undefined) await this.gate;
+
+    if (options.tools !== undefined && this.toolScripts.length > 0) {
+      const script = this.toolScripts.shift();
+      if (script !== undefined) return runToolScript(script, options.tools, options.signal);
+    }
 
     const text = input.userMessage;
     if (text.includes(MOCK_HANG_MARKER)) return waitForAbort(options.signal);
@@ -101,6 +132,56 @@ export class MockLlmProvider implements LlmProvider {
       text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}`,
     });
   }
+}
+
+/**
+ * Executa um roteiro com as mesmas regras do laço do provedor real: o pedido ao modelo seguinte ao teto
+ * não é feito, a chamada acima do teto recebe `limite_turno` sem executar e o prazo do turno (a `signal`)
+ * para o laço.
+ */
+async function runToolScript(
+  script: MockToolScript,
+  tools: LlmToolSet,
+  signal: AbortSignal | undefined,
+): Promise<Result<LlmReply, ExternalServiceError>> {
+  const outputs: LlmToolOutput[] = [];
+  let modelCalls = 1;
+  let toolCalls = 0;
+  for (const round of script.rounds) {
+    if (isAborted(signal)) return aborted();
+    if (modelCalls >= tools.limits.maxModelCalls) {
+      return Result.err(
+        new ExternalServiceError('O mock passou do limite de rodadas de ferramenta', {
+          context: { provider: 'mock', errorType: LLM_ERROR_TYPE.toolRoundCap, retryable: false },
+        }),
+      );
+    }
+    modelCalls += 1;
+    for (const call of round) {
+      if (isAborted(signal)) return aborted();
+      toolCalls += 1;
+      if (toolCalls > tools.limits.maxToolCalls) {
+        outputs.push(LLM_TOOL_RESULT_TURN_LIMIT);
+        continue;
+      }
+      try {
+        outputs.push(await tools.execute(call));
+      } catch {
+        outputs.push(LLM_TOOL_RESULT_UNAVAILABLE);
+      }
+    }
+  }
+  if (isAborted(signal)) return aborted();
+  const text = typeof script.finalText === 'string' ? script.finalText : script.finalText(outputs);
+  return Result.ok({ text, toolRounds: script.rounds.length, toolCalls });
+}
+
+function aborted(): Result<never, ExternalServiceError> {
+  return Result.err(
+    new ExternalServiceError('Chamada ao provedor mock cancelada', {
+      context: { provider: 'mock', errorType: LLM_ERROR_TYPE.timeout, retryable: false },
+    }),
+  );
 }
 
 /**
@@ -149,4 +230,9 @@ function waitForAbort(
     if (signal.aborted) cancelled();
     else signal.addEventListener('abort', cancelled, { once: true });
   });
+}
+
+/** O estado do `AbortSignal` muda fora do fluxo: função à parte para o TypeScript não o fixar. */
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted ?? false;
 }
