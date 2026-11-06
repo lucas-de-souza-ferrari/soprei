@@ -550,3 +550,55 @@ test('celular 360 px: assistente e cartão sem rolagem horizontal', async ({ pag
   await expect(step(page)).toBeVisible();
   await noHorizontalScroll(page);
 });
+
+// ---- Revisão da 030: colchetes do modelo e console ----
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`colchetes do modelo: aviso fixo e confirmação antes de "Salvar e continuar" (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { api, onb } = await openWizard(page, { theme });
+    await page.getByRole('button', { name: 'Usar modelo' }).click();
+    await expect(page.getByText('O texto ainda tem trechos entre colchetes')).toBeVisible();
+    await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Salvar com colchetes?');
+    await dialog.getByRole('button', { name: 'Cancelar' }).click();
+    expect(writes(api, onb)).toHaveLength(0);
+    await expect(page).toHaveURL(/\/persona$/);
+    await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Salvar assim mesmo' }).click();
+    await expect(page).toHaveURL(/\/documentos$/);
+    expect(api.persona).toContain('[nome da empresa]');
+  });
+}
+
+test('sem colchetes do modelo não há aviso nem confirmação', async ({ page }) => {
+  const { api } = await openWizard(page);
+  await page.getByRole('button', { name: 'Usar modelo' }).click();
+  await page.getByLabel('Persona do assistente').fill('Atendente da Loja X, simpático e direto.');
+  await expect(page.getByText('O texto ainda tem trechos entre colchetes')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+  await expect(page).toHaveURL(/\/documentos$/);
+  expect(api.persona).toBe('Atendente da Loja X, simpático e direto.');
+});
+
+test('console: textos de persona e documento nunca aparecem no console', async ({ page }) => {
+  const logged: string[] = [];
+  page.on('console', (message) => logged.push(message.text()));
+  page.on('pageerror', (error) => logged.push(error.message));
+  const personaSecret = 'persona-sentinela-8f3a';
+  const docSecret = 'documento-sentinela-2b9c';
+  await openWizard(page);
+  await page.getByLabel('Persona do assistente').fill(personaSecret);
+  await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+  await expect(page).toHaveURL(/\/documentos$/);
+  await page.getByLabel('Título do documento').fill(docSecret);
+  await page.getByLabel('Texto do documento').fill(docSecret);
+  await page.getByRole('button', { name: 'Adicionar', exact: true }).click();
+  await expect(page.getByText('Documento adicionado.')).toBeVisible();
+  for (const line of logged) {
+    expect(line).not.toContain(personaSecret);
+    expect(line).not.toContain(docSecret);
+  }
+});

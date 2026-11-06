@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { ApiError } from '../api';
+import { agendaMessageOf } from './agenda-api';
+import { failureOf } from './company-api';
+import { knowledgeMessageOf, SAMPLE_REQUIRES_EMPTY_MESSAGE } from './knowledge-api';
 import { allowedPages, areaPageForPath, areaPath, canOpen } from './company-nav';
 import {
   checklistCounts,
   checklistItems,
   firstPending,
+  hasTemplatePlaceholders,
   type OnboardingState,
   PERSONA_TEMPLATE,
   resolveStep,
@@ -151,5 +156,51 @@ describe('modelo de persona (D12)', () => {
   it('é texto fixo, curto, com lacunas entre colchetes e cabe no limite', () => {
     assert.ok(PERSONA_TEMPLATE.length < 600);
     assert.match(PERSONA_TEMPLATE, /\[nome da empresa\]/);
+  });
+});
+
+describe('colchetes do modelo (revisão da 030)', () => {
+  it('detecta lacunas do modelo e deixa passar texto editado', () => {
+    assert.equal(hasTemplatePlaceholders(PERSONA_TEMPLATE), true);
+    assert.equal(hasTemplatePlaceholders('Atendente da [nome da empresa], ajuda bem.'), true);
+    assert.equal(hasTemplatePlaceholders('Atendente da Loja X. Veja [1] e [aqui].'), false);
+    assert.equal(hasTemplatePlaceholders(''), false);
+    assert.equal(
+      hasTemplatePlaceholders(
+        PERSONA_TEMPLATE.replace('[nome da empresa]', 'Loja X').replace(
+          '[o que a empresa vende ou faz]',
+          'roupas',
+        ),
+      ),
+      false,
+    );
+  });
+});
+
+describe('mensagens de erro do assistente vêm de status e code (nunca do texto do servidor)', () => {
+  const SERVER_TEXT = 'TEXTO-DO-SERVIDOR-QUE-NAO-PODE-APARECER';
+  const failures: [number, string | undefined][] = [
+    [400, 'VALIDATION_ERROR'],
+    [403, 'FORBIDDEN'],
+    [409, 'SAMPLE_REQUIRES_EMPTY'],
+    [429, 'RATE_LIMITED'],
+    [500, 'INTERNAL_ERROR'],
+    [502, undefined],
+    [503, 'SERVICE_UNAVAILABLE'],
+  ];
+  it('failureOf, knowledgeMessageOf e agendaMessageOf ignoram a mensagem do ApiError', () => {
+    for (const [status, code] of failures) {
+      const error = new ApiError(status, SERVER_TEXT, code);
+      const failure = failureOf(error);
+      if (failure.kind === 'message') assert.equal(failure.text.includes(SERVER_TEXT), false);
+      assert.equal(knowledgeMessageOf(error)?.includes(SERVER_TEXT) ?? false, false);
+      assert.equal(agendaMessageOf(error)?.includes(SERVER_TEXT) ?? false, false);
+    }
+    assert.deepEqual(failureOf(new ApiError(401, SERVER_TEXT)), { kind: 'session' });
+    assert.deepEqual(failureOf(new ApiError(404, SERVER_TEXT)), { kind: 'changed' });
+    assert.equal(
+      knowledgeMessageOf(new ApiError(409, SERVER_TEXT, 'SAMPLE_REQUIRES_EMPTY')),
+      SAMPLE_REQUIRES_EMPTY_MESSAGE,
+    );
   });
 });

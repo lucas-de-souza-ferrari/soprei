@@ -5,7 +5,12 @@ import { Loader } from '../components/motion/loader';
 import { Textarea } from '../components/textarea';
 import { ApiError } from '../api';
 import { companyApi, PERSONA_MAX_LENGTH } from './company-api';
-import { PERSONA_TEMPLATE, type StepBridge } from './onboarding-steps';
+import {
+  hasTemplatePlaceholders,
+  PERSONA_TEMPLATE,
+  PLACEHOLDER_WARNING,
+  type StepBridge,
+} from './onboarding-steps';
 
 export interface PageProps {
   readonly companyId: string;
@@ -107,6 +112,8 @@ export function PersonaPage({
 
   // Rascunho (spec 030): texto diferente do gravado. O assistente o salva ou o descarta; só em memória.
   const dirty = loaded && value !== saved;
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const draftSave = useRef<() => Promise<boolean>>(() => Promise.resolve(false));
   draftSave.current = (): Promise<boolean> => {
     if (value.trim().length === 0 || value.includes(NUL)) {
@@ -117,7 +124,14 @@ export function PersonaPage({
   };
   useEffect(() => {
     if (onDraft === undefined) return;
-    onDraft(dirty ? { save: () => draftSave.current() } : null);
+    onDraft(
+      dirty
+        ? {
+            save: () => draftSave.current(),
+            hasPlaceholders: () => hasTemplatePlaceholders(valueRef.current),
+          }
+        : null,
+    );
     return () => onDraft(null);
   }, [dirty, onDraft]);
 
@@ -176,6 +190,14 @@ export function PersonaPage({
           </Alert>
         )}
       </div>
+      {withTemplate && hasTemplatePlaceholders(value) && (
+        <p
+          role="status"
+          className="m-0 rounded-2xl border border-border bg-muted p-3 text-sm text-foreground"
+        >
+          {PLACEHOLDER_WARNING}
+        </p>
+      )}
       <Textarea
         id="persona"
         label="Persona do assistente"

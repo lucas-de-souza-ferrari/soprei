@@ -86,6 +86,7 @@ export function OnboardingPage({
   const [skipped, setSkipped] = useState<ReadonlySet<WizardStepId>>(new Set());
   const [hasDraft, setHasDraft] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [placeholderAsk, setPlaceholderAsk] = useState(false);
   const [leaving, setLeaving] = useState<(() => void) | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const [announce, setAnnounce] = useState('');
@@ -211,9 +212,14 @@ export function OnboardingPage({
       }
     });
   };
-  const saveAndAdvance = async (): Promise<void> => {
+  const saveAndAdvance = async (confirmed = false): Promise<void> => {
     const pending = draft.current;
     if (pending === null) return advance();
+    // Colchetes do modelo ainda no texto: confirma antes de salvar do jeito que está.
+    if (!confirmed && pending.hasPlaceholders?.() === true) {
+      setPlaceholderAsk(true);
+      return;
+    }
     setSaving(true);
     try {
       if (await pending.save()) {
@@ -412,13 +418,30 @@ export function OnboardingPage({
               Ir para as conversas
             </Button>
           ) : (
-            <Button disabled={saving} onClick={() => void saveAndAdvance()}>
+            <Button disabled={saving} onClick={() => void saveAndAdvance(false)}>
               {saving ? 'Salvando…' : hasDraft ? 'Salvar e continuar' : 'Continuar'}
             </Button>
           )}
         </div>
       </div>
 
+      <ConfirmDialog
+        request={
+          placeholderAsk
+            ? {
+                title: 'Salvar com colchetes?',
+                text: 'O texto ainda tem trechos entre colchetes do modelo. Salvar assim, mesmo?',
+                confirmLabel: 'Salvar assim mesmo',
+              }
+            : null
+        }
+        busy={saving}
+        onConfirm={() => {
+          setPlaceholderAsk(false);
+          void saveAndAdvance(true);
+        }}
+        onCancel={() => setPlaceholderAsk(false)}
+      />
       <ConfirmDialog
         request={
           leaving === null

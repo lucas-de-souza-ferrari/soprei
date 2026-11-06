@@ -170,6 +170,8 @@ export const PERSONA_TEMPLATE = [
 export interface StepDraft {
   /** Grava o rascunho; `true` se gravou (a tela do passo mostra o erro, se falhar). */
   readonly save: () => Promise<boolean>;
+  /** O texto ainda tem colchetes do modelo (opcional; só a persona usa). */
+  readonly hasPlaceholders?: () => boolean;
 }
 
 /**
@@ -182,3 +184,14 @@ export interface StepBridge {
   /** Há (objeto) ou não há (`null`) rascunho não salvo. Deve ser estável (a tela o usa em efeitos). */
   readonly onDraft?: (draft: StepDraft | null) => void;
 }
+
+/** Colchetes do modelo (ex.: "[nome da empresa]"), extraídos do próprio PERSONA_TEMPLATE. */
+const TEMPLATE_PLACEHOLDERS: readonly string[] = PERSONA_TEMPLATE.match(/\[[^\]\n]+\]/g) ?? [];
+
+/** O texto ainda contém alguma lacuna do modelo, sem editar? (só detecção; nada é bloqueado) */
+export function hasTemplatePlaceholders(text: string): boolean {
+  return TEMPLATE_PLACEHOLDERS.some((placeholder) => text.includes(placeholder));
+}
+
+export const PLACEHOLDER_WARNING =
+  'O texto ainda tem trechos entre colchetes do modelo, como [nome da empresa]. Troque-os pelas informações reais antes de salvar.';
