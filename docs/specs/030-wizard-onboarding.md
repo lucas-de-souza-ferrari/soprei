@@ -55,7 +55,7 @@ PUT /admin/companies/:companyId/onboarding   { dismissed: boolean }
 
 ### Lista "Configuração" depois do wizard (decisão D10)
 
-- Cartão no topo de **Conversas** (a página inicial) e no próprio "Primeiros passos", **enquanto** a empresa não dispensou e ainda falta algum item dos que a pessoa vê: "Configuração: 2 de 4 itens" com a lista (persona, documentos, serviços, estoque), cada item com **texto e ícone de feito/pendente (nunca só cor)** e um link para o passo certo; os opcionais levam o selo "opcional". Botão **"Dispensar"** (confirmação curta) chama o `PUT { dismissed: true }`; no menu, **"Primeiros passos"** continua disponível e reabre (`dismissed: false`). Some sozinha quando tudo está feito. Erro ao ler o estado **não** bloqueia Conversas (o cartão simplesmente não aparece).
+- Cartão no topo de **Conversas** (a página inicial); dentro de "Primeiros passos" a própria lista de passos do cabeçalho faz esse papel (desvio registrado na E3), **enquanto** a empresa não dispensou e ainda falta algum item dos que a pessoa vê: "Configuração: 2 de 4 itens" com a lista (persona, documentos, serviços, estoque), cada item com **texto e ícone de feito/pendente (nunca só cor)** e um link para o passo certo; os opcionais levam o selo "opcional". Botão **"Dispensar"** (confirmação curta) chama o `PUT { dismissed: true }`; no menu, **"Primeiros passos"** continua disponível e reabre (`dismissed: false`). Some sozinha quando tudo está feito. Erro ao ler o estado **não** bloqueia Conversas (o cartão simplesmente não aparece).
 
 ### Os passos (reaproveitando telas e APIs existentes, decisão D11)
 
@@ -98,8 +98,8 @@ Frontend, unitários (E1 a E3)
 
 - [x] `onboarding-steps.ts` (puro): dado o estado e as permissões, devolve os passos visíveis na ordem certa, o primeiro pendente, o contador "N de M" e a decisão de mostrar ou não a lista (`dismissed`, tudo feito, sem permissão); passo ausente na resposta é oculto; o passo da URL com valor fora do conjunto fixo vira o primeiro pendente.
 - [x] `company-nav`: `primeirosPassos` exige `onboarding:manage`; `/painel/primeiros-passos` e cada um dos cinco passos mapeiam para a tela e de volta; qualquer outro sufixo cai no primeiro pendente e **não** chama a API de outra empresa nem de passo inexistente; sem permissão a tela mostra o aviso e **não chama** a API.
-- [ ] Rascunho: sair de passo com texto sem salvar pede confirmação; confirmar descarta, cancelar mantém; o teste prova que `localStorage`/`sessionStorage` ficam só com `soprei-theme` e que o texto não aparece em `location`, `document.title` nem `console`.
-- [ ] Mensagens de erro vêm de `status` e `error.code` (nunca do texto do servidor); 401 volta ao login, 404 relê a sessão ("A empresa selecionada mudou"), como nas demais telas.
+- [x] Rascunho: sair de passo com texto sem salvar pede confirmação; confirmar descarta, cancelar mantém; o teste prova que `localStorage`/`sessionStorage` ficam só com `soprei-theme` e que o texto não aparece em `location`, `document.title` nem `console`.
+- [x] Mensagens de erro vêm de `status` e `error.code` (nunca do texto do servidor); 401 volta ao login, 404 relê a sessão ("A empresa selecionada mudou"), como nas demais telas.
 - [x] Pares de cor novos em `contrast.test.ts`, nos dois temas.
 
 E2E Playwright (API falsa, desktop e celular, claro e escuro; os fluxos de dados podem rodar na matriz completa só em um tema e o contraste/foco nos dois, mas todos têm de passar nos dois)
@@ -201,4 +201,10 @@ O dono decide; cada uma tem a recomendação (R) e a alternativa (A), em linguag
 ### Validação (2026-11-06)
 
 - Typecheck, lint, `format:check` (raiz) e build verdes. Backend `pnpm test`: **1360 verdes em Node 24 e em Node 22**; suítes novas (serviço, controller, integração do store, migração e drift do schema) repetidas 3 vezes em Node 22; `site-bridge`, inventário de rotas e gate de vocabulário verdes. Frontend: 137 unitários; e2e Playwright **completo** (desktop e celular, em blocos) verde, incluindo 80 do assistente.
-- **Não verificados / ressalvas:** os critérios "Mensagens de erro vêm de status e code" e "Rascunho ... console" ficam desmarcados (a escolha de mensagem é o `settle` já existente e coberta nos e2e de falha, mas sem teste unitário próprio; o e2e do rascunho prova storage, URL e título, não o `console`); `pnpm test:integration` completo não foi rodado (só as suítes da área); smoke do `dist` não feito; o CI (Node 22 e LTS) é a palavra final; falta o `reviewer`.
+- **Não verificados / ressalvas:** `pnpm test:integration` completo não foi rodado (só as suítes da área); smoke do `dist` não feito; o CI (Node 22 e LTS) é a palavra final; falta o `reviewer`.
+
+### Revisão (2026-11-06)
+
+- **Colchetes do modelo:** `hasTemplatePlaceholders` (extrai as lacunas do próprio `PERSONA_TEMPLATE`) mostra um aviso fixo na tela da persona e, em "Salvar e continuar", pede confirmação ("Salvar com colchetes?"); salvar com o botão "Salvar" da própria tela não pergunta. Testes: unitário da detecção e e2e (claro e escuro).
+- **Critérios fechados:** o e2e captura `console` e `pageerror` e prova que os textos sentinela de persona e documento não aparecem; unitário prova que `failureOf`, `knowledgeMessageOf` e `agendaMessageOf` ignoram o texto do servidor (só `status` e `error.code`).
+- **Limitações aceitas:** (1) o aviso "Sair do passo?" não cobre a troca de aba pelo menu nem o Voltar do navegador (o rascunho só existe em memória e se perde); (2) o formulário de serviço não alimenta `onDraft` (sem aviso de texto não salvo); (3) entrar no assistente com a empresa dispensada reabre sozinho (o cartão volta em Conversas): intencional.

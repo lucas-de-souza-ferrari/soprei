@@ -100,6 +100,8 @@
 
 ## Pendências abertas (não bloqueiam o próximo passo)
 
+- **Assistente de primeiros passos (030), limitações aceitas:** (1) "Sair do passo?" não cobre a troca de aba pelo menu nem o Voltar do navegador (rascunho só em memória); (2) o formulário de serviço não alimenta `onDraft`; (3) entrar no assistente com a empresa dispensada reabre sozinho (o cartão volta em Conversas): intencional; (4) "Salvar e continuar" com colchetes do modelo na persona pede confirmação.
+
 - **Contas (017/020/021):** lista de senhas comuns (e a política de senha de 6 caracteres, risco aceito); auditoria global de contas (a 021 só loga, mede e avisa o titular por e-mail); quem conhece o e-mail alheio pode esgotar o teto de 10 erros da recuperação e bloquear a recuperação da vítima por até 24 h; sessões sem `gen` (anteriores à 021) só caem na primeira revogação; lista de senhas comuns e contador por IP + e-mail; prefixo `__Host-` do cookie; quem pré-cadastra o e-mail de uma vítima pode bloquear a confirmação dela por 24 h com o teto da 020 (risco aceito; o site poderia avisar "se não recebeu o e-mail, tente de novo mais tarde").
 - **Frontend (018):** código não usado dos componentes copiados do beUI, CSP (exige tratar o script inline do tema), evento `storage` do tema entre abas, divisão de código do bundle (acima de 500 kB por causa do `motion`).
 - **Autenticação (007/008):** limpeza de sessões expiradas no conjunto `usess`; `nbf` em massa ao suspender empresa; bloqueio por conta que permite negar acesso a um e-mail conhecido; 503 depois de rotação confirmada pode exigir novo login; auditoria imutável só por convenção (considerar gatilho/`REVOKE` na spec de retenção); `ALTER TYPE ... ADD VALUE` exige PostgreSQL >= 12.
