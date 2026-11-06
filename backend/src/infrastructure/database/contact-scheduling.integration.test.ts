@@ -383,18 +383,11 @@ describe('solicitar_agendamento: gravação, estado e idempotência (E2)', () =>
     assert.equal(active(await rows(crowded.company.id)).length, 30);
   });
 
-  it('cotas no Redis: a 9ª escrita do contato recusa; Redis fora = indisponível, sem gravar', async () => {
+  it('Redis fora: indisponível, sem gravar (a IA fica em modo só leitura)', async () => {
     const w = await world('ai-quota');
-    const ref = contact('18');
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      expectKind(await ai.cancel(w.company.id, ref, randomUUID()), 'not_found');
-    }
-    const ninth = expectKind(await book(w, ref, slot(10, '09:00')), 'limit');
-    assert.equal(ninth.reason, 'quota');
-    assert.equal((await rows(w.company.id)).length, 0);
-
     const down: ScheduleAiQuotaStore = {
       ping: () => Promise.reject(new ServiceUnavailableError('fora')),
+      check: () => Promise.reject(new ServiceUnavailableError('fora')),
       take: () => Promise.reject(new ServiceUnavailableError('fora')),
     };
     const broken = buildAi(down);
@@ -596,5 +589,159 @@ describe('interruptores da IA na configuração da agenda (E2/E4)', () => {
     const off = await schedule.updateSettings(company.id, { ...base, aiBookingEnabled: false });
     assert.equal(off.aiBookingEnabled, false);
     assert.equal(off.aiAutoConfirm, false, 'desligar a IA desliga a confirmação automática');
+  });
+});
+
+/** Cota de mentira: conta o que foi conferido e o que foi consumido. */
+class CountingQuota implements ScheduleAiQuotaStore {
+  checks = 0;
+  takes = 0;
+  answer: 'ok' | 'contact_limit' | 'company_limit' = 'ok';
+  ping(): Promise<void> {
+    return Promise.resolve();
+  }
+  check() {
+    this.checks += 1;
+    return Promise.resolve(this.answer);
+  }
+  take() {
+    this.takes += 1;
+    return Promise.resolve('ok' as const);
+  }
+}
+
+describe('cota consumida só com escrita efetiva e teto por empresa (E2/E3, revisão)', () => {
+  it('tentativas sem efeito não consomem cota; escrita efetiva consome uma vez', async () => {
+    const w = await world('ai-quota-eff');
+    const quota = new CountingQuota();
+    const svc = buildAi(quota);
+    const ref = contact('41');
+    const req = (name: string, start: string) =>
+      svc.request(w.company.id, ref, { serviceName: name, start, customerLabel: null });
+    expectKind(await req('Inexistente', slot(10, '09:00')), 'service_not_found');
+    expectKind(await req(w.serviceName, slot(10, '22:00')), 'outside_rules');
+    expectKind(await req(w.serviceName, '9999-12-31T09:00'), 'outside_rules');
+    expectKind(await svc.cancel(w.company.id, ref, randomUUID()), 'not_found');
+    assert.equal(quota.takes, 0);
+    // Horário ocupado por outro contato (efetiva para o outro) não consome do que perdeu.
+    expectKind(await book(w, contact('42'), slot(10, '09:00')), 'booked');
+    expectKind(await req(w.serviceName, slot(10, '09:00')), 'slot_taken');
+    assert.equal(quota.takes, 0);
+    // Efetiva: criar (1), repetição idempotente (0), cancelar (1), cancelar de novo (0).
+    expectKind(await req(w.serviceName, slot(10, '09:30')), 'booked');
+    assert.equal(quota.takes, 1);
+    const again = expectKind(await req(w.serviceName, slot(10, '09:30')), 'booked');
+    assert.equal(again.already, true);
+    assert.equal(quota.takes, 1);
+    const id = (await rows(w.company.id, ref))[0]?.id ?? '';
+    expectKind(await svc.cancel(w.company.id, ref, id), 'cancelled');
+    expectKind(await svc.cancel(w.company.id, ref, id), 'cancelled');
+    assert.equal(quota.takes, 2);
+    // Terceira criação e limite por contato (3 criações é do banco): limite sem efeito não consome.
+    assert.ok(quota.checks > 0);
+  });
+
+  it('cota esgotada (contato ou empresa) recusa antes de gravar; remarcar efetivo consome uma', async () => {
+    const w = await world('ai-quota-full');
+    const quota = new CountingQuota();
+    const svc = buildAi(quota);
+    const ref = contact('43');
+    for (const answer of ['contact_limit', 'company_limit'] as const) {
+      quota.answer = answer;
+      const out = await svc.request(w.company.id, ref, {
+        serviceName: w.serviceName,
+        start: slot(10, '09:00'),
+        customerLabel: null,
+      });
+      assert.equal(expectKind(out, 'limit').reason, 'quota');
+    }
+    assert.equal((await rows(w.company.id)).length, 0);
+    quota.answer = 'ok';
+    expectKind(
+      await svc.request(w.company.id, ref, {
+        serviceName: w.serviceName,
+        start: slot(10, '09:00'),
+        customerLabel: null,
+      }),
+      'booked',
+    );
+    const id = (await rows(w.company.id, ref))[0]?.id ?? '';
+    expectKind(
+      await svc.reschedule(w.company.id, ref, { appointmentId: id, newStart: slot(11, '10:00') }),
+      'rescheduled',
+    );
+    assert.equal(quota.takes, 2);
+  });
+
+  it('teto de 60 reservas futuras ativas do canal por empresa, mesmo com confirmação automática', async () => {
+    const w = await world('ai-cap60', { autoConfirm: true });
+    const mine = contact('44');
+    expectKind(await book(w, mine, slot(10, '09:00')), 'booked');
+    for (let index = 0; index < 59; index += 1) {
+      const start = new Date(Date.UTC(2026, 11, 1, 12, 0) + index * 30 * 60_000);
+      await appointments.create(w.company.id, {
+        resourceId: w.resourceId,
+        serviceId: w.serviceId,
+        kind: 'BOOKING',
+        status: 'CONFIRMED',
+        startsAt: start,
+        endsAt: new Date(start.getTime() + 30 * 60_000),
+        blockedUntil: new Date(start.getTime() + 30 * 60_000),
+        customerLabel: null,
+        contactRef: contact('45'),
+        source: 'CHANNEL',
+        createdByMembershipId: null,
+      });
+    }
+    const full = expectKind(await book(w, contact('46'), slot(11, '09:00')), 'limit');
+    assert.equal(full.reason, 'company_active');
+    // Remarcar não aumenta o volume (o antigo sai na mesma transação): continua possível no teto.
+    const id = (await rows(w.company.id, mine))[0]?.id ?? '';
+    expectKind(
+      await ai.reschedule(w.company.id, mine, { appointmentId: id, newStart: slot(11, '10:00') }),
+      'rescheduled',
+    );
+    // Concorrência no limite: duas criações simultâneas depois de abrir uma vaga, só uma entra.
+    const open = (await rows(w.company.id, mine)).find((row) => row.status === 'CONFIRMED');
+    assert.ok(open !== undefined);
+    expectKind(await ai.cancel(w.company.id, mine, open.id), 'cancelled');
+    const race = await Promise.all([
+      book(w, contact('47'), slot(12, '09:00')),
+      book(w, contact('48'), slot(12, '09:30')),
+    ]);
+    assert.deepEqual(race.map((outcome) => outcome.kind).toSorted(), ['booked', 'limit']);
+    assert.equal(
+      active(await rows(w.company.id)).filter((row) => row.source === 'CHANNEL').length,
+      60,
+    );
+  });
+
+  it('falha inesperada: log só com companyId, operação e errorName; resultado indisponivel', async () => {
+    const SECRET = 'segredo-da-mensagem-do-erro';
+    const secretService = 'Servico-Secreto-Do-Argumento';
+    const secretContact = '5511977770000';
+    const captured = captureLogs();
+    const failing = new ContactSchedulingService({
+      unitOfWork: { run: () => Promise.reject(new Error(SECRET)) },
+      quota: new CountingQuota(),
+      quotaSecret: 'x',
+      now: () => NOW,
+      logger: captured.logger,
+    });
+    const company = (await tenants.createCompany('ai-logfail')).id;
+    expectKind(
+      await failing.request(company, secretContact, {
+        serviceName: secretService,
+        start: slot(10, '09:00'),
+        customerLabel: 'Nome-Secreto',
+      }),
+      'unavailable',
+    );
+    expectKind(await failing.cancel(company, secretContact, randomUUID()), 'unavailable');
+    const raw = captured.raw();
+    assert.ok(raw.includes(company) && raw.includes('errorName'));
+    for (const secret of [SECRET, secretService, secretContact, 'Nome-Secreto', '2026-11-10']) {
+      assert.equal(raw.includes(secret), false, secret);
+    }
   });
 });

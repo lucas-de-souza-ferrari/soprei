@@ -65,6 +65,8 @@ export interface ContactScheduleTransaction {
     contactRef: string,
     since: Date,
   ): Promise<number>;
+  /** Reservas ativas e futuras com origem CHANNEL da empresa, qualquer status. */
+  countActiveChannelFuture(companyId: CompanyId, after: Date): Promise<number>;
   /** `PENDING` do canal (IA) ativos e futuros da empresa. */
   countPendingChannelFuture(companyId: CompanyId, after: Date): Promise<number>;
   /**
@@ -94,6 +96,11 @@ export interface ContactScheduleUnitOfWork {
 export interface ScheduleAiQuotaStore {
   /** Prova que o Redis das cotas responde (senão a IA fica em modo só leitura). */
   ping(): Promise<void>;
+  /** Só confere (não consome) se há vaga para o contato e para a empresa. */
+  check(
+    companyId: CompanyId,
+    contactKey: string,
+  ): Promise<'ok' | 'contact_limit' | 'company_limit'>;
   /**
    * Consome, tudo-ou-nada, uma vaga do contato e uma da empresa. `ok`; `contact_limit` ou
    * `company_limit` (nada é consumido).

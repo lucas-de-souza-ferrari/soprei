@@ -272,6 +272,18 @@ O `companyId` do `ToolContext` vem **só** do job do canal (resolvido por `phone
 
 **Testes (E4):** `agenda.test.ts` (origem, estados, filtro, contagem, contrato estrito), `contrast.test.ts` e `frontend/e2e/agenda-ai.spec.ts` (Playwright com API falsa, projetos desktop e celular, claro e escuro e 360 px: selo e "Aguardando confirmação", a equipe confirma e cancela, "Cancelado pelo contato", filtro, contagem, bloco da semana, interruptores e a regra da confirmação automática, AGENT sem a tela).
 
+### Ajustes da revisão de E2 a E4 (2026-11-06, implementer)
+
+1. **Falha inesperada com causa observável.** `ContactSchedulingService` recebe `logger` (`warn`: só `companyId`, `operation` fixa e `errorName`) e `createScheduleToolSet` também registra `warn` (ids, ferramenta e `errorName`) onde antes engolia o erro; nunca mensagem, argumento, nome, horário nem contato. Testado com sentinelas.
+2. **A cota do Redis é consumida só com escrita efetiva** (reserva criada, cancelada ou remarcada), **depois** do sucesso. Antes da transação a cota é só **conferida** (`ScheduleAiQuotaStore.check`, sem consumir; Redis fora = `unavailable`/só leitura; esgotada = `limit`). Serviço não achado, fora das regras, `slot_ocupado`, `limit`, repetição idempotente (`already`), cancelamento repetido e retentativa de `flush` **não gastam cota**. O consumo depois da escrita é de melhor esforço (falha do Redis só é logada). Isto substitui o desvio 3 do registro de E2/E3. Consequência aceita: sob concorrência a cota pode estourar em poucas unidades (check e take não são atômicos).
+3. **Teto de 60 reservas futuras ativas do canal por empresa** (`SCHEDULE_AI_COMPANY_MAX_ACTIVE_CHANNEL`, qualquer status, também com a confirmação automática), checado sob a trava da empresa na transação da criação e da remarcação (resultado `limite`, razão `company_active`). Testes com 60 reservas e corrida de duas criações no limite.
+4. **Faixa do início antes de qualquer cota ou transação:** data inválida ou fora de [ontem, hoje + 366 dias] (ex.: `9999-12-31`) é `fora_do_horario` sem tocar em Redis nem banco; o teto real de `maxAdvanceDays` continua no `computeSlots`.
+5. `saveAi` (site) relê as configurações logo antes do `PUT` (que leva o objeto inteiro), sem mudar o fuso fixo.
+6. `SCHEDULE_AI_CLAIM_PHRASES` ganhou "fica combinado", "pode vir", "te espero" e "reserva feita" (testes de afirmação e de negação: "não marquei", "não consegui agendar").
+7. `MockToolScript.failAfterRounds` **fica** em `mock-llm.provider.ts`: o roteiro do mock é parte do provedor mock (a porta não muda) e mover para `test-support` exigiria o mock importar de lá.
+
+**Riscos aceitos (adições):** (a) remarcar uma reserva `CONFIRMED` com a confirmação automática desligada cria a nova como `PENDING` (a equipe reconfirma; o contato não é avisado); (b) a guarda de afirmação é lexical (lista fixa de frases): falso negativo com frase fora da lista e falso positivo raro são aceitos; o pior caso é uma frase confusa, nunca uma reserva inexistente.
+
 ### E0: passo zero do dono (roteiro exato)
 
 1. `backend/.env` (o agente nunca o lê): `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY=<chave>` (defina **limite de gasto mensal** na Console antes), `SCHEDULE_AI_ENABLED=true`, `METRICS_TOKEN=<32+ caracteres>` (para ver `/metrics`) e, só no passo (d), `LLM_MAX_OUTPUT_TOKENS=64`. Reinicie o backend (`pnpm dev` não observa o `.env`).

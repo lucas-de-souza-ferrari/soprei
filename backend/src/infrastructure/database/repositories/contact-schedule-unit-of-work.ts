@@ -200,6 +200,18 @@ class PrismaContactScheduleTransaction implements ContactScheduleTransaction {
     });
   }
 
+  countActiveChannelFuture(companyId: CompanyId, after: Date): Promise<number> {
+    return this.db.appointment.count({
+      where: {
+        companyId,
+        kind: 'BOOKING',
+        source: 'CHANNEL',
+        status: { in: ACTIVE },
+        startsAt: { gte: after },
+      },
+    });
+  }
+
   countPendingChannelFuture(companyId: CompanyId, after: Date): Promise<number> {
     return this.db.appointment.count({
       where: {

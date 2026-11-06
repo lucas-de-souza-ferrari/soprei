@@ -45,6 +45,8 @@ export const SCHEDULE_AI_CONTACT_MAX_CREATIONS_PER_DAY = 3;
 export const SCHEDULE_AI_CONTACT_MAX_WRITES_PER_DAY = 8;
 export const SCHEDULE_AI_COMPANY_MAX_WRITES_PER_DAY = 100;
 export const SCHEDULE_AI_COMPANY_MAX_PENDING = 30;
+/** Reservas futuras ativas com origem CHANNEL por empresa, qualquer status (vale com a confirmação automática). */
+export const SCHEDULE_AI_COMPANY_MAX_ACTIVE_CHANNEL = 60;
 export const SCHEDULE_AI_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** Verbos de conclusão em primeira pessoa (sem acento, minúsculos): a guarda de afirmação (decisão 7). */
@@ -58,6 +60,10 @@ export const SCHEDULE_AI_CLAIM_PHRASES: readonly string[] = [
   'ficou marcado',
   'agendado para',
   'confirmado para',
+  'fica combinado',
+  'pode vir',
+  'te espero',
+  'reserva feita',
 ];
 
 /** Texto que troca uma resposta que afirma ter marcado algo sem escrita confirmada no turno. */

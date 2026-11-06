@@ -440,4 +440,17 @@ describe('AttendanceService com escrita da IA na agenda (spec 028, E2/E3)', () =
       assert.ok(tool.length < 30 && result.length < 30);
     }
   });
+
+  it('falha inesperada da escrita: log só com ids, ferramenta e errorName', async () => {
+    const h = await setup();
+    const SECRET = 'mensagem-secreta-do-erro';
+    h.scheduling.request = () => Promise.reject(new Error(SECRET));
+    h.llm.scriptTools({ rounds: [[request({ nome: SECRET_NAME })]], finalText: 'Anotado.' });
+    await ask(h);
+    const raw = h.logs.raw();
+    assert.ok(raw.includes('falhou de forma inesperada') && raw.includes('"errorName":"Error"'));
+    for (const secret of [SECRET, SECRET_NAME, SECRET_SERVICE, 'teste-no-site']) {
+      assert.equal(logContains(raw, secret), false, secret);
+    }
+  });
 });

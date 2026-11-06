@@ -7,7 +7,9 @@ import {
   SCHEDULE_AI_CONTACT_MAX_CREATIONS_PER_DAY,
   SCHEDULE_AI_MAX_ALTERNATIVES,
   SCHEDULE_AI_MAX_SERVICE_NAMES_RESULT,
+  SCHEDULE_AI_COMPANY_MAX_ACTIVE_CHANNEL,
   SCHEDULE_AI_QUOTA_WINDOW_MS,
+  SCHEDULE_MAX_ADVANCE_DAYS,
   type ScheduleServiceItem,
 } from '../../domain/index.js';
 import { ConflictError } from '../../shared/errors/index.js';
@@ -22,7 +24,9 @@ import type {
 import { computeSlots, type Slot } from './availability.js';
 import {
   addDays,
+  daysBetween,
   formatLocalTime,
+  isValidLocalDate,
   localPartsOf,
   parseLocalDateTime,
   zonedToInstant,
@@ -59,7 +63,10 @@ export type ContactOutcome =
   | { readonly kind: 'outside_rules' }
   | { readonly kind: 'service_not_found'; readonly names: readonly string[] }
   | { readonly kind: 'not_found' }
-  | { readonly kind: 'limit'; readonly reason: 'active' | 'creations' | 'pending' | 'quota' }
+  | {
+      readonly kind: 'limit';
+      readonly reason: 'active' | 'creations' | 'pending' | 'company_active' | 'quota';
+    }
   | { readonly kind: 'unavailable' };
 
 export interface RequestBookingArgs {
@@ -102,6 +109,8 @@ export interface ContactSchedulingDeps {
   readonly quotaSecret: string | Buffer;
   /** Relógio injetável, para os testes. */
   readonly now?: () => Date;
+  /** Só `companyId`, nome fixo da operação e `errorName`: nunca mensagem de erro, argumento, nome nem horário. */
+  readonly logger?: { warn(fields: object, message: string): void };
 }
 
 /** Desfaz a transação carregando o resultado de regra de negócio (não é erro). */
@@ -132,8 +141,16 @@ export class ContactSchedulingService implements ContactScheduling {
     contactRef: string,
     args: RequestBookingArgs,
   ): Promise<ContactOutcome> {
-    const gate = await this.takeQuota(companyId, contactRef);
+    const gate = await this.gate(companyId, contactRef, args.start);
     if (gate !== null) return gate;
+    return this.settle(companyId, contactRef, await this.doRequest(companyId, contactRef, args));
+  }
+
+  private async doRequest(
+    companyId: CompanyId,
+    contactRef: string,
+    args: RequestBookingArgs,
+  ): Promise<ContactOutcome> {
     try {
       return await this.write(companyId, async (tx, config, now) => {
         const service = resolveService(config, args.serviceName);
@@ -156,8 +173,20 @@ export class ContactSchedulingService implements ContactScheduling {
     contactRef: string,
     appointmentId: string,
   ): Promise<ContactOutcome> {
-    const gate = await this.takeQuota(companyId, contactRef);
+    const gate = await this.gate(companyId, contactRef, null);
     if (gate !== null) return gate;
+    return this.settle(
+      companyId,
+      contactRef,
+      await this.doCancel(companyId, contactRef, appointmentId),
+    );
+  }
+
+  private async doCancel(
+    companyId: CompanyId,
+    contactRef: string,
+    appointmentId: string,
+  ): Promise<ContactOutcome> {
     try {
       return await this.write(companyId, async (tx, config, now) => {
         const row = await tx.findForContact(companyId, contactRef, appointmentId);
@@ -170,8 +199,8 @@ export class ContactSchedulingService implements ContactScheduling {
         if (changed === null) return { kind: 'not_found' };
         return { kind: 'cancelled', cancelled: view(row, config), already: false };
       });
-    } catch {
-      return this.unexpected();
+    } catch (error) {
+      return this.unexpected(companyId, 'cancel', error);
     }
   }
 
@@ -180,8 +209,16 @@ export class ContactSchedulingService implements ContactScheduling {
     contactRef: string,
     args: RescheduleArgs,
   ): Promise<ContactOutcome> {
-    const gate = await this.takeQuota(companyId, contactRef);
+    const gate = await this.gate(companyId, contactRef, args.newStart);
     if (gate !== null) return gate;
+    return this.settle(companyId, contactRef, await this.doReschedule(companyId, contactRef, args));
+  }
+
+  private async doReschedule(
+    companyId: CompanyId,
+    contactRef: string,
+    args: RescheduleArgs,
+  ): Promise<ContactOutcome> {
     try {
       return await this.write(companyId, async (tx, config, now) => {
         const old = await tx.findForContact(companyId, contactRef, args.appointmentId);
@@ -214,25 +251,69 @@ export class ContactSchedulingService implements ContactScheduling {
         const alternatives = await this.alternativesFor(companyId, contactRef, args);
         return { kind: 'slot_taken', alternatives };
       }
-      return this.unexpected();
+      return this.unexpected(companyId, 'reschedule', error);
     }
   }
 
   /* ----------------------------------- interno ----------------------------------- */
 
-  /** Cota de escritas (Redis): estouro = `limit`; Redis fora = `unavailable` (nada é gravado). */
-  private async takeQuota(
+  /**
+   * Antes de qualquer transação: (1) início fora de uma faixa plausível (data inválida, extrema como 9999-12-31 ou
+   * além do teto de dias da agenda) é `fora_do_horario` sem tocar em Redis nem banco; (2) a cota é só **conferida**
+   * (nunca consumida aqui): Redis fora = `unavailable`, cota esgotada = `limit`.
+   */
+  private async gate(
     companyId: CompanyId,
     contactRef: string,
+    start: string | null,
   ): Promise<ContactOutcome | null> {
+    if (start !== null && startOutOfRange(start, this.now())) return { kind: 'outside_rules' };
     try {
-      const contactKey = createHmac('sha256', this.deps.quotaSecret)
-        .update(`schedule-ai-quota:${companyId}|${contactRef}`)
-        .digest('hex');
-      const result = await this.deps.quota.take(companyId, contactKey);
+      const result = await this.deps.quota.check(companyId, this.contactKey(companyId, contactRef));
       return result === 'ok' ? null : { kind: 'limit', reason: 'quota' };
-    } catch {
+    } catch (error) {
+      this.warn(companyId, 'quota_check', error);
       return { kind: 'unavailable' };
+    }
+  }
+
+  private contactKey(companyId: CompanyId, contactRef: string): string {
+    return createHmac('sha256', this.deps.quotaSecret)
+      .update(`schedule-ai-quota:${companyId}|${contactRef}`)
+      .digest('hex');
+  }
+
+  /**
+   * A cota é consumida **só** quando houve escrita efetiva (reserva criada, cancelada ou remarcada); tentativa sem
+   * efeito (serviço, regra, ocupado, limite, repetição idempotente) não gasta cota. A escrita já está feita: falha
+   * do Redis aqui só é registrada.
+   */
+  private async settle(
+    companyId: CompanyId,
+    contactRef: string,
+    outcome: ContactOutcome,
+  ): Promise<ContactOutcome> {
+    const effective =
+      (outcome.kind === 'booked' && !outcome.already) ||
+      (outcome.kind === 'cancelled' && !outcome.already) ||
+      outcome.kind === 'rescheduled';
+    if (!effective) return outcome;
+    try {
+      await this.deps.quota.take(companyId, this.contactKey(companyId, contactRef));
+    } catch (error) {
+      this.warn(companyId, 'quota_take', error);
+    }
+    return outcome;
+  }
+
+  private warn(companyId: CompanyId, operation: string, error: unknown): void {
+    try {
+      this.deps.logger?.warn(
+        { companyId, operation, errorName: error instanceof Error ? error.name : typeof error },
+        'escrita da IA na agenda falhou sem resultado de regra',
+      );
+    } catch {
+      // Log nunca derruba a operação.
     }
   }
 
@@ -309,6 +390,13 @@ export class ContactSchedulingService implements ContactScheduling {
       return { kind: 'limit', reason: 'pending' };
     }
 
+    // Teto de volume por empresa, independente do status (vale também com a confirmação automática).
+    if (
+      (await tx.countActiveChannelFuture(companyId, now)) >= SCHEDULE_AI_COMPANY_MAX_ACTIVE_CHANNEL
+    ) {
+      return { kind: 'limit', reason: 'company_active' };
+    }
+
     const date = input.start.slice(0, 10);
     const free = await this.freeSlots(tx, companyId, config, service, now, date);
     const match = free.find((slot) => slot.startsAt.getTime() === startsAt.getTime());
@@ -378,7 +466,7 @@ export class ContactSchedulingService implements ContactScheduling {
     contactRef: string,
     args: RequestBookingArgs,
   ): Promise<ContactOutcome> {
-    if (!isSlotTaken(error)) return this.unexpected();
+    if (!isSlotTaken(error)) return this.unexpected(companyId, 'request', error);
     try {
       return await this.write(companyId, async (tx, config, now) => {
         const service = resolveService(config, args.serviceName);
@@ -397,7 +485,8 @@ export class ContactSchedulingService implements ContactScheduling {
         );
         return { kind: 'slot_taken', alternatives: alternativesOf(free, startsAt) };
       });
-    } catch {
+    } catch (error) {
+      this.warn(companyId, 'request_recover', error);
       return { kind: 'slot_taken', alternatives: [] };
     }
   }
@@ -425,15 +514,25 @@ export class ContactSchedulingService implements ContactScheduling {
         return { kind: 'slot_taken', alternatives: alternativesOf(free, startsAt) };
       });
       return outcome.kind === 'slot_taken' ? outcome.alternatives : [];
-    } catch {
+    } catch (error) {
+      this.warn(companyId, 'reschedule_recover', error);
       return [];
     }
   }
 
   /** Erro que não é de regra: a IA recebe `indisponivel`; nada do erro vai adiante. */
-  private unexpected(): ContactOutcome {
+  private unexpected(companyId: CompanyId, operation: string, error: unknown): ContactOutcome {
+    this.warn(companyId, operation, error);
     return { kind: 'unavailable' };
   }
+}
+
+/** Início implausível: data inválida ou fora de [ontem, hoje + teto de dias da agenda + 1] (calendário UTC). */
+function startOutOfRange(start: string, now: Date): boolean {
+  const date = start.slice(0, 10);
+  if (!isValidLocalDate(date)) return true;
+  const distance = daysBetween(now.toISOString().slice(0, 10), date);
+  return distance < -1 || distance > SCHEDULE_MAX_ADVANCE_DAYS + 1;
 }
 
 function isSlotTaken(error: unknown): boolean {

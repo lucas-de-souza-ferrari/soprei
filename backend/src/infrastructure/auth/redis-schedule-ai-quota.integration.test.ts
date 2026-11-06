@@ -70,6 +70,23 @@ describe('RedisScheduleAiQuotaStore (spec 028)', () => {
     assert.equal(await store.take(company(), key()), 'ok');
   });
 
+  it('check só confere: não consome e reflete o esgotamento', async () => {
+    const { store } = await createStore();
+    const companyId = company();
+    const contact = key();
+    for (let index = 0; index < 5; index += 1)
+      assert.equal(await store.check(companyId, contact), 'ok');
+    for (let index = 0; index < SCHEDULE_AI_CONTACT_MAX_WRITES_PER_DAY; index += 1) {
+      assert.equal(await store.take(companyId, contact), 'ok');
+    }
+    assert.equal(await store.check(companyId, contact), 'contact_limit');
+    const other = company();
+    for (let index = 0; index < SCHEDULE_AI_COMPANY_MAX_WRITES_PER_DAY; index += 1) {
+      assert.equal(await store.take(other, key()), 'ok');
+    }
+    assert.equal(await store.check(other, key()), 'company_limit');
+  });
+
   it('as chaves têm TTL de 24 h e nunca guardam o contato em claro', async () => {
     const { store, prefix } = await createStore();
     const companyId = company();

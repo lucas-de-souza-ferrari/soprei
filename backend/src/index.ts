@@ -166,6 +166,7 @@ async function main(): Promise<void> {
               versionedAuthPrefix(config.AUTH_REDIS_PREFIX, config.ACCOUNTS_ENABLED),
             ),
             quotaSecret: deriveLoginLockSecret(config.JWT_SECRET),
+            logger,
           }),
         }
       : {}),

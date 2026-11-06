@@ -2,7 +2,7 @@
 
 > Atualize no fim de cada sessão (ver "Trabalho em turnos entre agentes" em `AGENTS.md`). Curto e factual; o histórico de decisões fica em `docs/context.md` e nas specs, e o detalhe de cada spec no "Registro da implementação" dela.
 
-**Última atualização:** 2026-11-06, por Claude Code (Sonnet 5.5, implementer): spec 028 (a IA marca, cancela e remarca horários por tool use) na branch **`spec/028-e2-escrita`**. **E2, E3 e E4 estão prontas e commitadas (a E1 já está mergeada); a árvore está limpa.** O dono liberou a implementação **sem o E0** (teste manual com a chave real): a **ativação** (`SCHEDULE_AI_ENABLED` e a opção da empresa, ambas desligadas por padrão) continua **condicionada ao E0**, e as suposições S1 a S6 seguem não verificadas. **Falta o `reviewer` (obrigatório na spec).** Nada foi enviado ao GitHub (o dono dá o push).
+**Última atualização:** 2026-11-06, por Claude Code (Sonnet 5.5, implementer): spec 028 (a IA marca, cancela e remarca horários por tool use) na branch **`spec/028-e2-escrita`**. **E2, E3 e E4 estão prontas e commitadas (a E1 já está mergeada); a árvore está limpa.** O dono liberou a implementação **sem o E0** (teste manual com a chave real): a **ativação** (`SCHEDULE_AI_ENABLED` e a opção da empresa, ambas desligadas por padrão) continua **condicionada ao E0**, e as suposições S1 a S6 seguem não verificadas. **O `reviewer` passou sem bloqueador e seus ajustes (log de falha inesperada, cota só com escrita efetiva, teto de 60 do canal por empresa, faixa do início, `saveAi` relendo, frases da guarda) estão aplicados: ver "Ajustes da revisão" no Registro da spec.** Nada foi enviado ao GitHub (o dono dá o push).
 
 ## Onde estamos
 

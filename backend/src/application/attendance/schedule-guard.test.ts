@@ -15,6 +15,10 @@ describe('guarda de afirmação (spec 028, decisão 7)', () => {
       'Ficou marcado para amanhã.',
       'Agendado para terça às 14:00.',
       'Confirmado para sexta.',
+      'Fica combinado então!',
+      'Pode vir às 14h.',
+      'Te espero amanhã.',
+      'Reserva feita para quinta.',
     ]) {
       assert.equal(claimsDone(text), true, text);
     }
@@ -25,6 +29,7 @@ describe('guarda de afirmação (spec 028, decisão 7)', () => {
       'Quer que eu marque para as 14:00?',
       'Posso agendar para quinta?',
       'Não marquei nada ainda.',
+      'Não consegui agendar esse horário.',
       'Qual serviço você quer?',
       'A equipe vai confirmar o seu pedido.',
     ]) {

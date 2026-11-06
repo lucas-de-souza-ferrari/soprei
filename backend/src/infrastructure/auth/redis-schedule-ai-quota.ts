@@ -45,6 +45,23 @@ export class RedisScheduleAiQuotaStore implements ScheduleAiQuotaStore {
     }
   }
 
+  async check(
+    companyId: CompanyId,
+    contactKey: string,
+  ): Promise<'ok' | 'contact_limit' | 'company_limit'> {
+    try {
+      const [contact, company] = await this.redis.mget(
+        `${this.prefix}sched-ai-quota:contact:${contactKey}`,
+        `${this.prefix}sched-ai-quota:company:${companyId}`,
+      );
+      if (Number(contact ?? 0) >= SCHEDULE_AI_CONTACT_MAX_WRITES_PER_DAY) return 'contact_limit';
+      if (Number(company ?? 0) >= SCHEDULE_AI_COMPANY_MAX_WRITES_PER_DAY) return 'company_limit';
+      return 'ok';
+    } catch {
+      throw new ServiceUnavailableError('Cotas da agenda indisponíveis');
+    }
+  }
+
   async take(
     companyId: CompanyId,
     contactKey: string,

@@ -158,6 +158,11 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByText('Opções da IA salvas.')).toBeVisible();
     const put = agenda.calls.filter((call) => call.method === 'PUT' && call.path === '/settings');
     expect(put.at(-1)?.body).toMatchObject({ aiBookingEnabled: true, aiAutoConfirm: true });
+    // Relê as configurações logo antes de salvar (o PUT leva o objeto inteiro).
+    const firstPut = agenda.calls.findIndex(
+      (call) => call.method === 'PUT' && call.path === '/settings',
+    );
+    expect(agenda.calls[firstPut - 1]).toMatchObject({ method: 'GET', path: '/settings' });
     await expect(enable).toBeChecked();
     await expect(auto).toBeChecked();
 

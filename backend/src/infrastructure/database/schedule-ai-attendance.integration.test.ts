@@ -55,6 +55,7 @@ let attendance: AttendanceService;
 /** Cota sem Redis: estes testes são do atendimento; as cotas têm teste próprio. */
 const openQuota: ScheduleAiQuotaStore = {
   ping: () => Promise.resolve(),
+  check: () => Promise.resolve('ok'),
   take: () => Promise.resolve('ok'),
 };
 

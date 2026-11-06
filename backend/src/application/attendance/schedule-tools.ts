@@ -62,6 +62,8 @@ export type ScheduleToolLabel =
 
 export interface ScheduleToolLogger {
   info(fields: object, message: string): void;
+  /** Falha inesperada: só ids, nome fixo da ferramenta e `errorName`; nunca mensagem, argumento nem resultado. */
+  warn?(fields: object, message: string): void;
 }
 
 export interface ScheduleToolMetrics {
@@ -388,6 +390,22 @@ export function createScheduleToolSet(deps: ScheduleToolsDeps): ScheduleToolSet 
     return output;
   };
 
+  const warnUnexpected = (tool: ScheduleToolLabel, error: unknown): void => {
+    try {
+      deps.logger.warn?.(
+        {
+          companyId: deps.companyId,
+          conversationId: deps.conversationId,
+          tool,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+        'ferramenta da agenda falhou de forma inesperada',
+      );
+    } catch {
+      // Log nunca derruba o turno.
+    }
+  };
+
   const listSlots = async (input: unknown): Promise<LlmToolOutput> => {
     const parsed = listSlotsArgs.safeParse(input);
     if (!parsed.success) return finish(SCHEDULE_AI_TOOL_LIST_SLOTS, 'invalid_args', INVALID_ARGS);
@@ -454,7 +472,8 @@ export function createScheduleToolSet(deps: ScheduleToolsDeps): ScheduleToolSet 
     let outcome: ContactOutcome;
     try {
       outcome = await pending;
-    } catch {
+    } catch (error) {
+      warnUnexpected(tool, error);
       return finish(tool, 'error', LLM_TOOL_RESULT_UNAVAILABLE);
     } finally {
       inFlight.delete(pending);
@@ -546,8 +565,9 @@ export function createScheduleToolSet(deps: ScheduleToolsDeps): ScheduleToolSet 
     if (handler === undefined) return finish('unknown', 'error', UNKNOWN_TOOL);
     try {
       return await handler.run(call.input);
-    } catch {
-      // Nunca copia o erro (pode carregar argumento ou nome de serviço).
+    } catch (error) {
+      // Nunca copia o erro (pode carregar argumento ou nome de serviço): só o nome do tipo.
+      warnUnexpected(tool, error);
       return finish(tool, 'error', LLM_TOOL_RESULT_UNAVAILABLE);
     }
   };

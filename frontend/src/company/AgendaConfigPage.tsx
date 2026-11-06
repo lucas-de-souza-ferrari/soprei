@@ -397,11 +397,13 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
       if (settings === null) return;
       setAiProblem(null);
       try {
+        // Relê as configurações antes de salvar: o PUT leva o objeto inteiro e outra aba pode ter mudado o resto.
+        const fresh = await agendaApi.settings(companyId);
         await agendaApi.saveSettings(companyId, {
-          timezone: settings.timezone,
-          slotStepMinutes: settings.slotStepMinutes,
-          minNoticeMinutes: settings.minNoticeMinutes,
-          maxAdvanceDays: settings.maxAdvanceDays,
+          timezone: fresh.timezone,
+          slotStepMinutes: fresh.slotStepMinutes,
+          minNoticeMinutes: fresh.minNoticeMinutes,
+          maxAdvanceDays: fresh.maxAdvanceDays,
           aiBookingEnabled: aiEnabled,
           aiAutoConfirm: aiEnabled && aiAuto,
         });
