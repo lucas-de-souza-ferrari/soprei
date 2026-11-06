@@ -84,37 +84,37 @@ PUT /admin/companies/:companyId/onboarding   { dismissed: boolean }
 
 Backend (E1)
 
-- [ ] A migration **aditiva** cria `companies.onboarding_dismissed_at timestamptz NULL`; o teste de drift do schema (`schema-catalog.integration.test.ts`) continua verde; nenhuma migration existente é alterada.
-- [ ] `ROLE_PERMISSIONS`: `onboarding:manage` está em `OWNER` e `ADMIN` e **não** em `AGENT` e `VIEWER`; o teste de matriz de permissões cobre a nova linha.
-- [ ] `GET /admin/companies/:companyId/onboarding` devolve `{ dismissed, steps }` com `persona`, `knowledge`, `schedule` e `inventory` booleanos corretos: empresa vazia = tudo `false`; persona definida = `persona: true` (e voltar ao padrão = `false`); 1 documento = `knowledge: true`; 1 serviço ativo = `schedule: true` e serviço **só inativo** = `false`; 1 produto ativo = `inventory: true` e produto **só inativo** = `false`.
-- [ ] Campo de `steps` cuja permissão quem pede não tem **não** aparece (teste de unidade do service com a checagem de permissão injetada); a resposta **nunca** contém texto de persona, título, nome, SKU nem id de documento, serviço ou produto (teste com sentinelas, como na 024).
-- [ ] `PUT` com `{ dismissed: true }` grava a data; repetir é idempotente (a data não muda); `{ dismissed: false }` anula; corpo inválido, campo extra ou ausente é 400 (schema estrito) sem eco do valor; um `GET` seguinte reflete o estado.
-- [ ] Ordem 401 -> 403 (`PlatformAdmin`) -> 404 (`:companyId` diferente do token) -> 403 (`AGENT`, `VIEWER`) nas duas rotas; `:companyId` que não é UUID é 404 uniforme.
-- [ ] **Isolamento:** com duas empresas, A com persona, documento, serviço e produto e B vazia, o `GET` de cada uma reflete só a própria; `PUT dismissed` em A **não** altera B (lido no banco); o service usa só o `CompanyId` da identidade e os repositórios de tenant com `companyId` primeiro (nenhum SQL cru novo, nenhuma consulta sem `companyId`); a rota entra no inventário de `rate-limit.test.ts` (perfil `admin`, `requirePermission`) e é percorrida pelo `site-bridge.integration.test.ts` (cookie da conta, ponte da 023).
-- [ ] O log de `PUT` tem só `companyId`, `membershipId`, a ação e o resultado; teste com `log-capture` prova que nenhum texto de persona, documento, produto ou serviço aparece (nem no `GET`); se a métrica for adotada, o rótulo é só `dismissed`/`reopened`.
-- [ ] O gate de vocabulário (`domain-vocabulary.test.ts`) continua verde (nenhum nome antigo da empresa volta).
+- [x] A migration **aditiva** cria `companies.onboarding_dismissed_at timestamptz NULL`; o teste de drift do schema (`schema-catalog.integration.test.ts`) continua verde; nenhuma migration existente é alterada.
+- [x] `ROLE_PERMISSIONS`: `onboarding:manage` está em `OWNER` e `ADMIN` e **não** em `AGENT` e `VIEWER`; o teste de matriz de permissões cobre a nova linha.
+- [x] `GET /admin/companies/:companyId/onboarding` devolve `{ dismissed, steps }` com `persona`, `knowledge`, `schedule` e `inventory` booleanos corretos: empresa vazia = tudo `false`; persona definida = `persona: true` (e voltar ao padrão = `false`); 1 documento = `knowledge: true`; 1 serviço ativo = `schedule: true` e serviço **só inativo** = `false`; 1 produto ativo = `inventory: true` e produto **só inativo** = `false`.
+- [x] Campo de `steps` cuja permissão quem pede não tem **não** aparece (teste de unidade do service com a checagem de permissão injetada); a resposta **nunca** contém texto de persona, título, nome, SKU nem id de documento, serviço ou produto (teste com sentinelas, como na 024).
+- [x] `PUT` com `{ dismissed: true }` grava a data; repetir é idempotente (a data não muda); `{ dismissed: false }` anula; corpo inválido, campo extra ou ausente é 400 (schema estrito) sem eco do valor; um `GET` seguinte reflete o estado.
+- [x] Ordem 401 -> 403 (`PlatformAdmin`) -> 404 (`:companyId` diferente do token) -> 403 (`AGENT`, `VIEWER`) nas duas rotas; `:companyId` que não é UUID é 404 uniforme.
+- [x] **Isolamento:** com duas empresas, A com persona, documento, serviço e produto e B vazia, o `GET` de cada uma reflete só a própria; `PUT dismissed` em A **não** altera B (lido no banco); o service usa só o `CompanyId` da identidade e os repositórios de tenant com `companyId` primeiro (nenhum SQL cru novo, nenhuma consulta sem `companyId`); a rota entra no inventário de `rate-limit.test.ts` (perfil `admin`, `requirePermission`) e é percorrida pelo `site-bridge.integration.test.ts` (cookie da conta, ponte da 023).
+- [x] O log de `PUT` tem só `companyId`, `membershipId`, a ação e o resultado; teste com `log-capture` prova que nenhum texto de persona, documento, produto ou serviço aparece (nem no `GET`); se a métrica for adotada, o rótulo é só `dismissed`/`reopened`.
+- [x] O gate de vocabulário (`domain-vocabulary.test.ts`) continua verde (nenhum nome antigo da empresa volta).
 
 Frontend, unitários (E1 a E3)
 
-- [ ] `onboarding-steps.ts` (puro): dado o estado e as permissões, devolve os passos visíveis na ordem certa, o primeiro pendente, o contador "N de M" e a decisão de mostrar ou não a lista (`dismissed`, tudo feito, sem permissão); passo ausente na resposta é oculto; o passo da URL com valor fora do conjunto fixo vira o primeiro pendente.
-- [ ] `company-nav`: `primeirosPassos` exige `onboarding:manage`; `/painel/primeiros-passos` e cada um dos cinco passos mapeiam para a tela e de volta; qualquer outro sufixo cai no primeiro pendente e **não** chama a API de outra empresa nem de passo inexistente; sem permissão a tela mostra o aviso e **não chama** a API.
+- [x] `onboarding-steps.ts` (puro): dado o estado e as permissões, devolve os passos visíveis na ordem certa, o primeiro pendente, o contador "N de M" e a decisão de mostrar ou não a lista (`dismissed`, tudo feito, sem permissão); passo ausente na resposta é oculto; o passo da URL com valor fora do conjunto fixo vira o primeiro pendente.
+- [x] `company-nav`: `primeirosPassos` exige `onboarding:manage`; `/painel/primeiros-passos` e cada um dos cinco passos mapeiam para a tela e de volta; qualquer outro sufixo cai no primeiro pendente e **não** chama a API de outra empresa nem de passo inexistente; sem permissão a tela mostra o aviso e **não chama** a API.
 - [ ] Rascunho: sair de passo com texto sem salvar pede confirmação; confirmar descarta, cancelar mantém; o teste prova que `localStorage`/`sessionStorage` ficam só com `soprei-theme` e que o texto não aparece em `location`, `document.title` nem `console`.
 - [ ] Mensagens de erro vêm de `status` e `error.code` (nunca do texto do servidor); 401 volta ao login, 404 relê a sessão ("A empresa selecionada mudou"), como nas demais telas.
-- [ ] Pares de cor novos em `contrast.test.ts`, nos dois temas.
+- [x] Pares de cor novos em `contrast.test.ts`, nos dois temas.
 
 E2E Playwright (API falsa, desktop e celular, claro e escuro; os fluxos de dados podem rodar na matriz completa só em um tema e o contraste/foco nos dois, mas todos têm de passar nos dois)
 
-- [ ] **Conta nova sem empresa:** entrar leva a `/painel/empresas`; criar a empresa abre `/painel/primeiros-passos/persona` com "Passo 2 de 6" e o passo 1 marcado como feito.
-- [ ] **Pular tudo:** Pular em cada passo chega ao fim sem gravar nada (nenhuma chamada de escrita na API falsa), e "Ir para as conversas" abre Conversas com o cartão "Configuração: 0 de 4".
-- [ ] **Usar exemplos:** o exemplo do passo Documentos chama `POST .../knowledge/sample` (com o aviso de que cria produtos) e marca Documentos **e** Estoque como feitos; o exemplo da agenda chama `POST .../schedule/sample`; o botão não aparece quando já há documento ou produto (ou serviço).
-- [ ] **Salvar persona e documento:** os dois chamam as rotas existentes e atualizam o progresso; importar CSV no passo Estoque usa o fluxo existente.
-- [ ] **Retomar depois:** com persona feita e o resto pendente, recarregar a página e abrir "Primeiros passos" pelo menu cai no primeiro passo pendente; o link do cartão "Configuração" abre o passo certo; o Voltar do navegador volta ao passo anterior.
-- [ ] **Dispensar e reabrir:** "Dispensar" faz `PUT { dismissed: true }`, o cartão some (também depois de recarregar); o menu "Primeiros passos" continua e reabre com `PUT { dismissed: false }`.
-- [ ] **Convidado não vê:** com papel `AGENT` ou `VIEWER` não há item de menu, cartão nem chamada a `/onboarding`; abrir o endereço mostra "sem permissão". Com papel `ADMIN` (entrou por convite) o menu e o cartão aparecem, mas o assistente **não** abre sozinho.
-- [ ] **Trocar de empresa:** com duas empresas, o estado, o passo e o rascunho de uma não aparecem na outra (a área remonta); resposta tardia da empresa anterior é descartada.
-- [ ] **Teclado e foco:** percorrer o assistente só com teclado; o foco vai ao título do passo a cada troca; a barra de progresso expõe `aria-valuenow`; nenhum passo depende só de cor.
-- [ ] **Celular (390 px e 360 px):** sem rolagem horizontal da página; botões acessíveis; lista de passos utilizável.
-- [ ] Passo 6: enviar uma mensagem de teste mostra a resposta e "Fontes usadas"; o botão "Conectar o WhatsApp" só aparece com `channel:read` e leva a `/painel/canal`.
+- [x] **Conta nova sem empresa:** entrar leva a `/painel/empresas`; criar a empresa abre `/painel/primeiros-passos/persona` com "Passo 2 de 6" e o passo 1 marcado como feito.
+- [x] **Pular tudo:** Pular em cada passo chega ao fim sem gravar nada (nenhuma chamada de escrita na API falsa), e "Ir para as conversas" abre Conversas com o cartão "Configuração: 0 de 4".
+- [x] **Usar exemplos:** o exemplo do passo Documentos chama `POST .../knowledge/sample` (com o aviso de que cria produtos) e marca Documentos **e** Estoque como feitos; o exemplo da agenda chama `POST .../schedule/sample`; o botão não aparece quando já há documento ou produto (ou serviço).
+- [x] **Salvar persona e documento:** os dois chamam as rotas existentes e atualizam o progresso; importar CSV no passo Estoque usa o fluxo existente.
+- [x] **Retomar depois:** com persona feita e o resto pendente, recarregar a página e abrir "Primeiros passos" pelo menu cai no primeiro passo pendente; o link do cartão "Configuração" abre o passo certo; o Voltar do navegador volta ao passo anterior.
+- [x] **Dispensar e reabrir:** "Dispensar" faz `PUT { dismissed: true }`, o cartão some (também depois de recarregar); o menu "Primeiros passos" continua e reabre com `PUT { dismissed: false }`.
+- [x] **Convidado não vê:** com papel `AGENT` ou `VIEWER` não há item de menu, cartão nem chamada a `/onboarding`; abrir o endereço mostra "sem permissão". Com papel `ADMIN` (entrou por convite) o menu e o cartão aparecem, mas o assistente **não** abre sozinho.
+- [x] **Trocar de empresa:** com duas empresas, o estado, o passo e o rascunho de uma não aparecem na outra (a área remonta); resposta tardia da empresa anterior é descartada.
+- [x] **Teclado e foco:** percorrer o assistente só com teclado; o foco vai ao título do passo a cada troca; a barra de progresso expõe `aria-valuenow`; nenhum passo depende só de cor.
+- [x] **Celular (390 px e 360 px):** sem rolagem horizontal da página; botões acessíveis; lista de passos utilizável.
+- [x] Passo 6: enviar uma mensagem de teste mostra a resposta e "Fontes usadas"; o botão "Conectar o WhatsApp" só aparece com `channel:read` e leva a `/painel/canal`.
 
 ## Casos de borda e erros
 
@@ -197,3 +197,8 @@ O dono decide; cada uma tem a recomendação (R) e a alternativa (A), em linguag
 - **Desvio:** o cartão **não** foi repetido dentro de "Primeiros passos" (a lista de passos do cabeçalho mostra o mesmo estado, com texto e ícone); o critério de aceite não o exige.
 - **Troca de empresa:** o site abre Conversas da empresa nova (comportamento da 029); o assistente reabre pelo menu sem o rascunho da outra (a tela remonta por `key`).
 - Testes: e2e de pular tudo (cartão "0 de 4", nenhuma escrita), teste final, cartão (itens, link, some ao completar; claro e escuro), dispensar e reabrir, falhas, `AGENT`/`VIEWER`, troca de empresa, teclado (Tab até "Continuar", foco no título), 360 px. Desktop e celular.
+
+### Validação (2026-11-06)
+
+- Typecheck, lint, `format:check` (raiz) e build verdes. Backend `pnpm test`: **1360 verdes em Node 24 e em Node 22**; suítes novas (serviço, controller, integração do store, migração e drift do schema) repetidas 3 vezes em Node 22; `site-bridge`, inventário de rotas e gate de vocabulário verdes. Frontend: 137 unitários; e2e Playwright **completo** (desktop e celular, em blocos) verde, incluindo 80 do assistente.
+- **Não verificados / ressalvas:** os critérios "Mensagens de erro vêm de status e code" e "Rascunho ... console" ficam desmarcados (a escolha de mensagem é o `settle` já existente e coberta nos e2e de falha, mas sem teste unitário próprio; o e2e do rascunho prova storage, URL e título, não o `console`); `pnpm test:integration` completo não foi rodado (só as suítes da área); smoke do `dist` não feito; o CI (Node 22 e LTS) é a palavra final; falta o `reviewer`.
