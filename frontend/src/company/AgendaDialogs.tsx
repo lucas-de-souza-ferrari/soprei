@@ -14,12 +14,14 @@ import {
   ACTION_LABELS,
   addDays,
   allowedActions,
+  BY_AI_LABEL,
   customerLabelProblem,
   dayHeading,
+  isByAi,
   type ItemAction,
   localStartOf,
   minutesOf,
-  STATUS_LABELS,
+  statusLabelOf,
 } from './agenda-rules';
 
 export const FIELD_CLASS =
@@ -416,9 +418,17 @@ export function ItemDialog({
           <dd className="m-0 inline">
             {item.kind === 'BLOCK' && item.status !== 'CANCELLED'
               ? 'Bloqueado'
-              : STATUS_LABELS[item.status]}
+              : statusLabelOf(item)}
           </dd>
         </div>
+        {isByAi(item) && (
+          <div>
+            <dt className="inline text-muted-foreground">Origem: </dt>
+            <dd className="m-0 inline">
+              {BY_AI_LABEL} (pedido feito pela conversa de atendimento)
+            </dd>
+          </div>
+        )}
       </dl>
       {actions.length === 0 && (
         <p className="m-0 text-sm text-muted-foreground">

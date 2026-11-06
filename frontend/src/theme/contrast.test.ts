@@ -95,6 +95,15 @@ const textPairs: [string, string][] = [
   ['foreground', 'bubble'],
   ['card-foreground', 'card'],
   ['muted-foreground', 'muted'],
+  // Spec 028 (E4): selo "Pela IA" (primary em muted na lista e no diálogo; primary em card no bloco da
+  // semana), "Aguardando confirmação" e "Cancelado pelo contato" (selos de estado: primary e
+  // muted-foreground em muted), contagem "N aguardando confirmação" (foreground em background) e o texto
+  // das opções da IA na configuração (foreground e muted-foreground em background).
+  ['primary', 'muted'],
+  ['primary', 'card'],
+  ['muted-foreground', 'muted'],
+  ['foreground', 'background'],
+  ['muted-foreground', 'background'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],

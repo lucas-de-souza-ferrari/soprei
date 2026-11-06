@@ -18,6 +18,7 @@ export interface FakeAppointment {
   localEnd: string;
   weekday: number;
   customerLabel: string | null;
+  cancelledBy: 'PANEL' | 'CONTACT' | null;
   contactLabel: string | null;
   createdAt: string;
 }
@@ -38,6 +39,9 @@ export interface FakeAgenda {
   noServices: boolean;
   /** O serviço que existe é o de exemplo. */
   sample: boolean;
+  /** Opções da IA (spec 028). */
+  aiBookingEnabled: boolean;
+  aiAutoConfirm: boolean;
 }
 
 export function newAgenda(): FakeAgenda {
@@ -52,6 +56,8 @@ export function newAgenda(): FakeAgenda {
     availabilityReads: 0,
     noServices: false,
     sample: false,
+    aiBookingEnabled: false,
+    aiAutoConfirm: false,
   };
 }
 
@@ -85,6 +91,7 @@ export function appointment(
     localEnd,
     weekday,
     customerLabel: 'João',
+    cancelledBy: null,
     contactLabel: null,
     createdAt: '2026-11-09T11:00:00.000Z',
     ...extra,
@@ -114,6 +121,8 @@ export async function installAgendaApi(
     slotStepMinutes: 30,
     minNoticeMinutes: 120,
     maxAdvanceDays: 60,
+    aiBookingEnabled: agenda.aiBookingEnabled,
+    aiAutoConfirm: agenda.aiAutoConfirm,
   });
   await page.route('**/api/admin/companies/*/schedule/**', async (route) => {
     const request = route.request();
@@ -129,7 +138,15 @@ export async function installAgendaApi(
 
     if (path === '/settings' && method === 'GET') return reply(200, settings());
     if (path === '/settings' && method === 'PUT') {
-      agenda.timezone = (body as { timezone: string }).timezone;
+      const input = body as {
+        timezone: string;
+        aiBookingEnabled?: boolean;
+        aiAutoConfirm?: boolean;
+      };
+      agenda.timezone = input.timezone;
+      if (input.aiBookingEnabled !== undefined) agenda.aiBookingEnabled = input.aiBookingEnabled;
+      if (input.aiAutoConfirm !== undefined) agenda.aiAutoConfirm = input.aiAutoConfirm;
+      if (!agenda.aiBookingEnabled) agenda.aiAutoConfirm = false;
       return reply(200, settings());
     }
     if (path === '/resources' && method === 'GET') {
@@ -216,7 +233,10 @@ export async function installAgendaApi(
       const found = agenda.appointments.find((item) => item.id === one[1]);
       if (found === undefined) return fail(404, 'NOT_FOUND');
       const change = body as { status?: FakeAppointment['status']; localStart?: string };
-      if (change.status !== undefined) found.status = change.status;
+      if (change.status !== undefined) {
+        found.status = change.status;
+        if (change.status === 'CANCELLED') found.cancelledBy = 'PANEL';
+      }
       if (change.localStart !== undefined) {
         const [date = '', time = '00:00'] = change.localStart.split('T');
         found.localDate = date;

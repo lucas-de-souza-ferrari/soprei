@@ -1,5 +1,6 @@
 import {
   Ban,
+  Bot,
   CheckCheck,
   CheckCircle2,
   Clock,
@@ -9,7 +10,14 @@ import {
 } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import type { Appointment, AppointmentStatus } from './agenda-api';
-import { dayHeading, STATUS_LABELS, weekDates, weekStart } from './agenda-rules';
+import {
+  dayHeading,
+  isByAi,
+  BY_AI_LABEL,
+  statusLabelOf,
+  weekDates,
+  weekStart,
+} from './agenda-rules';
 import {
   axisHours,
   blockPosition,
@@ -42,7 +50,7 @@ const who = (item: Appointment): string | null => item.customerLabel ?? item.con
 /** Estado do item em texto e ícone (nunca só cor): bloqueio vira "Bloqueado". */
 function stateOf(item: Appointment): { Icon: LucideIcon; text: string } {
   if (item.kind === 'BLOCK' && item.status !== 'CANCELLED') return { Icon: Ban, text: 'Bloqueado' };
-  return { Icon: STATUS_ICONS[item.status], text: STATUS_LABELS[item.status] };
+  return { Icon: STATUS_ICONS[item.status], text: statusLabelOf(item) };
 }
 
 export interface AgendaCalendarProps {
@@ -114,6 +122,12 @@ function ItemBlock({
           <span className="[overflow-wrap:anywhere]">
             {item.serviceName ?? 'Serviço'}
             {person === null ? '' : ` · ${person}`}
+          </span>
+        )}
+        {isByAi(item) && (
+          <span className="inline-flex items-center gap-1 text-primary">
+            <Bot aria-hidden="true" className="size-3 shrink-0" />
+            {BY_AI_LABEL}
           </span>
         )}
       </button>

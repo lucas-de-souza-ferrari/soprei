@@ -42,6 +42,7 @@ function item(
     localEnd,
     weekday: isoWeekday(localDate),
     customerLabel: 'Maria',
+    cancelledBy: null,
     contactLabel: null,
     createdAt: '2026-11-09T11:00:00.000Z',
     ...extra,

@@ -281,6 +281,10 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
   const [step, setStep] = useState('30');
   const [minNotice, setMinNotice] = useState('120');
   const [maxAdvance, setMaxAdvance] = useState('60');
+  // Spec 028: a IA pode solicitar, cancelar e remarcar horários; confirmar automaticamente.
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiAuto, setAiAuto] = useState(false);
+  const [aiProblem, setAiProblem] = useState<string | null>(null);
   const [generalProblem, setGeneralProblem] = useState<string | null>(null);
   const generation = useRef(0);
 
@@ -299,6 +303,8 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
         setStep(String(loadedSettings.slotStepMinutes));
         setMinNotice(String(loadedSettings.minNoticeMinutes));
         setMaxAdvance(String(loadedSettings.maxAdvanceDays));
+        setAiEnabled(loadedSettings.aiBookingEnabled);
+        setAiAuto(loadedSettings.aiAutoConfirm);
         setResources(resourceList);
         setServices(serviceList);
       })
@@ -384,6 +390,30 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
       setNotice({ tone: 'success', text: 'Configurações salvas.' });
       reload();
     }, 'general');
+
+  /** Só as opções da IA: o resto da configuração vai como já está salvo (não como está sendo editado). */
+  const saveAi = (): Promise<void> =>
+    run(async () => {
+      if (settings === null) return;
+      setAiProblem(null);
+      try {
+        await agendaApi.saveSettings(companyId, {
+          timezone: settings.timezone,
+          slotStepMinutes: settings.slotStepMinutes,
+          minNoticeMinutes: settings.minNoticeMinutes,
+          maxAdvanceDays: settings.maxAdvanceDays,
+          aiBookingEnabled: aiEnabled,
+          aiAutoConfirm: aiEnabled && aiAuto,
+        });
+      } catch (error) {
+        const own = agendaMessageOf(error);
+        if (own === null) throw error;
+        setAiProblem(own);
+        return;
+      }
+      setNotice({ tone: 'success', text: 'Opções da IA salvas.' });
+      reload();
+    }, 'page');
 
   const saveService = (
     service: AgendaService | null,
@@ -570,6 +600,51 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
         <div>
           <Button disabled={busy} onClick={() => void saveGeneral()}>
             {busy ? 'Aguarde…' : 'Salvar configurações'}
+          </Button>
+        </div>
+      </section>
+
+      <section className="grid gap-3" aria-labelledby="cfg-ia">
+        <h3 id="cfg-ia" className="m-0 text-lg font-semibold">
+          IA no WhatsApp
+        </h3>
+        <Problem text={aiProblem} />
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-5 shrink-0"
+            checked={aiEnabled}
+            onChange={(event) => {
+              setAiEnabled(event.target.checked);
+              if (!event.target.checked) setAiAuto(false);
+            }}
+          />
+          <span>
+            A IA pode solicitar, cancelar e remarcar horários para quem escreve no WhatsApp
+          </span>
+        </label>
+        <label
+          className={`flex items-start gap-2 text-sm ${aiEnabled ? '' : 'text-muted-foreground'}`}
+        >
+          <input
+            type="checkbox"
+            className="mt-0.5 size-5 shrink-0"
+            checked={aiAuto}
+            disabled={!aiEnabled}
+            onChange={(event) => setAiAuto(event.target.checked)}
+          />
+          <span>Confirmar automaticamente (sem passar pela equipe)</span>
+        </label>
+        <p className="m-0 text-sm text-muted-foreground">
+          A IA só mexe nos agendamentos do próprio contato, respeitando os horários, o passo e a
+          antecedência desta agenda, e nunca passa de 2 agendamentos ativos por contato. O contato
+          não é avisado quando a equipe confirma ou cancela depois; por isso existe a confirmação
+          automática. Sem ela, os pedidos da IA ficam aguardando a confirmação da equipe. Só vale
+          com a IA de agenda ativada no servidor.
+        </p>
+        <div>
+          <Button disabled={busy} onClick={() => void saveAi()}>
+            {busy ? 'Aguarde…' : 'Salvar opções da IA'}
           </Button>
         </div>
       </section>

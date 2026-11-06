@@ -13,6 +13,46 @@ export const STATUS_LABELS: Readonly<Record<AppointmentStatus, string>> = {
   NO_SHOW: 'Faltou',
 };
 
+/** Selo do que a IA criou pelo WhatsApp (texto e ícone, nunca só cor). */
+export const BY_AI_LABEL = 'Pela IA';
+
+/** Origem do item: criado pela IA (canal) ou pela equipe (painel). Bloqueio é sempre do painel. */
+export function isByAi(item: Appointment): boolean {
+  return item.kind === 'BOOKING' && item.source === 'CHANNEL';
+}
+
+/**
+ * Estado em texto: reserva da IA ainda `PENDING` é "Aguardando confirmação" e o cancelamento feito pelo próprio
+ * contato é "Cancelado pelo contato"; o resto segue `STATUS_LABELS`.
+ */
+export function statusLabelOf(item: Appointment): string {
+  if (item.status === 'CANCELLED' && item.cancelledBy === 'CONTACT')
+    return 'Cancelado pelo contato';
+  if (item.status === 'PENDING' && isByAi(item)) return 'Aguardando confirmação';
+  return STATUS_LABELS[item.status];
+}
+
+export type SourceFilter = 'all' | 'panel' | 'ai';
+export const SOURCE_FILTER_LABELS: Readonly<Record<SourceFilter, string>> = {
+  all: 'Todas as origens',
+  panel: 'Painel',
+  ai: 'IA',
+};
+
+export function filterBySource(items: readonly Appointment[], filter: SourceFilter): Appointment[] {
+  if (filter === 'all') return [...items];
+  return items.filter((item) => (filter === 'ai') === isByAi(item));
+}
+
+/** Reservas aguardando confirmação da equipe (`PENDING`): a contagem do topo da agenda. */
+export function awaitingCount(items: readonly Appointment[]): number {
+  return items.filter((item) => item.kind === 'BOOKING' && item.status === 'PENDING').length;
+}
+
+export function awaitingText(count: number): string {
+  return `${String(count)} aguardando confirmação`;
+}
+
 export const WEEKDAY_LABELS: readonly string[] = [
   'Segunda-feira',
   'Terça-feira',
@@ -153,7 +193,8 @@ export function itemSummary(item: Appointment): string {
     `${item.localStart} às ${item.localEnd}`,
     item.serviceName ?? 'Serviço',
     ...(who === null ? [] : [who]),
-    STATUS_LABELS[item.status],
+    ...(isByAi(item) ? [BY_AI_LABEL] : []),
+    statusLabelOf(item),
   ];
   return pieces.join(' · ');
 }

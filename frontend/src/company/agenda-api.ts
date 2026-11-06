@@ -17,6 +17,9 @@ export const settingsSchema = z.strictObject({
   slotStepMinutes: z.number().int(),
   minNoticeMinutes: z.number().int().min(0),
   maxAdvanceDays: z.number().int().min(1),
+  /** Spec 028: a IA pode solicitar, cancelar e remarcar horários; confirmar automaticamente. */
+  aiBookingEnabled: z.boolean(),
+  aiAutoConfirm: z.boolean(),
 });
 export type AgendaSettings = z.infer<typeof settingsSchema>;
 
@@ -74,6 +77,8 @@ export const appointmentSchema = z.strictObject({
   localEnd: localTime,
   weekday: z.number().int().min(1).max(7),
   customerLabel: z.string().nullable(),
+  /** Spec 028: `CONTACT` = o próprio contato cancelou (pela IA). */
+  cancelledBy: z.enum(['PANEL', 'CONTACT']).nullable(),
   contactLabel: z.string().nullable(),
   createdAt: isoDate,
 });
@@ -109,6 +114,8 @@ export interface SettingsInput {
   readonly slotStepMinutes: number;
   readonly minNoticeMinutes: number;
   readonly maxAdvanceDays: number;
+  readonly aiBookingEnabled?: boolean;
+  readonly aiAutoConfirm?: boolean;
 }
 
 export interface AppointmentQuery {
@@ -258,6 +265,7 @@ const CODE_MESSAGES: Readonly<Record<string, string>> = {
   INVALID_WINDOWS: 'Os horários do mesmo dia não podem se sobrepor.',
   INVALID_LOCAL_TIME: 'Esse horário não existe nessa data (mudança de horário de verão).',
   INVALID_RANGE: 'O fim deve ser depois do início.',
+  INVALID_AI_SETTINGS: 'Confirmar automaticamente exige a IA ligada.',
   SAMPLE_REQUIRES_EMPTY: 'O exemplo só carrega em uma agenda sem serviços seus.',
 };
 
