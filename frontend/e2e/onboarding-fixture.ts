@@ -306,6 +306,8 @@ export async function openWizard(
     path?: string;
     seed?: (api: FakeApi, onb: FakeOnboarding) => void;
     api?: Partial<FakeApi>;
+    /** Substitui as permissões da empresa depois de instalar a API (casos de borda). */
+    permissions?: readonly string[];
   } = {},
 ): Promise<{ api: FakeApi; onb: FakeOnboarding }> {
   const role = options.role ?? 'OWNER';
@@ -317,6 +319,9 @@ export async function openWizard(
   const onb = newOnboarding();
   options.seed?.(api, onb);
   await installOnboardingApi(page, api, onb, role);
+  if (options.permissions !== undefined) {
+    for (const item of api.companies) item.permissions = options.permissions;
+  }
   await page.goto(options.path ?? '/painel/primeiros-passos');
   return { api, onb };
 }

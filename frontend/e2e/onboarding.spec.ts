@@ -1,7 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { goTo, menuItems } from './company-fixture';
-import { noHorizontalScroll, openWizard, writes } from './onboarding-fixture';
+import { company, goTo, menuItems, switchTo } from './company-fixture';
+import {
+  noHorizontalScroll,
+  ONBOARDING_PERMISSIONS,
+  openWizard,
+  writes,
+} from './onboarding-fixture';
 
 // Spec 030: assistente de primeiros passos. API falsa (nada sai para a internet).
 
@@ -357,4 +362,191 @@ test('pular serviços e estoque não grava nada e leva ao teste final', async ({
   await page.getByRole('button', { name: 'Pular' }).click();
   await expect(page).toHaveURL(/\/testar$/);
   expect(writes(api, onb)).toHaveLength(0);
+});
+
+// ---- E3: teste final, cartão "Configuração", dispensar e reabrir ----
+
+const TEST_STEP = '/painel/primeiros-passos/testar';
+
+test('pular tudo: nada é gravado e o cartão em Conversas mostra "Configuração: 0 de 4 itens"', async ({
+  page,
+}) => {
+  const { api, onb } = await openWizard(page);
+  for (const next of [/documentos$/, /servicos$/, /estoque$/, /testar$/]) {
+    await page.getByRole('button', { name: 'Pular' }).click();
+    await expect(page).toHaveURL(next);
+  }
+  await expect(step(page)).toHaveText('Passo 6 de 6');
+  await expect(page.getByRole('button', { name: 'Pular' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Ir para as conversas' }).click();
+  await expect(page).toHaveURL(/\/painel\/conversas$/);
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+  expect(writes(api, onb)).toHaveLength(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`teste final: envia a mensagem, mostra resposta e "Fontes usadas"; o WhatsApp só leva a /painel/canal (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { onb } = await openWizard(page, { path: TEST_STEP, theme });
+    onb.sources.push({ kind: 'document', label: 'Política de trocas' });
+    await expect(step(page)).toHaveText('Passo 6 de 6');
+    await expect(page.getByText('a resposta é de mentira')).toBeVisible();
+    await page.getByLabel('Mensagem de teste').fill('Vocês trocam produtos?');
+    await page.getByRole('button', { name: 'Enviar', exact: true }).click();
+    await expect(page.getByText('Olá! Como posso ajudar?')).toBeVisible();
+    await expect(page.getByText('Fontes usadas: Política de trocas (documento)')).toBeVisible();
+    await page.getByRole('button', { name: 'Conectar o WhatsApp' }).click();
+    await expect(page).toHaveURL(/\/painel\/canal$/);
+  });
+}
+
+test('teste final: sem channel:read não há sugestão do WhatsApp', async ({ page }) => {
+  await openWizard(page, {
+    path: TEST_STEP,
+    permissions: ['conversation:read', 'conversation:simulate', 'onboarding:manage'],
+  });
+  await expect(step(page)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Conectar o WhatsApp' })).toHaveCount(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`cartão "Configuração": itens com texto e ícone, link para o passo certo e some quando tudo está feito (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { api, onb } = await openWizard(page, {
+      path: '/painel/conversas',
+      theme,
+      api: { persona: 'Já definida' },
+    });
+    await expect(page.getByRole('heading', { name: 'Configuração: 1 de 4 itens' })).toBeVisible();
+    const card = page.getByRole('region', { name: /Configuração:/ });
+    await expect(card).toContainText('Persona do atendente — feito');
+    await expect(card).toContainText('Serviços — pendente (opcional)');
+    await card.getByRole('link', { name: /Documentos/ }).click();
+    await expect(page).toHaveURL(/\/painel\/primeiros-passos\/documentos$/);
+    await expect(step(page)).toHaveText('Passo 3 de 6');
+    // Tudo feito: o cartão não aparece mais.
+    onb.docs.push({ id: randomUUID(), title: 'D', isSample: false });
+    onb.products.push({ id: randomUUID(), sku: 'A', name: 'A', isSample: false, active: true });
+    onb.services.push({ id: randomUUID(), name: 'S', isSample: false, active: true });
+    await goTo(page, 'Conversas');
+    await expect(
+      page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+    ).toBeVisible();
+    await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+    expect(api.persona).toBe('Já definida');
+  });
+}
+
+test('dispensar pede confirmação, grava dismissed:true, some (inclusive ao recarregar) e o menu reabre', async ({
+  page,
+}) => {
+  const { onb } = await openWizard(page, { path: '/painel/conversas' });
+  await page.getByRole('button', { name: 'Dispensar' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Dispensar a lista de configuração?');
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  expect(onb.dismissed).toBe(false);
+  await page.getByRole('button', { name: 'Dispensar' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Dispensar' }).click();
+  await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+  expect(onb.dismissed).toBe(true);
+  expect(
+    onb.calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/onboarding')),
+  ).toHaveLength(1);
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+  // O menu "Primeiros passos" continua e reabre.
+  await goTo(page, 'Primeiros passos');
+  await expect(step(page)).toBeVisible();
+  await expect.poll(() => onb.dismissed).toBe(false);
+  await goTo(page, 'Conversas');
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+});
+
+test('falha ao dispensar: mensagem de tela, o cartão continua', async ({ page }) => {
+  const { onb } = await openWizard(page, { path: '/painel/conversas' });
+  onb.dismissStatus = 500;
+  await page.getByRole('button', { name: 'Dispensar' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Dispensar' }).click();
+  await expect(page.getByText('Não foi possível dispensar agora.')).toBeVisible();
+  await expect(page.getByText('TEXTO-DO-SERVIDOR-QUE-NAO-PODE-APARECER')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+});
+
+test('falha ao ler o estado não bloqueia Conversas: o cartão simplesmente não aparece', async ({
+  page,
+}) => {
+  await openWizard(page, {
+    path: '/painel/conversas',
+    seed: (_api, onb) => (onb.failState = true),
+  });
+  await expect(
+    page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+for (const role of ['AGENT', 'VIEWER'] as const) {
+  test(`${role}: Conversas não mostra o cartão nem chama /onboarding`, async ({ page }) => {
+    const { onb } = await openWizard(page, { role, path: '/painel/conversas' });
+    await expect(
+      page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+    ).toBeVisible();
+    await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+    expect(onb.calls.filter((c) => c.path.endsWith('/onboarding'))).toHaveLength(0);
+  });
+}
+
+test('trocar de empresa: o rascunho e o estado de uma não aparecem na outra', async ({ page }) => {
+  const second = company('Empresa B');
+  const { api, onb } = await openWizard(page, {
+    api: { companies: [company('Empresa A'), second] },
+  });
+  for (const item of api.companies) item.permissions = ONBOARDING_PERMISSIONS.OWNER;
+  api.selected = api.companies[0]?.companyId ?? null;
+  await page.goto('/painel/primeiros-passos');
+  await page.getByLabel('Persona do assistente').fill('rascunho da empresa A');
+  await switchTo(page, 'Empresa B');
+  // Trocar de empresa abre Conversas da nova (como sempre); o assistente reabre pelo menu, sem o rascunho.
+  await expect(page).toHaveURL(/\/painel\/conversas$/);
+  await goTo(page, 'Primeiros passos');
+  await expect(step(page)).toHaveText('Passo 2 de 6');
+  await expect(page.getByLabel('Persona do assistente')).toHaveValue('');
+  expect(api.selected).toBe(second.companyId);
+  const reads = onb.calls.filter((c) => c.method === 'GET' && c.path.endsWith('/onboarding'));
+  expect(reads.at(-1)?.path).toContain(second.companyId);
+  expect(writes(api, onb)).toHaveLength(0);
+});
+
+test('teclado: do título do passo até "Continuar" só com Tab e Enter; o foco chega ao título do próximo passo', async ({
+  page,
+}) => {
+  await openWizard(page);
+  await expect(heading(page, 'Persona do atendente')).toBeFocused();
+  const focusedName = () =>
+    page.evaluate(() => (document.activeElement as HTMLElement | null)?.textContent?.trim() ?? '');
+  for (let index = 0; index < 25 && (await focusedName()) !== 'Continuar'; index += 1) {
+    await page.keyboard.press('Tab');
+  }
+  expect(await focusedName()).toBe('Continuar');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/documentos$/);
+  await expect(heading(page, 'Documentos')).toBeFocused();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
+});
+
+test('celular 360 px: assistente e cartão sem rolagem horizontal', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openWizard(page, { path: '/painel/conversas' });
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+  await noHorizontalScroll(page);
+  await page.getByRole('link', { name: /Persona do atendente/ }).click();
+  await expect(step(page)).toBeVisible();
+  await noHorizontalScroll(page);
 });

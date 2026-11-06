@@ -95,6 +95,7 @@ export function CompanyArea({
             settle={settle}
             onOpen={onOpenConversation}
             onNavigate={onNavigate}
+            onOpenStep={(step) => onWizardStep(step, false)}
           />
         ) : (
           <ConversationPage

@@ -189,3 +189,11 @@ O dono decide; cada uma tem a recomendação (R) e a alternativa (A), em linguag
 - **Decisão no passo de documentos/estoque:** se o exemplo é oferecido é decidido **uma vez, ao entrar no passo** (`DocumentsStep`/`StockStep`), para a mensagem "Exemplo carregado." e o "Remover exemplo" não sumirem quando o progresso muda; a regra de verdade (empresa sem documento e sem produto) continua do servidor (409).
 - **Mudança de comportamento mínima em tela existente:** `SampleControls` agora chama `onChanged()` também no 409 (relê a lista, porque outra aba pode ter cadastrado algo).
 - Testes: e2e de serviço, exemplo da agenda, produto novo, importar CSV, exemplo oferecido/escondido, 409 do exemplo e "pular" sem escrita (desktop e celular; claro e escuro nos de dados).
+
+### E3 — Teste final e lista "Configuração"
+
+- **Passo 6:** `TestStep` embute o `TestPage` de sempre (resposta e "Fontes usadas"), com o aviso de que o provedor `mock` responde de mentira, e a sugestão "Conectar o WhatsApp" (só com `channel:read`; só leva a `/painel/canal`). Nada é derivado nem gravado. O último passo troca "Continuar" por "Ir para as conversas".
+- **Cartão "Configuração":** `ConfigurationCard.tsx` no topo de Conversas (só com `onboarding:manage`; sem a permissão não há chamada). "Configuração: N de M itens" com texto e ícone por item (e "(opcional)"), links para o passo certo (`<a href>` com clique simples interceptado), "Dispensar" com `ConfirmDialog` (`PUT { dismissed: true }`); some sozinho quando tudo está feito; erro ao ler o estado não aparece nem bloqueia Conversas (401 e 404 seguem o `settle`). Reabrir é entrar em "Primeiros passos" pelo menu (`PUT { dismissed: false }` automático).
+- **Desvio:** o cartão **não** foi repetido dentro de "Primeiros passos" (a lista de passos do cabeçalho mostra o mesmo estado, com texto e ícone); o critério de aceite não o exige.
+- **Troca de empresa:** o site abre Conversas da empresa nova (comportamento da 029); o assistente reabre pelo menu sem o rascunho da outra (a tela remonta por `key`).
+- Testes: e2e de pular tudo (cartão "0 de 4", nenhuma escrita), teste final, cartão (itens, link, some ao completar; claro e escuro), dispensar e reabrir, falhas, `AGENT`/`VIEWER`, troca de empresa, teclado (Tab até "Continuar", foco no título), 360 px. Desktop e celular.

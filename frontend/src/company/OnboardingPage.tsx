@@ -26,6 +26,7 @@ import {
 } from './onboarding-steps';
 import { PersonaPage, type PageProps } from './PersonaPage';
 import { RetryAlert } from './RetryAlert';
+import { TestPage } from './TestPage';
 
 export interface OnboardingPageProps extends PageProps {
   readonly permissions: readonly string[];
@@ -273,7 +274,15 @@ export function OnboardingPage({
           />
         );
       default:
-        return <StepFallback step={current} onNavigate={onNavigate} />;
+        return (
+          <TestStep
+            key={companyId}
+            companyId={companyId}
+            settle={settle}
+            canOpenChannel={permissions.includes('channel:read')}
+            onNavigate={onNavigate}
+          />
+        );
     }
   })();
 
@@ -438,25 +447,6 @@ function firstAllowed(permissions: readonly string[]): AreaPage {
   return permissions.includes('conversation:read') ? 'conversas' : 'primeirosPassos';
 }
 
-/** Passos 4 a 6 chegam nas etapas seguintes; por ora apontam para a tela completa. */
-function StepFallback({
-  step,
-  onNavigate,
-}: {
-  step: WizardStepId;
-  onNavigate: (page: AreaPage) => void;
-}) {
-  const target: AreaPage =
-    step === 'servicos' ? 'agendaConfig' : step === 'estoque' ? 'estoque' : 'testar';
-  return (
-    <div>
-      <Button variant="outline" onClick={() => onNavigate(target)}>
-        Abrir a tela completa
-      </Button>
-    </div>
-  );
-}
-
 /**
  * Se o exemplo pode ser oferecido é decidido **uma vez**, ao entrar no passo: carregar o exemplo muda o
  * progresso (documentos e produtos passam a existir), mas a mensagem de sucesso e o "Remover exemplo" da
@@ -470,4 +460,40 @@ function DocumentsStep({ canSample, ...rest }: ComponentProps<typeof KnowledgePa
 function StockStep({ canSample, ...rest }: ComponentProps<typeof EstoquePage>) {
   const [offer] = useState(canSample);
   return <EstoquePage {...rest} canSample={offer} />;
+}
+
+/**
+ * Passo "Testar o atendente": o `TestPage` de sempre (simulador, resposta e "Fontes usadas"). Nada daqui é
+ * derivado nem gravado pelo assistente. Fecha com a sugestão de conectar o WhatsApp (só leva à tela Canal).
+ */
+function TestStep({
+  companyId,
+  settle,
+  canOpenChannel,
+  onNavigate,
+}: PageProps & {
+  readonly canOpenChannel: boolean;
+  readonly onNavigate: (page: AreaPage) => void;
+}) {
+  return (
+    <div className="grid gap-4">
+      <p className="m-0 rounded-2xl border border-border bg-muted p-3 text-sm text-foreground">
+        Se o ambiente usa o provedor de teste (mock), a resposta é de mentira: serve para ver o
+        caminho funcionando, não a qualidade do atendimento.
+      </p>
+      <TestPage companyId={companyId} settle={settle} />
+      {canOpenChannel && (
+        <div className="grid gap-2 rounded-2xl border border-border p-3">
+          <p className="m-0 text-sm">
+            Quando estiver pronto, conecte o WhatsApp da empresa para atender contatos de verdade.
+          </p>
+          <div>
+            <Button variant="outline" onClick={() => onNavigate('canal')}>
+              Conectar o WhatsApp
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
