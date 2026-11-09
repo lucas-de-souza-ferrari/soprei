@@ -1,5 +1,11 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
 import { BillingService } from './application/billing/billing.service.js';
+import { CheckoutService } from './application/billing/checkout.service.js';
+import { PaymentReconciler } from './application/billing/payment-reconciler.js';
+import { PaymentVerifier } from './application/billing/payment-verifier.js';
+import { PendingReplyResumer } from './application/billing/pending-reply-resumer.js';
+import { InfinitepayClient } from './infrastructure/external-apis/infinitepay/infinitepay.client.js';
+import { SecretString } from './shared/types/index.js';
 import { OnboardingService } from './application/onboarding/onboarding.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
 import { ContactSchedulingService } from './application/schedule/contact-scheduling.service.js';
@@ -45,6 +51,8 @@ import {
   PrismaOnboardingStore,
   PrismaStockMovementRepository,
   PrismaBillingRepository,
+  PrismaCheckoutRepository,
+  PrismaPendingReplyReader,
   PrismaEntitlementReader,
   PrismaUsageMeter,
 } from './infrastructure/database/index.js';
@@ -162,6 +170,59 @@ async function main(): Promise<void> {
         usage: new PrismaUsageMeter(prisma),
       }
     : undefined;
+  // Checkout da InfinitePay (spec 031, E3): só com BILLING_ENABLED e CHECKOUT_ENABLED; a config já exigiu as
+  // variáveis INFINITEPAY_*. Sem a fila do canal não há o que reativar (o canal ligado é que cria a fila).
+  const checkout =
+    billing !== undefined &&
+    config.CHECKOUT_ENABLED &&
+    config.INFINITEPAY_API_KEY !== undefined &&
+    config.INFINITEPAY_HANDLE !== undefined &&
+    config.INFINITEPAY_WEBHOOK_BASE_URL !== undefined &&
+    config.APP_ORIGIN !== undefined
+      ? (() => {
+          const repository = new PrismaCheckoutRepository(prisma);
+          const provider = new InfinitepayClient({
+            baseUrl: config.INFINITEPAY_API_BASE_URL,
+            apiKey: new SecretString(config.INFINITEPAY_API_KEY),
+            handle: config.INFINITEPAY_HANDLE,
+            timeoutMs: config.BILLING_HTTP_TIMEOUT_MS,
+          });
+          const verifier = new PaymentVerifier({
+            checkout: repository,
+            provider,
+            graceDays: config.BILLING_GRACE_DAYS,
+            logger,
+            metrics,
+            ...(inboundQueue === undefined
+              ? {}
+              : {
+                  resumer: new PendingReplyResumer({
+                    reader: new PrismaPendingReplyReader(prisma),
+                    queue: inboundQueue.queue,
+                    logger,
+                  }),
+                }),
+          });
+          return {
+            verifier,
+            reconciler: new PaymentReconciler({ checkout: repository, verifier, logger }),
+            service: new CheckoutService({
+              billing: new PrismaBillingRepository(prisma),
+              checkout: repository,
+              provider,
+              verifier,
+              settings: {
+                graceDays: config.BILLING_GRACE_DAYS,
+                appOrigin: config.APP_ORIGIN,
+                webhookBaseUrl: config.INFINITEPAY_WEBHOOK_BASE_URL,
+                allowSopreiPaysMeta: config.SOPREI_PAYS_META_ENABLED,
+              },
+              logger,
+              metrics,
+            }),
+          };
+        })()
+      : undefined;
   const attendance = new AttendanceService({
     companies: companyRepository,
     conversations: new PrismaConversationRepository(prisma),
@@ -423,6 +484,7 @@ async function main(): Promise<void> {
               },
             }),
             entitlements: billing.entitlements,
+            ...(checkout === undefined ? {} : { checkout: checkout.service }),
           },
         }),
     readiness: {
@@ -485,9 +547,21 @@ async function main(): Promise<void> {
     run: async () => {
       await purger.runOnce();
       await invitationPurger.runOnce();
+      // Reconciliação de pagamentos (spec 031, E3): o webhook pode não chegar; confere os pedidos pendentes.
+      await checkout?.reconciler.runOnce();
     },
     intervalMinutes: config.ACCOUNT_PURGE_INTERVAL_MINUTES,
   });
+  if (checkout !== undefined) {
+    // O desligamento também espera as confirmações de pagamento em segundo plano (webhook já respondido).
+    const purgeTimer = infrastructure.accountPurge;
+    infrastructure.accountPurge = {
+      async stop() {
+        await purgeTimer?.stop();
+        await checkout.verifier.drain();
+      },
+    };
+  }
 
   const stop = (signal: string): void => {
     app.log.info({ signal }, 'encerrando servidor');

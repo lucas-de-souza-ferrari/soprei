@@ -333,6 +333,94 @@ describe('parseConfig', () => {
       assert.equal(both.value.SOPREI_PAYS_META_ENABLED, true);
     });
 
+    it('checkout da InfinitePay (spec 031, E3): desligado por padrão, nada INFINITEPAY_* é exigido e a base padrão é a da API', () => {
+      const off = parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, BILLING_ENABLED: 'true' });
+      assert.ok(off.ok);
+      assert.equal(off.value.CHECKOUT_ENABLED, false);
+      assert.equal(off.value.INFINITEPAY_API_BASE_URL, 'https://api.checkout.infinitepay.io');
+      assert.equal(off.value.INFINITEPAY_API_KEY, undefined);
+      assert.equal(off.value.BILLING_HTTP_TIMEOUT_MS, 8_000);
+      for (const value of ['1', 'yes', 'TRUE']) {
+        assert.equal(parseConfig({ ...VALID_ENV, CHECKOUT_ENABLED: value }).ok, false, value);
+      }
+    });
+
+    describe('com CHECKOUT_ENABLED=true', () => {
+      const CHECKOUT_ON = {
+        ...VALID_ENV,
+        ...ACCOUNTS_ON,
+        BILLING_ENABLED: 'true',
+        CHECKOUT_ENABLED: 'true',
+        INFINITEPAY_API_KEY: 'inchk_chave_de_teste_0123',
+        INFINITEPAY_HANDLE: 'loja-teste',
+        INFINITEPAY_WEBHOOK_BASE_URL: 'https://api.exemplo.test',
+      };
+
+      it('aceita a configuração completa', () => {
+        const result = parseConfig(CHECKOUT_ON);
+        assert.ok(result.ok);
+        assert.equal(result.value.INFINITEPAY_HANDLE, 'loja-teste');
+      });
+
+      it('exige BILLING_ENABLED e as três variáveis', () => {
+        const noBilling = parseConfig({ ...CHECKOUT_ON, BILLING_ENABLED: 'false' });
+        assert.equal(noBilling.ok, false);
+        assert.match(noBilling.error.message, /CHECKOUT_ENABLED: exige BILLING_ENABLED=true/);
+        for (const name of [
+          'INFINITEPAY_API_KEY',
+          'INFINITEPAY_HANDLE',
+          'INFINITEPAY_WEBHOOK_BASE_URL',
+        ]) {
+          const result = parseConfig({ ...CHECKOUT_ON, [name]: '' });
+          assert.equal(result.ok, false, name);
+          assert.match(
+            result.error.message,
+            new RegExp(name + ': obrigatória com CHECKOUT_ENABLED=true'),
+          );
+        }
+      });
+
+      it('valida a chave curta, o handle (sem cifrão) e a origem do webhook (sem caminho nem barra final)', () => {
+        assert.equal(parseConfig({ ...CHECKOUT_ON, INFINITEPAY_API_KEY: 'curta' }).ok, false);
+        assert.equal(parseConfig({ ...CHECKOUT_ON, INFINITEPAY_HANDLE: '$loja' }).ok, false);
+        for (const url of [
+          'https://api.exemplo.test/',
+          'https://api.exemplo.test/webhooks',
+          'ftp://api.exemplo.test',
+          'https://u:p@api.exemplo.test',
+          'não é url',
+        ]) {
+          assert.equal(
+            parseConfig({ ...CHECKOUT_ON, INFINITEPAY_WEBHOOK_BASE_URL: url }).ok,
+            false,
+            url,
+          );
+        }
+        assert.ok(
+          parseConfig({ ...CHECKOUT_ON, INFINITEPAY_WEBHOOK_BASE_URL: 'http://localhost:3000' }).ok,
+        );
+      });
+
+      it('em produção as duas bases precisam ser https; fora dela http é aceito (servidor falso)', () => {
+        const production = { ...CHECKOUT_ON, NODE_ENV: 'production', TRUST_PROXY: 'false' };
+        const webhookHttp = parseConfig({
+          ...production,
+          INFINITEPAY_WEBHOOK_BASE_URL: 'http://api.exemplo.test',
+        });
+        assert.equal(webhookHttp.ok, false);
+        assert.match(webhookHttp.error.message, /INFINITEPAY_WEBHOOK_BASE_URL: precisa ser https/);
+        const apiHttp = parseConfig({
+          ...production,
+          INFINITEPAY_API_BASE_URL: 'http://127.0.0.1:9999',
+        });
+        assert.equal(apiHttp.ok, false);
+        assert.match(apiHttp.error.message, /INFINITEPAY_API_BASE_URL: precisa ser https/);
+        assert.ok(
+          parseConfig({ ...CHECKOUT_ON, INFINITEPAY_API_BASE_URL: 'http://127.0.0.1:9999' }).ok,
+        );
+      });
+    });
+
     it('com SCHEDULE_AI_ENABLED, "em andamento" precisa passar do prazo de 30 s do laço', () => {
       const result = parseConfig({
         ...VALID_ENV,

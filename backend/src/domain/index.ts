@@ -163,3 +163,10 @@ export type {
   TrialSettings,
   UsageWindow,
 } from './repositories/billing.repository.js';
+export type {
+  CheckoutRepository,
+  GrantResult,
+  NewOrderInput,
+  PaidFacts,
+  PaymentOrderRecord,
+} from './repositories/checkout.repository.js';

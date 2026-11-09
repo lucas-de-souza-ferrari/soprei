@@ -183,6 +183,15 @@ export function windowsInPeriod(cycle: BillingCycle, status: SubscriptionStatus)
   return cycle === 'ANNUAL' && status !== 'TRIAL' ? 12 : 1;
 }
 
+/** Janelas de uso do período atual da assinatura (1 no teste; nos pagos, os meses do período, spec 031 E3). */
+export function subscriptionWindows(
+  subscription: Pick<SubscriptionRecord, 'status' | 'currentPeriodStart' | 'currentPeriodEnd'>,
+): number {
+  return subscription.status === 'TRIAL'
+    ? 1
+    : windowsInSpan(subscription.currentPeriodStart, subscription.currentPeriodEnd);
+}
+
 export interface QuotaNumbers {
   readonly used: number;
   readonly limit: number;
@@ -288,4 +297,88 @@ export function priceTotalCents(
     (modules.agenda ? price.agendaCents : 0) +
     (modules.stock ? price.stockCents : 0)
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Checkout (spec 031, E3): regras puras de pedido e de extensão do período pago.
+// ---------------------------------------------------------------------------------------------
+
+/** Meses de cada ciclo de cobrança. */
+export const CYCLE_MONTHS: Readonly<Record<BillingCycle, number>> = { MONTHLY: 1, ANNUAL: 12 };
+
+/** Validade do pedido (e do link) a partir da criação: 24 h (spec 031). */
+export const ORDER_VALIDITY_MS = 24 * 3_600_000;
+/** Teto de pedidos criados por assinatura em 24 h (defesa contra abuso do provedor). */
+export const ORDER_MAX_PER_DAY = 10;
+/** A reconciliação só olha pedidos criados nesta janela (48 h). */
+export const RECONCILE_WINDOW_MS = 48 * 3_600_000;
+/** Valor mínimo de um link da InfinitePay, em centavos (R$ 1,00). */
+export const CHECKOUT_MIN_AMOUNT_CENTS = 100;
+
+/** O que o pedido cobra, copiado do catálogo no momento da criação (nada vem do navegador). */
+export interface OrderBreakdown {
+  readonly planCode: PlanCode;
+  readonly cycle: BillingCycle;
+  readonly agenda: boolean;
+  readonly stock: boolean;
+  readonly priceId: string;
+  readonly priceVersion: number;
+  readonly whatsappBillingMode: WhatsappBillingMode;
+}
+
+/**
+ * Quantas janelas mensais de uso cabem no período [start, end): o maior k com start + k meses <= end
+ * (no mínimo 1). Serve ao mensal estendido por renovação antecipada (2 meses = 2 janelas) e ao anual (12).
+ * O teste gratuito (poucos dias) tem 1 janela.
+ */
+export function windowsInSpan(periodStart: Date, periodEnd: Date): number {
+  let months = 0;
+  while (months < 600 && addMonthsUtc(periodStart, months + 1).getTime() <= periodEnd.getTime()) {
+    months += 1;
+  }
+  return Math.max(1, months);
+}
+
+export interface PaidPeriod {
+  readonly periodStart: Date;
+  readonly periodEnd: Date;
+  /** Verdadeiro quando o pagamento continua o período vigente (renovação) em vez de recomeçar em now. */
+  readonly continuing: boolean;
+}
+
+/**
+ * Período resultante de um pagamento aprovado. Renovação dentro do período, ou paga na carência, SOMA a
+ * partir do fim atual (âncora no início do período, sem deriva de dia); teste, assinatura bloqueada ou
+ * cancelada já vencida recomeçam em now. Pura, relógio injetado.
+ */
+export function computePaidPeriod(
+  current: Pick<
+    SubscriptionRecord,
+    'status' | 'currentPeriodStart' | 'currentPeriodEnd' | 'trialEndsAt' | 'cancelAtPeriodEnd'
+  >,
+  now: Date,
+  graceDays: number,
+  cycle: BillingCycle,
+): PaidPeriod {
+  const resolved = resolveAccess(current, now, graceDays);
+  const continuing =
+    current.status !== 'TRIAL' &&
+    current.status !== 'EXPIRED' &&
+    resolved.access !== 'blocked' &&
+    (resolved.state === 'ACTIVE' ||
+      resolved.state === 'PAST_DUE' ||
+      resolved.state === 'CANCELLED');
+  if (!continuing) {
+    return {
+      periodStart: now,
+      periodEnd: addMonthsUtc(now, CYCLE_MONTHS[cycle]),
+      continuing: false,
+    };
+  }
+  const months = windowsInSpan(current.currentPeriodStart, current.currentPeriodEnd);
+  return {
+    periodStart: current.currentPeriodStart,
+    periodEnd: addMonthsUtc(current.currentPeriodStart, months + CYCLE_MONTHS[cycle]),
+    continuing: true,
+  };
 }

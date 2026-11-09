@@ -3,6 +3,9 @@ import { describe, it } from 'node:test';
 import {
   addMonthsUtc,
   buildEntitlements,
+  computePaidPeriod,
+  subscriptionWindows,
+  windowsInSpan,
   metaEstimateMilliCents,
   priceTotalCents,
   quotaBlockReason,
@@ -308,5 +311,119 @@ describe('cotas e entitlements (spec 031)', () => {
     const price = { baseCents: 5_900, agendaCents: 2_900, stockCents: 1_900 };
     assert.equal(priceTotalCents(price, { agenda: false, stock: false }), 5_900);
     assert.equal(priceTotalCents(price, { agenda: true, stock: true }), 10_700);
+  });
+});
+
+describe('período pago e janelas de uso do checkout (spec 031, E3)', () => {
+  const START = at('2026-01-31T12:00:00Z');
+
+  it('windowsInSpan conta os meses do período ancorados no início (dia 31 sem deriva)', () => {
+    assert.equal(windowsInSpan(START, addMonthsUtc(START, 1)), 1);
+    assert.equal(windowsInSpan(START, addMonthsUtc(START, 2)), 2);
+    assert.equal(windowsInSpan(START, addMonthsUtc(START, 12)), 12);
+    assert.equal(windowsInSpan(START, addMonthsUtc(START, 24)), 24);
+    // Teste gratuito (dias) ainda tem uma janela.
+    assert.equal(windowsInSpan(START, new Date(START.getTime() + 7 * DAY)), 1);
+  });
+
+  it('subscriptionWindows: 1 no teste; nos pagos, os meses do período', () => {
+    const trial = subscription('TRIAL', {
+      currentPeriodStart: START,
+      currentPeriodEnd: addMonthsUtc(START, 12),
+    });
+    assert.equal(subscriptionWindows(trial), 1);
+    const annual = subscription('ACTIVE', {
+      currentPeriodStart: START,
+      currentPeriodEnd: addMonthsUtc(START, 12),
+    });
+    assert.equal(subscriptionWindows(annual), 12);
+  });
+
+  it('teste e assinatura expirada recomeçam em now, no ciclo escolhido', () => {
+    const now = at('2026-11-10T12:00:00Z');
+    for (const status of ['TRIAL', 'EXPIRED'] as const) {
+      const period = computePaidPeriod(
+        subscription(status, {
+          currentPeriodStart: at('2026-11-01T00:00:00Z'),
+          currentPeriodEnd: at('2026-11-08T00:00:00Z'),
+          trialEndsAt: at('2026-11-08T00:00:00Z'),
+        }),
+        now,
+        GRACE,
+        'ANNUAL',
+      );
+      assert.equal(period.continuing, false);
+      assert.equal(iso(period.periodStart), iso(now));
+      assert.equal(iso(period.periodEnd), '2027-11-10T12:00:00.000Z');
+    }
+  });
+
+  it('renovação antecipada e paga na carência continuam do período vigente; passada a carência, recomeça', () => {
+    const base = {
+      currentPeriodStart: at('2026-11-10T12:00:00Z'),
+      currentPeriodEnd: at('2026-12-10T12:00:00Z'),
+    };
+    const active = subscription('ACTIVE', base);
+    const early = computePaidPeriod(active, at('2026-12-01T00:00:00Z'), GRACE, 'MONTHLY');
+    assert.equal(early.continuing, true);
+    assert.equal(iso(early.periodStart), '2026-11-10T12:00:00.000Z');
+    assert.equal(iso(early.periodEnd), '2027-01-10T12:00:00.000Z');
+    // No instante exato do vencimento ainda vale a carência.
+    const exact = computePaidPeriod(active, at('2026-12-10T12:00:00Z'), GRACE, 'MONTHLY');
+    assert.equal(iso(exact.periodEnd), '2027-01-10T12:00:00.000Z');
+    // Último instante da carência (5 dias) e o primeiro depois dele.
+    const lastGrace = computePaidPeriod(active, at('2026-12-15T11:59:59Z'), GRACE, 'MONTHLY');
+    assert.equal(lastGrace.continuing, true);
+    const late = computePaidPeriod(active, at('2026-12-15T12:00:00Z'), GRACE, 'MONTHLY');
+    assert.equal(late.continuing, false);
+    assert.equal(iso(late.periodStart), '2026-12-15T12:00:00.000Z');
+    assert.equal(iso(late.periodEnd), '2027-01-15T12:00:00.000Z');
+  });
+
+  it('cancelada para o fim do período: ainda vigente continua; vencida recomeça (sem carência)', () => {
+    const base = {
+      currentPeriodStart: at('2026-11-10T12:00:00Z'),
+      currentPeriodEnd: at('2026-12-10T12:00:00Z'),
+      cancelAtPeriodEnd: true,
+    };
+    const during = computePaidPeriod(
+      subscription('ACTIVE', base),
+      at('2026-12-01T00:00:00Z'),
+      GRACE,
+      'MONTHLY',
+    );
+    assert.equal(during.continuing, true);
+    const after = computePaidPeriod(
+      subscription('ACTIVE', base),
+      at('2026-12-11T00:00:00Z'),
+      GRACE,
+      'MONTHLY',
+    );
+    assert.equal(after.continuing, false);
+  });
+
+  it('renovações antecipadas encadeadas ancoram no início (anual: 12 + 12 = 24 janelas; sem deriva de dia)', () => {
+    const first = computePaidPeriod(
+      subscription('ACTIVE', {
+        currentPeriodStart: START,
+        currentPeriodEnd: addMonthsUtc(START, 1),
+      }),
+      at('2026-02-10T00:00:00Z'),
+      GRACE,
+      'MONTHLY',
+    );
+    // 31/jan + 2 meses = 31/mar (e não 28/mar, o que daria a deriva de somar do fim "28/fev").
+    assert.equal(iso(first.periodEnd), '2026-03-31T12:00:00.000Z');
+    const annual = computePaidPeriod(
+      subscription('ACTIVE', {
+        cycle: 'ANNUAL',
+        currentPeriodStart: START,
+        currentPeriodEnd: addMonthsUtc(START, 12),
+      }),
+      at('2026-12-01T00:00:00Z'),
+      GRACE,
+      'ANNUAL',
+    );
+    assert.equal(windowsInSpan(annual.periodStart, annual.periodEnd), 24);
   });
 });

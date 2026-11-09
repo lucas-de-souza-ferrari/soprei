@@ -8,7 +8,9 @@ import type { ChannelIntakeService } from '../../application/channel/channel-int
 import type { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
 import type { BillingService } from '../../application/billing/billing.service.js';
 import type { EntitlementReader } from '../../application/ports/entitlement-reader.js';
+import type { CheckoutService } from '../../application/billing/checkout.service.js';
 import { billingController } from '../../presentation/billing/billing.controller.js';
+import { infinitepayWebhookController } from '../../presentation/webhooks/infinitepay-webhook.controller.js';
 import { adminEntitlementsController } from '../../presentation/admin/entitlements.controller.js';
 import { registerEntitlementGate } from './entitlement-gate.js';
 import type { CompanyService } from '../../application/companies/company.service.js';
@@ -95,6 +97,8 @@ export interface WhatsappRoutesParams {
 export interface BillingRoutesParams {
   readonly service: Pick<BillingService, 'overview'>;
   readonly entitlements: Pick<EntitlementReader, 'forCompany'>;
+  /** Checkout da InfinitePay (E3, CHECKOUT_ENABLED): pedido, "Já paguei" e webhook. Sem isto essas rotas não existem. */
+  readonly checkout?: Pick<CheckoutService, 'createOrder' | 'checkOrder' | 'acceptWebhook'>;
 }
 
 export interface BuildServerParams {
@@ -237,7 +241,12 @@ export function buildServer({
       service: billing.service,
       accounts: accounts.service,
       origin: accounts.origin,
+      checkout: billing.checkout,
     });
+  }
+  // Webhook público do checkout (spec 031, E3): corpo não confiado, só grava a referência e confirma por consulta.
+  if (billing?.checkout !== undefined) {
+    void app.register(infinitepayWebhookController, { checkout: billing.checkout, metrics });
   }
 
   void app.register(healthController, { readiness });

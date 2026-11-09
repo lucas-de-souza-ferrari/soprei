@@ -129,6 +129,23 @@ export type PasswordResetAttemptResult =
 export type PasswordResetEmailKind = 'code' | 'notice';
 /** Execução do expurgo de contas não confirmadas (spec 021). */
 export type AccountPurgeRunResult = 'ok' | 'error';
+/** Pedidos de pagamento (spec 031, E3). Conjuntos fixos: nunca id, valor, e-mail nem link. */
+export type BillingOrderKind = 'NEW' | 'RENEWAL' | 'UPGRADE' | 'EXTRA_PACK';
+export type BillingOrderResult =
+  'created' | 'link_failed' | 'provider_config' | 'limit' | 'rejected' | 'paid' | 'amount_mismatch';
+export type BillingWebhookResult = 'recorded' | 'duplicate' | 'unknown_order' | 'invalid' | 'error';
+export type BillingCheckResult =
+  | 'paid'
+  | 'already_paid'
+  | 'not_paid'
+  | 'amount_mismatch'
+  | 'unverifiable'
+  | 'unknown_order'
+  | 'ignored'
+  | 'unavailable'
+  | 'config_error'
+  | 'rejected';
+
 /** Recuperação da base de conhecimento (spec 026). Conjunto fixo: vai a label. */
 export type KnowledgeRetrievalResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
 
@@ -217,6 +234,12 @@ export interface Metrics {
   countUsageMeterError(): void;
   /** A leitura das cotas falhou e o atendimento seguiu sem limite (spec 031). Sem labels. */
   countEntitlementError(): void;
+  /** Um pedido de pagamento mudou de situação (spec 031, E3). Conjuntos fixos. */
+  countBillingOrder(kind: BillingOrderKind, result: BillingOrderResult): void;
+  /** Um webhook da InfinitePay foi tratado (spec 031, E3). Conjunto fixo. */
+  countBillingWebhook(result: BillingWebhookResult): void;
+  /** Uma confirmação de pagamento por payment_check terminou (spec 031, E3). Conjunto fixo. */
+  countBillingCheck(result: BillingCheckResult): void;
   /** Uma chamada de ferramenta da agenda terminou (spec 028). */
   countScheduleToolCall(tool: ScheduleToolLabel, result: ScheduleToolCallResult): void;
   /** Um turno com ferramentas de agenda terminou (spec 028). */
@@ -405,6 +428,24 @@ export function createMetrics(): Metrics {
   const usageMeterErrors = new Counter({
     name: 'usage_meter_errors_total',
     help: 'Falhas da medição de uso que não derrubaram o fluxo (spec 031)',
+    registers: [registry],
+  });
+  const billingOrders = new Counter({
+    name: 'billing_orders_total',
+    help: 'Pedidos de pagamento por tipo e resultado (spec 031, conjuntos fixos)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const billingWebhooks = new Counter({
+    name: 'billing_webhooks_total',
+    help: 'Webhooks da InfinitePay por resultado (spec 031, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const billingChecks = new Counter({
+    name: 'billing_checks_total',
+    help: 'Confirmações de pagamento (payment_check) por resultado (spec 031, conjunto fixo)',
+    labelNames: ['result'] as const,
     registers: [registry],
   });
   const entitlementErrors = new Counter({
@@ -674,6 +715,15 @@ export function createMetrics(): Metrics {
     },
     countEntitlementError() {
       entitlementErrors.inc();
+    },
+    countBillingOrder(kind, result) {
+      billingOrders.inc({ kind, result });
+    },
+    countBillingWebhook(result) {
+      billingWebhooks.inc({ result });
+    },
+    countBillingCheck(result) {
+      billingChecks.inc({ result });
     },
     countScheduleToolCall(tool, result) {
       scheduleToolCalls.inc({ tool, result });

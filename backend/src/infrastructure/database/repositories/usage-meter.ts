@@ -31,7 +31,7 @@ export class PrismaUsageMeter implements UsageMeter {
     return withRepositoryErrors('UsageMeter.add', async () => {
       const subscription = await this.db.subscription.findFirst({
         where: { companies: { some: { id: companyId, deletedAt: null } } },
-        select: { id: true, currentPeriodStart: true, cycle: true, status: true },
+        select: { id: true, currentPeriodStart: true, currentPeriodEnd: true, status: true },
       });
       if (subscription === null) return;
       const windowStart = currentWindowStart(subscription, this.now());

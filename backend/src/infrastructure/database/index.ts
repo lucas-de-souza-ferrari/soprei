@@ -60,5 +60,7 @@ export {
 export { PrismaContactScheduleUnitOfWork } from './repositories/contact-schedule-unit-of-work.js';
 export { PrismaScheduleAvailabilityReader } from './repositories/schedule-availability-reader.js';
 export { PrismaBillingRepository } from './repositories/billing.repository.js';
+export { PrismaCheckoutRepository } from './repositories/checkout.repository.js';
+export { PrismaPendingReplyReader } from './repositories/pending-reply-reader.js';
 export { PrismaEntitlementReader } from './repositories/entitlement-reader.js';
 export { PrismaUsageMeter } from './repositories/usage-meter.js';

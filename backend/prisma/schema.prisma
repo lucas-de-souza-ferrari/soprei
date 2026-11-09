@@ -722,6 +722,12 @@ model PaymentOrder {
   status                 PaymentOrderStatus @default(PENDING)
   checkoutUrl            String?            @map("checkout_url")
   providerTransactionRef String?            @map("provider_transaction_ref")
+  /// Identificador da fatura na InfinitePay (invoice_slug), so para a consulta de status (spec 031, E3).
+  providerSlug           String?            @map("provider_slug")
+  /// Forma de pagamento informada pela consulta (pix ou credit_card); so numeros e texto curto fixo.
+  captureMethod          String?            @map("capture_method")
+  /// Ultima consulta de status feita pela reconciliacao (marca de reivindicacao entre instancias).
+  lastCheckedAt          DateTime?          @map("last_checked_at") @db.Timestamptz(6)
   paidAt                 DateTime?          @map("paid_at") @db.Timestamptz(6)
   periodStart            DateTime?          @map("period_start") @db.Timestamptz(6)
   periodEnd              DateTime?          @map("period_end") @db.Timestamptz(6)

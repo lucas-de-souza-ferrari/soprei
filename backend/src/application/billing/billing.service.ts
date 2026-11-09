@@ -9,8 +9,8 @@ import {
   type SubscriptionRecord,
   type SubscriptionStatus,
   usageWindowEnd,
+  subscriptionWindows,
   usageWindowStart,
-  windowsInPeriod,
   type AccessLevel,
   type WhatsappBillingMode,
 } from '../../domain/index.js';
@@ -88,7 +88,7 @@ export class BillingService {
       };
     }
     const { state, access } = resolveAccess(subscription, now, settings.graceDays);
-    const windows = windowsInPeriod(subscription.cycle, subscription.status);
+    const windows = subscriptionWindows(subscription);
     const windowStart = usageWindowStart(now, subscription.currentPeriodStart, windows);
     const [usage, companies] = await Promise.all([
       billing.usage(accountId, windowStart),

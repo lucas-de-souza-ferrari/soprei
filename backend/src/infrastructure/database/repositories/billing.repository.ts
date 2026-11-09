@@ -9,8 +9,8 @@ import {
   type SubscriptionRecord,
   type TrialSettings,
   type UsageWindow,
+  subscriptionWindows,
   usageWindowStart,
-  windowsInPeriod,
 } from '../../../domain/index.js';
 import { DatabaseError } from '../../../shared/errors/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
@@ -155,14 +155,10 @@ export async function ensureTrialSubscription(
 
 /** Início da janela de uso atual de uma assinatura (a mesma regra para quem mede e para quem lê). */
 export function currentWindowStart(
-  subscription: Pick<SubscriptionRecord, 'currentPeriodStart' | 'cycle' | 'status'>,
+  subscription: Pick<SubscriptionRecord, 'currentPeriodStart' | 'currentPeriodEnd' | 'status'>,
   now: Date,
 ): Date {
-  return usageWindowStart(
-    now,
-    subscription.currentPeriodStart,
-    windowsInPeriod(subscription.cycle, subscription.status),
-  );
+  return usageWindowStart(now, subscription.currentPeriodStart, subscriptionWindows(subscription));
 }
 
 /**

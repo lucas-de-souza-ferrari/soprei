@@ -131,6 +131,17 @@ export const envSchema = z
     BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(60).default(5),
     BILLING_TRIAL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
     BILLING_TRIAL_TOKENS: z.coerce.number().int().min(1).max(100_000_000).default(300_000),
+    // Checkout da InfinitePay (spec 031, E3). Flag propria, desligada por padrao: com ela desligada nao existe rota
+    // de pedido, webhook nem reconciliacao, e nenhuma variavel INFINITEPAY_* e exigida. A chave nunca vai a log.
+    CHECKOUT_ENABLED: booleanLiteral(false),
+    INFINITEPAY_API_KEY: optionalSecret,
+    INFINITEPAY_HANDLE: optionalSecret,
+    INFINITEPAY_API_BASE_URL: z.preprocess(
+      emptyAsUndefined,
+      z.url().default('https://api.checkout.infinitepay.io'),
+    ),
+    INFINITEPAY_WEBHOOK_BASE_URL: optionalSecret,
+    BILLING_HTTP_TIMEOUT_MS: z.coerce.number().int().min(1).max(60_000).default(8_000),
     // Provedor Anthropic (spec 014). A chave só é exigida com `LLM_PROVIDER=anthropic` e nunca vai
     // a log, métrica, erro nem resposta. `ANTHROPIC_BASE_URL` existe para os testes (servidor falso).
     ANTHROPIC_API_KEY: optionalSecret,
@@ -287,6 +298,7 @@ export const envSchema = z
         message: 'exige BILLING_ENABLED=true',
       });
     }
+    refineCheckout(env, ctx);
     refineWhatsapp(env, ctx);
     refineAnthropic(env, ctx);
     if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < METRICS_TOKEN_MIN_LENGTH) {
@@ -365,6 +377,94 @@ function refineAnthropic(
       path: ['ANTHROPIC_API_KEY'],
       message: `precisa ter no mínimo ${String(ANTHROPIC_API_KEY_MIN_LENGTH)} caracteres`,
     });
+  }
+}
+
+/** Regras do checkout da InfinitePay (spec 031, E3): exigências só valem com CHECKOUT_ENABLED=true. */
+function refineCheckout(
+  env: {
+    readonly NODE_ENV: string;
+    readonly BILLING_ENABLED: boolean;
+    readonly CHECKOUT_ENABLED: boolean;
+    readonly INFINITEPAY_API_KEY?: string | undefined;
+    readonly INFINITEPAY_HANDLE?: string | undefined;
+    readonly INFINITEPAY_API_BASE_URL: string;
+    readonly INFINITEPAY_WEBHOOK_BASE_URL?: string | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const baseUrl = parseBaseUrl(env.INFINITEPAY_API_BASE_URL);
+  if (baseUrl === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['INFINITEPAY_API_BASE_URL'],
+      message: 'deve ser uma URL http(s) sem usuário, senha, query nem fragmento',
+    });
+  } else if (env.NODE_ENV === 'production' && baseUrl.protocol !== 'https:') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['INFINITEPAY_API_BASE_URL'],
+      message: 'precisa ser https:// em produção (a API Key iria em texto claro)',
+    });
+  }
+  if (!env.CHECKOUT_ENABLED) return;
+  if (!env.BILLING_ENABLED) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['CHECKOUT_ENABLED'],
+      message: 'exige BILLING_ENABLED=true',
+    });
+  }
+  for (const name of [
+    'INFINITEPAY_API_KEY',
+    'INFINITEPAY_HANDLE',
+    'INFINITEPAY_WEBHOOK_BASE_URL',
+  ] as const) {
+    if (env[name] === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [name],
+        message: 'obrigatória com CHECKOUT_ENABLED=true',
+      });
+    }
+  }
+  if (env.INFINITEPAY_API_KEY !== undefined && env.INFINITEPAY_API_KEY.length < 16) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['INFINITEPAY_API_KEY'],
+      message: 'precisa ter no mínimo 16 caracteres',
+    });
+  }
+  if (
+    env.INFINITEPAY_HANDLE !== undefined &&
+    !/^[A-Za-z0-9._-]{1,64}$/.test(env.INFINITEPAY_HANDLE)
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['INFINITEPAY_HANDLE'],
+      message: 'deve ser a InfiniteTag sem o cifrão (letras, dígitos, ponto, hífen e sublinhado)',
+    });
+  }
+  if (env.INFINITEPAY_WEBHOOK_BASE_URL !== undefined) {
+    const url = parseBaseUrl(env.INFINITEPAY_WEBHOOK_BASE_URL);
+    if (
+      url === undefined ||
+      url.pathname !== '/' ||
+      env.INFINITEPAY_WEBHOOK_BASE_URL.endsWith('/')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['INFINITEPAY_WEBHOOK_BASE_URL'],
+        message:
+          'deve ser só a origem pública do backend (http(s)://host[:porta], sem caminho nem barra final)',
+      });
+    } else if (env.NODE_ENV === 'production' && url.protocol !== 'https:') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['INFINITEPAY_WEBHOOK_BASE_URL'],
+        message: 'precisa ser https:// em produção',
+      });
+    }
   }
 }
 
