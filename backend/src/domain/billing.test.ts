@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 import {
   addMonthsUtc,
   buildEntitlements,
+  classifyChange,
   computePaidPeriod,
+  prorateUpgradeCents,
   subscriptionWindows,
   windowsInSpan,
   metaEstimateMilliCents,
@@ -65,6 +67,7 @@ function subscription(
     currentPeriodEnd: at('2026-12-01T00:00:00Z'),
     trialEndsAt: status === 'TRIAL' ? at('2026-11-08T00:00:00Z') : null,
     cancelAtPeriodEnd: false,
+    pendingChange: null,
     ...overrides,
   };
 }
@@ -425,5 +428,129 @@ describe('período pago e janelas de uso do checkout (spec 031, E3)', () => {
       'ANNUAL',
     );
     assert.equal(windowsInSpan(annual.periodStart, annual.periodEnd), 24);
+  });
+});
+
+describe('troca de plano: classificação e upgrade proporcional (spec 031, D11)', () => {
+  const ESS = { planCode: 'ESSENTIAL', cycle: 'MONTHLY', agenda: false, stock: false } as const;
+
+  it('classifyChange: igual, sobe, desce, misto e ciclo', () => {
+    assert.equal(classifyChange(ESS, ESS), 'same');
+    assert.equal(classifyChange(ESS, { ...ESS, agenda: true }), 'up');
+    assert.equal(classifyChange(ESS, { ...ESS, planCode: 'SCALE' }), 'up');
+    assert.equal(classifyChange(ESS, { ...ESS, planCode: 'PROFESSIONAL', stock: true }), 'up');
+    const pro = { ...ESS, planCode: 'PROFESSIONAL', agenda: true } as const;
+    assert.equal(classifyChange(pro, ESS), 'down');
+    assert.equal(classifyChange(pro, { ...pro, agenda: false }), 'down');
+    assert.equal(classifyChange(pro, { ...pro, planCode: 'ESSENTIAL', stock: true }), 'mixed');
+    assert.equal(classifyChange(ESS, { ...ESS, cycle: 'ANNUAL' }), 'cycle');
+  });
+
+  const base = (overrides: Partial<Parameters<typeof prorateUpgradeCents>[0]> = {}) => ({
+    currentTotalCents: 5_900,
+    newTotalCents: 14_900,
+    cycle: 'MONTHLY' as const,
+    periodStart: at('2026-11-10T12:00:00Z'),
+    periodEnd: at('2026-12-10T12:00:00Z'),
+    now: at('2026-11-20T12:00:00Z'),
+    ...overrides,
+  });
+
+  it('mensal: fração restante exata (20 dos 30 dias) e primeiro dia cobra a diferença cheia', () => {
+    const mid = prorateUpgradeCents(base());
+    assert.ok(mid.ok);
+    assert.equal(mid.cents, 6_000);
+    const first = prorateUpgradeCents(base({ now: at('2026-11-10T12:00:00Z') }));
+    assert.ok(first.ok);
+    assert.equal(first.cents, 9_000);
+    // Último dia inteiro: 1 de 30 dias.
+    const last = prorateUpgradeCents(base({ now: at('2026-12-09T12:00:00Z') }));
+    assert.ok(last.ok);
+    assert.equal(last.cents, 300);
+  });
+
+  it('arredonda PARA CIMA em centavos inteiros', () => {
+    // Período de 3 dias, restam 1: 1001 / 3 = 333,67 -> 334.
+    const result = prorateUpgradeCents({
+      currentTotalCents: 0 + 1_000,
+      newTotalCents: 2_001,
+      cycle: 'MONTHLY',
+      periodStart: at('2026-11-01T00:00:00Z'),
+      periodEnd: at('2026-11-04T00:00:00Z'),
+      now: at('2026-11-03T00:00:00Z'),
+    });
+    assert.ok(result.ok);
+    assert.equal(result.cents, 334);
+  });
+
+  it('piso de R$ 1,00 (mínimo do link)', () => {
+    const result = prorateUpgradeCents(base({ currentTotalCents: 5_900, newTotalCents: 5_950 }));
+    assert.ok(result.ok);
+    assert.equal(result.cents, 100);
+  });
+
+  it('menos de 1 dia restante é recusado (renove); fora do período e sem aumento também', () => {
+    const late = prorateUpgradeCents(base({ now: at('2026-12-09T12:00:01Z') }));
+    assert.deepEqual(late, { ok: false, reason: 'too_late' });
+    assert.deepEqual(prorateUpgradeCents(base({ now: at('2026-12-10T12:00:00Z') })), {
+      ok: false,
+      reason: 'not_in_period',
+    });
+    assert.deepEqual(prorateUpgradeCents(base({ now: at('2026-11-01T00:00:00Z') })), {
+      ok: false,
+      reason: 'not_in_period',
+    });
+    assert.deepEqual(prorateUpgradeCents(base({ newTotalCents: 5_900 })), {
+      ok: false,
+      reason: 'no_increase',
+    });
+    assert.deepEqual(prorateUpgradeCents(base({ newTotalCents: 100 })), {
+      ok: false,
+      reason: 'no_increase',
+    });
+  });
+
+  it('anual com ano bissexto: a fração é sobre os milissegundos reais do período (366 dias)', () => {
+    const start = at('2028-02-15T00:00:00Z');
+    const end = addMonthsUtc(start, 12); // 2029-02-15: 366 dias
+    const now = at('2028-08-16T00:00:00Z'); // 183 dias depois: restam 183 de 366 = metade
+    const result = prorateUpgradeCents({
+      currentTotalCents: 56_640,
+      newTotalCents: 156_640,
+      cycle: 'ANNUAL',
+      periodStart: start,
+      periodEnd: end,
+      now,
+    });
+    assert.ok(result.ok);
+    assert.equal(result.totalMs, 366 * DAY);
+    assert.equal(result.cents, 50_000);
+  });
+
+  it('período que começa no dia 31 (mês curto) e período estendido por renovação antecipada', () => {
+    const start = at('2026-01-31T12:00:00Z');
+    // Fev/2026 tem 28 dias: período de 28 dias, restam 14.
+    const short = prorateUpgradeCents({
+      currentTotalCents: 1_000,
+      newTotalCents: 1_280,
+      cycle: 'MONTHLY',
+      periodStart: start,
+      periodEnd: addMonthsUtc(start, 1),
+      now: at('2026-02-14T12:00:00Z'),
+    });
+    assert.ok(short.ok);
+    assert.equal(short.cents, 140);
+    // Dois ciclos pagos (2 meses): a diferença de cada ciclo conta, sobre o período inteiro.
+    const start2 = at('2026-11-10T12:00:00Z');
+    const two = prorateUpgradeCents({
+      currentTotalCents: 5_900,
+      newTotalCents: 14_900,
+      cycle: 'MONTHLY',
+      periodStart: start2,
+      periodEnd: addMonthsUtc(start2, 2),
+      now: start2,
+    });
+    assert.ok(two.ok);
+    assert.equal(two.cents, 18_000);
   });
 });

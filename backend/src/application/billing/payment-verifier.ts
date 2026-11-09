@@ -226,6 +226,16 @@ export class PaymentVerifier {
       this.deps.graceDays,
     );
     if (!granted.granted) {
+      if (granted.stale === true) {
+        // Upgrade com a base mudada (ou plano que não comporta as empresas): nada concedido; o pedido virou FAILED
+        // e o pagamento vai para revisão manual/estorno.
+        metrics?.countBillingOrder(order.kind, 'upgrade_stale');
+        logger.error(
+          { orderRef },
+          'pedido obsoleto no pagamento; nada concedido (revisão manual ou estorno)',
+        );
+        return { result: 'upgrade_stale' };
+      }
       if (granted.conflict === true) {
         // A referência já pertence a outro pedido: nada foi concedido e a transação foi desfeita.
         metrics?.countBillingOrder(order.kind, 'reference_conflict');

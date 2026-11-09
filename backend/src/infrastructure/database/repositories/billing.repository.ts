@@ -1,11 +1,15 @@
+import { z } from 'zod';
 import type { Prisma } from '../../../generated/prisma/client.js';
 import {
   AccountId,
+  BILLING_CYCLES,
   type BillingRepository,
   type CatalogEntry,
   type OrderSummary,
   type PlanPriceRecord,
+  type PendingChange,
   type PlanRecord,
+  PLAN_CODES,
   type SubscriptionRecord,
   type TrialSettings,
   type UsageWindow,
@@ -51,6 +55,19 @@ export function toPrice(row: Prisma.PlanPriceGetPayload<object>): PlanPriceRecor
   };
 }
 
+const pendingChangeSchema = z.object({
+  planCode: z.enum(PLAN_CODES),
+  cycle: z.enum(BILLING_CYCLES),
+  agenda: z.boolean(),
+  stock: z.boolean(),
+});
+
+/** Troca agendada gravada como JSON: formato inválido vale como ausente (nunca derruba a leitura). */
+export function parsePendingChange(value: unknown): PendingChange | null {
+  const parsed = pendingChangeSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 export function toSubscription(row: SubscriptionRow): SubscriptionRecord {
   return {
     id: row.id,
@@ -65,6 +82,7 @@ export function toSubscription(row: SubscriptionRow): SubscriptionRecord {
     currentPeriodEnd: row.currentPeriodEnd,
     trialEndsAt: row.trialEndsAt,
     cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+    pendingChange: parsePendingChange(row.pendingChange),
   };
 }
 
@@ -249,6 +267,24 @@ export class PrismaBillingRepository implements BillingRepository {
         where: { id: orderId, subscription: { accountId: AccountId.parse(accountId) } },
       });
       return row === null ? null : toOrderSummary(row);
+    });
+  }
+
+  countCompaniesIncludingUnadopted(accountId: string): Promise<number> {
+    return withRepositoryErrors('Billing.countCompaniesIncludingUnadopted', () => {
+      const id = AccountId.parse(accountId);
+      return this.db.company.count({
+        where: {
+          deletedAt: null,
+          OR: [
+            { subscription: { accountId: id } },
+            {
+              subscriptionId: null,
+              memberships: { some: { accountId: id, role: 'OWNER', status: 'ACTIVE' } },
+            },
+          ],
+        },
+      });
     });
   }
 

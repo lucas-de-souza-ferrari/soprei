@@ -98,7 +98,19 @@ export interface BillingRoutesParams {
   readonly service: Pick<BillingService, 'overview'>;
   readonly entitlements: Pick<EntitlementReader, 'forCompany'>;
   /** Checkout da InfinitePay (E3, CHECKOUT_ENABLED): pedido, "Já paguei" e webhook. Sem isto essas rotas não existem. */
-  readonly checkout?: Pick<CheckoutService, 'createOrder' | 'checkOrder' | 'acceptWebhook'>;
+  readonly checkout?: Pick<
+    CheckoutService,
+    | 'createOrder'
+    | 'checkOrder'
+    | 'acceptWebhook'
+    | 'quote'
+    | 'upgrade'
+    | 'scheduleChange'
+    | 'undoPendingChange'
+    | 'cancel'
+    | 'reactivate'
+    | 'changeState'
+  >;
 }
 
 export interface BuildServerParams {

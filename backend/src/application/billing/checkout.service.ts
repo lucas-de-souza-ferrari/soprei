@@ -1,10 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import {
+  type AccessLevel,
   type BillingCycle,
   type BillingRepository,
+  type CatalogEntry,
   CHECKOUT_MIN_AMOUNT_CENTS,
+  type ChangeRelation,
   type CheckoutRepository,
+  classifyChange,
+  type PendingChange,
+  type PlanPriceRecord,
+  type PlanSelection,
+  prorateUpgradeCents,
+  samePlanSelection,
+  type SubscriptionRecord,
+  type UpgradeBase,
   type OrderBreakdown,
   ORDER_MAX_PER_DAY,
   ORDER_VALIDITY_MS,
@@ -56,6 +67,24 @@ export interface CreatedOrder {
   readonly expiresAt: Date;
 }
 
+/** Escolha de uma troca: sem ciclo vale o da assinatura atual. */
+export interface ChangeRequest {
+  readonly planCode: PlanCode;
+  readonly cycle?: BillingCycle | undefined;
+  readonly agenda: boolean;
+  readonly stock: boolean;
+}
+
+/** Cotação de uma troca (só do servidor): valor em centavos e quando vale. */
+export interface ChangeQuote {
+  readonly kind: 'NEW' | 'RENEWAL' | 'UPGRADE' | 'DOWNGRADE';
+  /** NEW e RENEWAL: o valor cheio do ciclo; UPGRADE: o proporcional; DOWNGRADE: 0 (agendada, sem cobrança). */
+  readonly amountCents: number;
+  readonly effective: 'now' | 'next_renewal';
+  readonly periodEnd: Date | null;
+  readonly remainingDays: number | null;
+}
+
 /** Corpo do evento do webhook já reduzido ao mínimo (só ids curtos validados). */
 export interface WebhookEvent {
   readonly orderNsu: string | undefined;
@@ -85,7 +114,10 @@ const PLAN_DESCRIPTION: Readonly<Record<PlanCode, string>> = {
 export class CheckoutService {
   constructor(
     private readonly deps: {
-      readonly billing: Pick<BillingRepository, 'findSubscription' | 'catalog' | 'countCompanies'>;
+      readonly billing: Pick<
+        BillingRepository,
+        'findSubscription' | 'catalog' | 'countCompaniesIncludingUnadopted'
+      >;
       readonly checkout: CheckoutRepository;
       readonly provider: PaymentProvider;
       readonly verifier: Pick<PaymentVerifier, 'verify' | 'verifyInBackground'>;
@@ -96,57 +128,328 @@ export class CheckoutService {
     },
   ) {}
 
-  async createOrder(
-    account: { readonly id: string; readonly email: string },
-    request: OrderRequest,
-  ): Promise<CreatedOrder> {
-    const { billing, checkout, provider, settings, logger, metrics } = this.deps;
-    const now = this.deps.now?.() ?? new Date();
-    const subscription = await billing.findSubscription(account.id);
+  /** Contexto comum de uma escolha: assinatura atual, plano e preço do catálogo e a relação com o que há. */
+  private async evaluate(
+    accountId: string,
+    input: ChangeRequest,
+    now: Date,
+  ): Promise<{
+    readonly target: OrderRequest;
+    readonly subscription: SubscriptionRecord;
+    readonly entry: CatalogEntry;
+    readonly price: PlanPriceRecord;
+    readonly paidAndInForce: boolean;
+    readonly access: AccessLevel;
+    readonly current: PlanSelection;
+    readonly relation: ChangeRelation;
+  }> {
+    const { billing, settings } = this.deps;
+    const subscription = await billing.findSubscription(accountId);
     if (subscription === null) {
       throw new ConflictError('Crie uma empresa antes de assinar um plano', {
         code: 'NO_SUBSCRIPTION',
       });
     }
+    const request: OrderRequest = {
+      planCode: input.planCode,
+      cycle: input.cycle ?? subscription.cycle,
+      agenda: input.agenda,
+      stock: input.stock,
+    };
     const catalog = await billing.catalog(now, settings.allowSopreiPaysMeta);
     const entry = catalog.find((candidate) => candidate.plan.code === request.planCode);
     const price = entry?.prices.find((candidate) => candidate.cycle === request.cycle);
     if (entry === undefined || price === undefined) {
       throw new ValidationError('Plano indisponível', { context: { reason: 'plan_unavailable' } });
     }
+    const access = resolveAccess(subscription, now, settings.graceDays).access;
+    const current: PlanSelection = {
+      planCode: subscription.plan.code,
+      cycle: subscription.cycle,
+      agenda: subscription.agendaEnabled,
+      stock: subscription.stockEnabled,
+    };
+    return {
+      target: request,
+      subscription,
+      entry,
+      price,
+      access,
+      paidAndInForce: subscription.status !== 'TRIAL' && access !== 'blocked',
+      current,
+      relation: classifyChange(current, request),
+    };
+  }
 
-    // Quem tem mais empresas que o plano escolhido comporta não pode assinar esse plano (nada é apagado).
-    if ((await billing.countCompanies(account.id)) > entry.plan.maxCompanies) {
+  /** Quem tem mais empresas (inclusive não adotadas) que o plano comporta não pode ir para ele. */
+  private async assertFits(accountId: string, entry: CatalogEntry): Promise<void> {
+    if (
+      (await this.deps.billing.countCompaniesIncludingUnadopted(accountId)) >
+      entry.plan.maxCompanies
+    ) {
       throw new ConflictError('Você tem mais empresas do que este plano comporta', {
         code: 'PLAN_DOWNGRADE_BLOCKED',
       });
     }
+  }
 
-    const amountCents = priceTotalCents(price, request);
+  async createOrder(
+    account: { readonly id: string; readonly email: string },
+    request: OrderRequest,
+  ): Promise<CreatedOrder> {
+    const { metrics } = this.deps;
+    const now = this.deps.now?.() ?? new Date();
+    const ev = await this.evaluate(account.id, request, now);
+    await this.assertFits(account.id, ev.entry);
+
+    const amountCents = priceTotalCents(ev.price, request);
     if (amountCents < CHECKOUT_MIN_AMOUNT_CENTS) {
       throw new ValidationError('Valor do plano inválido', { context: { reason: 'amount_low' } });
     }
 
-    // Assinatura paga e em vigor (ou na carência): só a renovação do mesmo plano, ciclo e módulos. Trocar
-    // de plano no meio do ciclo (upgrade e downgrade, D11) é da etapa E4.
-    const access = resolveAccess(subscription, now, settings.graceDays).access;
-    const paidAndInForce = subscription.status !== 'TRIAL' && access !== 'blocked';
+    // Assinatura paga e em vigor (ou na carência): só a renovação. Sem troca agendada, o mesmo plano, ciclo
+    // e módulos; com troca agendada, o pedido é o da troca (o preço é o do plano pendente). Trocar no meio do
+    // ciclo é pelas rotas de troca (upgrade proporcional ou troca agendada).
     let kind: PaymentOrderKindValue = 'NEW';
-    if (paidAndInForce) {
-      const same =
-        subscription.plan.code === request.planCode &&
-        subscription.cycle === request.cycle &&
-        subscription.agendaEnabled === request.agenda &&
-        subscription.stockEnabled === request.stock;
-      if (!same) {
-        metrics?.countBillingOrder('UPGRADE', 'rejected');
-        throw new ConflictError('A troca de plano durante o ciclo ainda não está disponível', {
-          code: 'PLAN_CHANGE_UNAVAILABLE',
+    if (ev.paidAndInForce) {
+      const pending = ev.subscription.pendingChange;
+      if (pending !== null) {
+        if (samePlanSelection(request, pending)) kind = 'RENEWAL';
+        else if (samePlanSelection(request, ev.current)) {
+          throw new ConflictError('Há uma troca agendada; desfaça-a para renovar o plano atual', {
+            code: 'PENDING_CHANGE_EXISTS',
+          });
+        } else {
+          metrics?.countBillingOrder('RENEWAL', 'rejected');
+          throw new ConflictError('Use a troca de plano para mudar de plano durante o ciclo', {
+            code: 'USE_PLAN_CHANGE',
+          });
+        }
+      } else if (ev.relation === 'same') {
+        kind = 'RENEWAL';
+      } else {
+        metrics?.countBillingOrder('RENEWAL', 'rejected');
+        throw new ConflictError('Use a troca de plano para mudar de plano durante o ciclo', {
+          code: 'USE_PLAN_CHANGE',
         });
       }
-      kind = 'RENEWAL';
     }
+    return this.issueOrder(account, ev.entry, ev.price, request, kind, amountCents, now);
+  }
 
+  /**
+   * Cotação da troca, calculada só no servidor e sem criar pedido: o valor proporcional do upgrade, ou a troca
+   * agendada para a renovação. Mesmas recusas da troca de verdade. Dinheiro em centavos.
+   */
+  async quote(accountId: string, input: ChangeRequest): Promise<ChangeQuote> {
+    const now = this.deps.now?.() ?? new Date();
+    const ev = await this.evaluate(accountId, input, now);
+    const request = ev.target;
+    if (!ev.paidAndInForce) {
+      return {
+        kind: 'NEW',
+        amountCents: priceTotalCents(ev.price, request),
+        effective: 'now',
+        periodEnd: null,
+        remainingDays: null,
+      };
+    }
+    const periodEnd = ev.subscription.currentPeriodEnd;
+    if (ev.relation === 'same') {
+      return {
+        kind: 'RENEWAL',
+        amountCents: priceTotalCents(ev.price, request),
+        effective: 'now',
+        periodEnd,
+        remainingDays: null,
+      };
+    }
+    if (ev.relation === 'up') {
+      const plan = this.upgradePlan(ev, request, now);
+      return {
+        kind: 'UPGRADE',
+        amountCents: plan.cents,
+        effective: 'now',
+        periodEnd,
+        remainingDays: Math.floor(plan.remainingMs / 86_400_000),
+      };
+    }
+    await this.assertFits(accountId, ev.entry);
+    return {
+      kind: 'DOWNGRADE',
+      amountCents: 0,
+      effective: 'next_renewal',
+      periodEnd,
+      remainingDays: null,
+    };
+  }
+
+  /** Valida e calcula o upgrade (mesma lógica da cotação e do pedido). */
+  private upgradePlan(
+    ev: Awaited<ReturnType<CheckoutService['evaluate']>>,
+    request: OrderRequest,
+    now: Date,
+  ): { readonly cents: number; readonly remainingMs: number } {
+    const sub = ev.subscription;
+    if (!ev.paidAndInForce || ev.access !== 'ok' || sub.status !== 'ACTIVE') {
+      throw new ConflictError('Não há plano pago em vigor para trocar; renove ou assine', {
+        code: 'PLAN_CHANGE_UNAVAILABLE',
+      });
+    }
+    if (sub.cancelAtPeriodEnd) {
+      throw new ConflictError('A assinatura está cancelada para o fim do período; reative antes', {
+        code: 'PLAN_CHANGE_UNAVAILABLE',
+      });
+    }
+    if (sub.pendingChange !== null) {
+      throw new ConflictError('Há uma troca agendada; desfaça-a antes de fazer um upgrade', {
+        code: 'PENDING_CHANGE_EXISTS',
+      });
+    }
+    if (ev.relation !== 'up') {
+      throw new ConflictError('A escolha não é um upgrade', { code: 'NOT_AN_UPGRADE' });
+    }
+    const result = prorateUpgradeCents({
+      currentTotalCents: priceTotalCents(sub.price, {
+        agenda: sub.agendaEnabled,
+        stock: sub.stockEnabled,
+      }),
+      newTotalCents: priceTotalCents(ev.price, request),
+      cycle: sub.cycle,
+      periodStart: sub.currentPeriodStart,
+      periodEnd: sub.currentPeriodEnd,
+      now,
+    });
+    if (!result.ok) {
+      throw new ConflictError(
+        result.reason === 'too_late'
+          ? 'Falta menos de um dia para o fim do período; renove e troque na renovação'
+          : 'Não foi possível calcular o upgrade',
+        { code: result.reason === 'too_late' ? 'UPGRADE_TOO_LATE' : 'PLAN_CHANGE_UNAVAILABLE' },
+      );
+    }
+    return { cents: result.cents, remainingMs: result.remainingMs };
+  }
+
+  /**
+   * Upgrade no meio do ciclo pago: pedido UPGRADE com a diferença proporcional (só do catálogo e do período
+   * gravado), no mesmo ciclo; vale na hora ao pagar e NÃO muda o fim do período. Só um UPGRADE aberto por
+   * assinatura (o novo substitui o anterior).
+   */
+  async upgrade(
+    account: { readonly id: string; readonly email: string },
+    input: ChangeRequest,
+  ): Promise<CreatedOrder> {
+    const now = this.deps.now?.() ?? new Date();
+    const ev = await this.evaluate(account.id, input, now);
+    const request = ev.target;
+    if (ev.current.cycle !== request.cycle) {
+      throw new ConflictError('O ciclo só muda na renovação', { code: 'CYCLE_CHANGE_ON_RENEWAL' });
+    }
+    const plan = this.upgradePlan(ev, request, now);
+    await this.assertFits(account.id, ev.entry);
+    const sub = ev.subscription;
+    return this.issueOrder(account, ev.entry, ev.price, request, 'UPGRADE', plan.cents, now, {
+      planCode: sub.plan.code,
+      cycle: sub.cycle,
+      agenda: sub.agendaEnabled,
+      stock: sub.stockEnabled,
+      periodStart: sub.currentPeriodStart.toISOString(),
+      periodEnd: sub.currentPeriodEnd.toISOString(),
+    });
+  }
+
+  /**
+   * Downgrade, retirada de módulo ou mudança de ciclo: só GRAVA a troca (pendingChange) para a próxima
+   * renovação, sem cobrança e sem mudar nada agora. Recusa se a conta tem mais empresas (inclusive não
+   * adotadas) que o plano novo comporta.
+   */
+  async scheduleChange(accountId: string, input: ChangeRequest): Promise<PendingChange> {
+    const now = this.deps.now?.() ?? new Date();
+    const ev = await this.evaluate(accountId, input, now);
+    const request = ev.target;
+    if (!ev.paidAndInForce || ev.subscription.status === 'TRIAL') {
+      throw new ConflictError('Não há plano pago em vigor; escolha o plano ao assinar', {
+        code: 'PLAN_CHANGE_UNAVAILABLE',
+      });
+    }
+    if (ev.relation === 'same') {
+      throw new ConflictError('A escolha é igual ao plano atual', { code: 'NO_CHANGE' });
+    }
+    if (ev.relation === 'up') {
+      throw new ConflictError('Para subir de plano use o upgrade', { code: 'USE_UPGRADE' });
+    }
+    await this.assertFits(accountId, ev.entry);
+    const change: PendingChange = {
+      planCode: request.planCode,
+      cycle: request.cycle,
+      agenda: request.agenda,
+      stock: request.stock,
+    };
+    await this.deps.checkout.setPendingChange(accountId, change);
+    this.deps.logger.info({ accountId }, 'troca de plano agendada para a próxima renovação');
+    return change;
+  }
+
+  /** Desfaz a troca agendada antes da renovação. */
+  async undoPendingChange(accountId: string): Promise<void> {
+    await this.requireSubscription(accountId);
+    await this.deps.checkout.setPendingChange(accountId, null);
+  }
+
+  /** Cancelar no modelo de link por ciclo: marca o fim do período; nada é cobrado nem apagado. */
+  async cancel(accountId: string): Promise<void> {
+    const sub = await this.requirePaidInForce(accountId);
+    if (!sub.cancelAtPeriodEnd) await this.deps.checkout.setCancelAtPeriodEnd(accountId, true);
+  }
+
+  /** Reativar antes do fim do período limpa a marca; depois de expirada é um pedido normal. */
+  async reactivate(accountId: string): Promise<void> {
+    const sub = await this.requirePaidInForce(accountId);
+    if (sub.cancelAtPeriodEnd) await this.deps.checkout.setCancelAtPeriodEnd(accountId, false);
+  }
+
+  /** O estado que as rotas de troca devolvem depois de agir (sem dinheiro). */
+  async changeState(accountId: string): Promise<{
+    readonly cancelAtPeriodEnd: boolean;
+    readonly pendingChange: PendingChange | null;
+  }> {
+    const sub = await this.requireSubscription(accountId);
+    return { cancelAtPeriodEnd: sub.cancelAtPeriodEnd, pendingChange: sub.pendingChange };
+  }
+
+  private async requireSubscription(accountId: string): Promise<SubscriptionRecord> {
+    const sub = await this.deps.billing.findSubscription(accountId);
+    if (sub === null) {
+      throw new ConflictError('Crie uma empresa antes de assinar um plano', {
+        code: 'NO_SUBSCRIPTION',
+      });
+    }
+    return sub;
+  }
+
+  private async requirePaidInForce(accountId: string): Promise<SubscriptionRecord> {
+    const sub = await this.requireSubscription(accountId);
+    const now = this.deps.now?.() ?? new Date();
+    const access = resolveAccess(sub, now, this.deps.settings.graceDays).access;
+    if (sub.status === 'TRIAL' || access === 'blocked') {
+      throw new ConflictError('Não há plano pago em vigor', { code: 'PLAN_CHANGE_UNAVAILABLE' });
+    }
+    return sub;
+  }
+
+  /** Grava o pedido, cria o link e substitui os pedidos abertos do mesmo tipo. */
+  private async issueOrder(
+    account: { readonly id: string; readonly email: string },
+    entry: CatalogEntry,
+    price: PlanPriceRecord,
+    request: OrderRequest,
+    kind: PaymentOrderKindValue,
+    amountCents: number,
+    now: Date,
+    upgradeBase?: UpgradeBase,
+  ): Promise<CreatedOrder> {
+    const { checkout, provider, settings, logger, metrics } = this.deps;
     const breakdown: OrderBreakdown = {
       planCode: request.planCode,
       cycle: request.cycle,
@@ -155,6 +458,7 @@ export class CheckoutService {
       priceId: price.id,
       priceVersion: price.version,
       whatsappBillingMode: price.whatsappBillingMode,
+      ...(upgradeBase === undefined ? {} : { upgradeBase }),
     };
     const orderId = randomUUID();
     const expiresAt = new Date(now.getTime() + ORDER_VALIDITY_MS);
@@ -179,7 +483,7 @@ export class CheckoutService {
     const link = await provider.createLink({
       orderId,
       amountCents,
-      description: describe(entry.plan.code, request),
+      description: describe(entry.plan.code, request, kind),
       ...(settings.sendCustomerEmail ? { customerEmail: account.email } : {}),
       redirectUrl: `${settings.appOrigin}/painel/assinatura`,
       webhookUrl: `${settings.webhookBaseUrl}/webhooks/infinitepay/${orderId}/${webhookToken(settings.webhookSecret, orderId)}`,
@@ -266,10 +570,10 @@ export class CheckoutService {
   }
 }
 
-function describe(code: PlanCode, request: OrderRequest): string {
+function describe(code: PlanCode, request: OrderRequest, kind: PaymentOrderKindValue): string {
   const modules = [request.agenda ? 'Agenda' : null, request.stock ? 'Estoque' : null].filter(
     (value) => value !== null,
   );
   const cycle = request.cycle === 'ANNUAL' ? 'anual' : 'mensal';
-  return `Soprei ${PLAN_DESCRIPTION[code]} ${cycle}${modules.length > 0 ? ` + ${modules.join(' e ')}` : ''}`;
+  return `Soprei${kind === 'UPGRADE' ? ' upgrade' : ''} ${PLAN_DESCRIPTION[code]} ${cycle}${modules.length > 0 ? ` + ${modules.join(' e ')}` : ''}`;
 }

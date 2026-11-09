@@ -64,6 +64,14 @@ export interface PlanPriceRecord {
   readonly validFrom: Date;
 }
 
+/** Troca agendada para a PRÓXIMA renovação (downgrade, retirada de módulo ou mudança de ciclo). */
+export interface PendingChange {
+  readonly planCode: PlanCode;
+  readonly cycle: BillingCycle;
+  readonly agenda: boolean;
+  readonly stock: boolean;
+}
+
 export interface SubscriptionRecord {
   readonly id: string;
   readonly accountId: string;
@@ -77,6 +85,8 @@ export interface SubscriptionRecord {
   readonly currentPeriodEnd: Date;
   readonly trialEndsAt: Date | null;
   readonly cancelAtPeriodEnd: boolean;
+  /** Troca para a próxima renovação (nulo = nenhuma). */
+  readonly pendingChange: PendingChange | null;
 }
 
 export type AccessLevel = 'ok' | 'grace' | 'blocked';
@@ -324,6 +334,21 @@ export interface OrderBreakdown {
   readonly priceId: string;
   readonly priceVersion: number;
   readonly whatsappBillingMode: WhatsappBillingMode;
+  /**
+   * Só no UPGRADE: a assinatura como era quando o pedido foi criado. Se o plano, os módulos ou o período
+   * mudarem antes do pagamento, o pedido NÃO concede (revisão manual/estorno).
+   */
+  readonly upgradeBase?: UpgradeBase;
+}
+
+export interface UpgradeBase {
+  readonly planCode: PlanCode;
+  readonly cycle: BillingCycle;
+  readonly agenda: boolean;
+  readonly stock: boolean;
+  /** Início e fim do período pago (ISO UTC). */
+  readonly periodStart: string;
+  readonly periodEnd: string;
 }
 
 /**
@@ -380,5 +405,99 @@ export function computePaidPeriod(
     periodStart: current.currentPeriodStart,
     periodEnd: addMonthsUtc(current.currentPeriodStart, months + CYCLE_MONTHS[cycle]),
     continuing: true,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Troca de plano no meio do ciclo (spec 031, E3 estendida; D11): regras puras.
+// ---------------------------------------------------------------------------------------------
+
+/** Ordem dos planos (o maior comporta mais empresas e mais cota). */
+export const PLAN_RANK: Readonly<Record<PlanCode, number>> = {
+  ESSENTIAL: 1,
+  PROFESSIONAL: 2,
+  SCALE: 3,
+};
+
+/** Menos que isto de período restante: o upgrade é recusado e a pessoa é orientada a renovar. */
+export const UPGRADE_MIN_REMAINING_MS = DAY_MS;
+
+export interface PlanSelection {
+  readonly planCode: PlanCode;
+  readonly cycle: BillingCycle;
+  readonly agenda: boolean;
+  readonly stock: boolean;
+}
+
+export type ChangeRelation = 'same' | 'up' | 'down' | 'mixed' | 'cycle';
+
+/**
+ * Como a escolha se compara com a assinatura atual. 'up': mesmo ciclo, plano igual ou maior, módulos que
+ * contêm os atuais e ao menos um a mais. 'down': o inverso. 'mixed': um sobe e outro desce. 'cycle': o ciclo
+ * muda (só na renovação).
+ */
+export function classifyChange(current: PlanSelection, target: PlanSelection): ChangeRelation {
+  const planDelta = PLAN_RANK[target.planCode] - PLAN_RANK[current.planCode];
+  const agendaDelta = Number(target.agenda) - Number(current.agenda);
+  const stockDelta = Number(target.stock) - Number(current.stock);
+  if (target.cycle !== current.cycle) return 'cycle';
+  const deltas = [planDelta, agendaDelta, stockDelta];
+  const up = deltas.some((delta) => delta > 0);
+  const down = deltas.some((delta) => delta < 0);
+  if (up && down) return 'mixed';
+  if (up) return 'up';
+  if (down) return 'down';
+  return 'same';
+}
+
+export function samePlanSelection(a: PlanSelection, b: PlanSelection): boolean {
+  return (
+    a.planCode === b.planCode && a.cycle === b.cycle && a.agenda === b.agenda && a.stock === b.stock
+  );
+}
+
+export type ProrationResult =
+  | {
+      readonly ok: true;
+      readonly cents: number;
+      readonly remainingMs: number;
+      readonly totalMs: number;
+    }
+  | { readonly ok: false; readonly reason: 'no_increase' | 'not_in_period' | 'too_late' };
+
+/**
+ * Diferença proporcional de um upgrade: (preço do ciclo novo menos o atual) x fração restante do período
+ * pago, em centavos inteiros, aritmética inteira (BigInt), arredondando PARA CIMA e com piso de R$ 1,00
+ * (mínimo do link). Período estendido por renovações antecipadas conta várias vezes a diferença do ciclo
+ * (a fração é sobre o período inteiro). Menos de 1 dia restante: 'too_late'. Pura, now injetado.
+ */
+export function prorateUpgradeCents(input: {
+  readonly currentTotalCents: number;
+  readonly newTotalCents: number;
+  readonly cycle: BillingCycle;
+  readonly periodStart: Date;
+  readonly periodEnd: Date;
+  readonly now: Date;
+}): ProrationResult {
+  const diff = input.newTotalCents - input.currentTotalCents;
+  if (!(diff > 0)) return { ok: false, reason: 'no_increase' };
+  const totalMs = input.periodEnd.getTime() - input.periodStart.getTime();
+  const remainingMs = input.periodEnd.getTime() - input.now.getTime();
+  if (!(totalMs > 0) || remainingMs <= 0 || input.now.getTime() < input.periodStart.getTime()) {
+    return { ok: false, reason: 'not_in_period' };
+  }
+  if (remainingMs < UPGRADE_MIN_REMAINING_MS) return { ok: false, reason: 'too_late' };
+  const cycles = Math.max(
+    1,
+    Math.round(windowsInSpan(input.periodStart, input.periodEnd) / CYCLE_MONTHS[input.cycle]),
+  );
+  const numerator = BigInt(diff) * BigInt(cycles) * BigInt(remainingMs);
+  const denominator = BigInt(totalMs);
+  const cents = Number((numerator + denominator - 1n) / denominator);
+  return {
+    ok: true,
+    cents: Math.max(cents, CHECKOUT_MIN_AMOUNT_CENTS),
+    remainingMs,
+    totalMs,
   };
 }

@@ -16,7 +16,20 @@ export interface BillingControllerOptions {
   readonly accounts: Pick<AccountService, 'me'>;
   readonly origin: string;
   /** Checkout (E3): só com CHECKOUT_ENABLED; sem ele as rotas de pedido não existem (404). */
-  readonly checkout?: Pick<CheckoutService, 'createOrder' | 'checkOrder'> | undefined;
+  readonly checkout?:
+    | Pick<
+        CheckoutService,
+        | 'createOrder'
+        | 'checkOrder'
+        | 'quote'
+        | 'upgrade'
+        | 'scheduleChange'
+        | 'undoPendingChange'
+        | 'cancel'
+        | 'reactivate'
+        | 'changeState'
+      >
+    | undefined;
 }
 
 /** Corpo de POST /account/billing/orders: só a escolha. Valor, desconto e período são do servidor (strict recusa o resto). */
@@ -26,6 +39,43 @@ export const createOrderBodySchema = z
     cycle: z.enum(BILLING_CYCLES),
     agenda: z.boolean(),
     stock: z.boolean(),
+  })
+  .strict();
+
+/** Escolha de plano: só a escolha; preço, desconto e período são do servidor (strict recusa o resto). */
+const selectionFields = {
+  planCode: z.enum(PLAN_CODES),
+  agenda: z.boolean(),
+  stock: z.boolean(),
+};
+
+/**
+ * POST /account/billing/plan-change (spec 031, D11). upgrade: pedido proporcional no mesmo ciclo;
+ * downgrade: troca AGENDADA para a próxima renovação (plano menor, módulo a menos ou outro ciclo);
+ * cancel, reactivate e undo_pending não levam mais nada.
+ */
+export const planChangeBodySchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('upgrade'), ...selectionFields }).strict(),
+  z
+    .object({
+      action: z.literal('downgrade'),
+      ...selectionFields,
+      cycle: z.enum(BILLING_CYCLES).optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal('cancel') }).strict(),
+  z.object({ action: z.literal('reactivate') }).strict(),
+  z.object({ action: z.literal('undo_pending') }).strict(),
+]);
+
+const booleanText = z.enum(['true', 'false']).transform((value) => value === 'true');
+/** Query de GET /account/billing/quote. */
+export const quoteQuerySchema = z
+  .object({
+    planCode: z.enum(PLAN_CODES),
+    cycle: z.enum(BILLING_CYCLES).optional(),
+    agenda: booleanText,
+    stock: booleanText,
   })
   .strict();
 
@@ -151,6 +201,47 @@ export const billingController: FastifyPluginCallback<BillingControllerOptions> 
         amountCents: created.amountCents,
         expiresAt: created.expiresAt.toISOString(),
       });
+    });
+    // Cotação da troca: o valor proporcional é calculado no servidor, sem criar pedido.
+    app.get('/account/billing/quote', { config }, async (request) => {
+      const account = await accounts.me(accountCookie(request.headers.cookie));
+      const query = quoteQuerySchema.parse(request.query);
+      const quote = await checkout.quote(account.id, query);
+      return {
+        kind: quote.kind,
+        amountCents: quote.amountCents,
+        effective: quote.effective,
+        periodEnd: quote.periodEnd?.toISOString() ?? null,
+        remainingDays: quote.remainingDays,
+      };
+    });
+    app.post('/account/billing/plan-change', { config }, async (request, reply) => {
+      const account = await accounts.me(accountCookie(request.headers.cookie));
+      const body = planChangeBodySchema.parse(request.body);
+      if (body.action === 'upgrade') {
+        // O ciclo do upgrade é sempre o da assinatura atual (o serviço o resolve).
+        const created = await checkout.upgrade(
+          { id: account.id, email: account.email },
+          { planCode: body.planCode, agenda: body.agenda, stock: body.stock },
+        );
+        return reply.code(201).send({
+          orderId: created.orderId,
+          checkoutUrl: created.checkoutUrl,
+          amountCents: created.amountCents,
+          expiresAt: created.expiresAt.toISOString(),
+        });
+      }
+      if (body.action === 'downgrade') {
+        await checkout.scheduleChange(account.id, body);
+      } else if (body.action === 'cancel') {
+        await checkout.cancel(account.id);
+      } else if (body.action === 'reactivate') {
+        await checkout.reactivate(account.id);
+      } else {
+        await checkout.undoPendingChange(account.id);
+      }
+      const state = await checkout.changeState(account.id);
+      return { cancelAtPeriodEnd: state.cancelAtPeriodEnd, pendingChange: state.pendingChange };
     });
     app.post<{ Params: { orderId: string } }>(
       '/account/billing/orders/:orderId/check',

@@ -59,6 +59,11 @@ export interface BillingRepository {
   findOrder(accountId: string, orderId: string): Promise<OrderSummary | null>;
   /** Quantas empresas (não removidas) a assinatura da conta tem. */
   countCompanies(accountId: string): Promise<number>;
+  /**
+   * Como countCompanies, mais as empresas em que a conta é OWNER ativa e que ainda não têm assinatura (ainda
+   * não adotadas): é a conta que vale para recusar uma troca para plano com menos vagas.
+   */
+  countCompaniesIncludingUnadopted(accountId: string): Promise<number>;
 }
 
 export type { BillingCycle };

@@ -28,6 +28,51 @@ class FakeCheckout {
   readonly checks: { accountId: string; orderId: string; hints: unknown }[] = [];
   readonly webhooks: { orderId: string; event: WebhookEvent; token: string }[] = [];
   failWebhook = false;
+  readonly changes: { method: string; accountId: string; input?: unknown }[] = [];
+
+  quote(accountId: string, input: unknown) {
+    this.changes.push({ method: 'quote', accountId, input });
+    return Promise.resolve({
+      kind: 'UPGRADE' as const,
+      amountCents: 9_267,
+      effective: 'now' as const,
+      periodEnd: new Date('2026-12-10T12:00:00Z'),
+      remainingDays: 20,
+    });
+  }
+
+  upgrade(account: { id: string }, input: unknown): Promise<CreatedOrder> {
+    this.changes.push({ method: 'upgrade', accountId: account.id, input });
+    return this.createOrder({ id: account.id, email: 'x' }, input as OrderRequest);
+  }
+
+  scheduleChange(accountId: string, input: unknown) {
+    this.changes.push({ method: 'scheduleChange', accountId, input });
+    return Promise.resolve(input);
+  }
+
+  undoPendingChange(accountId: string) {
+    this.changes.push({ method: 'undoPendingChange', accountId });
+    return Promise.resolve();
+  }
+
+  cancel(accountId: string) {
+    this.changes.push({ method: 'cancel', accountId });
+    return Promise.resolve();
+  }
+
+  reactivate(accountId: string) {
+    this.changes.push({ method: 'reactivate', accountId });
+    return Promise.resolve();
+  }
+
+  changeState() {
+    return Promise.resolve({
+      cancelAtPeriodEnd: true,
+      pendingChange: null,
+      internal: 'nao-deve-sair',
+    });
+  }
 
   createOrder(
     account: { id: string; email: string },
@@ -406,6 +451,162 @@ describe('POST /webhooks/infinitepay/:orderId (spec 031, E3)', () => {
     assert.equal(profile('/webhooks/infinitepay/:orderId/:token'), 'webhook');
     assert.equal(profile('/account/billing/orders'), 'admin');
     assert.equal(profile('/account/billing/orders/:orderId/check'), 'admin');
+    await app.close();
+  });
+});
+
+describe('troca de plano, cotação, cancelar e reativar (spec 031, D11)', () => {
+  const UP = { action: 'upgrade', planCode: 'PROFESSIONAL', agenda: true, stock: false };
+
+  it('com a flag desligada as rotas novas não existem (404)', async () => {
+    const { app, checkout } = start({ checkout: false });
+    const post = await app.inject({
+      method: 'POST',
+      url: '/account/billing/plan-change',
+      headers: BROWSER,
+      payload: UP,
+    });
+    const get = await app.inject({
+      method: 'GET',
+      url: '/account/billing/quote?planCode=SCALE&agenda=true&stock=true',
+      headers: { cookie: BROWSER.cookie },
+    });
+    assert.equal(post.statusCode, 404);
+    assert.equal(get.statusCode, 404);
+    assert.equal(checkout.changes.length, 0);
+    await app.close();
+  });
+
+  it('exige cookie (401) e a origem do site (403); a conta vem só do cookie', async () => {
+    const { app, checkout } = start();
+    const anonymous = await app.inject({
+      method: 'POST',
+      url: '/account/billing/plan-change',
+      headers: { origin: ORIGIN, 'x-soprei-app': 'web' },
+      payload: UP,
+    });
+    assert.equal(anonymous.statusCode, 401);
+    const foreign = await app.inject({
+      method: 'POST',
+      url: '/account/billing/plan-change',
+      headers: { cookie: BROWSER.cookie, origin: 'https://outro.exemplo' },
+      payload: UP,
+    });
+    assert.equal(foreign.statusCode, 403);
+    const quoteAnonymous = await app.inject({
+      method: 'GET',
+      url: '/account/billing/quote?planCode=SCALE&agenda=true&stock=true',
+    });
+    assert.equal(quoteAnonymous.statusCode, 401);
+    assert.equal(checkout.changes.length, 0);
+    await app.close();
+  });
+
+  it('o corpo é strict por ação: valor, conta, pedido e campos fora da ação são recusados (400)', async () => {
+    const { app, checkout } = start();
+    for (const payload of [
+      { ...UP, amountCents: 1 },
+      { ...UP, accountId: ACCOUNT_ID },
+      { ...UP, cycle: 'ANNUAL' },
+      { action: 'cancel', planCode: 'SCALE' },
+      { action: 'reactivate', extra: 1 },
+      { action: 'undo_pending', extra: 1 },
+      { action: 'refund' },
+      { action: 'upgrade', planCode: 'GRATIS', agenda: true, stock: false },
+      { action: 'downgrade', planCode: 'ESSENTIAL', agenda: 'sim', stock: false },
+      {},
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/account/billing/plan-change',
+        headers: BROWSER,
+        payload,
+      });
+      assert.equal(response.statusCode, 400, JSON.stringify(payload));
+    }
+    assert.equal(checkout.changes.length, 0);
+    await app.close();
+  });
+
+  it('cada ação chama o serviço com a conta do cookie e devolve só o estado público (sem dinheiro de outros)', async () => {
+    const { app, checkout } = start();
+    const post = (payload: object) =>
+      app.inject({
+        method: 'POST',
+        url: '/account/billing/plan-change?accountId=01900000-0000-7000-8000-0000000000ff',
+        headers: BROWSER,
+        payload,
+      });
+    const upgrade = await post(UP);
+    assert.equal(upgrade.statusCode, 201);
+    assert.equal((JSON.parse(upgrade.body) as { amountCents: number }).amountCents, 8_800);
+    const down = await post({
+      action: 'downgrade',
+      planCode: 'ESSENTIAL',
+      agenda: false,
+      stock: false,
+      cycle: 'ANNUAL',
+    });
+    assert.equal(down.statusCode, 200);
+    assert.deepEqual(JSON.parse(down.body), { cancelAtPeriodEnd: true, pendingChange: null });
+    for (const action of ['cancel', 'reactivate', 'undo_pending']) {
+      assert.equal((await post({ action })).statusCode, 200);
+    }
+    assert.deepEqual(
+      checkout.changes.map((c) => [c.method, c.accountId]),
+      [
+        ['upgrade', ACCOUNT_ID],
+        ['scheduleChange', ACCOUNT_ID],
+        ['cancel', ACCOUNT_ID],
+        ['reactivate', ACCOUNT_ID],
+        ['undoPendingChange', ACCOUNT_ID],
+      ],
+    );
+    await app.close();
+  });
+
+  it('GET quote: valida a query, usa a conta do cookie e não cria pedido', async () => {
+    const { app, checkout } = start();
+    const ok = await app.inject({
+      method: 'GET',
+      url: '/account/billing/quote?planCode=PROFESSIONAL&agenda=true&stock=false',
+      headers: { cookie: BROWSER.cookie },
+    });
+    assert.equal(ok.statusCode, 200);
+    assert.deepEqual(JSON.parse(ok.body), {
+      kind: 'UPGRADE',
+      amountCents: 9_267,
+      effective: 'now',
+      periodEnd: '2026-12-10T12:00:00.000Z',
+      remainingDays: 20,
+    });
+    for (const query of [
+      'planCode=GRATIS&agenda=true&stock=false',
+      'planCode=SCALE&agenda=sim&stock=false',
+      'planCode=SCALE&agenda=true',
+      'planCode=SCALE&agenda=true&stock=false&amountCents=1',
+    ]) {
+      const bad = await app.inject({
+        method: 'GET',
+        url: '/account/billing/quote?' + query,
+        headers: { cookie: BROWSER.cookie },
+      });
+      assert.equal(bad.statusCode, 400, query);
+    }
+    assert.deepEqual(
+      checkout.changes.map((c) => c.method),
+      ['quote'],
+    );
+    assert.equal(checkout.created.length, 0);
+    await app.close();
+  });
+
+  it('as rotas de troca declaram o perfil admin', async () => {
+    const { app, routes } = start();
+    await app.ready();
+    const profile = (url: string): unknown => routes.find((route) => route.url === url)?.profile;
+    assert.equal(profile('/account/billing/plan-change'), 'admin');
+    assert.equal(profile('/account/billing/quote'), 'admin');
     await app.close();
   });
 });

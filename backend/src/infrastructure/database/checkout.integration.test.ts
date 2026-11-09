@@ -830,12 +830,11 @@ describe('renovação e períodos (spec 031, E3)', () => {
     assert.equal(sub.currentPeriodEnd.toISOString(), '2027-04-01T00:00:00.000Z');
   });
 
-  it('trocar de plano durante o ciclo pago fica para a etapa de troca (PLAN_CHANGE_UNAVAILABLE)', async () => {
+  it('trocar de plano durante o ciclo pago pelo pedido comum é recusado (USE_PLAN_CHANGE)', async () => {
     const { s, account } = await activate('change');
     await assert.rejects(
       s.service.createOrder(account, { ...ESSENTIAL_AGENDA, planCode: 'PROFESSIONAL' }),
-      (error: unknown) =>
-        error instanceof ConflictError && error.code === 'PLAN_CHANGE_UNAVAILABLE',
+      (error: unknown) => error instanceof ConflictError && error.code === 'USE_PLAN_CHANGE',
     );
   });
 });
@@ -1108,6 +1107,378 @@ describe('revisão da E3: cooldown, deduplicação, teto, reconciliação e cria
     const raw = s.logs.raw();
     assert.equal(raw.includes(created.orderId), false);
     assert.equal(raw.includes(tokenFor(created.orderId)), false);
+  });
+});
+
+describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)', () => {
+  const ESSENTIAL_PLAIN = {
+    planCode: 'ESSENTIAL',
+    cycle: 'MONTHLY',
+    agenda: false,
+    stock: false,
+  } as const;
+  const PRO_AGENDA = { planCode: 'PROFESSIONAL', agenda: true, stock: false } as const;
+
+  /** Assina o Essencial mensal sem módulos, pago em t0, e devolve o necessário para trocar. */
+  type OrderRequestLike = {
+    planCode: 'ESSENTIAL' | 'PROFESSIONAL' | 'SCALE';
+    cycle: 'MONTHLY' | 'ANNUAL';
+    agenda: boolean;
+    stock: boolean;
+  };
+  async function activated(label: string, selection: OrderRequestLike = ESSENTIAL_PLAIN) {
+    const s = stack();
+    clock = new Date('2026-11-10T12:00:00Z');
+    const { account, subscription } = await accountWithTrial(label);
+    const first = await s.service.createOrder(account, selection);
+    fake.markPaid(first.orderId, { amount: first.amountCents });
+    assert.equal(await s.verifier.verify(first.orderId), 'paid');
+    return { s, account, subscription };
+  }
+
+  const state = (accountId: string) => billing.findSubscription(accountId);
+
+  it('cotação e pedido de upgrade: diferença proporcional só do servidor; o pagamento vale na hora, o fim do período não muda e o uso permanece', async () => {
+    const { s, account, subscription } = await activated('up-basic');
+    const before = await state(account.id);
+    assert.equal(before?.currentPeriodEnd.toISOString(), '2026-12-10T12:00:00.000Z');
+    await db().usageCounter.updateMany({
+      where: { subscriptionId: subscription.id },
+      data: { tokens: 777n, sentMessages: 5n },
+    });
+    clock = new Date('2026-11-20T12:00:00Z'); // restam 20 dos 30 dias
+
+    // Essencial (R$ 59) -> Profissional + Agenda (R$ 149 + R$ 49): diferença 13.900 x 20/30 = 9.266,67 -> 9.267.
+    const quote = await s.service.quote(account.id, PRO_AGENDA);
+    assert.equal(quote.kind, 'UPGRADE');
+    assert.equal(quote.amountCents, 9_267);
+    assert.equal(quote.effective, 'now');
+    assert.equal(quote.remainingDays, 20);
+    // Cotar não cria pedido.
+    assert.equal(
+      await db().paymentOrder.count({
+        where: { subscriptionId: subscription.id, kind: 'UPGRADE' },
+      }),
+      0,
+    );
+
+    const created = await s.service.upgrade(account, PRO_AGENDA);
+    assert.equal(created.amountCents, 9_267);
+    const order = await checkoutRepo.findOrder(account.id, created.orderId);
+    assert.equal(order?.kind, 'UPGRADE');
+    assert.equal(order.breakdown.upgradeBase?.planCode, 'ESSENTIAL');
+    assert.equal(order.breakdown.upgradeBase.periodEnd, '2026-12-10T12:00:00.000Z');
+    const link = fake.callsTo('/links').at(-1)?.body as { items: { price: number }[] };
+    assert.equal(link.items[0]?.price, 9_267);
+
+    fake.markPaid(created.orderId, { amount: 9_267 });
+    assert.equal(await s.verifier.verify(created.orderId), 'paid');
+    const after = await state(account.id);
+    assert.equal(after?.plan.code, 'PROFESSIONAL');
+    assert.equal(after.agendaEnabled, true);
+    assert.equal(after.stockEnabled, false);
+    assert.equal(after.cycle, 'MONTHLY');
+    assert.equal(after.status, 'ACTIVE');
+    // O fim e o início do período NÃO mudam; o uso já contado permanece e a cota é a do plano novo.
+    assert.equal(after.currentPeriodStart.toISOString(), before.currentPeriodStart.toISOString());
+    assert.equal(after.currentPeriodEnd.toISOString(), '2026-12-10T12:00:00.000Z');
+    const usage = await billing.usage(account.id, after.currentPeriodStart);
+    assert.equal(usage.tokens, 777);
+    assert.equal(usage.sentMessages, 5);
+    assert.equal(after.plan.monthlyTokens, 12_000_000);
+    const paid = await checkoutRepo.findOrder(account.id, created.orderId);
+    assert.equal(paid?.periodEnd?.toISOString(), '2026-12-10T12:00:00.000Z');
+  });
+
+  it('idempotência e concorrência: 10 confirmações do mesmo upgrade em paralelo concedem uma só vez', async () => {
+    const { s, account } = await activated('up-race');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const created = await s.service.upgrade(account, PRO_AGENDA);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => s.verifier.verify(created.orderId)),
+    );
+    assert.equal(results.filter((r) => r === 'paid').length, 1, `resultados: ${results.join(',')}`);
+    const after = await state(account.id);
+    assert.equal(after?.plan.code, 'PROFESSIONAL');
+    assert.equal(after.currentPeriodEnd.toISOString(), '2026-12-10T12:00:00.000Z');
+  });
+
+  it('só um UPGRADE aberto por assinatura: o novo substitui o anterior', async () => {
+    const { s, account } = await activated('up-one');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const first = await s.service.upgrade(account, PRO_AGENDA);
+    const second = await s.service.upgrade(account, { ...PRO_AGENDA, stock: true });
+    assert.equal((await checkoutRepo.findOrder(account.id, first.orderId))?.status, 'EXPIRED');
+    assert.equal((await checkoutRepo.findOrder(account.id, second.orderId))?.status, 'PENDING');
+  });
+
+  it('período renovado entre criar e pagar o upgrade: não concede, o pedido vira FAILED, conta a métrica e o plano não muda', async () => {
+    const { s, account } = await activated('up-stale');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const upgrade = await s.service.upgrade(account, PRO_AGENDA);
+    // A renovação do mesmo plano é paga antes (o período passa a terminar em janeiro).
+    const renewal = await s.service.createOrder(account, ESSENTIAL_PLAIN);
+    fake.markPaid(renewal.orderId, { amount: renewal.amountCents });
+    assert.equal(await s.verifier.verify(renewal.orderId), 'paid');
+    assert.equal(
+      (await state(account.id))?.currentPeriodEnd.toISOString(),
+      '2027-01-10T12:00:00.000Z',
+    );
+
+    fake.markPaid(upgrade.orderId, { amount: upgrade.amountCents });
+    assert.equal(await s.verifier.verify(upgrade.orderId), 'upgrade_stale');
+    const after = await state(account.id);
+    assert.equal(after?.plan.code, 'ESSENTIAL');
+    assert.equal(after.agendaEnabled, false);
+    assert.equal(after.currentPeriodEnd.toISOString(), '2027-01-10T12:00:00.000Z');
+    assert.equal((await checkoutRepo.findOrder(account.id, upgrade.orderId))?.status, 'FAILED');
+    assert.match(
+      await s.metrics.render(),
+      /billing_orders_total\{kind="UPGRADE",result="upgrade_stale"\} 1/,
+    );
+    assert.ok(s.logs.lines().some((line) => line.level === 50));
+    // Já FAILED: confirmar de novo não faz nada.
+    assert.equal(await s.verifier.verify(upgrade.orderId), 'ignored');
+  });
+
+  it('módulo contratado por outro caminho entre criar e pagar também invalida o upgrade', async () => {
+    const { s, account, subscription } = await activated('up-stale2');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const upgrade = await s.service.upgrade(account, PRO_AGENDA);
+    await db().subscription.updateMany({
+      where: { id: subscription.id },
+      data: { stockEnabled: true },
+    });
+    fake.markPaid(upgrade.orderId, { amount: upgrade.amountCents });
+    assert.equal(await s.verifier.verify(upgrade.orderId), 'upgrade_stale');
+    assert.equal((await state(account.id))?.plan.code, 'ESSENTIAL');
+  });
+
+  it('recusas do upgrade: tarde demais, ciclo, não é upgrade, troca agendada, cancelada, trial e carência', async () => {
+    const { s, account } = await activated('up-refuse');
+    const code = (promise: Promise<unknown>) =>
+      promise.then(
+        () => 'ok',
+        (error: unknown) => (error as { code?: string }).code,
+      );
+    clock = new Date('2026-12-10T00:00:00Z'); // faltam 12 h
+    assert.equal(await code(s.service.upgrade(account, PRO_AGENDA)), 'UPGRADE_TOO_LATE');
+    clock = new Date('2026-11-15T12:00:00Z');
+    assert.equal(
+      await code(s.service.upgrade(account, { ...PRO_AGENDA, cycle: 'ANNUAL' })),
+      'CYCLE_CHANGE_ON_RENEWAL',
+    );
+    assert.equal(await code(s.service.upgrade(account, ESSENTIAL_PLAIN)), 'NOT_AN_UPGRADE');
+    await s.service.cancel(account.id);
+    assert.equal(await code(s.service.upgrade(account, PRO_AGENDA)), 'PLAN_CHANGE_UNAVAILABLE');
+    await s.service.reactivate(account.id);
+    await db().subscription.updateMany({
+      where: { accountId: account.id },
+      data: {
+        pendingChange: { planCode: 'ESSENTIAL', cycle: 'ANNUAL', agenda: false, stock: false },
+      },
+    });
+    assert.equal(await code(s.service.upgrade(account, PRO_AGENDA)), 'PENDING_CHANGE_EXISTS');
+    await s.service.undoPendingChange(account.id);
+    // Na carência (fim + 1 dia): renovar, não fazer upgrade.
+    clock = new Date('2026-12-11T12:00:00Z');
+    assert.equal(await code(s.service.upgrade(account, PRO_AGENDA)), 'PLAN_CHANGE_UNAVAILABLE');
+    // Teste gratuito: escolhe-se o plano ao assinar.
+    const trial = await accountWithTrial('up-refuse-trial');
+    assert.equal(
+      await code(s.service.upgrade(trial.account, PRO_AGENDA)),
+      'PLAN_CHANGE_UNAVAILABLE',
+    );
+  });
+
+  it('downgrade e retirada de módulo só gravam a troca agendada: nada muda agora e nenhum pedido é criado', async () => {
+    const { s, account, subscription } = await activated('down-basic', {
+      ...ESSENTIAL_PLAIN,
+      agenda: true,
+    });
+    const before = await state(account.id);
+    const orders = await db().paymentOrder.count({ where: { subscriptionId: subscription.id } });
+    clock = new Date('2026-11-15T12:00:00Z');
+    const quote = await s.service.quote(account.id, ESSENTIAL_PLAIN);
+    assert.equal(quote.kind, 'DOWNGRADE');
+    assert.equal(quote.amountCents, 0);
+    assert.equal(quote.effective, 'next_renewal');
+    const change = await s.service.scheduleChange(account.id, ESSENTIAL_PLAIN);
+    assert.deepEqual(change, ESSENTIAL_PLAIN);
+    const after = await state(account.id);
+    assert.deepEqual(after?.pendingChange, ESSENTIAL_PLAIN);
+    // Nada mudou agora.
+    assert.equal(after.agendaEnabled, true);
+    assert.equal(after.currentPeriodEnd.toISOString(), before?.currentPeriodEnd.toISOString());
+    assert.equal(
+      await db().paymentOrder.count({ where: { subscriptionId: subscription.id } }),
+      orders,
+    );
+    // Desfazer antes da renovação.
+    await s.service.undoPendingChange(account.id);
+    assert.equal((await state(account.id))?.pendingChange, null);
+  });
+
+  it('a renovação usa o preço do plano pendente e aplica a troca; renovar o atual com troca agendada é recusado', async () => {
+    const { s, account } = await activated('down-renew', { ...ESSENTIAL_PLAIN, agenda: true });
+    clock = new Date('2026-12-01T12:00:00Z');
+    await s.service.scheduleChange(account.id, ESSENTIAL_PLAIN);
+    const code = (promise: Promise<unknown>) =>
+      promise.then(
+        () => 'ok',
+        (error: unknown) => (error as { code?: string }).code,
+      );
+    assert.equal(
+      await code(s.service.createOrder(account, { ...ESSENTIAL_PLAIN, agenda: true })),
+      'PENDING_CHANGE_EXISTS',
+    );
+    assert.equal(
+      await code(s.service.createOrder(account, { ...ESSENTIAL_PLAIN, planCode: 'SCALE' })),
+      'USE_PLAN_CHANGE',
+    );
+    const renewal = await s.service.createOrder(account, ESSENTIAL_PLAIN);
+    assert.equal(renewal.amountCents, 5_900);
+    assert.equal((await checkoutRepo.findOrder(account.id, renewal.orderId))?.kind, 'RENEWAL');
+    fake.markPaid(renewal.orderId, { amount: 5_900 });
+    assert.equal(await s.verifier.verify(renewal.orderId), 'paid');
+    const after = await state(account.id);
+    assert.equal(after?.agendaEnabled, false);
+    assert.equal(after.pendingChange, null);
+    assert.equal(after.currentPeriodEnd.toISOString(), '2027-01-10T12:00:00.000Z');
+  });
+
+  it('downgrade bloqueado por número de empresas (inclusive as não adotadas) e reconferido na renovação', async () => {
+    const { s, account, subscription } = await activated('down-block', {
+      planCode: 'PROFESSIONAL',
+      cycle: 'MONTHLY',
+      agenda: false,
+      stock: false,
+    });
+    const code = (promise: Promise<unknown>) =>
+      promise.then(
+        () => 'ok',
+        (error: unknown) => (error as { code?: string }).code,
+      );
+    clock = new Date('2026-11-15T12:00:00Z');
+    const adopted = await tenants.createCompany('blk1');
+    await db().company.updateMany({
+      where: { id: adopted.id },
+      data: { subscriptionId: subscription.id },
+    });
+    // Uma segunda empresa ainda NÃO adotada (sem assinatura), em que a conta é OWNER ativa.
+    const loose = await tenants.createCompany('blk2');
+    await db().membership.create({
+      data: {
+        companyId: loose.id,
+        email: account.email,
+        passwordHash: 'account-managed',
+        role: 'OWNER',
+        status: 'ACTIVE',
+        accountId: account.id,
+      },
+    });
+    assert.equal(await billing.countCompanies(account.id), 1);
+    assert.equal(await billing.countCompaniesIncludingUnadopted(account.id), 2);
+    assert.equal(
+      await code(s.service.scheduleChange(account.id, { ...ESSENTIAL_PLAIN })),
+      'PLAN_DOWNGRADE_BLOCKED',
+    );
+    assert.equal((await state(account.id))?.pendingChange, null);
+
+    // Reconferência na renovação: troca agendada válida (2 empresas cabem no Profissional ... para o mesmo
+    // plano sem módulos não há troca; usa o Escala -> Profissional abaixo), depois as empresas passam do limite.
+    await db().company.updateMany({
+      where: { id: loose.id },
+      data: { deletedAt: new Date() },
+    });
+    await s.service.scheduleChange(account.id, ESSENTIAL_PLAIN); // 1 empresa cabe no Essencial
+    const renewal = await s.service.createOrder(account, ESSENTIAL_PLAIN);
+    // A conta ganha uma 2ª empresa depois de gerado o pedido: a concessão NÃO aplica a troca.
+    const another = await tenants.createCompany('blk3');
+    await db().company.updateMany({
+      where: { id: another.id },
+      data: { subscriptionId: subscription.id },
+    });
+    fake.markPaid(renewal.orderId, { amount: renewal.amountCents });
+    assert.equal(await s.verifier.verify(renewal.orderId), 'upgrade_stale');
+    assert.equal((await state(account.id))?.plan.code, 'PROFESSIONAL');
+    // E novos pedidos para o plano pequeno são recusados na criação.
+    assert.equal(
+      await code(s.service.createOrder(account, ESSENTIAL_PLAIN)),
+      'PLAN_DOWNGRADE_BLOCKED',
+    );
+  });
+
+  it('cancelar marca o fim do período (segue ativa e renovável) e reativar desmarca; depois de expirada não há o que cancelar', async () => {
+    const { s, account } = await activated('cancel');
+    clock = new Date('2026-11-15T12:00:00Z');
+    await s.service.cancel(account.id);
+    await s.service.cancel(account.id); // idempotente
+    let sub = await state(account.id);
+    assert.equal(sub?.cancelAtPeriodEnd, true);
+    assert.equal(sub.status, 'ACTIVE');
+    assert.equal(sub.currentPeriodEnd.toISOString(), '2026-12-10T12:00:00.000Z');
+    // Segue com acesso até o fim e vira EXPIRED depois (sem carência).
+    const { resolveAccess } = await import('../../domain/index.js');
+    assert.equal(resolveAccess(sub, clock, GRACE).state, 'CANCELLED');
+    assert.equal(resolveAccess(sub, new Date('2026-12-10T12:00:01Z'), GRACE).state, 'EXPIRED');
+    await s.service.reactivate(account.id);
+    sub = await state(account.id);
+    assert.equal(sub?.cancelAtPeriodEnd, false);
+    // Renovar paga e também limpa a marca.
+    await s.service.cancel(account.id);
+    const renewal = await s.service.createOrder(account, ESSENTIAL_PLAIN);
+    fake.markPaid(renewal.orderId, { amount: renewal.amountCents });
+    assert.equal(await s.verifier.verify(renewal.orderId), 'paid');
+    assert.equal((await state(account.id))?.cancelAtPeriodEnd, false);
+    // Depois de expirada (fim + carência) cancelar/reativar não se aplicam: é um pedido normal.
+    clock = new Date('2027-03-01T00:00:00Z');
+    for (const action of [s.service.cancel(account.id), s.service.reactivate(account.id)]) {
+      await assert.rejects(
+        action,
+        (error: unknown) => (error as { code?: string }).code === 'PLAN_CHANGE_UNAVAILABLE',
+      );
+    }
+  });
+
+  it('isolamento: a ação de uma conta nunca toca a assinatura de outra; sem assinatura é NO_SUBSCRIPTION', async () => {
+    const a = await activated('iso-a');
+    const b = await activated('iso-b');
+    const none = await newAccount('iso-none');
+    clock = new Date('2026-11-15T12:00:00Z');
+    await a.s.service.cancel(a.account.id);
+    await a.s.service.scheduleChange(a.account.id, { ...ESSENTIAL_PLAIN, cycle: 'ANNUAL' });
+    const bState = await state(b.account.id);
+    assert.equal(bState?.cancelAtPeriodEnd, false);
+    assert.equal(bState.pendingChange, null);
+    for (const act of [
+      () => a.s.service.cancel(none.id),
+      () => a.s.service.reactivate(none.id),
+      () => a.s.service.undoPendingChange(none.id),
+      () => a.s.service.upgrade(none, PRO_AGENDA),
+      () => a.s.service.quote(none.id, PRO_AGENDA),
+    ]) {
+      await assert.rejects(
+        act(),
+        (error: unknown) => (error as { code?: string }).code === 'NO_SUBSCRIPTION',
+      );
+    }
+    assert.equal(await checkoutRepo.setCancelAtPeriodEnd(none.id, true), false);
+    assert.equal(await checkoutRepo.setPendingChange(none.id, null), false);
+  });
+
+  it('privacidade: nenhuma operação de troca vaza e-mail, id de pedido ou valores em log e as métricas são de conjunto fixo', async () => {
+    const { s, account } = await activated('priv-change');
+    clock = new Date('2026-11-15T12:00:00Z');
+    await s.service.quote(account.id, PRO_AGENDA);
+    const created = await s.service.upgrade(account, PRO_AGENDA);
+    await s.service.cancel(account.id);
+    await s.service.reactivate(account.id);
+    const raw = s.logs.raw() + (await s.metrics.render());
+    for (const secret of [account.email, EMAIL_SENTINEL, created.orderId, created.checkoutUrl]) {
+      assert.equal(raw.includes(secret), false, `vazou ${secret}`);
+    }
   });
 });
 

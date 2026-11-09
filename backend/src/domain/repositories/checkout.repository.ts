@@ -1,4 +1,9 @@
-import type { OrderBreakdown, PaymentOrderKindValue, PaymentOrderStatusValue } from '../billing.js';
+import type {
+  OrderBreakdown,
+  PaymentOrderKindValue,
+  PaymentOrderStatusValue,
+  PendingChange,
+} from '../billing.js';
 
 /** Pedido de pagamento como o checkout o enxerga. Nunca carrega cartão, pagador nem corpo de webhook. */
 export interface PaymentOrderRecord {
@@ -45,7 +50,11 @@ export type GrantResult =
    * Nada foi concedido: o pedido já foi concedido (ou está FAILED, ou não existe), ou a referência da
    * transação já pertence a outro pedido (conflict: a transação foi desfeita; revisão manual).
    */
-  | { readonly granted: false; readonly conflict?: boolean };
+  /**
+   * stale: o pedido ficou obsoleto (upgrade cuja base mudou, ou plano com menos vagas que as empresas atuais);
+   * a transação foi desfeita, o pedido virou FAILED e o pagamento vai para revisão manual/estorno.
+   */
+  | { readonly granted: false; readonly conflict?: boolean; readonly stale?: boolean };
 
 /** Teto de pedidos criados desde um instante, conferido sob a trava da assinatura. */
 export interface OrderCap {
@@ -104,6 +113,10 @@ export interface CheckoutRepository {
    * (SKIP LOCKED): PENDING e também EXPIRED por substituição que tenham link.
    */
   claimForReconciliation(now: Date, staleBefore: Date, limit: number): Promise<readonly string[]>;
+  /** Grava (ou limpa) a troca agendada para a próxima renovação; falso se a conta não tem assinatura. */
+  setPendingChange(accountId: string, change: PendingChange | null): Promise<boolean>;
+  /** Marca (ou desmarca) o cancelamento no fim do período; falso se a conta não tem assinatura. */
+  setCancelAtPeriodEnd(accountId: string, cancel: boolean): Promise<boolean>;
   /** Expira um pedido PENDING cujo prazo passou. */
   expireIfDue(orderId: string, now: Date): Promise<boolean>;
 }

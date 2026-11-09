@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Prisma } from '../../../generated/prisma/client.js';
+import { Prisma } from '../../../generated/prisma/client.js';
 import {
   AccountId,
   BILLING_CYCLES,
@@ -12,6 +12,8 @@ import {
   type PaidFacts,
   type PaymentOrderKindValue,
   type PaymentOrderRecord,
+  type PendingChange,
+  resolveAccess,
   PLAN_CODES,
   RECONCILE_WINDOW_MS,
   subscriptionWindows,
@@ -33,7 +35,20 @@ const breakdownSchema = z.object({
   priceId: z.uuid(),
   priceVersion: z.number().int(),
   whatsappBillingMode: z.enum(WHATSAPP_BILLING_MODES),
+  upgradeBase: z
+    .object({
+      planCode: z.enum(PLAN_CODES),
+      cycle: z.enum(BILLING_CYCLES),
+      agenda: z.boolean(),
+      stock: z.boolean(),
+      periodStart: z.string(),
+      periodEnd: z.string(),
+    })
+    .optional(),
 });
+
+/** Pedido obsoleto no instante da concessão: desfaz a transação e vai para revisão manual. */
+class StaleGrantError extends Error {}
 
 /** Pedido ainda não concedido: pode receber o pagamento (EXPIRED incluído: o dinheiro não se perde). */
 const GRANTABLE = ['PENDING', 'EXPIRED'] as const;
@@ -197,6 +212,14 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
     } catch (error) {
       // Unicidade da referência da transação: pertence a outro pedido. A transação já foi desfeita.
       if (error instanceof ConflictError) return { granted: false, conflict: true };
+      if (error instanceof StaleGrantError) {
+        // A transação foi desfeita (o pedido voltou a PENDING): fecha o pedido para a reconciliação parar.
+        await this.db.paymentOrder.updateMany({
+          where: { id: orderId, status: { in: [...GRANTABLE] } },
+          data: { status: 'FAILED' },
+        });
+        return { granted: false, stale: true };
+      }
       throw error;
     }
   }
@@ -242,6 +265,59 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
               context: { reason: 'grant_target_missing' },
             });
           }
+          // Trava de segurança: o plano do pedido precisa comportar as empresas da assinatura (a renovação
+          // de uma troca agendada é reconferida aqui; nunca se aplica um plano que não comporta a conta).
+          const targetPlan = await tx.plan.findFirst({
+            where: { id: price.planId },
+            select: { maxCompanies: true },
+          });
+          const companies = await tx.company.count({
+            where: { subscriptionId: subscription.id, deletedAt: null },
+          });
+          if (targetPlan === null || companies > targetPlan.maxCompanies)
+            throw new StaleGrantError();
+
+          if (order.kind === 'UPGRADE') {
+            // Upgrade: vale na hora, o FIM do período NÃO muda e o uso já contado permanece. Só concede se a
+            // assinatura ainda é exatamente a da criação do pedido (plano, módulos, ciclo e período).
+            const base = breakdown.upgradeBase;
+            const resolved = resolveAccess(subscription, now, graceDays);
+            const intact =
+              base !== undefined &&
+              subscription.status === 'ACTIVE' &&
+              resolved.state === 'ACTIVE' &&
+              subscription.pendingChange === null &&
+              subscription.plan.code === base.planCode &&
+              subscription.cycle === base.cycle &&
+              subscription.agendaEnabled === base.agenda &&
+              subscription.stockEnabled === base.stock &&
+              subscription.currentPeriodStart.toISOString() === base.periodStart &&
+              subscription.currentPeriodEnd.toISOString() === base.periodEnd &&
+              breakdown.cycle === subscription.cycle;
+            if (!intact) throw new StaleGrantError();
+            await tx.subscription.updateMany({
+              where: { id: subscription.id },
+              data: {
+                planId: price.planId,
+                priceId: price.id,
+                agendaEnabled: breakdown.agenda,
+                stockEnabled: breakdown.stock,
+              },
+            });
+            await tx.paymentOrder.updateMany({
+              where: { id: orderId },
+              data: {
+                periodStart: subscription.currentPeriodStart,
+                periodEnd: subscription.currentPeriodEnd,
+              },
+            });
+            return {
+              granted: true,
+              subscriptionId: subscription.id,
+              periodStart: subscription.currentPeriodStart,
+              periodEnd: subscription.currentPeriodEnd,
+            };
+          }
           const period = computePaidPeriod(subscription, now, graceDays, breakdown.cycle);
           await tx.subscription.updateMany({
             where: { id: subscription.id },
@@ -256,6 +332,8 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
               currentPeriodEnd: period.periodEnd,
               trialEndsAt: null,
               cancelAtPeriodEnd: false,
+              // A troca agendada (se havia) foi aplicada por esta renovação.
+              pendingChange: Prisma.DbNull,
             },
           });
           await tx.paymentOrder.updateMany({
@@ -307,6 +385,29 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
         WHERE id IN (SELECT id FROM picked) AND status IN ('PENDING', 'EXPIRED')
         RETURNING id::text AS id`;
       return rows.map((row) => row.id);
+    });
+  }
+
+  setPendingChange(accountId: string, change: PendingChange | null): Promise<boolean> {
+    return withRepositoryErrors('Checkout.setPendingChange', async () => {
+      const { count } = await this.db.subscription.updateMany({
+        where: { accountId: AccountId.parse(accountId) },
+        data: {
+          pendingChange:
+            change === null ? Prisma.DbNull : (change as unknown as Prisma.InputJsonValue),
+        },
+      });
+      return count > 0;
+    });
+  }
+
+  setCancelAtPeriodEnd(accountId: string, cancel: boolean): Promise<boolean> {
+    return withRepositoryErrors('Checkout.setCancelAtPeriodEnd', async () => {
+      const { count } = await this.db.subscription.updateMany({
+        where: { accountId: AccountId.parse(accountId) },
+        data: { cancelAtPeriodEnd: cancel },
+      });
+      return count > 0;
     });
   }
 
