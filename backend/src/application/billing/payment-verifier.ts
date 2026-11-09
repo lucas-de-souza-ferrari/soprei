@@ -121,7 +121,7 @@ export class PaymentVerifier {
     for (let attempt = 0; ; attempt += 1) {
       let detailed: Detailed;
       try {
-        detailed = await this.verifyDetailed(orderId, hints, { skipCooldown: attempt > 0 });
+        detailed = await this.verifyDetailed(orderId, hints, { skipCooldown: true });
       } catch (error) {
         this.deps.logger.error(
           {
@@ -167,7 +167,6 @@ export class PaymentVerifier {
     // 1ª tentativa: só handle e order_nsu. As referências vindas de fonte não confiável só entram se o
     // provedor recusar a primeira com um 4xx específico (estratégia tolerante).
     let check = await provider.checkPayment({ orderId: order.id });
-    let usedRefs: PaymentHints | undefined;
     const refs: PaymentHints = {
       transactionNsu: hints.transactionNsu ?? order.providerTransactionRef ?? undefined,
       slug: hints.slug ?? order.providerSlug ?? undefined,
@@ -178,7 +177,6 @@ export class PaymentVerifier {
       (refs.transactionNsu !== undefined || refs.slug !== undefined)
     ) {
       check = await provider.checkPayment({ orderId: order.id, ...refs });
-      usedRefs = refs;
     }
     if (!check.ok) {
       const error = check.error;
@@ -218,23 +216,25 @@ export class PaymentVerifier {
     const granted = await checkout.grantPaidOrder(
       order.id,
       {
-        transactionNsu: usedRefs?.transactionNsu ?? null,
-        slug: usedRefs?.slug ?? null,
+        // Só a referência que o PROVEDOR devolveu (nunca a dica do corpo do webhook ou do navegador).
+        transactionNsu: outcome.transactionNsu,
+        slug: outcome.slug,
         captureMethod: outcome.captureMethod,
       },
       now,
       this.deps.graceDays,
     );
     if (!granted.granted) {
-      if (granted.stale === true) {
-        // Upgrade com a base mudada (ou plano que não comporta as empresas): nada concedido; o pedido virou FAILED
-        // e o pagamento vai para revisão manual/estorno.
-        metrics?.countBillingOrder(order.kind, 'upgrade_stale');
+      if (granted.stale !== undefined) {
+        // Pedido obsoleto (upgrade com a base mudada, renovação de plano que já não vale ou plano que não
+        // comporta as empresas): nada concedido; o pedido virou FAILED e o pagamento vai para revisão manual.
+        const upgrade = granted.stale === 'upgrade';
+        metrics?.countBillingOrder(order.kind, upgrade ? 'upgrade_stale' : 'renewal_stale');
         logger.error(
           { orderRef },
           'pedido obsoleto no pagamento; nada concedido (revisão manual ou estorno)',
         );
-        return { result: 'upgrade_stale' };
+        return { result: upgrade ? 'upgrade_stale' : 'renewal_stale' };
       }
       if (granted.conflict === true) {
         // A referência já pertence a outro pedido: nada foi concedido e a transação foi desfeita.

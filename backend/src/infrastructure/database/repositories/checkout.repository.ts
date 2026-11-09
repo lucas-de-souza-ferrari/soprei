@@ -14,6 +14,7 @@ import {
   type PaymentOrderRecord,
   type PendingChange,
   resolveAccess,
+  samePlanSelection,
   PLAN_CODES,
   RECONCILE_WINDOW_MS,
   subscriptionWindows,
@@ -48,7 +49,11 @@ const breakdownSchema = z.object({
 });
 
 /** Pedido obsoleto no instante da concessão: desfaz a transação e vai para revisão manual. */
-class StaleGrantError extends Error {}
+class StaleGrantError extends Error {
+  constructor(readonly kind: 'upgrade' | 'renewal') {
+    super('stale');
+  }
+}
 
 /** Pedido ainda não concedido: pode receber o pagamento (EXPIRED incluído: o dinheiro não se perde). */
 const GRANTABLE = ['PENDING', 'EXPIRED'] as const;
@@ -218,7 +223,7 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
           where: { id: orderId, status: { in: [...GRANTABLE] } },
           data: { status: 'FAILED' },
         });
-        return { granted: false, stale: true };
+        return { granted: false, stale: error.kind };
       }
       throw error;
     }
@@ -274,8 +279,10 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
           const companies = await tx.company.count({
             where: { subscriptionId: subscription.id, deletedAt: null },
           });
-          if (targetPlan === null || companies > targetPlan.maxCompanies)
-            throw new StaleGrantError();
+          const staleKind = order.kind === 'UPGRADE' ? 'upgrade' : 'renewal';
+          if (targetPlan === null || companies > targetPlan.maxCompanies) {
+            throw new StaleGrantError(staleKind);
+          }
 
           if (order.kind === 'UPGRADE') {
             // Upgrade: vale na hora, o FIM do período NÃO muda e o uso já contado permanece. Só concede se a
@@ -294,7 +301,7 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
               subscription.currentPeriodStart.toISOString() === base.periodStart &&
               subscription.currentPeriodEnd.toISOString() === base.periodEnd &&
               breakdown.cycle === subscription.cycle;
-            if (!intact) throw new StaleGrantError();
+            if (!intact) throw new StaleGrantError('upgrade');
             await tx.subscription.updateMany({
               where: { id: subscription.id },
               data: {
@@ -318,6 +325,27 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
               periodEnd: subscription.currentPeriodEnd,
             };
           }
+          // Renovação ou assinatura nova: o plano do pedido precisa ser ainda o vigente ou o da troca agendada.
+          // Um upgrade pago depois da criação do pedido não pode ser desfeito por ele (revisão manual).
+          const inForce =
+            subscription.status !== 'TRIAL' &&
+            resolveAccess(subscription, now, graceDays).access !== 'blocked';
+          const target = {
+            planCode: breakdown.planCode,
+            cycle: breakdown.cycle,
+            agenda: breakdown.agenda,
+            stock: breakdown.stock,
+          };
+          const matchesPending =
+            subscription.pendingChange !== null &&
+            samePlanSelection(target, subscription.pendingChange);
+          const matchesCurrent = samePlanSelection(target, {
+            planCode: subscription.plan.code,
+            cycle: subscription.cycle,
+            agenda: subscription.agendaEnabled,
+            stock: subscription.stockEnabled,
+          });
+          if (inForce && !matchesCurrent && !matchesPending) throw new StaleGrantError('renewal');
           const period = computePaidPeriod(subscription, now, graceDays, breakdown.cycle);
           await tx.subscription.updateMany({
             where: { id: subscription.id },
@@ -332,8 +360,9 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
               currentPeriodEnd: period.periodEnd,
               trialEndsAt: null,
               cancelAtPeriodEnd: false,
-              // A troca agendada (se havia) foi aplicada por esta renovação.
-              pendingChange: Prisma.DbNull,
+              // Só a troca agendada que ESTA renovação aplicou (ou uma já sem sentido, fora de vigência) é
+              // limpa; uma troca agendada diferente permanece.
+              ...(matchesPending || !inForce ? { pendingChange: Prisma.DbNull } : {}),
             },
           });
           await tx.paymentOrder.updateMany({
@@ -385,6 +414,19 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
         WHERE id IN (SELECT id FROM picked) AND status IN ('PENDING', 'EXPIRED')
         RETURNING id::text AS id`;
       return rows.map((row) => row.id);
+    });
+  }
+
+  expireOpenRenewals(accountId: string): Promise<void> {
+    return withRepositoryErrors('Checkout.expireOpenRenewals', async () => {
+      await this.db.paymentOrder.updateMany({
+        where: {
+          kind: 'RENEWAL',
+          status: 'PENDING',
+          subscription: { accountId: AccountId.parse(accountId) },
+        },
+        data: { status: 'EXPIRED' },
+      });
     });
   }
 

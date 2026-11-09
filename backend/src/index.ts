@@ -565,10 +565,12 @@ async function main(): Promise<void> {
     const purgeTimer = infrastructure.accountPurge;
     infrastructure.accountPurge = {
       async stop() {
-        await purgeTimer?.stop();
-        await reconcileTimer?.stop();
+        // allSettled: se um dos timers falhar ao parar, os outros e o drain ainda rodam.
+        const results = await Promise.allSettled([purgeTimer?.stop(), reconcileTimer?.stop()]);
         // O desligamento também espera as confirmações em segundo plano (webhook já respondido).
         await checkout.verifier.drain();
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
       },
     };
   }

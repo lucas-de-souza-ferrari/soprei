@@ -3,6 +3,7 @@ import {
   type CreateLinkInput,
   type PaymentCheckInput,
   type PaymentCheckOutcome,
+  type PaymentFailureDetail,
   type PaymentFailureReason,
   type PaymentOperation,
   type PaymentProvider,
@@ -31,6 +32,15 @@ const checkResponseSchema = z.object({
   amount: z.number().nonnegative().optional(),
   paid_amount: z.number().nonnegative().optional(),
   capture_method: z.string().max(40).optional(),
+  // Só se o provedor devolver: a referência confirmada pelo PROVEDOR (a única que se grava).
+  transaction_nsu: z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]{1,128}$/)
+    .optional(),
+  slug: z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]{1,128}$/)
+    .optional(),
 });
 
 export interface InfinitepayClientOptions {
@@ -91,9 +101,11 @@ export class InfinitepayClient implements PaymentProvider {
     });
     if (!result.ok) return result;
     const parsed = linkResponseSchema.safeParse(result.value);
-    if (!parsed.success || !this.isSafeLink(parsed.data.url)) {
-      return fail('create_link', 'invalid_response');
-    }
+    if (!parsed.success)
+      return fail('create_link', 'invalid_response', undefined, undefined, 'format');
+    const unsafe = this.linkProblem(parsed.data.url);
+    if (unsafe !== undefined)
+      return fail('create_link', 'invalid_response', undefined, undefined, unsafe);
     return Result.ok({ url: parsed.data.url });
   }
 
@@ -119,20 +131,22 @@ export class InfinitepayClient implements PaymentProvider {
       amountCents: integerOrNull(data.amount),
       paidAmountCents: integerOrNull(data.paid_amount),
       captureMethod: data.capture_method ?? null,
+      transactionNsu: data.transaction_nsu ?? null,
+      slug: data.slug ?? null,
     });
   }
 
   /** O link vai ao navegador: só https (http só quando a própria base é http, ou seja, o servidor falso). */
-  private isSafeLink(raw: string): boolean {
+  private linkProblem(raw: string): PaymentFailureDetail | undefined {
     try {
       const url = new URL(raw);
-      if (url.username !== '' || url.password !== '') return false;
+      if (url.username !== '' || url.password !== '') return 'credentials';
       const host = (this.options.checkoutHost ?? DEFAULT_CHECKOUT_HOST).toLowerCase();
-      if (url.hostname.toLowerCase() !== host) return false;
-      if (url.protocol === 'https:') return true;
-      return url.protocol === 'http:' && this.baseUrl.startsWith('http:');
+      if (url.hostname.toLowerCase() !== host) return 'unexpected_host';
+      if (url.protocol === 'https:') return undefined;
+      return url.protocol === 'http:' && this.baseUrl.startsWith('http:') ? undefined : 'scheme';
     } catch {
-      return false;
+      return 'format';
     }
   }
 
@@ -182,6 +196,8 @@ export class InfinitepayClient implements PaymentProvider {
 function reasonFor(status: number): PaymentFailureReason {
   if (status === 401 || status === 403) return 'config';
   if (status === 429) return 'rate_limited';
+  // 3xx (redirect manual): nunca é "recusa" nem "não pago" (a resposta não é a esperada).
+  if (status >= 300 && status < 400) return 'invalid_response';
   if (status === 408 || status >= 500) return 'transient';
   return 'rejected';
 }
@@ -202,6 +218,7 @@ function fail(
   reason: PaymentFailureReason,
   httpStatus?: number,
   retryAfter?: number,
+  detail?: PaymentFailureDetail,
 ): Result<never, PaymentProviderError> {
   return Result.err(
     new PaymentProviderError({
@@ -209,6 +226,7 @@ function fail(
       reason,
       ...(httpStatus === undefined ? {} : { httpStatus }),
       ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
+      ...(detail === undefined ? {} : { detail }),
     }),
   );
 }

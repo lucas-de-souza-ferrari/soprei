@@ -77,7 +77,7 @@ export interface ChangeRequest {
 
 /** Cotação de uma troca (só do servidor): valor em centavos e quando vale. */
 export interface ChangeQuote {
-  readonly kind: 'NEW' | 'RENEWAL' | 'UPGRADE' | 'DOWNGRADE';
+  readonly kind: 'NEW' | 'RENEWAL' | 'UPGRADE' | 'DOWNGRADE' | 'CYCLE_CHANGE';
   /** NEW e RENEWAL: o valor cheio do ciclo; UPGRADE: o proporcional; DOWNGRADE: 0 (agendada, sem cobrança). */
   readonly amountCents: number;
   readonly effective: 'now' | 'next_renewal';
@@ -276,7 +276,7 @@ export class CheckoutService {
     }
     await this.assertFits(accountId, ev.entry);
     return {
-      kind: 'DOWNGRADE',
+      kind: ev.relation === 'cycle' ? 'CYCLE_CHANGE' : 'DOWNGRADE',
       amountCents: 0,
       effective: 'next_renewal',
       periodEnd,
@@ -349,6 +349,8 @@ export class CheckoutService {
     const plan = this.upgradePlan(ev, request, now);
     await this.assertFits(account.id, ev.entry);
     const sub = ev.subscription;
+    // Uma renovação aberta no plano de antes não pode desfazer o upgrade: expira as abertas.
+    await this.deps.checkout.expireOpenRenewals(account.id);
     return this.issueOrder(account, ev.entry, ev.price, request, 'UPGRADE', plan.cents, now, {
       planCode: sub.plan.code,
       cycle: sub.cycle,
@@ -386,6 +388,7 @@ export class CheckoutService {
       agenda: request.agenda,
       stock: request.stock,
     };
+    await this.deps.checkout.expireOpenRenewals(accountId);
     await this.deps.checkout.setPendingChange(accountId, change);
     this.deps.logger.info({ accountId }, 'troca de plano agendada para a próxima renovação');
     return change;
@@ -400,7 +403,10 @@ export class CheckoutService {
   /** Cancelar no modelo de link por ciclo: marca o fim do período; nada é cobrado nem apagado. */
   async cancel(accountId: string): Promise<void> {
     const sub = await this.requirePaidInForce(accountId);
-    if (!sub.cancelAtPeriodEnd) await this.deps.checkout.setCancelAtPeriodEnd(accountId, true);
+    if (!sub.cancelAtPeriodEnd) {
+      await this.deps.checkout.expireOpenRenewals(accountId);
+      await this.deps.checkout.setCancelAtPeriodEnd(accountId, true);
+    }
   }
 
   /** Reativar antes do fim do período limpa a marca; depois de expirada é um pedido normal. */
@@ -501,7 +507,12 @@ export class CheckoutService {
         );
       } else {
         logger.warn(
-          { accountId: account.id, orderRef: messageRef(orderId), reason },
+          {
+            accountId: account.id,
+            orderRef: messageRef(orderId),
+            reason,
+            ...(link.error.detail === undefined ? {} : { detail: link.error.detail }),
+          },
           'não foi possível criar o link',
         );
       }

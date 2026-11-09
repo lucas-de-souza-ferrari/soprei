@@ -140,7 +140,8 @@ export type BillingOrderResult =
   | 'paid'
   | 'amount_mismatch'
   | 'reference_conflict'
-  | 'upgrade_stale';
+  | 'upgrade_stale'
+  | 'renewal_stale';
 export type BillingWebhookResult =
   'recorded' | 'duplicate' | 'unknown_order' | 'bad_token' | 'throttled' | 'invalid' | 'error';
 export type BillingCheckResult =
@@ -149,6 +150,7 @@ export type BillingCheckResult =
   | 'not_paid'
   | 'amount_mismatch'
   | 'upgrade_stale'
+  | 'renewal_stale'
   | 'unverifiable'
   | 'unknown_order'
   | 'ignored'

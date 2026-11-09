@@ -36,6 +36,7 @@ export class FakeInfinitepayApi {
   private linkFailure: Failure | undefined;
   private checkFailure: Failure | undefined;
   private refsRequired = false;
+  private echoReferences = true;
   private checkFailuresLeft = Number.POSITIVE_INFINITY;
   private linkResponse: unknown;
 
@@ -83,6 +84,11 @@ export class FakeInfinitepayApi {
   failChecks(failure: Failure | undefined, times = Number.POSITIVE_INFINITY): void {
     this.checkFailure = failure;
     this.checkFailuresLeft = times;
+  }
+
+  /** Se o payment_check devolve (eco) a referência recebida; false simula um provedor que não a devolve. */
+  echoRefs(echo: boolean): void {
+    this.echoReferences = echo;
   }
 
   /** O payment_check passa a recusar (400) a consulta sem transaction_nsu e slug. */
@@ -160,6 +166,10 @@ export class FakeInfinitepayApi {
       paid_amount: payment.paidAmount ?? payment.amount,
       installments: 1,
       capture_method: payment.captureMethod ?? 'pix',
+      ...(this.echoReferences && typeof body.transaction_nsu === 'string'
+        ? { transaction_nsu: body.transaction_nsu }
+        : {}),
+      ...(this.echoReferences && typeof body.slug === 'string' ? { slug: body.slug } : {}),
     });
   }
 

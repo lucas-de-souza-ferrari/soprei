@@ -1401,7 +1401,7 @@ describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)',
       data: { subscriptionId: subscription.id },
     });
     fake.markPaid(renewal.orderId, { amount: renewal.amountCents });
-    assert.equal(await s.verifier.verify(renewal.orderId), 'upgrade_stale');
+    assert.equal(await s.verifier.verify(renewal.orderId), 'renewal_stale');
     assert.equal((await state(account.id))?.plan.code, 'PROFESSIONAL');
     // E novos pedidos para o plano pequeno são recusados na criação.
     assert.equal(
@@ -1479,6 +1479,150 @@ describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)',
     for (const secret of [account.email, EMAIL_SENTINEL, created.orderId, created.checkoutUrl]) {
       assert.equal(raw.includes(secret), false, `vazou ${secret}`);
     }
+  });
+});
+
+describe('segunda revisão da E3: cooldown do webhook, renovação obsoleta e referências do provedor', () => {
+  const ESS = { planCode: 'ESSENTIAL', cycle: 'MONTHLY', agenda: false, stock: false } as const;
+  const PRO_AGENDA = { planCode: 'PROFESSIONAL', agenda: true, stock: false } as const;
+
+  async function activeEssential(label: string) {
+    const s = stack({ cooldownMs: 10_000 });
+    clock = new Date('2026-11-10T12:00:00Z');
+    const { account } = await accountWithTrial(label);
+    const first = await s.service.createOrder(account, ESS);
+    fake.markPaid(first.orderId, { amount: first.amountCents });
+    assert.equal(await s.verifier.verify(first.orderId, {}, { skipCooldown: true }), 'paid');
+    return { s, account };
+  }
+
+  it('I1: o webhook logo depois de um "Já paguei" com not_paid (atraso do provedor) concede e não é descartado pelo cooldown', async () => {
+    const s = stack({ cooldownMs: 10_000 });
+    const { account } = await accountWithTrial('webhook-cooldown');
+    const created = await s.service.createOrder(account, ESS);
+    // O provedor ainda não refletia o pagamento: "Já paguei" dá not_paid e abre o cooldown.
+    const early = await s.service.checkOrder(account.id, created.orderId);
+    assert.equal(early.result, 'not_paid');
+    assert.equal((await s.service.checkOrder(account.id, created.orderId)).result, 'cooldown');
+    // 3 s depois o provedor confirma e o webhook definitivo chega: não pode ser descartado.
+    clock = new Date(clock.getTime() + 3_000);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    assert.equal(
+      await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
+        orderNsu: created.orderId,
+        transactionNsu: undefined,
+        invoiceSlug: undefined,
+      }),
+      'recorded',
+    );
+    await s.verifier.drain();
+    assert.equal((await checkoutRepo.findOrder(account.id, created.orderId))?.status, 'PAID');
+  });
+
+  it('I2a: renovação aberta no plano menor, upgrade pago, depois a renovação paga: não desfaz o upgrade e vai para revisão (renewal_stale)', async () => {
+    const { s, account } = await activeEssential('renewal-stale');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const renewal = await s.service.createOrder(account, ESS);
+    const upgrade = await s.service.upgrade(account, PRO_AGENDA);
+    // (b) criar o upgrade expira as renovações abertas.
+    assert.equal((await checkoutRepo.findOrder(account.id, renewal.orderId))?.status, 'EXPIRED');
+    fake.markPaid(upgrade.orderId, { amount: upgrade.amountCents });
+    assert.equal(await s.verifier.verify(upgrade.orderId, {}, { skipCooldown: true }), 'paid');
+
+    fake.markPaid(renewal.orderId, { amount: renewal.amountCents });
+    assert.equal(
+      await s.verifier.verify(renewal.orderId, {}, { skipCooldown: true }),
+      'renewal_stale',
+    );
+    const sub = await billing.findSubscription(account.id);
+    assert.equal(sub?.plan.code, 'PROFESSIONAL');
+    assert.equal(sub.agendaEnabled, true);
+    assert.equal(sub.currentPeriodEnd.toISOString(), '2026-12-10T12:00:00.000Z');
+    assert.equal((await checkoutRepo.findOrder(account.id, renewal.orderId))?.status, 'FAILED');
+    const metrics = await s.metrics.render();
+    assert.match(metrics, /billing_orders_total\{kind="RENEWAL",result="renewal_stale"\} 1/);
+    assert.doesNotMatch(metrics, /kind="RENEWAL",result="upgrade_stale"/);
+  });
+
+  it('I2d: renovação aberta e troca agendada depois: a renovação do plano atual concede e a troca agendada NÃO é apagada', async () => {
+    const { s, account } = await activeEssential('renewal-keeps-pending');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const renewal = await s.service.createOrder(account, { ...ESS, agenda: false });
+    // Troca agendada para o plano SCALE só de agenda... (qualquer troca diferente do plano do pedido).
+    const pending = {
+      planCode: 'ESSENTIAL',
+      cycle: 'ANNUAL',
+      agenda: false,
+      stock: false,
+    } as const;
+    await s.service.scheduleChange(account.id, pending);
+    assert.equal((await checkoutRepo.findOrder(account.id, renewal.orderId))?.status, 'EXPIRED');
+    fake.markPaid(renewal.orderId, { amount: renewal.amountCents });
+    assert.equal(await s.verifier.verify(renewal.orderId, {}, { skipCooldown: true }), 'paid');
+    const sub = await billing.findSubscription(account.id);
+    assert.deepEqual(sub?.pendingChange, pending);
+    assert.equal(sub.currentPeriodEnd.toISOString(), '2027-01-10T12:00:00.000Z');
+  });
+
+  it('S8: concessão de renovação e agendamento de troca em paralelo nunca apagam a troca agendada', async () => {
+    const { s, account } = await activeEssential('race-pending');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const renewal = await s.service.createOrder(account, ESS);
+    fake.markPaid(renewal.orderId, { amount: renewal.amountCents });
+    const pending = {
+      planCode: 'ESSENTIAL',
+      cycle: 'ANNUAL',
+      agenda: false,
+      stock: false,
+    } as const;
+    await Promise.all([
+      s.verifier.verify(renewal.orderId, {}, { skipCooldown: true }),
+      checkoutRepo.setPendingChange(account.id, pending),
+    ]);
+    // Motivo: a renovação aplicou o plano atual, não a troca agendada; esta tem de sobreviver em qualquer ordem.
+    assert.deepEqual((await billing.findSubscription(account.id))?.pendingChange, pending);
+  });
+
+  it('S3: a cotação de mudança de ciclo tem o rótulo próprio (CYCLE_CHANGE)', async () => {
+    const { s, account } = await activeEssential('quote-cycle');
+    clock = new Date('2026-11-15T12:00:00Z');
+    const quote = await s.service.quote(account.id, { ...ESS, cycle: 'ANNUAL' });
+    assert.equal(quote.kind, 'CYCLE_CHANGE');
+    assert.equal(quote.effective, 'next_renewal');
+    assert.equal(quote.amountCents, 0);
+  });
+
+  it('S6: só a referência que o PROVEDOR devolve é gravada; a dica do corpo do webhook ou do navegador nunca', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('provider-refs');
+    const created = await s.service.createOrder(account, ESS);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    fake.requireRefs(true);
+    fake.echoRefs(false);
+    try {
+      assert.equal(
+        await s.verifier.verify(created.orderId, { transactionNsu: 'dica', slug: 'dica' }),
+        'paid',
+      );
+    } finally {
+      fake.requireRefs(false);
+      fake.echoRefs(true);
+    }
+    const order = await checkoutRepo.findOrder(account.id, created.orderId);
+    assert.equal(order?.status, 'PAID');
+    assert.equal(order.providerTransactionRef, null);
+    assert.equal(order.providerSlug, null);
+  });
+
+  it('S2: link com host inesperado é recusado com motivo próprio no log, sem expor o link nem a chave', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('detail');
+    fake.setLinkResponse({ url: 'https://atacante.exemplo/segredo-do-link' });
+    await assert.rejects(s.service.createOrder(account, ESS));
+    const warn = s.logs.lines().find((line) => line.detail !== undefined);
+    assert.equal(warn?.detail, 'unexpected_host');
+    assert.equal(s.logs.raw().includes('atacante.exemplo'), false);
+    assert.equal(s.logs.raw().includes(API_KEY), false);
   });
 });
 

@@ -14,7 +14,12 @@ export type PaymentOperation = 'create_link' | 'payment_check';
 export type PaymentFailureReason =
   'config' | 'rate_limited' | 'transient' | 'rejected' | 'invalid_response';
 
+/** Motivo fino de uma resposta inválida (conjunto fixo; nunca o corpo nem o link): para o primeiro teste real. */
+export type PaymentFailureDetail =
+  'unexpected_host' | 'scheme' | 'credentials' | 'format' | 'redirect';
+
 export interface PaymentProviderErrorDetails {
+  readonly detail?: PaymentFailureDetail;
   readonly operation: PaymentOperation;
   readonly reason: PaymentFailureReason;
   readonly httpStatus?: number;
@@ -32,6 +37,7 @@ export class PaymentProviderError extends ExternalServiceError {
   readonly reason: PaymentFailureReason;
   readonly httpStatus: number | undefined;
   readonly retryAfterMs: number | undefined;
+  readonly detail: PaymentFailureDetail | undefined;
 
   constructor(details: PaymentProviderErrorDetails) {
     super('Falha ao consultar o provedor de pagamento', {
@@ -39,6 +45,7 @@ export class PaymentProviderError extends ExternalServiceError {
         operation: details.operation,
         reason: details.reason,
         retryable: PaymentProviderError.isRetryable(details.reason),
+        ...(details.detail === undefined ? {} : { detail: details.detail }),
         ...(details.httpStatus === undefined ? {} : { httpStatus: details.httpStatus }),
       },
     });
@@ -46,6 +53,7 @@ export class PaymentProviderError extends ExternalServiceError {
     this.reason = details.reason;
     this.httpStatus = details.httpStatus;
     this.retryAfterMs = details.retryAfterMs;
+    this.detail = details.detail;
   }
 
   get retryable(): boolean {
@@ -85,6 +93,9 @@ export interface PaymentCheckOutcome {
   /** Valor pago (pode ser maior: taxas de parcelamento repassadas). Só informativo. */
   readonly paidAmountCents: number | null;
   readonly captureMethod: string | null;
+  /** Só o que o PROVEDOR devolveu na resposta (nunca a dica do corpo do webhook ou do navegador). */
+  readonly transactionNsu: string | null;
+  readonly slug: string | null;
 }
 
 /**

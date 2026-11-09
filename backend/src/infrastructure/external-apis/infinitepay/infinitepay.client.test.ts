@@ -228,6 +228,8 @@ describe('InfinitepayClient.checkPayment (spec 031, E3)', () => {
       amountCents: 8_800,
       paidAmountCents: 9_160,
       captureMethod: 'credit_card',
+      transactionNsu: 'tx-1',
+      slug: 'slug-1',
     });
     const call = fake.calls.at(-1);
     assert.equal(call?.path, '/payment_check');
@@ -280,6 +282,90 @@ describe('InfinitepayClient.checkPayment (spec 031, E3)', () => {
     const serialized = JSON.stringify(result.error) + result.error.message;
     for (const secret of [API_KEY, 'recibo.exemplo', 'tx-9']) {
       assert.equal(serialized.includes(secret), false, `vazou ${secret}`);
+    }
+  });
+});
+
+describe('InfinitepayClient: motivos finos e 3xx (spec 031, revisão)', () => {
+  const make = (url: string, status = 200) =>
+    new InfinitepayClient({
+      baseUrl: 'https://api.checkout.infinitepay.io',
+      apiKey: new SecretString(API_KEY),
+      handle: 'loja-teste',
+      timeoutMs: 1_000,
+      fetch: () =>
+        Promise.resolve(
+          new Response(status >= 300 && status < 400 ? null : JSON.stringify({ url }), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+    });
+
+  it('S2: o erro de link inválido leva um motivo fixo (host, esquema, credenciais, formato) sem expor o link', async () => {
+    const cases: [string, string][] = [
+      ['https://atacante.exemplo/x', 'unexpected_host'],
+      ['http://checkout.infinitepay.com.br/x', 'scheme'],
+      ['https://u:p@checkout.infinitepay.com.br/x', 'credentials'],
+      ['não é url', 'format'],
+    ];
+    for (const [url, detail] of cases) {
+      const result = await make(url).createLink(LINK_INPUT);
+      assert.ok(!result.ok, url);
+      assert.equal(result.error.reason, 'invalid_response');
+      assert.equal(result.error.detail, detail);
+      assert.equal(JSON.stringify(result.error).includes('atacante'), false);
+      assert.equal(
+        JSON.stringify(result.error).includes(url.slice(0, 12)) && detail === 'format',
+        false,
+      );
+    }
+  });
+
+  it('S7: 3xx (redirect manual) nunca vira "recusa" nem "não pago": é resposta inválida', async () => {
+    for (const status of [301, 302, 307, 308]) {
+      const check = await make('x', status).checkPayment({ orderId: ORDER });
+      assert.ok(!check.ok);
+      assert.equal(check.error.reason, 'invalid_response');
+      assert.equal(check.error.httpStatus, status);
+      const link = await make('x', status).createLink(LINK_INPUT);
+      assert.ok(!link.ok);
+      assert.equal(link.error.reason, 'invalid_response');
+    }
+  });
+
+  it('S6: a referência só sai do payment_check se o provedor a devolver', async () => {
+    const withRefs = new InfinitepayClient({
+      baseUrl: 'https://api.checkout.infinitepay.io',
+      apiKey: new SecretString(API_KEY),
+      handle: 'loja-teste',
+      timeoutMs: 1_000,
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              success: true,
+              paid: true,
+              amount: 100,
+              transaction_nsu: 'tx-p',
+              slug: 'sl-p',
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        ),
+    });
+    const result = await withRefs.checkPayment({ orderId: ORDER, transactionNsu: 'dica' });
+    assert.ok(result.ok);
+    assert.equal(result.value.transactionNsu, 'tx-p');
+    assert.equal(result.value.slug, 'sl-p');
+    fake.markPaid(ORDER, { amount: 100 });
+    fake.echoRefs(false);
+    try {
+      const without = await client().checkPayment({ orderId: ORDER, transactionNsu: 'dica' });
+      assert.ok(without.ok);
+      assert.equal(without.value.transactionNsu, null);
+    } finally {
+      fake.echoRefs(true);
     }
   });
 });
