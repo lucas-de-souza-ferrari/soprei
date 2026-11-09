@@ -354,12 +354,34 @@ describe('parseConfig', () => {
         INFINITEPAY_API_KEY: 'inchk_chave_de_teste_0123',
         INFINITEPAY_HANDLE: 'loja-teste',
         INFINITEPAY_WEBHOOK_BASE_URL: 'https://api.exemplo.test',
+        TRUST_PROXY: 'false',
       };
 
       it('aceita a configuração completa', () => {
         const result = parseConfig(CHECKOUT_ON);
         assert.ok(result.ok);
         assert.equal(result.value.INFINITEPAY_HANDLE, 'loja-teste');
+      });
+
+      it('I2: exige TRUST_PROXY definido explicitamente (mesmo false); a variável opcional de e-mail e o host do link têm padrão', () => {
+        const withoutProxy = { ...CHECKOUT_ON, TRUST_PROXY: undefined };
+        const missing = parseConfig(withoutProxy);
+        assert.equal(missing.ok, false);
+        assert.match(missing.error.message, /TRUST_PROXY: precisa ser definida explicitamente/);
+        assert.equal(parseConfig({ ...CHECKOUT_ON, TRUST_PROXY: '' }).ok, false);
+        const ok = parseConfig({ ...CHECKOUT_ON, TRUST_PROXY: '127.0.0.1,::1' });
+        assert.ok(ok.ok);
+        assert.equal(ok.value.CHECKOUT_SEND_CUSTOMER_EMAIL, false);
+        assert.equal(ok.value.INFINITEPAY_CHECKOUT_HOST, 'checkout.infinitepay.com.br');
+        assert.equal(ok.value.BILLING_RECONCILE_INTERVAL_MINUTES, 10);
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, BILLING_RECONCILE_INTERVAL_MINUTES: '0' }).ok,
+          true,
+        );
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, CHECKOUT_SEND_CUSTOMER_EMAIL: 'sim' }).ok,
+          false,
+        );
       });
 
       it('exige BILLING_ENABLED e as três variáveis', () => {

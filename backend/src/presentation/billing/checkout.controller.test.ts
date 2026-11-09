@@ -20,12 +20,13 @@ const ORIGIN = 'http://localhost:5174';
 const SECRET = 'a'.repeat(43);
 const ACCOUNT_ID = '01900000-0000-7000-8000-0000000000a1';
 const ORDER_ID = '01900000-0000-7000-8000-0000000000b2';
+const TOKEN = 'T'.repeat(43);
 const BROWSER = { cookie: `soprei_session=${SECRET}`, origin: ORIGIN, 'x-soprei-app': 'web' };
 
 class FakeCheckout {
   readonly created: { accountId: string; email: string; request: OrderRequest }[] = [];
   readonly checks: { accountId: string; orderId: string; hints: unknown }[] = [];
-  readonly webhooks: { orderId: string; event: WebhookEvent }[] = [];
+  readonly webhooks: { orderId: string; event: WebhookEvent; token: string }[] = [];
   failWebhook = false;
 
   createOrder(
@@ -73,8 +74,8 @@ class FakeCheckout {
     });
   }
 
-  acceptWebhook(orderId: string, event: WebhookEvent): Promise<WebhookOutcome> {
-    this.webhooks.push({ orderId, event });
+  acceptWebhook(orderId: string, token: string, event: WebhookEvent): Promise<WebhookOutcome> {
+    this.webhooks.push({ orderId, event, token });
     if (this.failWebhook) return Promise.reject(new Error('banco fora'));
     return Promise.resolve('recorded');
   }
@@ -142,7 +143,7 @@ describe('POST /account/billing/orders (spec 031, E3)', () => {
     assert.equal(check.statusCode, 404);
     const webhook = await app.inject({
       method: 'POST',
-      url: `/webhooks/infinitepay/${ORDER_ID}`,
+      url: `/webhooks/infinitepay/${ORDER_ID}/${TOKEN}`,
       payload: { order_nsu: ORDER_ID },
     });
     assert.equal(webhook.statusCode, 404);
@@ -292,7 +293,7 @@ describe('POST /webhooks/infinitepay/:orderId (spec 031, E3)', () => {
     const { app, checkout, logs } = start();
     const response = await app.inject({
       method: 'POST',
-      url: `/webhooks/infinitepay/${ORDER_ID}`,
+      url: `/webhooks/infinitepay/${ORDER_ID}/${TOKEN}`,
       payload: {
         order_nsu: ORDER_ID,
         transaction_nsu: 'tx-77',
@@ -307,6 +308,7 @@ describe('POST /webhooks/infinitepay/:orderId (spec 031, E3)', () => {
     assert.deepEqual(checkout.webhooks, [
       {
         orderId: ORDER_ID,
+        token: TOKEN,
         event: { orderNsu: ORDER_ID, transactionNsu: 'tx-77', invoiceSlug: 'slug-77' },
       },
     ]);
@@ -321,20 +323,20 @@ describe('POST /webhooks/infinitepay/:orderId (spec 031, E3)', () => {
     const { app, checkout } = start();
     const malformed = await app.inject({
       method: 'POST',
-      url: '/webhooks/infinitepay/nao-e-uuid',
+      url: `/webhooks/infinitepay/nao-e-uuid/${TOKEN}`,
       payload: { order_nsu: ORDER_ID },
     });
     assert.equal(malformed.statusCode, 200);
     const array = await app.inject({
       method: 'POST',
-      url: `/webhooks/infinitepay/${ORDER_ID}`,
+      url: `/webhooks/infinitepay/${ORDER_ID}/${TOKEN}`,
       payload: [1, 2, 3],
     });
     assert.equal(array.statusCode, 200);
     assert.equal(checkout.webhooks.length, 0);
     const weird = await app.inject({
       method: 'POST',
-      url: `/webhooks/infinitepay/${ORDER_ID}`,
+      url: `/webhooks/infinitepay/${ORDER_ID}/${TOKEN}`,
       payload: { transaction_nsu: 'tem espaço <script>', invoice_slug: 12 },
     });
     assert.equal(weird.statusCode, 200);
@@ -346,11 +348,33 @@ describe('POST /webhooks/infinitepay/:orderId (spec 031, E3)', () => {
     await app.close();
   });
 
+  it('token malformado responde 200 sem efeito e o orderId e o token nunca vão a log', async () => {
+    const { app, checkout, logs } = start();
+    checkout.failWebhook = true;
+    const bad = await app.inject({
+      method: 'POST',
+      url: `/webhooks/infinitepay/${ORDER_ID}/curto`,
+      payload: { order_nsu: ORDER_ID },
+    });
+    assert.equal(bad.statusCode, 200);
+    assert.equal(checkout.webhooks.length, 0);
+    // A falha ao gravar também não loga o id nem o token.
+    const failed = await app.inject({
+      method: 'POST',
+      url: `/webhooks/infinitepay/${ORDER_ID}/${TOKEN}`,
+      payload: { order_nsu: ORDER_ID },
+    });
+    assert.equal(failed.statusCode, 400);
+    assert.equal(logs.raw().includes(ORDER_ID), false);
+    assert.equal(logs.raw().includes(TOKEN), false);
+    await app.close();
+  });
+
   it('corpo acima de 16 KiB é recusado (413) sem processar', async () => {
     const { app, checkout } = start();
     const response = await app.inject({
       method: 'POST',
-      url: `/webhooks/infinitepay/${ORDER_ID}`,
+      url: `/webhooks/infinitepay/${ORDER_ID}/${TOKEN}`,
       payload: { order_nsu: ORDER_ID, items: 'x'.repeat(17 * 1024) },
     });
     assert.equal(response.statusCode, 413);
@@ -363,7 +387,7 @@ describe('POST /webhooks/infinitepay/:orderId (spec 031, E3)', () => {
     checkout.failWebhook = true;
     const response = await app.inject({
       method: 'POST',
-      url: `/webhooks/infinitepay/${ORDER_ID}`,
+      url: `/webhooks/infinitepay/${ORDER_ID}/${TOKEN}`,
       payload: { order_nsu: ORDER_ID, transaction_nsu: 'tx-1' },
     });
     assert.equal(response.statusCode, 400);
@@ -379,7 +403,7 @@ describe('POST /webhooks/infinitepay/:orderId (spec 031, E3)', () => {
     const { app, routes } = start();
     await app.ready();
     const profile = (url: string): unknown => routes.find((route) => route.url === url)?.profile;
-    assert.equal(profile('/webhooks/infinitepay/:orderId'), 'webhook');
+    assert.equal(profile('/webhooks/infinitepay/:orderId/:token'), 'webhook');
     assert.equal(profile('/account/billing/orders'), 'admin');
     assert.equal(profile('/account/billing/orders/:orderId/check'), 'admin');
     await app.close();

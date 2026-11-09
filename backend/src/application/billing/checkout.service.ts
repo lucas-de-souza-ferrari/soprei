@@ -22,7 +22,8 @@ import {
   RateLimitError,
   ValidationError,
 } from '../../shared/errors/index.js';
-import { isUuid } from '../../shared/utils/index.js';
+import { isUuid, messageRef } from '../../shared/utils/index.js';
+import { verifyWebhookToken, webhookToken } from './webhook-token.js';
 import type { PaymentProvider } from '../ports/payment-provider.js';
 import type { PaymentHints, PaymentVerifier, VerifyResult } from './payment-verifier.js';
 
@@ -34,6 +35,10 @@ export interface CheckoutSettings {
   readonly webhookBaseUrl: string;
   /** SOPREI_PAYS_META_ENABLED: sem ele o modo S não é vendido. */
   readonly allowSopreiPaysMeta: boolean;
+  /** Chave derivada do JWT_SECRET para o token da webhook_url (deriveWebhookSecret). */
+  readonly webhookSecret: Buffer;
+  /** CHECKOUT_SEND_CUSTOMER_EMAIL: o e-mail da conta só vai ao provedor se o dono confirmar (LGPD). */
+  readonly sendCustomerEmail: boolean;
 }
 
 /** O que o navegador manda para criar um pedido: só a escolha. Preço, desconto e período são do servidor. */
@@ -58,7 +63,7 @@ export interface WebhookEvent {
   readonly invoiceSlug: string | undefined;
 }
 
-export type WebhookOutcome = 'recorded' | 'duplicate' | 'unknown_order';
+export type WebhookOutcome = 'recorded' | 'duplicate' | 'unknown_order' | 'bad_token' | 'throttled';
 
 /** Resultado de "Já paguei": a situação do pedido depois da confirmação e o que a confirmação disse. */
 export interface OrderCheckResult {
@@ -142,14 +147,6 @@ export class CheckoutService {
       kind = 'RENEWAL';
     }
 
-    const since = new Date(now.getTime() - ORDER_VALIDITY_MS);
-    if ((await checkout.countOrdersSince(account.id, since)) >= ORDER_MAX_PER_DAY) {
-      metrics?.countBillingOrder(kind, 'limit');
-      throw new RateLimitError(3_600, 'Muitos pedidos hoje. Tente novamente mais tarde.', {
-        code: 'ORDER_LIMIT_REACHED',
-      });
-    }
-
     const breakdown: OrderBreakdown = {
       planCode: request.planCode,
       cycle: request.cycle,
@@ -162,13 +159,17 @@ export class CheckoutService {
     const orderId = randomUUID();
     const expiresAt = new Date(now.getTime() + ORDER_VALIDITY_MS);
     // O pedido é gravado ANTES de chamar o provedor: o webhook sempre acha a linha.
-    const order = await checkout.createPendingOrder(account.id, {
-      id: orderId,
-      kind,
-      amountCents,
-      breakdown,
-      expiresAt,
-    });
+    const order = await checkout.createPendingOrder(
+      account.id,
+      { id: orderId, kind, amountCents, breakdown, expiresAt },
+      { since: new Date(now.getTime() - ORDER_VALIDITY_MS), max: ORDER_MAX_PER_DAY },
+    );
+    if (order === 'limit') {
+      metrics?.countBillingOrder(kind, 'limit');
+      throw new RateLimitError(3_600, 'Muitos pedidos hoje. Tente novamente mais tarde.', {
+        code: 'ORDER_LIMIT_REACHED',
+      });
+    }
     if (order === null) {
       throw new ConflictError('Crie uma empresa antes de assinar um plano', {
         code: 'NO_SUBSCRIPTION',
@@ -179,9 +180,9 @@ export class CheckoutService {
       orderId,
       amountCents,
       description: describe(entry.plan.code, request),
-      customerEmail: account.email,
+      ...(settings.sendCustomerEmail ? { customerEmail: account.email } : {}),
       redirectUrl: `${settings.appOrigin}/painel/assinatura`,
-      webhookUrl: `${settings.webhookBaseUrl}/webhooks/infinitepay/${orderId}`,
+      webhookUrl: `${settings.webhookBaseUrl}/webhooks/infinitepay/${orderId}/${webhookToken(settings.webhookSecret, orderId)}`,
       validUntil: expiresAt,
     });
     if (!link.ok) {
@@ -191,11 +192,14 @@ export class CheckoutService {
       metrics?.countBillingOrder(kind, reason === 'config' ? 'provider_config' : 'link_failed');
       if (reason === 'config') {
         logger.error(
-          { accountId: account.id, orderId },
+          { accountId: account.id, orderRef: messageRef(orderId) },
           'provedor de pagamento recusou a credencial ao criar o link; confira INFINITEPAY_API_KEY e INFINITEPAY_HANDLE',
         );
       } else {
-        logger.warn({ accountId: account.id, orderId, reason }, 'não foi possível criar o link');
+        logger.warn(
+          { accountId: account.id, orderRef: messageRef(orderId), reason },
+          'não foi possível criar o link',
+        );
       }
       throw new BaseError({
         message: 'Não foi possível gerar o link de pagamento agora. Tente novamente em instantes.',
@@ -206,7 +210,10 @@ export class CheckoutService {
     await checkout.attachCheckoutUrl(orderId, link.value.url);
     await checkout.expireSiblings(order.subscriptionId, kind, orderId);
     metrics?.countBillingOrder(kind, 'created');
-    logger.info({ accountId: account.id, orderId, kind }, 'pedido de pagamento criado');
+    logger.info(
+      { accountId: account.id, orderRef: messageRef(orderId), kind },
+      'pedido de pagamento criado',
+    );
     return { orderId, checkoutUrl: link.value.url, amountCents, expiresAt };
   }
 
@@ -228,32 +235,34 @@ export class CheckoutService {
   }
 
   /**
-   * Webhook: NÃO confia no corpo. Grava só a referência (idempotente) e dispara a confirmação em segundo
-   * plano. Falha ao gravar propaga (o controller responde 400 para a InfinitePay tentar de novo).
-   * order_nsu desconhecido ou diferente do da rota: nada acontece e nada vaza.
+   * Webhook: NÃO confia no corpo. Confere o token da URL (tempo constante) e o pedido; o corpo só dá
+   * referências que servem de dica na segunda tentativa da consulta e NUNCA são gravadas antes de uma
+   * confirmação paga. Token inválido, pedido desconhecido ou order_nsu diferente da rota: nada acontece e a
+   * resposta é a mesma (nada vaza). A confirmação roda em segundo plano, deduplicada por pedido.
    */
-  async acceptWebhook(orderId: string, event: WebhookEvent): Promise<WebhookOutcome> {
-    const { checkout, verifier, metrics } = this.deps;
-    const count = (result: 'recorded' | 'duplicate' | 'unknown_order'): WebhookOutcome => {
+  async acceptWebhook(
+    orderId: string,
+    token: string,
+    event: WebhookEvent,
+  ): Promise<WebhookOutcome> {
+    const { checkout, verifier, metrics, settings } = this.deps;
+    const count = (result: WebhookOutcome): WebhookOutcome => {
       metrics?.countBillingWebhook(result);
       return result;
     };
     if (!isUuid(orderId)) return count('unknown_order');
+    if (!verifyWebhookToken(settings.webhookSecret, orderId, token)) return count('bad_token');
     if (event.orderNsu !== undefined && event.orderNsu !== orderId) return count('unknown_order');
     const order = await checkout.findOrderById(orderId);
     if (order === null) return count('unknown_order');
     if (order.status === 'PAID' || order.status === 'FAILED') return count('duplicate');
-    if (event.transactionNsu !== undefined) {
-      await checkout.recordWebhookEvent(orderId, {
-        transactionNsu: event.transactionNsu,
-        slug: event.invoiceSlug ?? null,
-      });
-    }
-    verifier.verifyInBackground(orderId, {
+    const started = verifier.verifyInBackground(orderId, {
       transactionNsu: event.transactionNsu,
       slug: event.invoiceSlug,
     });
-    return count('recorded');
+    return count(
+      started === 'started' ? 'recorded' : started === 'duplicate' ? 'duplicate' : 'throttled',
+    );
   }
 }
 

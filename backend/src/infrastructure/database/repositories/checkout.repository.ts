@@ -8,6 +8,7 @@ import {
   type GrantResult,
   type NewOrderInput,
   type OrderBreakdown,
+  type OrderCap,
   type PaidFacts,
   type PaymentOrderKindValue,
   type PaymentOrderRecord,
@@ -17,7 +18,7 @@ import {
   usageWindowStart,
   WHATSAPP_BILLING_MODES,
 } from '../../../domain/index.js';
-import { DatabaseError } from '../../../shared/errors/index.js';
+import { ConflictError, DatabaseError } from '../../../shared/errors/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
 import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction } from '../transaction.js';
@@ -72,24 +73,41 @@ function toOrder(row: Prisma.PaymentOrderGetPayload<object>): PaymentOrderRecord
 export class PrismaCheckoutRepository implements CheckoutRepository {
   constructor(private readonly db: TenantScopedPrisma) {}
 
-  createPendingOrder(accountId: string, input: NewOrderInput): Promise<PaymentOrderRecord | null> {
+  createPendingOrder(
+    accountId: string,
+    input: NewOrderInput,
+    cap: OrderCap,
+  ): Promise<PaymentOrderRecord | 'limit' | null> {
     return withRepositoryErrors('Checkout.createPendingOrder', async () => {
       const subscription = await this.db.subscription.findFirst({
         where: { accountId: AccountId.parse(accountId) },
         select: { id: true },
       });
       if (subscription === null) return null;
-      const row = await this.db.paymentOrder.create({
-        data: {
-          id: input.id,
-          subscriptionId: subscription.id,
-          kind: input.kind,
-          amountCents: input.amountCents,
-          breakdown: input.breakdown as unknown as Prisma.InputJsonValue,
-          expiresAt: input.expiresAt,
+      return runInTransaction(
+        this.db,
+        async (tx): Promise<PaymentOrderRecord | 'limit'> => {
+          // Trava a assinatura: a contagem e a gravação são atômicas (criações simultâneas não furam o teto).
+          await tx.$queryRaw`
+            SELECT id FROM subscriptions WHERE id = ${subscription.id}::uuid FOR NO KEY UPDATE`;
+          const recent = await tx.paymentOrder.count({
+            where: { subscriptionId: subscription.id, createdAt: { gte: cap.since } },
+          });
+          if (recent >= cap.max) return 'limit';
+          const row = await tx.paymentOrder.create({
+            data: {
+              id: input.id,
+              subscriptionId: subscription.id,
+              kind: input.kind,
+              amountCents: input.amountCents,
+              breakdown: input.breakdown as unknown as Prisma.InputJsonValue,
+              expiresAt: input.expiresAt,
+            },
+          });
+          return toOrder(row);
         },
-      });
-      return toOrder(row);
+        { maxWait: 30_000, timeout: 30_000 },
+      );
     });
   }
 
@@ -101,17 +119,6 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
       });
       return row === null ? null : toOrder(row);
     });
-  }
-
-  countOrdersSince(accountId: string, since: Date): Promise<number> {
-    return withRepositoryErrors('Checkout.countOrdersSince', () =>
-      this.db.paymentOrder.count({
-        where: {
-          createdAt: { gte: since },
-          subscription: { accountId: AccountId.parse(accountId) },
-        },
-      }),
-    );
   }
 
   attachCheckoutUrl(orderId: string, checkoutUrl: string): Promise<void> {
@@ -152,26 +159,49 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
     });
   }
 
-  recordWebhookEvent(
-    orderId: string,
-    event: { readonly transactionNsu: string; readonly slug: string | null },
-  ): Promise<boolean> {
-    return withRepositoryErrors('Checkout.recordWebhookEvent', async () => {
+  touchCheck(orderId: string, now: Date, cooldownMs: number): Promise<boolean> {
+    return withRepositoryErrors('Checkout.touchCheck', async () => {
       if (!isUuid(orderId)) return false;
-      // Última referência informada vence: um evento falso não bloqueia o verdadeiro (a confirmação
-      // sempre usa os valores do próprio evento ou a consulta; nada aqui concede).
       const { count } = await this.db.paymentOrder.updateMany({
-        where: { id: orderId, status: { in: [...GRANTABLE] } },
-        data: {
-          providerTransactionRef: event.transactionNsu,
-          ...(event.slug === null ? {} : { providerSlug: event.slug }),
+        where: {
+          id: orderId,
+          status: { in: [...GRANTABLE] },
+          OR: [
+            { lastCheckedAt: null },
+            { lastCheckedAt: { lt: new Date(now.getTime() - cooldownMs) } },
+          ],
         },
+        data: { lastCheckedAt: now },
       });
       return count > 0;
     });
   }
 
   grantPaidOrder(
+    orderId: string,
+    facts: PaidFacts,
+    now: Date,
+    graceDays: number,
+  ): Promise<GrantResult> {
+    return this.grantOrConflict(orderId, facts, now, graceDays);
+  }
+
+  private async grantOrConflict(
+    orderId: string,
+    facts: PaidFacts,
+    now: Date,
+    graceDays: number,
+  ): Promise<GrantResult> {
+    try {
+      return await this.grant(orderId, facts, now, graceDays);
+    } catch (error) {
+      // Unicidade da referência da transação: pertence a outro pedido. A transação já foi desfeita.
+      if (error instanceof ConflictError) return { granted: false, conflict: true };
+      throw error;
+    }
+  }
+
+  private grant(
     orderId: string,
     facts: PaidFacts,
     now: Date,
@@ -258,16 +288,6 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
     });
   }
 
-  markFailed(orderId: string): Promise<void> {
-    return withRepositoryErrors('Checkout.markFailed', async () => {
-      if (!isUuid(orderId)) return;
-      await this.db.paymentOrder.updateMany({
-        where: { id: orderId, status: { in: [...GRANTABLE] } },
-        data: { status: 'FAILED' },
-      });
-    });
-  }
-
   claimForReconciliation(now: Date, staleBefore: Date, limit: number): Promise<readonly string[]> {
     return withRepositoryErrors('Checkout.claimForReconciliation', async () => {
       const since = new Date(now.getTime() - RECONCILE_WINDOW_MS);
@@ -276,7 +296,7 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
       const rows = await this.db.$queryRaw<{ id: string }[]>`
         WITH picked AS MATERIALIZED (
           SELECT id FROM payment_orders
-          WHERE status = 'PENDING'
+          WHERE (status = 'PENDING' OR (status = 'EXPIRED' AND checkout_url IS NOT NULL))
             AND created_at >= ${since}::timestamptz
             AND (last_checked_at IS NULL OR last_checked_at < ${staleBefore}::timestamptz)
           ORDER BY created_at
@@ -284,7 +304,7 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
           FOR UPDATE SKIP LOCKED)
         UPDATE payment_orders
         SET last_checked_at = ${now}::timestamptz
-        WHERE id IN (SELECT id FROM picked) AND status = 'PENDING'
+        WHERE id IN (SELECT id FROM picked) AND status IN ('PENDING', 'EXPIRED')
         RETURNING id::text AS id`;
       return rows.map((row) => row.id);
     });

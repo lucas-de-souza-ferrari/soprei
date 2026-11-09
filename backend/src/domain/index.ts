@@ -167,6 +167,7 @@ export type {
   CheckoutRepository,
   GrantResult,
   NewOrderInput,
+  OrderCap,
   PaidFacts,
   PaymentOrderRecord,
 } from './repositories/checkout.repository.js';

@@ -43,6 +43,7 @@ const REDACTED_KEYS = [
   'INFINITEPAY_API_KEY',
   'checkoutUrl',
   'providerTransactionRef',
+  'webhookToken',
   'transactionNsu',
   'invoiceSlug',
   'receiptUrl',

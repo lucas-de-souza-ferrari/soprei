@@ -41,8 +41,17 @@ export type GrantResult =
       readonly periodStart: Date;
       readonly periodEnd: Date;
     }
-  /** O pedido já foi concedido (ou está FAILED, ou não existe): nada mudou. */
-  | { readonly granted: false };
+  /**
+   * Nada foi concedido: o pedido já foi concedido (ou está FAILED, ou não existe), ou a referência da
+   * transação já pertence a outro pedido (conflict: a transação foi desfeita; revisão manual).
+   */
+  | { readonly granted: false; readonly conflict?: boolean };
+
+/** Teto de pedidos criados desde um instante, conferido sob a trava da assinatura. */
+export interface OrderCap {
+  readonly since: Date;
+  readonly max: number;
+}
 
 /**
  * Pedidos de pagamento (spec 031, E3). Os métodos com accountId só enxergam pedidos **daquela** conta
@@ -51,10 +60,17 @@ export type GrantResult =
  * dado ao chamador externo; a concessão vai sempre à assinatura **do próprio pedido**.
  */
 export interface CheckoutRepository {
-  /** Grava o pedido PENDING na assinatura da conta; null se a conta ainda não tem assinatura. */
-  createPendingOrder(accountId: string, input: NewOrderInput): Promise<PaymentOrderRecord | null>;
+  /**
+   * Grava o pedido PENDING na assinatura da conta. A contagem do teto e a gravação acontecem na mesma
+   * transação, com a linha da assinatura travada (criações simultâneas não furam o teto). Devolve null se a
+   * conta ainda não tem assinatura e 'limit' se o teto foi atingido.
+   */
+  createPendingOrder(
+    accountId: string,
+    input: NewOrderInput,
+    cap: OrderCap,
+  ): Promise<PaymentOrderRecord | 'limit' | null>;
   findOrder(accountId: string, orderId: string): Promise<PaymentOrderRecord | null>;
-  countOrdersSince(accountId: string, since: Date): Promise<number>;
   /** Guarda o link criado (só em pedido PENDING ainda sem link). */
   attachCheckoutUrl(orderId: string, checkoutUrl: string): Promise<void>;
   /** Apaga um pedido PENDING que nunca ganhou link (falha ao criar o link: nada pendurado). */
@@ -67,11 +83,11 @@ export interface CheckoutRepository {
   ): Promise<void>;
 
   findOrderById(orderId: string): Promise<PaymentOrderRecord | null>;
-  /** Guarda a última referência de transação e a fatura informadas pelo webhook (ainda NÃO confirmadas). */
-  recordWebhookEvent(
-    orderId: string,
-    event: { readonly transactionNsu: string; readonly slug: string | null },
-  ): Promise<boolean>;
+  /**
+   * Marca a consulta ao provedor (last_checked_at) se o pedido ainda pode receber pagamento e não foi
+   * consultado há menos de cooldownMs. Verdadeiro = pode consultar agora (cooldown por pedido).
+   */
+  touchCheck(orderId: string, now: Date, cooldownMs: number): Promise<boolean>;
   /**
    * Concede o pagamento: PENDING ou EXPIRED vira PAID por updateMany condicional (quem atualiza 0 linhas não
    * concede de novo) e, **na mesma transação**, estende o período da assinatura do pedido, aplica o plano e
@@ -83,9 +99,10 @@ export interface CheckoutRepository {
     now: Date,
     graceDays: number,
   ): Promise<GrantResult>;
-  /** Marca o pedido como FAILED (valor divergente), só se ainda não foi pago. */
-  markFailed(orderId: string): Promise<void>;
-  /** Reivindica até limit pedidos PENDING recentes não consultados desde staleBefore (SKIP LOCKED). */
+  /**
+   * Reivindica até limit pedidos recentes (48 h) ainda sem pagamento, não consultados desde staleBefore
+   * (SKIP LOCKED): PENDING e também EXPIRED por substituição que tenham link.
+   */
   claimForReconciliation(now: Date, staleBefore: Date, limit: number): Promise<readonly string[]>;
   /** Expira um pedido PENDING cujo prazo passou. */
   expireIfDue(orderId: string, now: Date): Promise<boolean>;

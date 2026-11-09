@@ -4,6 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { CheckoutService } from '../../application/billing/checkout.service.js';
 import { PaymentReconciler } from '../../application/billing/payment-reconciler.js';
 import { PaymentVerifier } from '../../application/billing/payment-verifier.js';
+import { deriveWebhookSecret, webhookToken } from '../../application/billing/webhook-token.js';
 import { PendingReplyResumer } from '../../application/billing/pending-reply-resumer.js';
 import type { FlushJob, FlushSchedule } from '../../application/ports/inbound-job-queue.js';
 import { ORDER_MAX_PER_DAY } from '../../domain/index.js';
@@ -32,6 +33,8 @@ const API_KEY = `inchk_${randomBytes(12).toString('hex')}`;
 const EMAIL_SENTINEL = 'sentinela-email';
 const APP_ORIGIN = 'https://site.exemplo.test';
 const WEBHOOK_BASE = 'https://api.exemplo.test';
+const WEBHOOK_SECRET = deriveWebhookSecret('segredo-de-teste-do-webhook-0123456789');
+const tokenFor = (orderId: string): string => webhookToken(WEBHOOK_SECRET, orderId);
 const SETTINGS = { graceDays: GRACE, trialDays: 7, trialTokens: 300_000 };
 
 let database: Database;
@@ -57,7 +60,22 @@ interface Stack {
   readonly flushes: { job: FlushJob; schedule: FlushSchedule }[];
 }
 
-function stack(options: { apiKey?: string; timeoutMs?: number } = {}): Stack {
+/** Remove os pedidos em aberto (PENDING e EXPIRED com link) destes testes, que a reconciliação veria. */
+async function clearOpenOrders(): Promise<void> {
+  await db().paymentOrder.deleteMany({
+    where: { subscriptionId: { in: [...subscriptionIds] }, status: { in: ['PENDING', 'EXPIRED'] } },
+  });
+}
+
+function stack(
+  options: {
+    apiKey?: string;
+    timeoutMs?: number;
+    sendEmail?: boolean;
+    cooldownMs?: number;
+    maxBackground?: number;
+  } = {},
+): Stack {
   const logs = captureLogs();
   const metrics = createMetrics();
   const flushes: Stack['flushes'] = [];
@@ -66,6 +84,7 @@ function stack(options: { apiKey?: string; timeoutMs?: number } = {}): Stack {
     apiKey: new SecretString(options.apiKey ?? API_KEY),
     handle: 'loja-teste',
     timeoutMs: options.timeoutMs ?? 2_000,
+    checkoutHost: '127.0.0.1',
   });
   const resumer = new PendingReplyResumer({
     reader: new PrismaPendingReplyReader(db()),
@@ -84,6 +103,8 @@ function stack(options: { apiKey?: string; timeoutMs?: number } = {}): Stack {
     logger: logs.logger,
     metrics,
     resumer,
+    cooldownMs: options.cooldownMs ?? 0,
+    ...(options.maxBackground === undefined ? {} : { maxBackground: options.maxBackground }),
     now: () => clock,
     sleep: (ms) => {
       sleeps.push(ms);
@@ -100,6 +121,8 @@ function stack(options: { apiKey?: string; timeoutMs?: number } = {}): Stack {
       appOrigin: APP_ORIGIN,
       webhookBaseUrl: WEBHOOK_BASE,
       allowSopreiPaysMeta: false,
+      webhookSecret: WEBHOOK_SECRET,
+      sendCustomerEmail: options.sendEmail ?? false,
     },
     logger: logs.logger,
     metrics,
@@ -177,7 +200,7 @@ after(async () => {
 
 describe('criar o pedido e o link (spec 031, E3)', () => {
   it('o valor sai do catálogo no servidor e o link leva só o mínimo ao provedor', async () => {
-    const s = stack();
+    const s = stack({ sendEmail: true });
     const { account } = await accountWithTrial('create');
     const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
     assert.equal(created.amountCents, ESSENTIAL_AGENDA_CENTS);
@@ -198,9 +221,13 @@ describe('criar o pedido e o link (spec 031, E3)', () => {
       },
     ]);
     assert.equal(body.redirect_url, `${APP_ORIGIN}/painel/assinatura`);
-    assert.equal(body.webhook_url, `${WEBHOOK_BASE}/webhooks/infinitepay/${created.orderId}`);
     // O mínimo do pagador: só o e-mail da conta, nunca telefone nem endereço.
     assert.deepEqual(body.customer, { email: account.email });
+    // O token da webhook_url é o HMAC do pedido (autentica o webhook público).
+    assert.equal(
+      body.webhook_url,
+      `${WEBHOOK_BASE}/webhooks/infinitepay/${created.orderId}/${tokenFor(created.orderId)}`,
+    );
     assert.equal('address' in body, false);
     const options = body.options as Record<string, unknown>;
     assert.equal(options.single_payment, true);
@@ -330,7 +357,7 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
       captureMethod: 'credit_card',
     });
     clock = new Date(clock.getTime() + 60_000);
-    const outcome = await s.service.acceptWebhook(created.orderId, {
+    const outcome = await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
       orderNsu: created.orderId,
       transactionNsu: 'tx-123',
       invoiceSlug: 'slug-123',
@@ -340,8 +367,9 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
 
     const order = await checkoutRepo.findOrder(account.id, created.orderId);
     assert.equal(order?.status, 'PAID');
-    assert.equal(order.providerTransactionRef, 'tx-123');
-    assert.equal(order.providerSlug, 'slug-123');
+    // Referência vinda do corpo do webhook (não confiável) nunca é gravada: a consulta usou só handle e order_nsu.
+    assert.equal(order.providerTransactionRef, null);
+    assert.equal(order.providerSlug, null);
     assert.equal(order.paidAt?.getTime(), clock.getTime());
     assert.equal(order.periodStart?.getTime(), clock.getTime());
     const after = await billing.findSubscription(account.id);
@@ -357,12 +385,7 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
     // A consulta levou a chave e as referências do evento, nunca valores do corpo do webhook.
     const check = fake.callsTo('/payment_check').at(-1);
     assert.equal(check?.apiKey, API_KEY);
-    assert.deepEqual(check.body, {
-      handle: 'loja-teste',
-      order_nsu: created.orderId,
-      transaction_nsu: 'tx-123',
-      slug: 'slug-123',
-    });
+    assert.deepEqual(check.body, { handle: 'loja-teste', order_nsu: created.orderId });
     // A janela de uso do período novo já existe.
     const counters = await db().usageCounter.findMany({
       where: { subscriptionId: subscription.id },
@@ -436,7 +459,7 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
     const { account } = await accountWithTrial('lie');
     const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
     // O provedor NÃO marcou o pedido como pago; o corpo do webhook jura que sim (e o valor).
-    await s.service.acceptWebhook(created.orderId, {
+    await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
       orderNsu: created.orderId,
       transactionNsu: 'tx-fake',
       invoiceSlug: 'slug-fake',
@@ -446,21 +469,23 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
     assert.equal((await billing.findSubscription(account.id))?.status, 'TRIAL');
   });
 
-  it('valor confirmado diferente do pedido: não concede e marca FAILED', async () => {
+  it('valor confirmado diferente do pedido: não concede, NÃO é terminal (segue PENDING) e uma confirmação correta depois concede', async () => {
     const s = stack();
     const { account } = await accountWithTrial('mismatch');
     const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
     fake.markPaid(created.orderId, { amount: 100, paidAmount: 100 });
     assert.equal(await s.verifier.verify(created.orderId), 'amount_mismatch');
-    assert.equal((await checkoutRepo.findOrder(account.id, created.orderId))?.status, 'FAILED');
+    assert.equal((await checkoutRepo.findOrder(account.id, created.orderId))?.status, 'PENDING');
     assert.equal((await billing.findSubscription(account.id))?.status, 'TRIAL');
-    // Pedido FAILED nunca é concedido depois, mesmo que passe a constar como pago pelo valor certo.
-    fake.markPaid(created.orderId, { amount: created.amountCents });
-    assert.equal(await s.verifier.verify(created.orderId), 'ignored');
+    assert.ok(s.logs.lines().some((line) => line.level === 50));
     assert.match(
       await s.metrics.render(),
       /billing_orders_total\{kind="NEW",result="amount_mismatch"\} 1/,
     );
+    // A igualdade amount == amountCents continua a única porta.
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    assert.equal(await s.verifier.verify(created.orderId), 'paid');
+    assert.equal((await billing.findSubscription(account.id))?.status, 'ACTIVE');
   });
 
   it('403 do provedor no payment_check é erro de configuração (alerta), nunca "não pago"', async () => {
@@ -530,12 +555,22 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
     const before = fake.callsTo('/payment_check').length;
     const event = { orderNsu: undefined, transactionNsu: 'tx', invoiceSlug: 'sl' };
     assert.equal(
-      await s.service.acceptWebhook('01900000-0000-7000-8000-00000000dead', event),
+      await s.service.acceptWebhook(
+        '01900000-0000-7000-8000-00000000dead',
+        tokenFor('01900000-0000-7000-8000-00000000dead'),
+        event,
+      ),
       'unknown_order',
     );
-    assert.equal(await s.service.acceptWebhook('nao-e-uuid', event), 'unknown_order');
     assert.equal(
-      await s.service.acceptWebhook(created.orderId, { ...event, orderNsu: 'outro-pedido' }),
+      await s.service.acceptWebhook('nao-e-uuid', 'x'.repeat(43), event),
+      'unknown_order',
+    );
+    assert.equal(
+      await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
+        ...event,
+        orderNsu: 'outro-pedido',
+      }),
       'unknown_order',
     );
     await s.verifier.drain();
@@ -554,30 +589,146 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
     assert.equal(await s.verifier.verify(created.orderId), 'paid');
     const calls = fake.callsTo('/payment_check').length;
     const event = { orderNsu: created.orderId, transactionNsu: 'tx', invoiceSlug: 'sl' };
-    assert.equal(await s.service.acceptWebhook(created.orderId, event), 'duplicate');
+    assert.equal(
+      await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), event),
+      'duplicate',
+    );
     assert.equal(fake.callsTo('/payment_check').length, calls);
   });
 
-  it('um evento falso não bloqueia o verdadeiro: a confirmação usa os valores do próprio evento', async () => {
+  it('B1: referência do corpo nunca é gravada antes de uma confirmação paga e não envenena o pedido', async () => {
     const s = stack();
-    const { account } = await accountWithTrial('forged');
+    const { account } = await accountWithTrial('poison');
     const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
-    await s.service.acceptWebhook(created.orderId, {
+    await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
       orderNsu: created.orderId,
-      transactionNsu: 'falso',
-      invoiceSlug: 'falso',
-    });
-    await s.verifier.drain();
-    fake.markPaid(created.orderId, { amount: created.amountCents });
-    await s.service.acceptWebhook(created.orderId, {
-      orderNsu: created.orderId,
-      transactionNsu: 'verdadeiro',
-      invoiceSlug: 'slug-ok',
+      transactionNsu: 'envenenada',
+      invoiceSlug: 'envenenada',
     });
     await s.verifier.drain();
     const order = await checkoutRepo.findOrder(account.id, created.orderId);
-    assert.equal(order?.status, 'PAID');
-    assert.equal(order.providerTransactionRef, 'verdadeiro');
+    assert.equal(order?.providerTransactionRef, null);
+    assert.equal(order.providerSlug, null);
+    assert.equal(order.status, 'PENDING');
+    // Pagamento verdadeiro depois: concede normalmente.
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    assert.equal(await s.verifier.verify(created.orderId), 'paid');
+  });
+
+  it('B1: sem as referências a consulta usa só handle e order_nsu; o provedor que as exige (4xx) recebe a segunda tentativa e a referência só é gravada depois do pago', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('strategy');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    fake.requireRefs(true);
+    try {
+      const before = fake.callsTo('/payment_check').length;
+      assert.equal(
+        await s.verifier.verify(created.orderId, { transactionNsu: 'tx-ok', slug: 'slug-ok' }),
+        'paid',
+      );
+      const calls = fake.callsTo('/payment_check').slice(before);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(Object.keys(calls[0]?.body ?? {}).sort(), ['handle', 'order_nsu']);
+      assert.equal(calls[1]?.body.transaction_nsu, 'tx-ok');
+      assert.equal(calls[1].body.slug, 'slug-ok');
+    } finally {
+      fake.requireRefs(false);
+    }
+    const order = await checkoutRepo.findOrder(account.id, created.orderId);
+    assert.equal(order?.providerTransactionRef, 'tx-ok');
+    assert.equal(order.providerSlug, 'slug-ok');
+  });
+
+  it('B1: o provedor exige as referências e elas não vieram: rejected, nada concedido, sem alarme', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('norefs');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    fake.requireRefs(true);
+    try {
+      assert.equal(await s.verifier.verify(created.orderId), 'rejected');
+    } finally {
+      fake.requireRefs(false);
+    }
+    assert.equal((await checkoutRepo.findOrder(account.id, created.orderId))?.status, 'PENDING');
+  });
+
+  it('B1: a mesma referência reutilizada em dois pedidos concede só um; o segundo desfaz a transação, não concede e conta a métrica', async () => {
+    const s = stack();
+    const a = await accountWithTrial('reuse-a');
+    const b = await accountWithTrial('reuse-b');
+    const orderA = await s.service.createOrder(a.account, ESSENTIAL_AGENDA);
+    const orderB = await s.service.createOrder(b.account, ESSENTIAL_AGENDA);
+    fake.markPaid(orderA.orderId, { amount: orderA.amountCents });
+    fake.markPaid(orderB.orderId, { amount: orderB.amountCents });
+    fake.requireRefs(true);
+    try {
+      assert.equal(
+        await s.verifier.verify(orderA.orderId, {
+          transactionNsu: 'tx-compartilhada',
+          slug: 'slug-a',
+        }),
+        'paid',
+      );
+      // Um atacante paga o próprio pedido e reaproveita a referência: a unicidade do banco recusa.
+      assert.equal(
+        await s.verifier.verify(orderB.orderId, {
+          transactionNsu: 'tx-compartilhada',
+          slug: 'slug-b',
+        }),
+        'reference_conflict',
+      );
+    } finally {
+      fake.requireRefs(false);
+    }
+    assert.equal((await checkoutRepo.findOrder(b.account.id, orderB.orderId))?.status, 'PENDING');
+    assert.equal((await billing.findSubscription(b.account.id))?.status, 'TRIAL');
+    assert.equal((await billing.findSubscription(a.account.id))?.status, 'ACTIVE');
+    assert.match(
+      await s.metrics.render(),
+      /billing_orders_total\{kind="NEW",result="reference_conflict"\} 1/,
+    );
+  });
+
+  it('B1: tentativa de forçar FAILED com referência alheia não altera o pedido legítimo', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('force');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.markPaid(created.orderId, { amount: 1 });
+    await s.verifier.verify(created.orderId, { transactionNsu: 'alheia', slug: 'alheia' });
+    assert.equal((await checkoutRepo.findOrder(account.id, created.orderId))?.status, 'PENDING');
+  });
+
+  it('B1: token inválido, ausente ou de outro pedido responde como desconhecido: nada acontece e o provedor não é chamado', async () => {
+    const s = stack();
+    const a = await accountWithTrial('tok-a');
+    const created = await s.service.createOrder(a.account, ESSENTIAL_AGENDA);
+    const other = await s.service.createOrder(
+      (await accountWithTrial('tok-b')).account,
+      ESSENTIAL_AGENDA,
+    );
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    const before = fake.callsTo('/payment_check').length;
+    const event = { orderNsu: created.orderId, transactionNsu: 'tx', invoiceSlug: 'sl' };
+    for (const token of [
+      '',
+      'curto',
+      'x'.repeat(43),
+      tokenFor(other.orderId),
+      tokenFor(created.orderId) + 'a',
+    ]) {
+      assert.equal(await s.service.acceptWebhook(created.orderId, token, event), 'bad_token');
+    }
+    await s.verifier.drain();
+    assert.equal(fake.callsTo('/payment_check').length, before);
+    assert.equal((await checkoutRepo.findOrder(a.account.id, created.orderId))?.status, 'PENDING');
+    assert.equal(
+      await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), event),
+      'recorded',
+    );
+    await s.verifier.drain();
+    assert.equal((await checkoutRepo.findOrder(a.account.id, created.orderId))?.status, 'PAID');
   });
 });
 
@@ -609,7 +760,8 @@ describe('"Já paguei" e isolamento entre contas (spec 031, E3)', () => {
     });
     assert.equal(result.result, 'paid');
     assert.equal(result.order.status, 'PAID');
-    assert.equal(fake.callsTo('/payment_check').at(-1)?.body.transaction_nsu, 'tx-retorno');
+    // A referência do retorno é só dica: a primeira consulta saiu sem ela e foi suficiente.
+    assert.equal(fake.callsTo('/payment_check').at(-1)?.body.transaction_nsu, undefined);
     // A assinatura de B não mudou e a de A foi estendida.
     assert.equal((await billing.findSubscription(a.account.id))?.status, 'ACTIVE');
     assert.equal((await billing.findSubscription(b.account.id))?.status, 'TRIAL');
@@ -623,7 +775,7 @@ describe('"Já paguei" e isolamento entre contas (spec 031, E3)', () => {
     const b = await accountWithTrial('own-b');
     const orderB = await s.service.createOrder(b.account, ESSENTIAL_AGENDA);
     fake.markPaid(orderB.orderId, { amount: orderB.amountCents });
-    await s.service.acceptWebhook(orderB.orderId, {
+    await s.service.acceptWebhook(orderB.orderId, tokenFor(orderB.orderId), {
       orderNsu: orderB.orderId,
       transactionNsu: 'tx',
       invoiceSlug: 'sl',
@@ -692,10 +844,7 @@ describe('reconciliação periódica (spec 031, E3)', () => {
   it('concede o pedido pago cujo webhook nunca chegou, expira o vencido não pago e não toca em outra conta', async () => {
     const s = stack();
     // Estado limpo: nenhum pedido pendente antigo destes testes para atrapalhar a contagem.
-    await db().paymentOrder.updateMany({
-      where: { subscriptionId: { in: [...subscriptionIds] }, status: 'PENDING' },
-      data: { status: 'EXPIRED' },
-    });
+    await clearOpenOrders();
     // A janela de 48 h da reconciliação usa o created_at do banco: este teste usa o relógio real como base.
     clock = new Date();
     const a = await accountWithTrial('rec-a');
@@ -727,10 +876,7 @@ describe('reconciliação periódica (spec 031, E3)', () => {
   it('respeita o teto por execução e para sozinha quando a credencial é recusada', async () => {
     const good = stack();
     const bad = stack({ apiKey: 'inchk_chave_errada_0000' });
-    await db().paymentOrder.updateMany({
-      where: { subscriptionId: { in: [...subscriptionIds] }, status: 'PENDING' },
-      data: { status: 'EXPIRED' },
-    });
+    await clearOpenOrders();
     const accounts = await Promise.all(
       ['cap1', 'cap2', 'cap3'].map((label) => accountWithTrial(label)),
     );
@@ -744,10 +890,7 @@ describe('reconciliação periódica (spec 031, E3)', () => {
   });
 
   it('claimForReconciliation não entrega o mesmo pedido a duas execuções simultâneas', async () => {
-    await db().paymentOrder.updateMany({
-      where: { subscriptionId: { in: [...subscriptionIds] }, status: 'PENDING' },
-      data: { status: 'EXPIRED' },
-    });
+    await clearOpenOrders();
     const s = stack();
     const accounts = await Promise.all(
       ['sk1', 'sk2', 'sk3', 'sk4'].map((label) => accountWithTrial(label)),
@@ -818,6 +961,7 @@ describe('reativação da IA depois do pagamento (spec 031, E3)', () => {
     fake.markPaid(created.orderId, { amount: created.amountCents });
     assert.equal(await s.verifier.verify(created.orderId), 'paid');
 
+    await s.verifier.drain();
     assert.equal(s.flushes.length, 1);
     const flush = s.flushes[0];
     assert.equal(flush?.job.companyId, companyA.id);
@@ -826,6 +970,144 @@ describe('reativação da IA depois do pagamento (spec 031, E3)', () => {
     assert.deepEqual(flush.schedule, { delayMs: 0, mode: 'ensure' });
     // O log do reagendamento tem só contagens e ids, nunca o contato.
     assert.equal(s.logs.raw().includes('contato-a-pendente'), false);
+  });
+});
+
+describe('revisão da E3: cooldown, deduplicação, teto, reconciliação e criação concorrente', () => {
+  it('I3: cooldown por pedido: a segunda consulta logo depois é descartada sem chamar o provedor e volta depois do intervalo', async () => {
+    const s = stack({ cooldownMs: 10_000 });
+    const { account } = await accountWithTrial('cooldown');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    const base = fake.callsTo('/payment_check').length;
+    assert.equal(await s.verifier.verify(created.orderId), 'not_paid');
+    assert.equal(await s.verifier.verify(created.orderId), 'cooldown');
+    assert.equal(await s.verifier.verify(created.orderId), 'cooldown');
+    assert.equal(fake.callsTo('/payment_check').length, base + 1);
+    clock = new Date(clock.getTime() + 11_000);
+    assert.equal(await s.verifier.verify(created.orderId), 'not_paid');
+    assert.equal(fake.callsTo('/payment_check').length, base + 2);
+    // "Já paguei" também respeita o cooldown (e a reconciliação, que já reivindicou, não o aplica de novo).
+    const again = await s.service.checkOrder(account.id, created.orderId);
+    assert.equal(again.result, 'cooldown');
+    assert.equal(await s.verifier.verify(created.orderId, {}, { skipCooldown: true }), 'not_paid');
+  });
+
+  it('I3: confirmação em segundo plano duplicada para o mesmo pedido é ignorada enquanto há tarefa', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('dedup');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.failChecks({ kind: 'slow', ms: 250 });
+    const base = fake.callsTo('/payment_check').length;
+    assert.equal(s.verifier.verifyInBackground(created.orderId, {}), 'started');
+    assert.equal(s.verifier.verifyInBackground(created.orderId, {}), 'duplicate');
+    assert.equal(
+      await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
+        orderNsu: created.orderId,
+        transactionNsu: undefined,
+        invoiceSlug: undefined,
+      }),
+      'duplicate',
+    );
+    await s.verifier.drain();
+    // Motivo: uma só consulta para as três tentativas de disparar a confirmação.
+    assert.equal(fake.callsTo('/payment_check').length, base + 1);
+    // Terminada a tarefa, uma nova é aceita.
+    fake.failChecks(undefined);
+    assert.equal(s.verifier.verifyInBackground(created.orderId, {}), 'started');
+    await s.verifier.drain();
+  });
+
+  it('I3: teto de confirmações simultâneas em segundo plano', async () => {
+    const s = stack({ maxBackground: 2 });
+    const orders: string[] = [];
+    for (const label of ['cap-a', 'cap-b', 'cap-c']) {
+      const { account } = await accountWithTrial(label);
+      orders.push((await s.service.createOrder(account, ESSENTIAL_AGENDA)).orderId);
+    }
+    fake.failChecks({ kind: 'slow', ms: 250 });
+    const started = orders.map((id) => s.verifier.verifyInBackground(id, {}));
+    assert.deepEqual(started, ['started', 'started', 'capacity']);
+    await s.verifier.drain();
+    fake.failChecks(undefined);
+  });
+
+  it('S2: o Retry-After do provedor entra no backoff do segundo plano, limitado a 30 s', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('retry-after');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.failChecks({ kind: 'status', status: 429, retryAfter: '20' }, 1);
+    fake.failChecks({ kind: 'status', status: 429, retryAfter: '999' }, 1);
+    // Duas falhas com esperas diferentes: configura em sequência pelo próprio servidor falso.
+    sleeps.length = 0;
+    fake.failChecks({ kind: 'status', status: 429, retryAfter: '20' }, 2);
+    s.verifier.verifyInBackground(created.orderId, {});
+    await s.verifier.drain();
+    assert.deepEqual(sleeps, [20_000, 20_000]);
+    sleeps.length = 0;
+    fake.failChecks({ kind: 'status', status: 429, retryAfter: '999' }, 2);
+    s.verifier.verifyInBackground(created.orderId, {});
+    await s.verifier.drain();
+    assert.deepEqual(sleeps, [30_000, 30_000]);
+  });
+
+  it('I4: a reconciliação também confere o pedido EXPIRED por substituição que tem link', async () => {
+    const s = stack();
+    await clearOpenOrders();
+    clock = new Date();
+    const { account } = await accountWithTrial('rec-expired');
+    const first = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    assert.equal((await checkoutRepo.findOrder(account.id, first.orderId))?.status, 'EXPIRED');
+    fake.markPaid(first.orderId, { amount: first.amountCents });
+    clock = new Date(clock.getTime() + 3_600_000);
+    const summary = await s.reconciler.runOnce();
+    assert.equal(summary.paid, 1);
+    assert.equal((await checkoutRepo.findOrder(account.id, first.orderId))?.status, 'PAID');
+  });
+
+  it('S3: criações simultâneas respeitam o teto de pedidos (contagem sob a trava da assinatura)', async () => {
+    const s = stack();
+    clock = new Date();
+    const { account } = await accountWithTrial('create-race');
+    const results = await Promise.allSettled(
+      Array.from({ length: ORDER_MAX_PER_DAY + 8 }, () =>
+        s.service.createOrder(account, ESSENTIAL_AGENDA),
+      ),
+    );
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    // Motivo na asserção: sem a trava, a contagem lida por todas daria mais de ORDER_MAX_PER_DAY pedidos.
+    assert.equal(ok, ORDER_MAX_PER_DAY, `criados: ${String(ok)}`);
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        assert.equal((r.reason as { code?: string }).code, 'ORDER_LIMIT_REACHED');
+      }
+    }
+    assert.equal((await billing.listOrders(account.id, 50)).length, ORDER_MAX_PER_DAY);
+  });
+
+  it('S1: por padrão nenhum dado do pagador (e-mail) vai ao provedor', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('no-email');
+    await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    const body = fake.callsTo('/links').at(-1)?.body ?? {};
+    assert.equal('customer' in body, false);
+    assert.equal(JSON.stringify(body).includes(account.email), false);
+  });
+
+  it('o orderId e o token do webhook nunca aparecem em log', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('no-id-log');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
+      orderNsu: created.orderId,
+      transactionNsu: undefined,
+      invoiceSlug: undefined,
+    });
+    await s.verifier.drain();
+    const raw = s.logs.raw();
+    assert.equal(raw.includes(created.orderId), false);
+    assert.equal(raw.includes(tokenFor(created.orderId)), false);
   });
 });
 
@@ -852,7 +1134,7 @@ describe('privacidade (spec 031, E3)', () => {
     fake.failChecks({ kind: 'echo' });
     await s.verifier.verify(created.orderId);
     fake.failChecks(undefined);
-    await s.service.acceptWebhook(created.orderId, {
+    await s.service.acceptWebhook(created.orderId, tokenFor(created.orderId), {
       orderNsu: created.orderId,
       transactionNsu: 'tx-secreta-123',
       invoiceSlug: 'slug-secreto-123',

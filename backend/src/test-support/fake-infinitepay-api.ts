@@ -35,6 +35,7 @@ export class FakeInfinitepayApi {
   private readonly payments = new Map<string, FakePayment>();
   private linkFailure: Failure | undefined;
   private checkFailure: Failure | undefined;
+  private refsRequired = false;
   private checkFailuresLeft = Number.POSITIVE_INFINITY;
   private linkResponse: unknown;
 
@@ -82,6 +83,11 @@ export class FakeInfinitepayApi {
   failChecks(failure: Failure | undefined, times = Number.POSITIVE_INFINITY): void {
     this.checkFailure = failure;
     this.checkFailuresLeft = times;
+  }
+
+  /** O payment_check passa a recusar (400) a consulta sem transaction_nsu e slug. */
+  requireRefs(required: boolean): void {
+    this.refsRequired = required;
   }
 
   /** Corpo de sucesso do POST /links diferente do padrão (formato inesperado, link malicioso...). */
@@ -136,6 +142,10 @@ export class FakeInfinitepayApi {
     if (this.checkFailuresLeft > 0) {
       if (this.checkFailure !== undefined) this.checkFailuresLeft -= 1;
       if (await this.applyFailure(this.checkFailure, body, response)) return;
+    }
+    if (this.refsRequired && (body.transaction_nsu === undefined || body.slug === undefined)) {
+      send(response, 400, { message: 'transaction_nsu e slug obrigatorios' });
+      return;
     }
     const orderId = typeof body.order_nsu === 'string' ? body.order_nsu : '';
     const payment = this.payments.get(orderId);

@@ -25,6 +25,23 @@ test('a migration do checkout só acrescenta colunas: nenhum DROP, DELETE, TRUNC
   assert.doesNotMatch(code, /ALTER COLUMN/i);
 });
 
+test('a migration da revisão cria só índices únicos parciais da referência e da fatura', async () => {
+  const sql = await readFile(
+    new URL(
+      '../../../prisma/migrations/20261109210000_payment_reference_unique/migration.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const code = sql
+    .split(String.fromCharCode(10))
+    .filter((line) => !line.trim().startsWith('--'))
+    .join(String.fromCharCode(10));
+  assert.doesNotMatch(code, /DROP|DELETE|TRUNCATE|RENAME|ALTER COLUMN/i);
+  assert.equal((code.match(/CREATE UNIQUE INDEX/g) ?? []).length, 2);
+  assert.equal((code.match(/WHERE "provider_/g) ?? []).length, 2);
+});
+
 test('aplica sobre pedidos existentes sem perder dado: as três colunas nascem nulas', async () => {
   const sql = await readFile(MIGRATION, 'utf8');
   const schema = `soprei_migration_${randomUUID().replaceAll('-', '')}`;

@@ -8,7 +8,10 @@ import { rateLimitProfile } from '../common/rate-limit.js';
 /** Limite do corpo do webhook da InfinitePay: 16 KiB (spec 031); o conteúdo só serve para extrair ids. */
 export const INFINITEPAY_WEBHOOK_BODY_LIMIT_BYTES = 16 * 1024;
 
-export const INFINITEPAY_WEBHOOK_ROUTE = '/webhooks/infinitepay/:orderId';
+export const INFINITEPAY_WEBHOOK_ROUTE = '/webhooks/infinitepay/:orderId/:token';
+
+/** O token é HMAC-SHA256 em base64url (43 caracteres); qualquer outra forma é recusada sem consultar nada. */
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 
 export interface InfinitepayWebhookControllerOptions {
   readonly checkout: Pick<CheckoutService, 'acceptWebhook'>;
@@ -45,12 +48,12 @@ export const infinitepayWebhookController: FastifyPluginCallback<
     }
   };
 
-  app.post<{ Params: { orderId: string } }>(
+  app.post<{ Params: { orderId: string; token: string } }>(
     INFINITEPAY_WEBHOOK_ROUTE,
     { config, bodyLimit: INFINITEPAY_WEBHOOK_BODY_LIMIT_BYTES },
     async (request, reply) => {
-      const { orderId } = request.params;
-      if (!isUuid(orderId)) {
+      const { orderId, token } = request.params;
+      if (!isUuid(orderId) || !TOKEN_PATTERN.test(token)) {
         count('invalid');
         return reply.code(200).send({ received: true });
       }
@@ -60,7 +63,7 @@ export const infinitepayWebhookController: FastifyPluginCallback<
         return reply.code(200).send({ received: true });
       }
       try {
-        await checkout.acceptWebhook(orderId, {
+        await checkout.acceptWebhook(orderId, token, {
           orderNsu: parsed.data.order_nsu,
           transactionNsu: parsed.data.transaction_nsu,
           invoiceSlug: parsed.data.invoice_slug,
@@ -68,8 +71,9 @@ export const infinitepayWebhookController: FastifyPluginCallback<
       } catch (error) {
         // Falha ao gravar (banco fora): 400 faz a InfinitePay repetir o evento; nada foi concedido.
         count('error');
+        // Nunca o orderId nem o token: a URL do webhook é uma credencial.
         request.log.warn(
-          { orderId, errName: error instanceof Error ? error.name : typeof error },
+          { errName: error instanceof Error ? error.name : typeof error },
           'falha ao registrar o evento de pagamento; a InfinitePay deve repetir',
         );
         return reply.code(400).send({

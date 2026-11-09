@@ -2,6 +2,7 @@ import { AttendanceService } from './application/attendance/attendance.service.j
 import { BillingService } from './application/billing/billing.service.js';
 import { CheckoutService } from './application/billing/checkout.service.js';
 import { PaymentReconciler } from './application/billing/payment-reconciler.js';
+import { deriveWebhookSecret } from './application/billing/webhook-token.js';
 import { PaymentVerifier } from './application/billing/payment-verifier.js';
 import { PendingReplyResumer } from './application/billing/pending-reply-resumer.js';
 import { InfinitepayClient } from './infrastructure/external-apis/infinitepay/infinitepay.client.js';
@@ -186,6 +187,7 @@ async function main(): Promise<void> {
             apiKey: new SecretString(config.INFINITEPAY_API_KEY),
             handle: config.INFINITEPAY_HANDLE,
             timeoutMs: config.BILLING_HTTP_TIMEOUT_MS,
+            checkoutHost: config.INFINITEPAY_CHECKOUT_HOST,
           });
           const verifier = new PaymentVerifier({
             checkout: repository,
@@ -216,6 +218,8 @@ async function main(): Promise<void> {
                 appOrigin: config.APP_ORIGIN,
                 webhookBaseUrl: config.INFINITEPAY_WEBHOOK_BASE_URL,
                 allowSopreiPaysMeta: config.SOPREI_PAYS_META_ENABLED,
+                webhookSecret: deriveWebhookSecret(config.JWT_SECRET),
+                sendCustomerEmail: config.CHECKOUT_SEND_CUSTOMER_EMAIL,
               },
               logger,
               metrics,
@@ -547,17 +551,23 @@ async function main(): Promise<void> {
     run: async () => {
       await purger.runOnce();
       await invitationPurger.runOnce();
-      // Reconciliação de pagamentos (spec 031, E3): o webhook pode não chegar; confere os pedidos pendentes.
-      await checkout?.reconciler.runOnce();
     },
     intervalMinutes: config.ACCOUNT_PURGE_INTERVAL_MINUTES,
   });
   if (checkout !== undefined) {
-    // O desligamento também espera as confirmações de pagamento em segundo plano (webhook já respondido).
+    // Reconciliação de pagamentos (spec 031, E3): o webhook pode não chegar. Timer PRÓPRIO (padrão 10 min;
+    // 0 desliga só ela) e independente do expurgo de contas; parado no closeInfrastructure junto com o dele.
+    const reconcileTimer = startPurgeTimer({
+      enabled: true,
+      run: () => checkout.reconciler.runOnce(),
+      intervalMinutes: config.BILLING_RECONCILE_INTERVAL_MINUTES,
+    });
     const purgeTimer = infrastructure.accountPurge;
     infrastructure.accountPurge = {
       async stop() {
         await purgeTimer?.stop();
+        await reconcileTimer?.stop();
+        // O desligamento também espera as confirmações em segundo plano (webhook já respondido).
         await checkout.verifier.drain();
       },
     };

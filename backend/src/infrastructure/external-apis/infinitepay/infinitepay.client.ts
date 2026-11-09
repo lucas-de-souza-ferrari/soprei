@@ -17,6 +17,8 @@ import {
 } from '../whatsapp/whatsapp-cloud-api.client.js';
 
 /** Nome do campo que traz a lista de itens no corpo de POST /links (a confirmar no primeiro teste real). */
+/** Host do link de pagamento no exemplo de resposta da documentação (a confirmar no teste real). */
+export const DEFAULT_CHECKOUT_HOST = 'checkout.infinitepay.com.br';
 const ITEMS_FIELD = 'items';
 /** Teto da espera sugerida por Retry-After (nunca dorme mais que isto por uma instrução do provedor). */
 const MAX_RETRY_AFTER_MS = 60_000;
@@ -38,6 +40,8 @@ export interface InfinitepayClientOptions {
   /** INFINITEPAY_HANDLE (InfiniteTag, sem o cifrão). */
   readonly handle: string;
   readonly timeoutMs: number;
+  /** Único host aceito para o link devolvido (padrão: o do exemplo da documentação). */
+  readonly checkoutHost?: string;
   readonly fetch?: typeof fetch;
 }
 
@@ -122,6 +126,9 @@ export class InfinitepayClient implements PaymentProvider {
   private isSafeLink(raw: string): boolean {
     try {
       const url = new URL(raw);
+      if (url.username !== '' || url.password !== '') return false;
+      const host = (this.options.checkoutHost ?? DEFAULT_CHECKOUT_HOST).toLowerCase();
+      if (url.hostname.toLowerCase() !== host) return false;
       if (url.protocol === 'https:') return true;
       return url.protocol === 'http:' && this.baseUrl.startsWith('http:');
     } catch {

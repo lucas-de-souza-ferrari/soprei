@@ -132,16 +132,28 @@ export type AccountPurgeRunResult = 'ok' | 'error';
 /** Pedidos de pagamento (spec 031, E3). Conjuntos fixos: nunca id, valor, e-mail nem link. */
 export type BillingOrderKind = 'NEW' | 'RENEWAL' | 'UPGRADE' | 'EXTRA_PACK';
 export type BillingOrderResult =
-  'created' | 'link_failed' | 'provider_config' | 'limit' | 'rejected' | 'paid' | 'amount_mismatch';
-export type BillingWebhookResult = 'recorded' | 'duplicate' | 'unknown_order' | 'invalid' | 'error';
+  | 'created'
+  | 'link_failed'
+  | 'provider_config'
+  | 'limit'
+  | 'rejected'
+  | 'paid'
+  | 'amount_mismatch'
+  | 'reference_conflict'
+  | 'upgrade_stale';
+export type BillingWebhookResult =
+  'recorded' | 'duplicate' | 'unknown_order' | 'bad_token' | 'throttled' | 'invalid' | 'error';
 export type BillingCheckResult =
   | 'paid'
   | 'already_paid'
   | 'not_paid'
   | 'amount_mismatch'
+  | 'upgrade_stale'
   | 'unverifiable'
   | 'unknown_order'
   | 'ignored'
+  | 'cooldown'
+  | 'reference_conflict'
   | 'unavailable'
   | 'config_error'
   | 'rejected';

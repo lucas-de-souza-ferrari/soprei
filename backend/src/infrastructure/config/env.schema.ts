@@ -142,6 +142,18 @@ export const envSchema = z
     ),
     INFINITEPAY_WEBHOOK_BASE_URL: optionalSecret,
     BILLING_HTTP_TIMEOUT_MS: z.coerce.number().int().min(1).max(60_000).default(8_000),
+    // Host do link de pagamento aceito (o adaptador recusa qualquer outro): padrão o do exemplo da documentação.
+    INFINITEPAY_CHECKOUT_HOST: z.preprocess(
+      emptyAsUndefined,
+      z
+        .string()
+        .regex(/^[A-Za-z0-9.-]{1,253}$/, 'deve ser só o nome do host')
+        .default('checkout.infinitepay.com.br'),
+    ),
+    // LGPD: o e-mail da conta só vai ao provedor se o dono confirmar (decisão do dono). Padrão false.
+    CHECKOUT_SEND_CUSTOMER_EMAIL: booleanLiteral(false),
+    // Reconciliação de pagamentos: timer PRÓPRIO (minutos; 0 desliga só ela; independe do expurgo de contas).
+    BILLING_RECONCILE_INTERVAL_MINUTES: z.coerce.number().int().min(0).max(1_440).default(10),
     // Provedor Anthropic (spec 014). A chave só é exigida com `LLM_PROVIDER=anthropic` e nunca vai
     // a log, métrica, erro nem resposta. `ANTHROPIC_BASE_URL` existe para os testes (servidor falso).
     ANTHROPIC_API_KEY: optionalSecret,

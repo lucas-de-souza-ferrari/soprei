@@ -16,6 +16,7 @@ function client(options: { apiKey?: string; timeoutMs?: number; baseUrl?: string
     apiKey: new SecretString(options.apiKey ?? API_KEY),
     handle: 'loja-teste',
     timeoutMs: options.timeoutMs ?? 2_000,
+    checkoutHost: '127.0.0.1',
   });
 }
 
@@ -152,6 +153,40 @@ describe('InfinitepayClient.createLink (spec 031, E3)', () => {
     }
   });
 
+  it('S4: o link só vale no host de checkout configurado (padrão da documentação) e sem credenciais embutidas', async () => {
+    const make = (url: string, checkoutHost?: string) =>
+      new InfinitepayClient({
+        baseUrl: 'https://api.checkout.infinitepay.io',
+        apiKey: new SecretString(API_KEY),
+        handle: 'loja-teste',
+        timeoutMs: 1_000,
+        ...(checkoutHost === undefined ? {} : { checkoutHost }),
+        fetch: () =>
+          Promise.resolve(
+            new Response(JSON.stringify({ url }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          ),
+      });
+    const ok = await make('https://checkout.infinitepay.com.br/abc').createLink(LINK_INPUT);
+    assert.ok(ok.ok);
+    for (const url of [
+      'https://outro.exemplo/abc',
+      'https://checkout.infinitepay.com.br.atacante.exemplo/abc',
+      'https://user:senha@checkout.infinitepay.com.br/abc',
+      'https://checkout.infinitepay.com.br@atacante.exemplo/abc',
+    ]) {
+      const bad = await make(url).createLink(LINK_INPUT);
+      assert.ok(!bad.ok, url);
+      assert.equal(bad.error.reason, 'invalid_response');
+    }
+    const custom = await make('https://pagamento.exemplo/x', 'pagamento.exemplo').createLink(
+      LINK_INPUT,
+    );
+    assert.ok(custom.ok);
+  });
+
   it('com a base https o link http é recusado e o https passa (http só quando a própria base é http)', async () => {
     const respond =
       (url: string): typeof fetch =>
@@ -168,6 +203,7 @@ describe('InfinitepayClient.createLink (spec 031, E3)', () => {
         apiKey: new SecretString(API_KEY),
         handle: 'loja-teste',
         timeoutMs: 1_000,
+        checkoutHost: 'checkout.exemplo',
         fetch: respond(url),
       });
     const insecure = await make('http://checkout.exemplo/x').createLink(LINK_INPUT);

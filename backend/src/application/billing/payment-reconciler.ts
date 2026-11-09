@@ -48,7 +48,7 @@ export class PaymentReconciler {
         RECONCILE_BATCH_LIMIT,
       );
       for (const id of ids) {
-        const result = await verifier.verify(id);
+        const result = await verifier.verify(id, {}, { skipCooldown: true });
         checked += 1;
         if (result === 'config_error') {
           stoppedEarly = true;
