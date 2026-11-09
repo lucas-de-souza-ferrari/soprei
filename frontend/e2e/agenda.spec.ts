@@ -246,10 +246,12 @@ test('bloquear horário avisa quando há agendamento no período', async ({ page
 test('configurar agenda: seções, fuso fixo (sem campo) e voltar à agenda', async ({ page }) => {
   const agenda = await open(page, 'OWNER', () => undefined, 'light', '/painel/agenda/configurar');
   await expect(page.getByRole('heading', { level: 2, name: 'Configurar agenda' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Geral' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Serviços' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Horários de atendimento' })).toBeVisible();
   await expect(page.getByText('Corte de cabelo')).toBeVisible();
+  await page.getByRole('tab', { name: 'Horários' }).click();
+  await expect(page.getByRole('heading', { name: 'Horários de atendimento' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Geral' }).click();
+  await expect(page.getByRole('heading', { name: 'Geral' })).toBeVisible();
   await expect(page.getByLabel('Fuso horário da empresa')).toHaveCount(0);
   await page.getByRole('button', { name: 'Salvar configurações' }).click();
   await expect(page.getByText('Configurações salvas.')).toBeVisible();

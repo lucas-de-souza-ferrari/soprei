@@ -39,6 +39,7 @@ import {
   type Tone,
 } from './billing-rules';
 import { ConfirmDialog } from './ConfirmDialog';
+import { SectionTabs } from './SectionTabs';
 import { formatMoney } from './money';
 import { RetryAlert } from './RetryAlert';
 
@@ -183,6 +184,7 @@ export function SubscriptionPage({
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [tab, setTab] = useState<'resumo' | 'planos' | 'pagamentos'>('resumo');
   const generation = useRef(0);
   const quoteGeneration = useRef(0);
   const sessionRef = useRef(onSession);
@@ -347,7 +349,7 @@ export function SubscriptionPage({
 
   /** Abre o link do checkout na mesma aba (só https, sem credenciais embutidas). */
   const openCheckout = (url: string): void => {
-    const safe = safeCheckoutUrl(url);
+    const safe = safeCheckoutUrl(url, billing?.checkoutHost);
     if (safe === null) {
       setNotice({
         tone: 'error',
@@ -451,331 +453,371 @@ export function SubscriptionPage({
           />
         )}
 
-      <Section id="sec-plano" title="Seu plano">
-        <dl className="m-0 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <div>
-            <dt className="text-muted-foreground">Plano</dt>
-            <dd className="m-0 font-medium">{subscription.planName}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Ciclo</dt>
-            <dd className="m-0 font-medium">{CYCLE_LABELS[subscription.cycle]}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Módulos</dt>
-            <dd className="m-0 font-medium">
-              Agenda: {subscription.agenda ? 'contratada' : 'não contratada'}; Estoque:{' '}
-              {subscription.stock ? 'contratado' : 'não contratado'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">
-              {subscription.status === 'TRIAL' ? 'Fim do teste' : 'Vencimento'}
-            </dt>
-            <dd className="m-0 font-medium">
-              {formatDate(
-                subscription.status === 'TRIAL'
-                  ? (subscription.trialEndsAt ?? subscription.currentPeriodEnd)
-                  : subscription.currentPeriodEnd,
-              )}{' '}
-              <span className="font-normal text-muted-foreground">
-                ({String(daysLeft(subscription.currentPeriodEnd, now))}{' '}
-                {plural(daysLeft(subscription.currentPeriodEnd, now), 'dia', 'dias')})
-              </span>
-            </dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Empresas</dt>
-            <dd className="m-0 font-medium">
-              {String(subscription.companies)} de {String(subscription.maxCompanies)}
-            </dd>
-          </div>
-        </dl>
-        {pending !== null && (
-          <div
-            className="grid gap-2 rounded-xl bg-muted p-3 text-sm text-foreground"
-            data-testid="troca-agendada"
-          >
-            <p className="m-0">
-              <strong>Troca agendada:</strong> na próxima renovação o plano passa a ser{' '}
-              {describeSelection(catalog, pending)}. Nada é cobrado agora.
-            </p>
-            <div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() =>
-                  void act('undo', async () => {
-                    await billingApi.undoPending();
-                    await load(true);
-                    setNotice({ tone: 'success', text: 'Troca agendada desfeita.' });
-                  })
-                }
-              >
-                Desfazer troca agendada
-              </Button>
-            </div>
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2">
-          {canReactivate(subscription) && (
-            <Button
-              disabled={busy !== null}
-              onClick={() =>
-                void act('reactivate', async () => {
-                  await billingApi.reactivate();
-                  await load(true);
-                  setNotice({
-                    tone: 'success',
-                    text: 'Assinatura reativada: ela volta a renovar.',
-                  });
-                })
-              }
-            >
-              Reativar assinatura
-            </Button>
-          )}
-          {canCancel(subscription) && billing.checkoutEnabled && (
-            <Button
-              variant="outline"
-              disabled={busy !== null}
-              onClick={() => setConfirmCancel(true)}
-            >
-              Cancelar assinatura
-            </Button>
-          )}
-        </div>
-      </Section>
-
-      {usage !== null && (
-        <Section id="sec-uso" title="Uso deste mês">
-          <p className="m-0 text-sm text-muted-foreground">
-            Janela de uso de {formatDate(usage.windowStart)} até {formatDate(usage.windowEnd)}. Vale
-            a cota que acabar primeiro.
-          </p>
-          <UsageBar
-            id="respostas"
-            label="Respostas enviadas"
-            used={usage.replies.used}
-            limit={usage.replies.limit}
-            unit="respostas"
-          />
-          <UsageBar
-            id="ia"
-            label="Uso da IA"
-            used={usage.tokens.used}
-            limit={usage.tokens.limit}
-            unit="tokens"
-          />
-          <div
-            className="grid gap-1 rounded-xl bg-muted p-3 text-sm text-foreground"
-            data-testid="estimativa-meta"
-          >
-            <p className="m-0">
-              <strong>Estimativa de custo na Meta este mês:</strong>{' '}
-              {formatMoney(metaEstimateCents(usage.metaEstimate.milliCents))} (estimativa)
-            </p>
-            <p className="m-0 text-muted-foreground">{META_ESTIMATE_NOTE}</p>
-          </div>
-        </Section>
-      )}
-
-      <p className="m-0 rounded-xl border border-border p-3 text-sm" data-testid="aviso-whatsapp">
-        {whatsappNotice(subscription.whatsappNotice, includedReplies)}
-      </p>
-
-      {billing.checkoutEnabled ? (
-        <Section id="sec-escolher" title="Escolher plano">
-          <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0">
-            <legend className="mb-1 p-0 text-sm font-medium">Ciclo de cobrança</legend>
-            <div className="flex flex-wrap gap-2">
-              {CYCLES.map((cycle) => (
-                <label
-                  key={cycle}
-                  className="flex min-h-11 items-center gap-2 rounded-xl border border-border px-3 text-sm"
-                >
-                  <input
-                    type="radio"
-                    name="ciclo"
-                    className="size-5"
-                    checked={choosing.cycle === cycle}
-                    onChange={() => setSelection({ ...choosing, cycle })}
-                  />
-                  <span>
-                    {CYCLE_LABELS[cycle]}
-                    {cycle === 'ANNUAL' ? ' (um pagamento por ano, com desconto)' : ''}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0">
-            <legend className="mb-1 p-0 text-sm font-medium">Plano</legend>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {catalog.map((plan) => {
-                const planPrice = price(plan);
-                const periodo = choosing.cycle === 'MONTHLY' ? 'por mês' : 'por ano';
-                return (
-                  <label
-                    key={plan.code}
-                    className="flex min-w-0 items-start gap-2 rounded-xl border border-border p-3 text-sm"
-                  >
-                    <input
-                      type="radio"
-                      name="plano"
-                      className="mt-0.5 size-5 shrink-0"
-                      checked={choosing.planCode === plan.code}
-                      onChange={() => setSelection({ ...choosing, planCode: plan.code })}
-                    />
-                    <span className="grid min-w-0 gap-0.5">
-                      <strong>{plan.name}</strong>
-                      <span className="text-muted-foreground">
-                        Até {String(plan.maxCompanies)}{' '}
-                        {plural(plan.maxCompanies, 'empresa', 'empresas')}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {formatCount(plan.monthlyReplies)} respostas por mês
-                      </span>
-                      <span>
-                        {planPrice === undefined
-                          ? 'Indisponível neste ciclo'
-                          : `${formatMoney(planPrice.baseCents)} ${periodo}`}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
-
-          <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0">
-            <legend className="mb-1 p-0 text-sm font-medium">Módulos opcionais</legend>
-            <label className="flex min-h-11 items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 size-5 shrink-0"
-                checked={choosing.agenda}
-                onChange={(event) => setSelection({ ...choosing, agenda: event.target.checked })}
-              />
-              <span>
-                Agenda
-                {chosenPrice !== undefined && ` (+ ${formatMoney(chosenPrice.agendaCents)})`}
-              </span>
-            </label>
-            <label className="flex min-h-11 items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 size-5 shrink-0"
-                checked={choosing.stock}
-                onChange={(event) => setSelection({ ...choosing, stock: event.target.checked })}
-              />
-              <span>
-                Estoque
-                {chosenPrice !== undefined && ` (+ ${formatMoney(chosenPrice.stockCents)})`}
-              </span>
-            </label>
-          </fieldset>
-
-          <div className="grid gap-2" aria-live="polite" data-testid="cotacao">
-            {quote === null && quoteError === null && (
-              <p className="m-0 text-sm text-muted-foreground">Calculando o valor…</p>
-            )}
-            {quoteError !== null && (
-              <p className="m-0 text-sm font-medium text-destructive" role="alert">
-                {quoteError}
-              </p>
-            )}
-            {view !== null && (
-              <p className="m-0 text-sm" data-testid="cotacao-texto">
-                {view.text}
-              </p>
-            )}
-            {quote !== null && quote.amountCents > 0 && (
-              <p className="m-0 text-2xl font-semibold" data-testid="total">
-                {formatMoney(quote.amountCents)}
-              </p>
-            )}
-          </div>
-          <div>
-            <Button
-              disabled={busy !== null || view === null || quoteError !== null || waiting !== null}
-              onClick={submit}
-            >
-              {busy === 'pay' || busy === 'schedule' ? 'Aguarde…' : (view?.button ?? 'Continuar')}
-            </Button>
-            {isSame && view?.action === 'pay' && subscription.status === 'TRIAL' && (
-              <p className="m-0 pt-2 text-sm text-muted-foreground">
-                Esta é a escolha do seu teste. Pague para continuar depois do fim dele.
-              </p>
-            )}
-          </div>
-        </Section>
-      ) : (
-        <p className="m-0 text-sm text-muted-foreground">
-          O pagamento ainda não está habilitado neste ambiente; você pode acompanhar o plano e o
-          uso.
-        </p>
-      )}
-
-      <Section id="sec-historico" title="Pedidos e pagamentos">
-        {billing.orders.length === 0 ? (
-          <p className="m-0 text-sm text-muted-foreground">Nenhum pedido ainda.</p>
-        ) : (
-          <ul className="m-0 grid list-none gap-2 p-0">
-            {billing.orders.map((order) => (
-              <li
-                key={order.id}
-                data-testid="pedido"
-                className="grid min-w-0 gap-1 rounded-xl border border-border p-3 text-sm"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <strong>{ORDER_KIND_LABELS[order.kind]}</strong>
-                  <span>{formatMoney(order.amountCents)}</span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
-                  <span>
-                    {formatDate(order.createdAt)} · {ORDER_STATUS_LABELS[order.status]}
-                    {order.paidAt === null ? '' : ` em ${formatDate(order.paidAt)}`}
-                  </span>
-                  {canCheckOrder(order, now) && billing.checkoutEnabled && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={busy !== null || waiting !== null}
-                      onClick={() =>
-                        void act('check', async () => {
-                          const result = await billingApi.check(order.id);
-                          await load(true);
-                          setNotice(
-                            result.outcome === 'paid'
-                              ? {
-                                  tone: 'success',
-                                  text: 'Pagamento confirmado. Seu plano já está ativo.',
-                                }
-                              : result.outcome === 'failed'
-                                ? {
-                                    tone: 'error',
-                                    text: 'O pagamento não pôde ser concluído. Tente de novo.',
-                                  }
-                                : {
-                                    tone: 'info',
-                                    text: 'Ainda não recebemos a confirmação deste pagamento. Tente de novo em instantes.',
-                                  },
-                          );
-                        })
-                      }
+      <SectionTabs
+        label="Seções da assinatura"
+        active={tab}
+        onChange={setTab}
+        tabs={[
+          {
+            key: 'resumo',
+            label: 'Resumo',
+            content: (
+              <>
+                <Section id="sec-plano" title="Seu plano">
+                  <dl className="m-0 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                    <div>
+                      <dt className="text-muted-foreground">Plano</dt>
+                      <dd className="m-0 font-medium">{subscription.planName}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Ciclo</dt>
+                      <dd className="m-0 font-medium">{CYCLE_LABELS[subscription.cycle]}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Módulos</dt>
+                      <dd className="m-0 font-medium">
+                        Agenda: {subscription.agenda ? 'contratada' : 'não contratada'}; Estoque:{' '}
+                        {subscription.stock ? 'contratado' : 'não contratado'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">
+                        {subscription.status === 'TRIAL' ? 'Fim do teste' : 'Vencimento'}
+                      </dt>
+                      <dd className="m-0 font-medium">
+                        {formatDate(
+                          subscription.status === 'TRIAL'
+                            ? (subscription.trialEndsAt ?? subscription.currentPeriodEnd)
+                            : subscription.currentPeriodEnd,
+                        )}{' '}
+                        <span className="font-normal text-muted-foreground">
+                          ({String(daysLeft(subscription.currentPeriodEnd, now))}{' '}
+                          {plural(daysLeft(subscription.currentPeriodEnd, now), 'dia', 'dias')})
+                        </span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Empresas</dt>
+                      <dd className="m-0 font-medium">
+                        {String(subscription.companies)} de {String(subscription.maxCompanies)}
+                      </dd>
+                    </div>
+                  </dl>
+                  {pending !== null && (
+                    <div
+                      className="grid gap-2 rounded-xl bg-muted p-3 text-sm text-foreground"
+                      data-testid="troca-agendada"
                     >
-                      Já paguei
-                    </Button>
+                      <p className="m-0">
+                        <strong>Troca agendada:</strong> na próxima renovação o plano passa a ser{' '}
+                        {describeSelection(catalog, pending)}. Nada é cobrado agora.
+                      </p>
+                      <div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            void act('undo', async () => {
+                              await billingApi.undoPending();
+                              await load(true);
+                              setNotice({ tone: 'success', text: 'Troca agendada desfeita.' });
+                            })
+                          }
+                        >
+                          Desfazer troca agendada
+                        </Button>
+                      </div>
+                    </div>
                   )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+                  <div className="flex flex-wrap gap-2">
+                    {canReactivate(subscription) && (
+                      <Button
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void act('reactivate', async () => {
+                            await billingApi.reactivate();
+                            await load(true);
+                            setNotice({
+                              tone: 'success',
+                              text: 'Assinatura reativada: ela volta a renovar.',
+                            });
+                          })
+                        }
+                      >
+                        Reativar assinatura
+                      </Button>
+                    )}
+                    {canCancel(subscription) && billing.checkoutEnabled && (
+                      <Button
+                        variant="outline"
+                        disabled={busy !== null}
+                        onClick={() => setConfirmCancel(true)}
+                      >
+                        Cancelar assinatura
+                      </Button>
+                    )}
+                  </div>
+                </Section>
+
+                {usage !== null && (
+                  <Section id="sec-uso" title="Uso deste mês">
+                    <p className="m-0 text-sm text-muted-foreground">
+                      Janela de uso de {formatDate(usage.windowStart)} até{' '}
+                      {formatDate(usage.windowEnd)}. Vale a cota que acabar primeiro.
+                    </p>
+                    <UsageBar
+                      id="respostas"
+                      label="Respostas enviadas"
+                      used={usage.replies.used}
+                      limit={usage.replies.limit}
+                      unit="respostas"
+                    />
+                    <UsageBar
+                      id="ia"
+                      label="Uso da IA"
+                      used={usage.tokens.used}
+                      limit={usage.tokens.limit}
+                      unit="tokens"
+                    />
+                    <div
+                      className="grid gap-1 rounded-xl bg-muted p-3 text-sm text-foreground"
+                      data-testid="estimativa-meta"
+                    >
+                      <p className="m-0">
+                        <strong>Estimativa de custo na Meta este mês:</strong>{' '}
+                        {formatMoney(metaEstimateCents(usage.metaEstimate.milliCents))} (estimativa)
+                      </p>
+                      <p className="m-0 text-muted-foreground">{META_ESTIMATE_NOTE}</p>
+                    </div>
+                  </Section>
+                )}
+
+                <p
+                  className="m-0 rounded-xl border border-border p-3 text-sm"
+                  data-testid="aviso-whatsapp"
+                >
+                  {whatsappNotice(subscription.whatsappNotice, includedReplies)}
+                </p>
+              </>
+            ),
+          },
+          {
+            key: 'planos',
+            label: 'Planos',
+            content: (
+              <>
+                {billing.checkoutEnabled ? (
+                  <Section id="sec-escolher" title="Escolher plano">
+                    <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0">
+                      <legend className="mb-1 p-0 text-sm font-medium">Ciclo de cobrança</legend>
+                      <div className="flex flex-wrap gap-2">
+                        {CYCLES.map((cycle) => (
+                          <label
+                            key={cycle}
+                            className="flex min-h-11 items-center gap-2 rounded-xl border border-border px-3 text-sm"
+                          >
+                            <input
+                              type="radio"
+                              name="ciclo"
+                              className="size-5"
+                              checked={choosing.cycle === cycle}
+                              onChange={() => setSelection({ ...choosing, cycle })}
+                            />
+                            <span>
+                              {CYCLE_LABELS[cycle]}
+                              {cycle === 'ANNUAL' ? ' (um pagamento por ano, com desconto)' : ''}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+
+                    <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0">
+                      <legend className="mb-1 p-0 text-sm font-medium">Plano</legend>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {catalog.map((plan) => {
+                          const planPrice = price(plan);
+                          const periodo = choosing.cycle === 'MONTHLY' ? 'por mês' : 'por ano';
+                          return (
+                            <label
+                              key={plan.code}
+                              className="flex min-w-0 items-start gap-2 rounded-xl border border-border p-3 text-sm"
+                            >
+                              <input
+                                type="radio"
+                                name="plano"
+                                className="mt-0.5 size-5 shrink-0"
+                                checked={choosing.planCode === plan.code}
+                                onChange={() => setSelection({ ...choosing, planCode: plan.code })}
+                              />
+                              <span className="grid min-w-0 gap-0.5">
+                                <strong>{plan.name}</strong>
+                                <span className="text-muted-foreground">
+                                  Até {String(plan.maxCompanies)}{' '}
+                                  {plural(plan.maxCompanies, 'empresa', 'empresas')}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  {formatCount(plan.monthlyReplies)} respostas por mês
+                                </span>
+                                <span>
+                                  {planPrice === undefined
+                                    ? 'Indisponível neste ciclo'
+                                    : `${formatMoney(planPrice.baseCents)} ${periodo}`}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+
+                    <fieldset className="m-0 grid min-w-0 gap-2 border-0 p-0">
+                      <legend className="mb-1 p-0 text-sm font-medium">Módulos opcionais</legend>
+                      <label className="flex min-h-11 items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 size-5 shrink-0"
+                          checked={choosing.agenda}
+                          onChange={(event) =>
+                            setSelection({ ...choosing, agenda: event.target.checked })
+                          }
+                        />
+                        <span>
+                          Agenda
+                          {chosenPrice !== undefined &&
+                            ` (+ ${formatMoney(chosenPrice.agendaCents)})`}
+                        </span>
+                      </label>
+                      <label className="flex min-h-11 items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 size-5 shrink-0"
+                          checked={choosing.stock}
+                          onChange={(event) =>
+                            setSelection({ ...choosing, stock: event.target.checked })
+                          }
+                        />
+                        <span>
+                          Estoque
+                          {chosenPrice !== undefined &&
+                            ` (+ ${formatMoney(chosenPrice.stockCents)})`}
+                        </span>
+                      </label>
+                    </fieldset>
+
+                    <div className="grid gap-2" aria-live="polite" data-testid="cotacao">
+                      {quote === null && quoteError === null && (
+                        <p className="m-0 text-sm text-muted-foreground">Calculando o valor…</p>
+                      )}
+                      {quoteError !== null && (
+                        <p className="m-0 text-sm font-medium text-destructive" role="alert">
+                          {quoteError}
+                        </p>
+                      )}
+                      {view !== null && (
+                        <p className="m-0 text-sm" data-testid="cotacao-texto">
+                          {view.text}
+                        </p>
+                      )}
+                      {quote !== null && quote.amountCents > 0 && (
+                        <p className="m-0 text-2xl font-semibold" data-testid="total">
+                          {formatMoney(quote.amountCents)}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Button
+                        disabled={
+                          busy !== null || view === null || quoteError !== null || waiting !== null
+                        }
+                        onClick={submit}
+                      >
+                        {busy === 'pay' || busy === 'schedule'
+                          ? 'Aguarde…'
+                          : (view?.button ?? 'Continuar')}
+                      </Button>
+                      {isSame && view?.action === 'pay' && subscription.status === 'TRIAL' && (
+                        <p className="m-0 pt-2 text-sm text-muted-foreground">
+                          Esta é a escolha do seu teste. Pague para continuar depois do fim dele.
+                        </p>
+                      )}
+                    </div>
+                  </Section>
+                ) : (
+                  <p className="m-0 text-sm text-muted-foreground">
+                    O pagamento ainda não está habilitado neste ambiente; você pode acompanhar o
+                    plano e o uso.
+                  </p>
+                )}
+              </>
+            ),
+          },
+          {
+            key: 'pagamentos',
+            label: 'Pagamentos',
+            content: (
+              <Section id="sec-historico" title="Pedidos e pagamentos">
+                {billing.orders.length === 0 ? (
+                  <p className="m-0 text-sm text-muted-foreground">Nenhum pedido ainda.</p>
+                ) : (
+                  <ul className="m-0 grid list-none gap-2 p-0">
+                    {billing.orders.map((order) => (
+                      <li
+                        key={order.id}
+                        data-testid="pedido"
+                        className="grid min-w-0 gap-1 rounded-xl border border-border p-3 text-sm"
+                      >
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                          <strong>{ORDER_KIND_LABELS[order.kind]}</strong>
+                          <span>{formatMoney(order.amountCents)}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
+                          <span>
+                            {formatDate(order.createdAt)} · {ORDER_STATUS_LABELS[order.status]}
+                            {order.paidAt === null ? '' : ` em ${formatDate(order.paidAt)}`}
+                          </span>
+                          {canCheckOrder(order, now) && billing.checkoutEnabled && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busy !== null || waiting !== null}
+                              onClick={() =>
+                                void act('check', async () => {
+                                  const result = await billingApi.check(order.id);
+                                  await load(true);
+                                  setNotice(
+                                    result.outcome === 'paid'
+                                      ? {
+                                          tone: 'success',
+                                          text: 'Pagamento confirmado. Seu plano já está ativo.',
+                                        }
+                                      : result.outcome === 'failed'
+                                        ? {
+                                            tone: 'error',
+                                            text: 'O pagamento não pôde ser concluído. Tente de novo.',
+                                          }
+                                        : {
+                                            tone: 'info',
+                                            text: 'Ainda não recebemos a confirmação deste pagamento. Tente de novo em instantes.',
+                                          },
+                                  );
+                                })
+                              }
+                            >
+                              Já paguei
+                            </Button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Section>
+            ),
+          },
+        ]}
+      />
 
       <ConfirmDialog
         request={

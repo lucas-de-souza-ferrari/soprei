@@ -112,7 +112,9 @@ test('a 360 px a tela não rola na horizontal (plano, escolha e histórico)', as
     paidAt: new Date().toISOString(),
   });
   await page.reload();
+  await page.getByRole('tab', { name: 'Planos' }).click();
   await expect(page_(page)).toContainText('Escolher plano');
+  await page.getByRole('tab', { name: 'Pagamentos' }).click();
   await expect(page.getByTestId('pedido')).toHaveCount(1);
   await noHorizontalScroll(page);
 });
@@ -178,6 +180,7 @@ test('escolher plano e ciclo, ver o total do servidor, pagar (abre o link) e vol
   const { billing } = await open(page, {
     sub: { status: 'TRIAL', endsInDays: 3, agenda: true, stock: true },
   });
+  await page.getByRole('tab', { name: 'Planos' }).click();
   await expect(page.getByTestId('cotacao-texto')).toContainText('Você pagará');
   await page.getByLabel(/Anual/).check();
   await page.getByLabel(/Profissional/).check();
@@ -211,6 +214,7 @@ test('escolher plano e ciclo, ver o total do servidor, pagar (abre o link) e vol
   expect(stored).not.toContain(orderId);
   expect(stored).not.toContain('tx-1');
   expect(await page.title()).not.toContain(orderId);
+  await page.getByRole('tab', { name: 'Pagamentos' }).click();
   await expect(page.getByTestId('pedido').first()).toContainText('Pago');
 });
 
@@ -267,6 +271,7 @@ test('pedido pendente no histórico tem "Já paguei"; ainda não confirmado most
       ],
     },
   });
+  await page.getByRole('tab', { name: 'Pagamentos' }).click();
   const row = page.getByTestId('pedido').first();
   await expect(row).toContainText('Aguardando pagamento');
   await row.getByRole('button', { name: 'Já paguei' }).click();
@@ -280,6 +285,7 @@ test('upgrade: a cotação do servidor aparece antes de confirmar ("você pagar�
   page,
 }) => {
   const { billing } = await open(page, { sub: { endsInDays: 10 } });
+  await page.getByRole('tab', { name: 'Planos' }).click();
   await page.getByLabel(/Profissional/).check();
   await expect(page.getByTestId('cotacao-texto')).toContainText('Você pagará R$ 43,21 agora');
   await expect(page.getByTestId('cotacao-texto')).toContainText('vencimento não muda');
@@ -296,9 +302,11 @@ test('upgrade: a cotação do servidor aparece antes de confirmar ("você pagar�
 
 test('downgrade vira troca agendada sem cobrança e pode ser desfeita', async ({ page }) => {
   const { billing } = await open(page, { sub: { planCode: 'PROFESSIONAL' } });
+  await page.getByRole('tab', { name: 'Planos' }).click();
   await page.getByLabel(/Essencial/).check();
   await expect(page.getByTestId('cotacao-texto')).toContainText('Nada será cobrado agora');
   await page.getByRole('button', { name: 'Agendar troca' }).click();
+  await page.getByRole('tab', { name: 'Resumo' }).click();
   const box = page.getByTestId('troca-agendada');
   await expect(box).toContainText('Troca agendada');
   await expect(box).toContainText('Essencial');
@@ -340,6 +348,7 @@ test('mais empresas do que o plano comporta: mensagem clara por código, botão 
     sub: { planCode: 'PROFESSIONAL', companies: 3 },
     billing: { quoteError: { status: 409, code: 'PLAN_DOWNGRADE_BLOCKED' } },
   });
+  await page.getByRole('tab', { name: 'Planos' }).click();
   await page.getByLabel(/Essencial/).check();
   await expect(page.getByTestId('cotacao')).toContainText(
     'Você tem mais empresas do que este plano comporta',
@@ -354,6 +363,7 @@ test('erro ao criar o pedido usa o code: mensagem do site, nunca o texto do serv
   const { billing } = await open(page, {
     sub: { status: 'EXPIRED', access: 'blocked', endsInDays: -9 },
   });
+  await page.getByRole('tab', { name: 'Planos' }).click();
   await expect(page.getByTestId('cotacao-texto')).toContainText('Você pagará');
   await page.route('**/api/account/billing/orders', (route) =>
     route.fulfill({
@@ -396,6 +406,7 @@ test('sem checkout ligado a tela mostra plano e uso mas não oferece pagar nem t
 }) => {
   const { billing } = await open(page, { billing: { checkoutEnabled: false } });
   await expect(page_(page)).toContainText('Seu plano');
+  await page.getByRole('tab', { name: 'Planos' }).click();
   await expect(page_(page)).toContainText('pagamento ainda não está habilitado');
   await expect(page.getByRole('button', { name: /Pagar|Renovar/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Cancelar assinatura' })).toHaveCount(0);
@@ -483,4 +494,22 @@ test('o login da conta titular com a assinatura em dia segue para as Conversas',
 }) => {
   await open(page, { path: '/entrar' });
   await expect(page).toHaveURL(/\/painel\/conversas$/);
+});
+
+test('conta com assinatura própria que é membro da empresa de OUTRA conta: sem item Assinatura, a faixa manda falar com o titular e a tela não é oferecida', async ({
+  page,
+}) => {
+  const { billing } = await open(page, {
+    path: '/painel/conversas',
+    billing: { holder: false, access: { access: 'blocked', agenda: true, stock: true } },
+  });
+  await expect(page.getByText('Assinatura encerrada')).toBeVisible();
+  await expect(page.getByText(/pessoa titular da conta/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Abrir Assinatura' })).toHaveCount(0);
+  expect((await menuItems(page)).includes('Assinatura')).toBe(false);
+  // Forçar o endereço: nada da assinatura da conta logada é mostrado nem lido.
+  await page.goto('/painel/assinatura');
+  await expect(page.getByText(/não tem assinatura própria/)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('R$');
+  expect(billing.calls.some((call) => call.path === '/account/billing')).toBe(false);
 });

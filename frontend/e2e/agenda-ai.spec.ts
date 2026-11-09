@@ -142,6 +142,7 @@ for (const theme of ['light', 'dark'] as const) {
     page,
   }) => {
     const agenda = await open(page, 'OWNER', () => undefined, theme, '/painel/agenda/configurar');
+    await page.getByRole('tab', { name: 'IA no WhatsApp' }).click();
     await expect(page.getByRole('heading', { name: 'IA no WhatsApp' })).toBeVisible();
     const enable = page.getByLabel(/A IA pode solicitar, cancelar e remarcar/);
     const auto = page.getByLabel(/Confirmar automaticamente/);
@@ -188,6 +189,7 @@ test('360 px: a lista com o selo, a contagem e a configuração não rolam na ho
   await expect(page.getByTestId('aguardando')).toBeVisible();
   await noHorizontalScroll(page);
   await page.goto('/painel/agenda/configurar');
+  await page.getByRole('tab', { name: 'IA no WhatsApp' }).click();
   await expect(page.getByRole('heading', { name: 'IA no WhatsApp' })).toBeVisible();
   await noHorizontalScroll(page);
 });
