@@ -1,6 +1,9 @@
 import type { FastifyPluginCallback } from 'fastify';
 import type { AuthService } from '../../application/auth/auth.service.js';
-import type { EntitlementReader } from '../../application/ports/entitlement-reader.js';
+import type {
+  EntitlementReader,
+  SubscriptionHolderReader,
+} from '../../application/ports/entitlement-reader.js';
 import { UNLIMITED_ENTITLEMENTS } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, membershipAuth, requirePermission } from '../common/auth.hooks.js';
@@ -11,7 +14,9 @@ export interface AdminEntitlementsControllerOptions {
   readonly auth: Pick<AuthService, 'authenticate'>;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   /** Sem leitor (cobrança desligada) tudo está liberado e nada tem cota. */
-  readonly entitlements?: Pick<EntitlementReader, 'forCompany'> | undefined;
+  readonly entitlements?:
+    | (Pick<EntitlementReader, 'forCompany'> & Partial<SubscriptionHolderReader>)
+    | undefined;
 }
 
 /**
@@ -32,10 +37,12 @@ export const adminEntitlementsController: FastifyPluginCallback<
       onRequest: requirePermission('conversation:read', { companyParam: 'companyId', metrics }),
     },
     async (request) => {
-      const { companyId } = membershipAuth(request);
-      return entitlements === undefined
-        ? UNLIMITED_ENTITLEMENTS
-        : await entitlements.forCompany(companyId);
+      const { companyId, membershipId } = membershipAuth(request);
+      if (entitlements === undefined) return { ...UNLIMITED_ENTITLEMENTS, holder: false };
+      const result = await entitlements.forCompany(companyId);
+      // Só um booleano: a conta logada é a titular da assinatura DESTA empresa (nunca dado de outra conta).
+      const holder = (await entitlements.holderOf?.(companyId, membershipId)) ?? false;
+      return { ...result, holder };
     },
   );
   done();

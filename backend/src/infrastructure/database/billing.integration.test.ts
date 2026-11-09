@@ -395,6 +395,36 @@ describe('createCompany com a cobrança ligada (spec 031, E1)', () => {
     );
   });
 
+  it('holderOf: só a conta titular da assinatura DA EMPRESA é titular; membro de empresa de outra conta não é, mesmo com assinatura própria', async () => {
+    const ownerA = await newAccount('holder-a');
+    const guestB = await newAccount('holder-b');
+    const companyA = await createCompanyFor(ownerA, now);
+    // B tem assinatura própria (empresa própria) e é membro da empresa de A.
+    const companyB = await createCompanyFor(guestB, now);
+    const guestInA = await db().membership.create({
+      data: {
+        companyId: companyA,
+        accountId: guestB,
+        email: `h-${randomBytes(4).toString('hex')}@exemplo.test`,
+        passwordHash: 'account-managed',
+        role: 'OWNER',
+      },
+    });
+    const ownerInA = await db().membership.findFirstOrThrow({
+      where: { companyId: companyA, accountId: ownerA },
+    });
+    const guestInB = await db().membership.findFirstOrThrow({
+      where: { companyId: companyB, accountId: guestB },
+    });
+    const r = reader(() => now);
+    assert.equal(await r.holderOf(companyA, ownerInA.id), true);
+    assert.equal(await r.holderOf(companyA, guestInA.id), false);
+    assert.equal(await r.holderOf(companyB, guestInB.id), true);
+    // Vínculo de outra empresa nunca vale para esta.
+    assert.equal(await r.holderOf(companyA, guestInB.id), false);
+    assert.equal(await r.holderOf(companyB, ownerInA.id), false);
+  });
+
   it('quem entra por convite numa empresa alheia não consome o limite dele', async () => {
     const owner = await newAccount('owner');
     const guest = await newAccount('guest');

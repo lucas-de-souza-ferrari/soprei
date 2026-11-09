@@ -7,7 +7,10 @@ import type { AttendanceService } from '../../application/attendance/attendance.
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
 import type { BillingService } from '../../application/billing/billing.service.js';
-import type { EntitlementReader } from '../../application/ports/entitlement-reader.js';
+import type {
+  EntitlementReader,
+  SubscriptionHolderReader,
+} from '../../application/ports/entitlement-reader.js';
 import type { CheckoutService } from '../../application/billing/checkout.service.js';
 import { billingController } from '../../presentation/billing/billing.controller.js';
 import { infinitepayWebhookController } from '../../presentation/webhooks/infinitepay-webhook.controller.js';
@@ -96,7 +99,8 @@ export interface WhatsappRoutesParams {
  */
 export interface BillingRoutesParams {
   readonly service: Pick<BillingService, 'overview'>;
-  readonly entitlements: Pick<EntitlementReader, 'forCompany'>;
+  readonly entitlements: Pick<EntitlementReader, 'forCompany'> &
+    Partial<SubscriptionHolderReader>;
   /** Checkout da InfinitePay (E3, CHECKOUT_ENABLED): pedido, "Já paguei" e webhook. Sem isto essas rotas não existem. */
   readonly checkout?: Pick<
     CheckoutService,

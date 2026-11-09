@@ -1,4 +1,7 @@
-import type { EntitlementReader } from '../../../application/ports/entitlement-reader.js';
+import type {
+  EntitlementReader,
+  SubscriptionHolderReader,
+} from '../../../application/ports/entitlement-reader.js';
 import {
   buildEntitlements,
   type CompanyEntitlements,
@@ -35,7 +38,7 @@ export interface EntitlementReaderSettings extends QuotaSettings, TrialSettings 
  * ligar a cobrança: a assinatura da conta da pessoa `OWNER` mais antiga (teste gratuito, uma vez por conta)
  * passa a ser a dela, de forma idempotente (`updateMany` condicional ao `subscriptionId` nulo).
  */
-export class PrismaEntitlementReader implements EntitlementReader {
+export class PrismaEntitlementReader implements EntitlementReader, SubscriptionHolderReader {
   constructor(
     private readonly db: TenantScopedPrisma,
     private readonly settings: EntitlementReaderSettings,
@@ -71,6 +74,23 @@ export class PrismaEntitlementReader implements EntitlementReader {
         now,
         this.settings,
       );
+    });
+  }
+
+  holderOf(companyId: CompanyId, membershipId: string): Promise<boolean> {
+    return withRepositoryErrors('Entitlements.holderOf', async () => {
+      const [membership, company] = await Promise.all([
+        this.db.membership.findFirst({
+          where: { id: membershipId, companyId },
+          select: { accountId: true },
+        }),
+        this.db.company.findFirst({
+          where: { id: companyId, deletedAt: null },
+          select: { subscription: { select: { accountId: true } } },
+        }),
+      ]);
+      const holder = company?.subscription?.accountId;
+      return membership?.accountId != null && holder !== undefined && holder === membership.accountId;
     });
   }
 

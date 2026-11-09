@@ -9,3 +9,12 @@ import type { CompanyEntitlements, CompanyId } from '../../domain/index.js';
 export interface EntitlementReader {
   forCompany(companyId: CompanyId): Promise<CompanyEntitlements>;
 }
+
+/** Titularidade da assinatura (E4): a tela de Assinatura é da conta, então só o titular a vê. */
+export interface SubscriptionHolderReader {
+  /**
+   * A conta do vínculo é a TITULAR da assinatura desta empresa? Só um booleano (a tela de Assinatura é da
+   * conta, então só o titular a vê); nunca devolve dado de outra conta.
+   */
+  holderOf(companyId: CompanyId, membershipId: string): Promise<boolean>;
+}
