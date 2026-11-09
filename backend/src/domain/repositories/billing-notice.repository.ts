@@ -20,6 +20,12 @@ export interface NoticeTarget {
   readonly recipient: NoticeRecipient | null;
 }
 
+/** Pagamento concedido cujo recibo ainda não foi marcado. */
+export interface PendingReceipt {
+  readonly subscriptionId: string;
+  readonly paidAt: Date;
+}
+
 /**
  * Avisos por e-mail (spec 031, E5). Models globais: só se lê por lote de assinaturas ou pelo id da própria
  * assinatura; nenhuma rota passa por aqui. `claim` é a trava de "uma vez por ciclo e tipo": a chave única
@@ -28,6 +34,8 @@ export interface NoticeTarget {
 export interface BillingNoticeRepository {
   /** Lote de assinaturas ainda não vencidas de vez (EXPIRED fica fora), em ordem de id, depois de `after`. */
   listBatch(now: Date, after: string | null, limit: number): Promise<readonly NoticeCandidate[]>;
+  /** Pagamentos concedidos desde `since` sem a marca do recibo (PAYMENT_RECEIVED na janela do instante do pagamento). */
+  listPendingReceipts(since: Date, limit: number): Promise<readonly PendingReceipt[]>;
   findTarget(subscriptionId: string): Promise<NoticeTarget | null>;
   /** Marca o aviso como enviado; falso se já estava marcado (quem perde a corrida não envia). */
   claim(subscriptionId: string, kind: BillingNoticeKind, windowStart: Date): Promise<boolean>;

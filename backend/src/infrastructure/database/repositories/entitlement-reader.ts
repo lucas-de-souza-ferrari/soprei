@@ -90,7 +90,9 @@ export class PrismaEntitlementReader implements EntitlementReader, SubscriptionH
         }),
       ]);
       const holder = company?.subscription?.accountId;
-      return membership?.accountId != null && holder !== undefined && holder === membership.accountId;
+      return (
+        membership?.accountId != null && holder !== undefined && holder === membership.accountId
+      );
     });
   }
 

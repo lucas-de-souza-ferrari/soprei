@@ -4,6 +4,7 @@ import {
   type NoticeCandidate,
   type NoticeRecipient,
   type NoticeTarget,
+  type PendingReceipt,
   type SubscriptionRecord,
 } from '../../../domain/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
@@ -76,8 +77,20 @@ export class PrismaBillingNoticeRepository implements BillingNoticeRepository {
             select: { maxCompanies: true },
           });
           pendingPlanMaxCompanies = plan?.maxCompanies ?? null;
+          // Como manda a spec (e o checkout): inclui as empresas ainda não adotadas em que a conta é OWNER ativa.
           companies = await this.db.company.count({
-            where: { subscriptionId: subscription.id, deletedAt: null },
+            where: {
+              deletedAt: null,
+              OR: [
+                { subscriptionId: subscription.id },
+                {
+                  subscriptionId: null,
+                  memberships: {
+                    some: { accountId: subscription.accountId, role: 'OWNER', status: 'ACTIVE' },
+                  },
+                },
+              ],
+            },
           });
         }
         out.push({
@@ -94,6 +107,37 @@ export class PrismaBillingNoticeRepository implements BillingNoticeRepository {
         });
       }
       return out;
+    });
+  }
+
+  listPendingReceipts(since: Date, limit: number): Promise<readonly PendingReceipt[]> {
+    return withRepositoryErrors('BillingNotice.listPendingReceipts', async () => {
+      const orders = await this.db.paymentOrder.findMany({
+        where: { status: 'PAID', paidAt: { gte: since } },
+        orderBy: { paidAt: 'desc' },
+        take: Math.min(Math.max(1, limit), 200),
+        select: { subscriptionId: true, paidAt: true },
+      });
+      const paid = orders.filter(
+        (order): order is { subscriptionId: string; paidAt: Date } => order.paidAt !== null,
+      );
+      if (paid.length === 0) return [];
+      const marks = await this.db.paymentNotice.findMany({
+        where: {
+          kind: 'PAYMENT_RECEIVED',
+          OR: paid.map((order) => ({
+            subscriptionId: order.subscriptionId,
+            windowStart: order.paidAt,
+          })),
+        },
+        select: { subscriptionId: true, windowStart: true },
+      });
+      const done = new Set(
+        marks.map((mark) => mark.subscriptionId + '|' + mark.windowStart.toISOString()),
+      );
+      return paid.filter(
+        (order) => !done.has(order.subscriptionId + '|' + order.paidAt.toISOString()),
+      );
     });
   }
 

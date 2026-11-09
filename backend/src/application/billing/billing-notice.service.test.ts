@@ -6,6 +6,7 @@ import type {
   NoticeCandidate,
   NoticeRecipient,
   NoticeTarget,
+  PendingReceipt,
   SubscriptionRecord,
 } from '../../domain/index.js';
 import type { BillingNoticeResult } from '../../infrastructure/metrics/index.js';
@@ -77,8 +78,19 @@ class MemoryNotices implements BillingNoticeRepository {
       .slice(0, limit);
     return Promise.resolve(rows);
   }
-  findTarget(): Promise<NoticeTarget | null> {
-    return Promise.resolve(this.target);
+  receipts: PendingReceipt[] = [];
+  listPendingReceipts(): Promise<readonly PendingReceipt[]> {
+    return Promise.resolve(this.receipts.filter((r) => !this.claimedReceipt(r)));
+  }
+  private claimedReceipt(r: PendingReceipt): boolean {
+    return this.claimed.has(r.subscriptionId + '|PAYMENT_RECEIVED|' + r.paidAt.toISOString());
+  }
+  findTarget(id?: string): Promise<NoticeTarget | null> {
+    if (this.target !== null) return Promise.resolve(this.target);
+    const row = this.candidates.find((c) => c.subscription.id === id);
+    return Promise.resolve(
+      row === undefined ? null : { subscription: row.subscription, recipient: row.recipient },
+    );
   }
   async claim(subscriptionId: string, kind: BillingNoticeKind, windowStart: Date) {
     await this.claimDelay;
@@ -305,5 +317,61 @@ describe('BillingNoticeService.paymentGranted (spec 031, E5)', () => {
     broken.repository.findTarget = () => Promise.reject(new Error(EMAIL));
     await broken.service.paymentGranted(granted(true));
     assert.ok(!logContains(broken.logs.raw(), EMAIL));
+  });
+});
+
+describe('cursor rotativo, releitura e recibo (spec 031, E5, revisão)', () => {
+  it('com mais assinaturas que o teto de lotes, a execução seguinte continua de onde parou e volta ao início ao esgotar', async () => {
+    const repository = new MemoryNotices();
+    repository.candidates = Array.from({ length: 7 }, (_, index) => candidate('s' + String(index)));
+    const mailer = new RecordingMailer();
+    const service = new BillingNoticeService({
+      repository,
+      mailer,
+      logger: captureLogs().logger,
+      settings: SETTINGS,
+      now: () => at(-3 * DAY),
+      batchSize: 2,
+      maxBatches: 2,
+    });
+    const visited = async (): Promise<string[]> => {
+      const before = mailer.sent.length;
+      await service.runOnce();
+      return mailer.sent.slice(before).map((entry) => entry.mail.subject);
+    };
+    assert.equal((await visited()).length, 4); // s0 a s3
+    assert.equal((await visited()).length, 3); // s4 a s6 e esgotou
+    // Já enviados: a terceira volta ao início e visita tudo de novo, sem reenviar (chave única).
+    const third = await service.runOnce();
+    assert.equal(third.scanned, 4);
+    assert.equal(third.sent, 0);
+    assert.equal(mailer.sent.length, 7);
+  });
+
+  it('um pagamento no meio da varredura: o aviso de vencido é descartado se o período já foi renovado', async () => {
+    const t = build(at(GRACE * 0 + DAY));
+    const stale = candidate('s1');
+    t.repository.candidates = [stale];
+    // A leitura imediatamente antes do envio já vê o período renovado.
+    t.repository.target = {
+      subscription: subscription('s1', { currentPeriodEnd: new Date(END.getTime() + 30 * DAY) }),
+      recipient: { email: EMAIL },
+    };
+    const summary = await t.service.runOnce();
+    assert.equal(summary.sent, 0);
+    assert.equal(t.mailer.sent.length, 0);
+    assert.equal(t.repository.claimed.size, 0);
+  });
+
+  it('recibo que não saiu é reenviado pela tarefa, uma vez só', async () => {
+    const t = build(at(-DAY));
+    t.repository.target = { subscription: subscription('s1'), recipient: { email: EMAIL } };
+    t.repository.receipts = [{ subscriptionId: 's1', paidAt: at(-2 * DAY) }];
+    await t.service.runOnce();
+    await t.service.runOnce();
+    assert.deepEqual(
+      t.mailer.sent.map((entry) => entry.mail.subject),
+      ['Recebemos o seu pagamento no Soprei'],
+    );
   });
 });

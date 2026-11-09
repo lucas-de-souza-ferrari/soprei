@@ -160,6 +160,7 @@ export type {
   BillingNoticeRepository,
   NoticeCandidate,
   NoticeRecipient,
+  PendingReceipt,
   NoticeTarget,
 } from './repositories/billing-notice.repository.js';
 export type {

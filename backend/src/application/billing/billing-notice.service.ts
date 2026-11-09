@@ -20,6 +20,9 @@ const DAY_MS = 86_400_000;
 /** Assinaturas lidas por lote e lotes por execução (o resto fica para a próxima; nada é perdido). */
 export const NOTICE_BATCH_SIZE = 100;
 export const NOTICE_MAX_BATCHES = 20;
+/** Recibos não enviados: tenta de novo os pagamentos dos últimos 2 dias (até 50 por execução). */
+const RECEIPT_RETRY_WINDOW_MS = 2 * DAY_MS;
+const RECEIPT_RETRY_LIMIT = 50;
 
 export interface BillingNoticeServiceDeps {
   readonly repository: BillingNoticeRepository;
@@ -51,6 +54,12 @@ type SendResult = 'sent' | 'failed' | 'duplicate' | 'skipped';
  * O endereço, o texto e os valores nunca vão a log nem a métrica (só id da assinatura, tipo e resultado).
  */
 export class BillingNoticeService {
+  /**
+   * Cursor rotativo entre execuções (só em memória): a próxima continua de onde a anterior parou e volta ao
+   * início ao esgotar a lista, então com mais assinaturas que o teto de lotes nenhuma fica sem ser visitada.
+   */
+  private cursor: string | null = null;
+
   constructor(private readonly deps: BillingNoticeServiceDeps) {}
 
   async runOnce(): Promise<NoticeRunSummary> {
@@ -63,16 +72,23 @@ export class BillingNoticeService {
     let failed = 0;
     let skipped = 0;
     let synced = 0;
+    let after = this.cursor;
+    let exhausted = false;
     try {
-      let after: string | null = null;
       for (let batch = 0; batch < maxBatches; batch += 1) {
         const candidates = await repository.listBatch(now, after, batchSize);
-        if (candidates.length === 0) break;
+        if (candidates.length === 0) {
+          exhausted = true;
+          break;
+        }
         for (const candidate of candidates) {
           scanned += 1;
           let failedHere = false;
           try {
             for (const notice of dueNotices(candidate, now, settings)) {
+              // Relê a assinatura imediatamente antes de enviar um aviso de período: um pagamento no meio
+              // da varredura não pode gerar um e-mail velho ("venceu") logo depois.
+              if (await this.isStale(candidate.subscription.id, notice)) continue;
               const result = await this.sendNotice(
                 candidate.subscription,
                 candidate.recipient,
@@ -106,8 +122,12 @@ export class BillingNoticeService {
           }
         }
         after = candidates.at(-1)?.subscription.id ?? null;
-        if (candidates.length < batchSize) break;
+        if (candidates.length < batchSize) {
+          exhausted = true;
+          break;
+        }
       }
+      sent += await this.retryReceipts(now);
       metrics?.countBillingNoticeRun('ok');
     } catch (error) {
       metrics?.countBillingNoticeRun('error');
@@ -116,10 +136,56 @@ export class BillingNoticeService {
         'falha na tarefa de avisos de cobrança',
       );
     }
+    this.cursor = exhausted ? null : after;
     if (sent + failed + synced > 0) {
       logger.info({ scanned, sent, failed, skipped, synced }, 'avisos de cobrança');
     }
     return { scanned, sent, failed, skipped, synced };
+  }
+
+  /** O aviso de período ainda vale? Relê a assinatura: o fim do período, o teste e o cancelamento precisam ser os da varredura. */
+  private async isStale(subscriptionId: string, notice: DueNotice): Promise<boolean> {
+    const periodKinds: readonly BillingNoticeKind[] = [
+      'PERIOD_ENDING_7D',
+      'PERIOD_ENDING_1D',
+      'PERIOD_ENDED',
+      'PERIOD_GRACE_ENDED',
+      'DOWNGRADE_BLOCKED',
+      'TRIAL_ENDING',
+      'TRIAL_ENDED',
+    ];
+    if (!periodKinds.includes(notice.kind)) return false;
+    const fresh = await this.deps.repository.findTarget(subscriptionId);
+    if (fresh === null) return true;
+    const sub = fresh.subscription;
+    const key =
+      notice.kind === 'TRIAL_ENDING' || notice.kind === 'TRIAL_ENDED'
+        ? (sub.trialEndsAt ?? sub.currentPeriodEnd)
+        : sub.currentPeriodEnd;
+    if (key.getTime() !== notice.windowStart.getTime()) return true;
+    if (notice.kind.startsWith('TRIAL')) return sub.status !== 'TRIAL';
+    return sub.status === 'TRIAL' || sub.status === 'EXPIRED' || sub.cancelAtPeriodEnd;
+  }
+
+  /** Recibos de pagamentos concedidos cujo e-mail não saiu (falha de SMTP ou queda): a tarefa os reenvia, uma vez só pela chave única. */
+  private async retryReceipts(now: Date): Promise<number> {
+    const pending = await this.deps.repository.listPendingReceipts(
+      new Date(now.getTime() - RECEIPT_RETRY_WINDOW_MS),
+      RECEIPT_RETRY_LIMIT,
+    );
+    let sent = 0;
+    for (const receipt of pending) {
+      const target = await this.deps.repository.findTarget(receipt.subscriptionId);
+      if (target === null) continue;
+      const result = await this.sendNotice(
+        target.subscription,
+        target.recipient,
+        { kind: 'PAYMENT_RECEIVED', windowStart: receipt.paidAt, covers: [] },
+        this.dataFor(target.subscription, undefined, 'PAYMENT_RECEIVED'),
+      );
+      if (result === 'sent') sent += 1;
+    }
+    return sent;
   }
 
   /** Pagamento concedido (evento): recibo e, se a renovação aplicou a troca agendada, o aviso da troca. */
@@ -210,12 +276,16 @@ export class BillingNoticeService {
         { subscriptionId: subscription.id, kind: notice.kind, result: 'failed' },
         'falha ao enviar aviso de cobrança',
       );
-      await repository.release(subscription.id, notice.kind, notice.windowStart).catch(() => {
-        logger.error(
-          { subscriptionId: subscription.id, kind: notice.kind },
-          'marca do aviso não desfeita; o aviso não será reenviado',
-        );
-      });
+      const release = () => repository.release(subscription.id, notice.kind, notice.windowStart);
+      await release()
+        .catch(() => release())
+        .catch(() => {
+          // A marca fica: este aviso não será reenviado (o recibo, ao contrário, é reconferido pela tarefa).
+          logger.error(
+            { subscriptionId: subscription.id, kind: notice.kind },
+            'marca do aviso não desfeita; o aviso não será reenviado',
+          );
+        });
       return 'failed';
     }
   }

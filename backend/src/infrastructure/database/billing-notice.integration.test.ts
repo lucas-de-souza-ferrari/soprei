@@ -278,13 +278,24 @@ describe('avisos periódicos com o banco real (spec 031, E5)', () => {
         pendingChange: { planCode: 'ESSENTIAL', cycle: 'MONTHLY', agenda: false, stock: false },
       },
     });
-    const owners = await Promise.all(
-      [1, 2].map((n) =>
-        db().company.create({
-          data: { slug: `bloq-${RUN}-${String(n)}`, name: `Bloqueio ${String(n)}`, subscriptionId },
-        }),
-      ),
-    );
+    // Uma empresa da assinatura e outra ainda NÃO adotada (sem assinatura, com a conta como OWNER ativa): as duas
+    // contam (2 > 1 vaga do Essencial), como no checkout.
+    const adopted = await db().company.create({
+      data: { slug: 'bloq-' + RUN + '-1', name: 'Bloqueio 1', subscriptionId },
+    });
+    const unadopted = await db().company.create({
+      data: { slug: 'bloq-' + RUN + '-2', name: 'Bloqueio 2' },
+    });
+    await db().membership.create({
+      data: {
+        companyId: unadopted.id,
+        accountId: account.id,
+        email: 'bloq-' + randomBytes(4).toString('hex') + '@exemplo.test',
+        passwordHash: 'account-managed',
+        role: 'OWNER',
+      },
+    });
+    const owners = [adopted, unadopted];
     try {
       const mailer = new RecordingMailer();
       const s = service(mailer);
@@ -300,6 +311,7 @@ describe('avisos periódicos com o banco real (spec 031, E5)', () => {
         1,
       );
     } finally {
+      await db().membership.deleteMany({ where: { companyId: unadopted.id } });
       await db().company.deleteMany({ where: { id: { in: owners.map((row) => row.id) } } });
     }
   });
@@ -417,6 +429,15 @@ describe('aviso de pagamento recebido e de troca aplicada (spec 031, E5)', () =>
     ]);
     const text = mailer.mine().at(-1)?.mail.text ?? '';
     assert.ok(!/R\$/.test(text));
+    // Recibo que não saiu (marca perdida): a tarefa reenvia o dos últimos 2 dias, uma vez só.
+    await db().paymentNotice.deleteMany({
+      where: { subscriptionId: trial.id, kind: 'PAYMENT_RECEIVED' },
+    });
+    const before = subjectsOf().length;
+    const retry = service(mailer);
+    await retry.runOnce();
+    await retry.runOnce();
+    assert.equal(subjectsOf().length, before + 1);
     // Nada de e-mail nem texto de aviso em log ou métrica.
     assert.ok(!logContains(s.logs.raw(), account.email));
     assert.ok(!(await s.metrics.registry.metrics()).includes(EMAIL_SENTINEL));

@@ -99,8 +99,7 @@ export interface WhatsappRoutesParams {
  */
 export interface BillingRoutesParams {
   readonly service: Pick<BillingService, 'overview'>;
-  readonly entitlements: Pick<EntitlementReader, 'forCompany'> &
-    Partial<SubscriptionHolderReader>;
+  readonly entitlements: Pick<EntitlementReader, 'forCompany'> & Partial<SubscriptionHolderReader>;
   /** Checkout da InfinitePay (E3, CHECKOUT_ENABLED): pedido, "Já paguei" e webhook. Sem isto essas rotas não existem. */
   readonly checkout?: Pick<
     CheckoutService,

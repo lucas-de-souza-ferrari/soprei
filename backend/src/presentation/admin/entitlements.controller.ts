@@ -15,8 +15,7 @@ export interface AdminEntitlementsControllerOptions {
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   /** Sem leitor (cobrança desligada) tudo está liberado e nada tem cota. */
   readonly entitlements?:
-    | (Pick<EntitlementReader, 'forCompany'> & Partial<SubscriptionHolderReader>)
-    | undefined;
+    (Pick<EntitlementReader, 'forCompany'> & Partial<SubscriptionHolderReader>) | undefined;
 }
 
 /**
