@@ -346,6 +346,36 @@ Nota fiscal (NFS-e) e cadastro fiscal do pagador (**pendência do dono**, regist
 - **S7** Política de **retentativa** do webhook (quantas, intervalo, que status aciona) e prazo de resposta.
 - **S8** O `payment_check` informa **valor pago, forma e estado** de forma que se possa conferir o valor? Um link pode ser pago duas vezes? O link expira?
 
+### Resultado do E0 para a InfinitePay (2026-11-09, documentação oficial do Checkout Integrado colada pelo dono; S4 a S8 resolvidos, restam as perguntas no fim)
+
+- **S4 confirmado:** o Checkout Integrado gera **links de pagamento** (`POST https://api.checkout.infinitepay.io/links`). A documentação colada **não traz cobrança recorrente nem assinatura por API**. O desenho de **um link por ciclo** (mensal ou anual) vale.
+- **S5 (criar o link):** corpo do `POST /links`:
+  - `handle` (a InfiniteTag, sem o `$`; **dispensada** quando se usa a API Key);
+  - `itens`: lista de `{ quantity, price (em centavos), description }`, ao menos 1;
+  - `order_nsu` opcional, que é o **nosso identificador do pedido** (se ausente, a InfinitePay gera um);
+  - `redirect_url` e `webhook_url` (pública e válida);
+  - `customer` (`name`, `email`, `phone_number`): **mandar o mínimo**, pela regra de LGPD da spec 032;
+  - `address`: não usar.
+- **S5 (opções avançadas, só com API Key):** a chave vai no header `X-Api-Key`, enviada **pelo servidor**, criada nas configurações do Checkout depois de ativar o Checkout Integrado, e **mostrada uma única vez**. Ela vira um segredo novo (por exemplo `INFINITEPAY_API_KEY`), nunca em log, URL nem navegador. Opções:
+  - `options.single_payment`: **usar `true`**;
+  - `options.valid_until`: **usar**, no futuro e dentro de um ano;
+  - `options.payment_methods_enabled`: `credit_card` sempre disponível, `pix` opcional;
+  - `options.assured_installments` (0 a 12): em quantas parcelas **o Soprei paga as taxas**; 0 repassa as taxas ao pagador;
+  - `options.discounts`: percentual para `pix` e para `credit_card`.
+- **Sem ambiente de teste (sandbox)** na documentação: o botão de testar cria um link real. Todo teste automatizado usa servidor falso.
+- **S5 (consulta):** `POST /payment_check` com `{ handle, order_nsu, transaction_nsu, slug }` devolve `{ success, paid, amount, paid_amount, installments, capture_method }`.
+- **S6 (webhook sem assinatura):** a documentação **não cita assinatura nem segredo** no webhook. O desenho continua: **não confiar no corpo**. Ao receber, confirmar com `payment_check` e conferir `paid = true` e que **`amount` (valor do link) é igual ao valor do nosso pedido**. O `paid_amount` pode ser **maior** (taxas de parcelamento pagas pelo cliente) e **não** é o valor a comparar. Corpo do webhook: `invoice_slug` (é o `slug` do `payment_check`), `amount`, `paid_amount`, `installments`, `capture_method`, `transaction_nsu`, `order_nsu`, `receipt_url`, `items`. Guardar só ids, valores, datas, estado, forma de pagamento e `transaction_nsu` e `slug` (nunca o corpo inteiro, `receipt_url` nem `customer`).
+- **S7 (retentativa):** responder **rápido, de preferência em menos de 1 s**: **200** significa recebido e **400** significa que a InfinitePay **tenta de novo**. Quantidade e intervalo das retentativas **não são informados**. Desenho: a rota grava o evento mínimo (idempotente por `order_nsu` e `transaction_nsu`), responde 200, e a verificação com `payment_check` roda **em segundo plano**. Falha transitória ao gravar responde 400 para provocar nova tentativa. A **reconciliação periódica** por `payment_check` e o botão "Já paguei" cobrem a perda de webhook.
+- **S8:** `single_payment: true` impede reutilizar o link depois de pago, e `valid_until` define a expiração (até 1 ano). No redirecionamento, o cliente volta à `redirect_url` com `receipt_url`, `order_nsu`, `slug`, `capture_method` e `transaction_nsu` **na query, que o navegador controla: nada disso concede acesso, e sempre se confirma com `payment_check`**. Dica da documentação adotada: validar sempre que o `order_nsu` é de um pedido real nosso.
+- **Ainda em aberto:**
+  - (a) o **formato da resposta do `POST /links`** (qual campo traz a URL do link) e os códigos de erro: o dono testa pelo botão da documentação e cola a resposta, **sem segredo**;
+  - (b) se o `payment_check` exige a API Key;
+  - (c) as **taxas do contrato do dono** (S3) e se o **Pix** tem taxa;
+  - (d) quantidade e intervalo das retentativas do webhook;
+  - (e) limite de requisições e valor mínimo do link;
+  - (f) decisão do dono sobre `assured_installments` (quem paga as taxas de parcelamento; recomendação: **0**, repassar ao pagador) e sobre um **desconto de Pix** como incentivo.
+
+
 ## Riscos
 
 - **Dinheiro e acesso:** conceder sem pagamento real (corpo falso, valor errado, repetição) é o risco central; mitigado por consulta ao provedor, conferência de valor, idempotência por `updateMany` condicional e pedido gerado por nós. O `reviewer` revisa.
