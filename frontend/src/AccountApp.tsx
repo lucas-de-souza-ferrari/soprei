@@ -11,7 +11,7 @@ import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
 import { AppShell } from './company/AppShell';
-import { loadEntitlements, probeBilling, type Entitlements } from './company/billing-api';
+import { loadEntitlements, type Entitlements } from './company/billing-api';
 import { hasModule, moduleOfPage, type CheckoutReturn } from './company/billing-rules';
 import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
@@ -115,7 +115,6 @@ export function AccountApp({
   const [session, setSession] = useState<Session | null>(null);
   // Assinatura (spec 031, E4): o acesso da empresa selecionada (faixa e módulos) e se a conta é a titular.
   const [entitlements, setEntitlements] = useState<Entitlements | null>(null);
-  const [billingKind, setBillingKind] = useState<'holder' | 'none' | 'off'>('off');
   const [checkoutReturn, setCheckoutReturn] = useState<CheckoutReturn | null>(
     initialCheckoutReturn,
   );
@@ -171,18 +170,11 @@ export function AccountApp({
     let replaceUrl = requestedReplace;
     // Leituras auxiliares da Assinatura (spec 031): feitas uma vez por empresa, antes de decidir a tela e
     // reaproveitadas depois. Qualquer falha vira "sem cobrança" (nada é escondido).
-    let probed: {
-      companyId: string | null;
-      kind: 'holder' | 'none' | 'off';
-      access: Entitlements | null;
-    } | null = null;
+    let probed: { companyId: string | null; access: Entitlements | null } | null = null;
     const probe = async (companyId: string | null) => {
       if (probed !== null && probed.companyId === companyId) return probed;
-      const [kind, access] = await Promise.all([
-        probeBilling(),
-        companyId === null ? Promise.resolve(null) : loadEntitlements(companyId),
-      ]);
-      probed = { companyId, kind, access };
+      const access = companyId === null ? null : await loadEntitlements(companyId);
+      probed = { companyId, access };
       return probed;
     };
     let current = sessionSchema.parse(await api('/auth/session'));
@@ -219,7 +211,8 @@ export function AccountApp({
       else if (opened !== undefined) {
         const info = await probe(opened.companyId);
         if (generation.current !== stamp) return;
-        if (info.kind === 'holder' && info.access?.access === 'blocked') landing = 'assinatura';
+        if (info.access?.holder === true && info.access.access === 'blocked')
+          landing = 'assinatura';
       }
       replaceUrl = true;
       setRoute({ kind: 'list' });
@@ -233,7 +226,6 @@ export function AccountApp({
         : null,
     );
     if (generation.current !== stamp) return;
-    setBillingKind(info.kind);
     setEntitlements(info.access);
     setSession(current);
     setCompanies(list.items);
@@ -635,7 +627,7 @@ export function AccountApp({
   const areaCompany =
     baseAreaCompany === undefined
       ? undefined
-      : billingKind === 'holder'
+      : entitlements?.holder === true
         ? { ...baseAreaCompany, permissions: [...baseAreaCompany.permissions, BILLING_PERMISSION] }
         : baseAreaCompany;
   // Abas de módulo (Agenda, Estoque) somem sem o módulo contratado; sem leitura do acesso nada some.
@@ -648,12 +640,9 @@ export function AccountApp({
   const refreshAccess = () => {
     const stamp = generation.current;
     const selectedId = session?.selectedCompanyId ?? null;
-    void Promise.all([
-      probeBilling(),
-      selectedId === null ? Promise.resolve(null) : loadEntitlements(selectedId),
-    ]).then(([kind, access]) => {
+    if (selectedId === null) return;
+    void loadEntitlements(selectedId).then((access) => {
       if (generation.current !== stamp) return;
-      setBillingKind(kind);
       setEntitlements(access);
     });
   };

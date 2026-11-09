@@ -309,11 +309,17 @@ export function parseCheckoutReturn(search: string): CheckoutReturn | null {
   };
 }
 
-/** O link do checkout só é aberto se for `https`, sem credenciais embutidas. */
-export function safeCheckoutUrl(url: string): string | null {
+/**
+ * O link do checkout só é aberto se for `https`, sem credenciais embutidas e, quando o servidor informa o host
+ * do provedor, só nesse host (defesa em profundidade).
+ */
+export function safeCheckoutUrl(url: string, allowedHost?: string | null): string | null {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') {
+      return null;
+    }
+    if (allowedHost !== undefined && allowedHost !== null && parsed.hostname !== allowedHost) {
       return null;
     }
     return parsed.toString();

@@ -89,6 +89,8 @@ export const billingSchema = z.object({
   catalog: z.array(catalogPlanSchema).max(10),
   trial: z.object({ available: z.boolean(), days: z.number().int().min(0) }),
   checkoutEnabled: z.boolean(),
+  /** Host do link de pagamento: o site só abre links deste host (defesa em profundidade). */
+  checkoutHost: z.string().max(253).nullable().default(null),
 });
 export type Billing = z.infer<typeof billingSchema>;
 
@@ -266,33 +268,23 @@ export const entitlementsSchema = z.object({
   stock: z.boolean(),
   tokens: quotaSchema.nullable(),
   replies: quotaSchema.nullable(),
+  /** A conta logada é a titular da assinatura DESTA empresa (a tela de Assinatura é da conta). */
+  holder: z.boolean().default(false),
 });
 export type Entitlements = z.infer<typeof entitlementsSchema>;
 
 /**
- * Lê o acesso da empresa. Falha de qualquer tipo (cobrança desligada, rede) vira `null`: sem leitura nada é
- * escondido nem bloqueado pelo site (o backend é quem barra de verdade).
+ * Lê o acesso da empresa. Falha 4xx (cobrança desligada, sem acesso) vira `null`: sem leitura nada é escondido
+ * nem bloqueado pelo site (o backend é quem barra de verdade). Falha transitória (5xx, rede) é repetida uma vez
+ * antes de desistir, para o item Assinatura não sumir por um soluço do servidor.
  */
 export async function loadEntitlements(companyId: string): Promise<Entitlements | null> {
-  try {
-    return entitlementsSchema.parse(await request(`/admin/companies/${companyId}/entitlements`));
-  } catch {
-    return null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return entitlementsSchema.parse(await request(`/admin/companies/${companyId}/entitlements`));
+    } catch (error) {
+      if (error instanceof ApiError && error.status < 500) return null;
+    }
   }
-}
-
-const probeSchema = z.object({ subscription: z.unknown().nullable() });
-
-/**
- * A conta é titular de uma assinatura e a cobrança está ligada? `holder` = tem assinatura própria; `none` =
- * cobrança ligada mas a conta não tem assinatura; `off` = cobrança desligada (404) ou leitura indisponível.
- * Só decide se o item "Assinatura" aparece no menu; o servidor barra de verdade.
- */
-export async function probeBilling(): Promise<'holder' | 'none' | 'off'> {
-  try {
-    const result = probeSchema.parse(await request('/account/billing'));
-    return result.subscription === null ? 'none' : 'holder';
-  } catch {
-    return 'off';
-  }
+  return null;
 }

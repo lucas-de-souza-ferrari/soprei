@@ -91,6 +91,7 @@ function billing(overrides: Partial<Billing> = {}): Billing {
     ],
     trial: { available: false, days: 7 },
     checkoutEnabled: true,
+    checkoutHost: null,
     ...overrides,
   };
 }
@@ -235,6 +236,16 @@ test('o link do checkout só abre com https e sem credenciais embutidas', () => 
   assert.equal(safeCheckoutUrl('javascript:alert(1)'), null);
   assert.equal(safeCheckoutUrl('https://user:senha@checkout.example.test/'), null);
   assert.equal(safeCheckoutUrl('nao é url'), null);
+  // Com o host do provedor informado pelo servidor, só esse host abre (defesa em profundidade).
+  assert.notEqual(
+    safeCheckoutUrl('https://checkout.example.test/p', 'checkout.example.test'),
+    null,
+  );
+  assert.equal(safeCheckoutUrl('https://outro.example.test/p', 'checkout.example.test'), null);
+  assert.equal(
+    safeCheckoutUrl('https://checkout.example.test.mau.test/p', 'checkout.example.test'),
+    null,
+  );
 });
 
 test('pedido pendente só pode ser confirmado dentro das 24 h de validade', () => {
@@ -307,6 +318,7 @@ test('faixa de acesso para qualquer papel: carência, encerrada e cota esgotada,
     stock: true,
     tokens: { used: 10, limit: 100 },
     replies: { used: 10, limit: 100 },
+    holder: true,
   };
   assert.equal(accessNotice(null, true), null);
   assert.equal(accessNotice(ok, true), null);
@@ -324,6 +336,9 @@ test('faixa de acesso para qualquer papel: carência, encerrada e cota esgotada,
   );
   // Os dois contratos: o acesso da empresa não carrega dinheiro.
   assert.ok(entitlementsSchema.safeParse(ok).success);
+  // O titular vem do servidor; sem o campo vale como não titular (nunca oferece a tela por engano).
+  const withoutHolder = { ...ok, holder: undefined };
+  assert.equal(entitlementsSchema.parse(withoutHolder).holder, false);
 });
 
 test('abas de Agenda e Estoque dependem do módulo; sem a leitura do acesso nada some', () => {
@@ -337,6 +352,7 @@ test('abas de Agenda e Estoque dependem do módulo; sem a leitura do acesso nada
     stock: false,
     tokens: null,
     replies: null,
+    holder: false,
   };
   assert.equal(hasModule(null, 'agenda'), true);
   assert.equal(hasModule(none, 'agenda'), false);
@@ -363,7 +379,7 @@ test('nenhum texto da tela usa o termo antigo da empresa', () => {
     stateBanner(subscription({ status: 'EXPIRED', access: 'blocked' }), NOW).text,
     WHATSAPP_NOT_INCLUDED,
     accessNotice(
-      { access: 'blocked', agenda: true, stock: true, tokens: null, replies: null },
+      { access: 'blocked', agenda: true, stock: true, tokens: null, replies: null, holder: true },
       true,
     )?.text ?? '',
   ].join(' ');

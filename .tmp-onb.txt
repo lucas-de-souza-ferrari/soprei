@@ -1,0 +1,443 @@
+[WebServer] $ vite --host 127.0.0.1 "--port" "5186" "--strictPort"
+
+Running 88 tests using 2 workers
+···············F····F·[WebServer] [ELIFECYCLE] Command failed with exit code [WebServer] 127[WebServer] .
+FFFFFTFFFFFFFFFF°°°°°°°°°°°°°°°°°°°°F°°°°°°°°°°°°°°°°°°°°°
+°°°°°°°°
+
+  1) [desktop] › e2e\onboarding.spec.ts:163:1 › com documento já cadastrado o botão de exemplo não aparece 
+
+    Test timeout of 30000ms exceeded while setting up "page".
+
+    Error Context: test-results\onboarding-com-documento-j-59067-otão-de-exemplo-não-aparece-desktop\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-com-documento-j-59067-otão-de-exemplo-não-aparece-desktop\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-com-documento-j-59067-otão-de-exemplo-não-aparece-desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [desktop] › e2e\onboarding.spec.ts:172:1 › retomar: persona feita, recarregar e abrir pelo menu cai no primeiro passo pendente 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/conversas
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/conversas", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:175:3
+
+    Error Context: test-results\onboarding-retomar-persona-f6f76--no-primeiro-passo-pendente-desktop\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-retomar-persona-f6f76--no-primeiro-passo-pendente-desktop\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-retomar-persona-f6f76--no-primeiro-passo-pendente-desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [desktop] › e2e\onboarding.spec.ts:186:1 › endereço com passo inexistente cai no primeiro pendente, sem chamar API de passo inexistente 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos/inexistente
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos/inexistente", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:189:19
+
+    Error Context: test-results\onboarding-endereço-com-pa-56171-ar-API-de-passo-inexistente-desktop\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-endereço-com-pa-56171-ar-API-de-passo-inexistente-desktop\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-endereço-com-pa-56171-ar-API-de-passo-inexistente-desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [desktop] › e2e\onboarding.spec.ts:195:3 › AGENT não vê o assistente: sem item de menu e sem chamada a /onboarding; o endereço mostra "sem permissão" 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/conversas
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/conversas", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:198:21
+
+    Error Context: test-results\onboarding-AGENT-não-vê-o--d27e5-ereço-mostra-sem-permissão--desktop\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-AGENT-não-vê-o--d27e5-ereço-mostra-sem-permissão--desktop\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-AGENT-não-vê-o--d27e5-ereço-mostra-sem-permissão--desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) [desktop] › e2e\onboarding.spec.ts:195:3 › VIEWER não vê o assistente: sem item de menu e sem chamada a /onboarding; o endereço mostra "sem permissão" 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/conversas
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/conversas", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:198:21
+
+    Error Context: test-results\onboarding-VIEWER-não-vê-o-c170a-ereço-mostra-sem-permissão--desktop\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-VIEWER-não-vê-o-c170a-ereço-mostra-sem-permissão--desktop\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-VIEWER-não-vê-o-c170a-ereço-mostra-sem-permissão--desktop\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6) [desktop] › e2e\onboarding.spec.ts:206:1 › ADMIN (entrou por convite) vê o item de menu, mas o assistente não abre sozinho 
+
+    Error: worker process exited unexpectedly (code=1073807364, signal=null)
+
+    Error Context: test-results\onboarding-ADMIN-entrou-po-05b69-assistente-não-abre-sozinho-desktop\error-context.md
+
+  7) [desktop] › e2e\onboarding.spec.ts:214:1 › falha ao ler o estado: aviso com "Tentar de novo", sem texto do servidor 
+
+    Error: worker process exited unexpectedly (code=3221226091, signal=null)
+
+  8) [mobile] › e2e\onboarding.spec.ts:141:1 › exemplo de documentos: avisa que cria produtos, marca Documentos e Estoque como feitos e some o botão 
+
+    Error: browserContext.close: ENOENT: no such file or directory, open 'C:\Users\Micro\Documents\GitHub\soprei\frontend\test-results\.playwright-artifacts-1\traces\fe534f0825407f213faa-cad2b196cb765d5f449c-recording14.trace'
+
+    Error: ENOENT: no such file or directory, open 'C:\Users\Micro\Documents\GitHub\soprei\frontend\test-results\.playwright-artifacts-1\aa073f70d458dc59eac4fded714c65a9.zip'
+
+    Error Context: test-results\onboarding-exemplo-de-docu-25d16--como-feitos-e-some-o-botão-mobile\error-context.md
+
+  9) [mobile] › e2e\onboarding.spec.ts:195:3 › VIEWER não vê o assistente: sem item de menu e sem chamada a /onboarding; o endereço mostra "sem permissão" 
+
+    Error: page.goto: Target page, context or browser has been closed
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos", waiting until "load"
+
+
+      198 |     const { onb } = await openWizard(page, { role, path: '/painel/conversas' });
+      199 |     expect(await menuItems(page)).not.toContain('Primeiros passos');
+    > 200 |     await page.goto('/painel/primeiros-passos');
+          |                ^
+      201 |     await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
+      202 |     expect(onb.calls.filter((c) => c.path.endsWith('/onboarding'))).toHaveLength(0);
+      203 |   });
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:200:16
+
+    Error Context: test-results\onboarding-VIEWER-não-vê-o-c170a-ereço-mostra-sem-permissão--mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-VIEWER-não-vê-o-c170a-ereço-mostra-sem-permissão--mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-VIEWER-não-vê-o-c170a-ereço-mostra-sem-permissão--mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  10) [mobile] › e2e\onboarding.spec.ts:214:1 › falha ao ler o estado: aviso com "Tentar de novo", sem texto do servidor 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:217:19
+
+    Error Context: test-results\onboarding-falha-ao-ler-o--753cc--novo-sem-texto-do-servidor-mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-falha-ao-ler-o--753cc--novo-sem-texto-do-servidor-mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-falha-ao-ler-o--753cc--novo-sem-texto-do-servidor-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  11) [mobile] › e2e\onboarding.spec.ts:225:1 › celular: sem rolagem horizontal e lista de passos utilizável 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:226:3
+
+    Error Context: test-results\onboarding-celular-sem-rol-c1c03--lista-de-passos-utilizável-mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-celular-sem-rol-c1c03--lista-de-passos-utilizável-mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-celular-sem-rol-c1c03--lista-de-passos-utilizável-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  12) [mobile] › e2e\onboarding.spec.ts:255:3 › serviços: criar um serviço usa a rota existente, o passo fica feito e o aviso de horários aparece (tema light) 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos/servicos
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos/servicos", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:258:21
+
+    Error Context: test-results\onboarding-serviços-criar--9a1ce-orários-aparece-tema-light--mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-serviços-criar--9a1ce-orários-aparece-tema-light--mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-serviços-criar--9a1ce-orários-aparece-tema-light--mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  13) [mobile] › e2e\onboarding.spec.ts:255:3 › serviços: criar um serviço usa a rota existente, o passo fica feito e o aviso de horários aparece (tema dark) 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos/servicos
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos/servicos", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:258:21
+
+    Error Context: test-results\onboarding-serviços-criar--1599d-horários-aparece-tema-dark--mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-serviços-criar--1599d-horários-aparece-tema-dark--mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-serviços-criar--1599d-horários-aparece-tema-dark--mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  14) [mobile] › e2e\onboarding.spec.ts:276:1 › serviços: "Usar exemplo" chama a rota do exemplo da agenda e o botão some 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos/servicos
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos/servicos", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:279:19
+
+    Error: ENOENT: no such file or directory, open 'C:\Users\Micro\Documents\GitHub\soprei\frontend\test-results\.playwright-artifacts-7\03ce517c4b85aee4ba052b43ed024a32.zip'
+
+    Error Context: test-results\onboarding-serviços-Usar-e-65512-lo-da-agenda-e-o-botão-some-mobile\error-context.md
+
+  15) [mobile] › e2e\onboarding.spec.ts:289:1 › serviços: com serviço próprio já cadastrado o exemplo não é oferecido 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('Meu serviço')
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" getByText('Meu serviço') with timeout 5000ms
+      - waiting for getByText('Meu serviço')
+
+
+      293 |       onb.services.push({ id: randomUUID(), name: 'Meu serviço', isSample: false, active: true }),
+      294 |   });
+    > 295 |   await expect(page.getByText('Meu serviço')).toBeVisible();
+          |                                               ^
+      296 |   await expect(page.getByRole('button', { name: 'Usar exemplo' })).toHaveCount(0);
+      297 | });
+      298 |
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:295:47
+
+    Error Context: test-results\onboarding-serviços-com-se-43b8e-o-o-exemplo-não-é-oferecido-mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-serviços-com-se-43b8e-o-o-exemplo-não-é-oferecido-mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-serviços-com-se-43b8e-o-o-exemplo-não-é-oferecido-mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  16) [mobile] › e2e\onboarding.spec.ts:300:3 › estoque: novo produto e importar CSV usam o fluxo existente (tema light) 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos/estoque
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos/estoque", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:303:21
+
+    Error Context: test-results\onboarding-estoque-novo-pr-59c11-fluxo-existente-tema-light--mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-estoque-novo-pr-59c11-fluxo-existente-tema-light--mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-estoque-novo-pr-59c11-fluxo-existente-tema-light--mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  17) [mobile] › e2e\onboarding.spec.ts:300:3 › estoque: novo produto e importar CSV usam o fluxo existente (tema dark) 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:5186/painel/primeiros-passos/estoque
+    Call log:
+      - navigating to "http://127.0.0.1:5186/painel/primeiros-passos/estoque", waiting until "load"
+
+
+       at onboarding-fixture.ts:325
+
+      323 |     for (const item of api.companies) item.permissions = options.permissions;
+      324 |   }
+    > 325 |   await page.goto(options.path ?? '/painel/primeiros-passos');
+          |              ^
+      326 |   return { api, onb };
+      327 | }
+      328 |
+        at openWizard (C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding-fixture.ts:325:14)
+        at C:\Users\Micro\Documents\GitHub\soprei\frontend\e2e\onboarding.spec.ts:303:21
+
+    Error Context: test-results\onboarding-estoque-novo-pr-9c274--fluxo-existente-tema-dark--mobile\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\onboarding-estoque-novo-pr-9c274--fluxo-existente-tema-dark--mobile\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\onboarding-estoque-novo-pr-9c274--fluxo-existente-tema-dark--mobile\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  18) [mobile] › e2e\onboarding.spec.ts:332:1 › estoque: sem documento e sem produto o exemplo é oferecido 
+
+    Error: worker process exited unexpectedly (code=1073807364, signal=null)
+
+    Error Context: test-results\onboarding-estoque-sem-doc-1e421-oduto-o-exemplo-é-oferecido-mobile\error-context.md
+
+  19) [mobile] › e2e\onboarding.spec.ts:337:1 › estoque: com um documento cadastrado, o botão de exemplo não aparece 
+
+    Error: worker process exited unexpectedly (code=3221226091, signal=null)
+
+  19 failed
+    [desktop] › e2e\onboarding.spec.ts:163:1 › com documento já cadastrado o botão de exemplo não aparece 
+    [desktop] › e2e\onboarding.spec.ts:172:1 › retomar: persona feita, recarregar e abrir pelo menu cai no primeiro passo pendente 
+    [desktop] › e2e\onboarding.spec.ts:186:1 › endereço com passo inexistente cai no primeiro pendente, sem chamar API de passo inexistente 
+    [desktop] › e2e\onboarding.spec.ts:195:3 › AGENT não vê o assistente: sem item de menu e sem chamada a /onboarding; o endereço mostra "sem permissão" 
+    [desktop] › e2e\onboarding.spec.ts:195:3 › VIEWER não vê o assistente: sem item de menu e sem chamada a /onboarding; o endereço mostra "sem permissão" 
+    [desktop] › e2e\onboarding.spec.ts:206:1 › ADMIN (entrou por convite) vê o item de menu, mas o assistente não abre sozinho 
+    [desktop] › e2e\onboarding.spec.ts:214:1 › falha ao ler o estado: aviso com "Tentar de novo", sem texto do servidor 
+    [mobile] › e2e\onboarding.spec.ts:141:1 › exemplo de documentos: avisa que cria produtos, marca Documentos e Estoque como feitos e some o botão 
+    [mobile] › e2e\onboarding.spec.ts:195:3 › VIEWER não vê o assistente: sem item de menu e sem chamada a /onboarding; o endereço mostra "sem permissão" 
+    [mobile] › e2e\onboarding.spec.ts:214:1 › falha ao ler o estado: aviso com "Tentar de novo", sem texto do servidor 
+    [mobile] › e2e\onboarding.spec.ts:225:1 › celular: sem rolagem horizontal e lista de passos utilizável 
+    [mobile] › e2e\onboarding.spec.ts:255:3 › serviços: criar um serviço usa a rota existente, o passo fica feito e o aviso de horários aparece (tema light) 
+    [mobile] › e2e\onboarding.spec.ts:255:3 › serviços: criar um serviço usa a rota existente, o passo fica feito e o aviso de horários aparece (tema dark) 
+    [mobile] › e2e\onboarding.spec.ts:276:1 › serviços: "Usar exemplo" chama a rota do exemplo da agenda e o botão some 
+    [mobile] › e2e\onboarding.spec.ts:289:1 › serviços: com serviço próprio já cadastrado o exemplo não é oferecido 
+    [mobile] › e2e\onboarding.spec.ts:300:3 › estoque: novo produto e importar CSV usam o fluxo existente (tema light) 
+    [mobile] › e2e\onboarding.spec.ts:300:3 › estoque: novo produto e importar CSV usam o fluxo existente (tema dark) 
+    [mobile] › e2e\onboarding.spec.ts:332:1 › estoque: sem documento e sem produto o exemplo é oferecido 
+    [mobile] › e2e\onboarding.spec.ts:337:1 › estoque: com um documento cadastrado, o botão de exemplo não aparece 
+  49 did not run
+  20 passed (1.8m)

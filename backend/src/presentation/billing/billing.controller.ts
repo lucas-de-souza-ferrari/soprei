@@ -15,6 +15,8 @@ export interface BillingControllerOptions {
   readonly service: Pick<BillingService, 'overview'>;
   readonly accounts: Pick<AccountService, 'me'>;
   readonly origin: string;
+  /** Host do link de pagamento (só o nome, sem esquema): o site só abre links deste host. */
+  readonly checkoutHost?: string | undefined;
   /** Checkout (E3): só com CHECKOUT_ENABLED; sem ele as rotas de pedido não existem (404). */
   readonly checkout?:
     | Pick<
@@ -112,7 +114,11 @@ function toCheckResponse({ order, result }: OrderCheckResult): object {
 }
 
 /** Corpo de `GET /account/billing`: datas em ISO UTC e dinheiro em centavos; nenhum dado de outra conta. */
-export function toBillingResponse(overview: BillingOverview, checkoutEnabled = false): object {
+export function toBillingResponse(
+  overview: BillingOverview,
+  checkoutEnabled = false,
+  checkoutHost: string | null = null,
+): object {
   const { subscription, usage } = overview;
   return {
     subscription:
@@ -161,6 +167,7 @@ export function toBillingResponse(overview: BillingOverview, checkoutEnabled = f
     trial: overview.trial,
     // Sem checkout (CHECKOUT_ENABLED desligado) a tela mostra o plano mas não oferece pagar nem trocar.
     checkoutEnabled,
+    checkoutHost: checkoutEnabled ? checkoutHost : null,
   };
 }
 
@@ -172,7 +179,7 @@ export function toBillingResponse(overview: BillingOverview, checkoutEnabled = f
  */
 export const billingController: FastifyPluginCallback<BillingControllerOptions> = (
   app,
-  { service, accounts, origin, checkout },
+  { service, accounts, origin, checkout, checkoutHost },
   done,
 ) => {
   app.addHook('onRequest', (request, reply, next) => {
@@ -189,7 +196,11 @@ export const billingController: FastifyPluginCallback<BillingControllerOptions> 
   const config = rateLimitProfile('admin');
   app.get('/account/billing', { config }, async (request) => {
     const account = await accounts.me(accountCookie(request.headers.cookie));
-    return toBillingResponse(await service.overview(account.id), checkout !== undefined);
+    return toBillingResponse(
+      await service.overview(account.id),
+      checkout !== undefined,
+      checkoutHost ?? null,
+    );
   });
 
   if (checkout !== undefined) {

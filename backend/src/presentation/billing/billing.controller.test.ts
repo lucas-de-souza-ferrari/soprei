@@ -105,6 +105,7 @@ describe('GET /account/billing (spec 031, E1)', () => {
     assert.deepEqual(seen.overview, [ACCOUNT_ID]);
     const body = JSON.parse(response.body) as {
       checkoutEnabled: boolean;
+      checkoutHost: string | null;
       subscription: {
         currentPeriodEnd: string;
         graceEndsAt: string;
@@ -119,6 +120,7 @@ describe('GET /account/billing (spec 031, E1)', () => {
     assert.equal(body.usage.metaEstimate.isEstimate, true);
     // Sem o checkout ligado a tela não oferece pagar; a troca agendada (nenhuma) vem na leitura.
     assert.equal(body.checkoutEnabled, false);
+    assert.equal(body.checkoutHost, null);
     assert.equal(body.subscription.pendingChange, null);
     await app.close();
   });

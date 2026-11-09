@@ -507,7 +507,9 @@ async function main(): Promise<void> {
               },
             }),
             entitlements: billing.entitlements,
-            ...(checkout === undefined ? {} : { checkout: checkout.service }),
+            ...(checkout === undefined
+              ? {}
+              : { checkout: checkout.service, checkoutHost: config.INFINITEPAY_CHECKOUT_HOST }),
           },
         }),
     readiness: {

@@ -42,6 +42,8 @@ export interface FakeBilling {
   /** `false` = a cobrança está desligada (`GET /account/billing` responde 404). */
   enabled: boolean;
   checkoutEnabled: boolean;
+  /** A conta logada é a titular da assinatura DA EMPRESA aberta (padrão: tem assinatura própria). */
+  holder?: boolean | undefined;
   /** `null` = a conta não tem assinatura própria (quem entrou por convite). */
   sub: FakeSubscription | null;
   usage: { replies: [number, number]; tokens: [number, number]; milliCents: number };
@@ -153,6 +155,7 @@ export async function installBillingApi(
       };
       return reply(200, {
         ...access,
+        holder: state.holder ?? sub !== null,
         tokens: { used: state.usage.tokens[0], limit: state.usage.tokens[1] },
         replies: { used: state.usage.replies[0], limit: state.usage.replies[1] },
       });
@@ -213,6 +216,7 @@ export async function installBillingApi(
         })),
         trial: { available: sub === null, days: 7 },
         checkoutEnabled: state.checkoutEnabled,
+        checkoutHost: state.checkoutEnabled ? 'checkout.exemplo.test' : null,
       });
     }
     if (!state.checkoutEnabled) return fail(404, 'NOT_FOUND');

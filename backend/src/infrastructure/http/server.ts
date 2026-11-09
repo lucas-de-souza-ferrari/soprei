@@ -100,6 +100,8 @@ export interface WhatsappRoutesParams {
 export interface BillingRoutesParams {
   readonly service: Pick<BillingService, 'overview'>;
   readonly entitlements: Pick<EntitlementReader, 'forCompany'> & Partial<SubscriptionHolderReader>;
+  /** Host do link de pagamento (INFINITEPAY_CHECKOUT_HOST): o site só o abre se for este (defesa em profundidade). */
+  readonly checkoutHost?: string | undefined;
   /** Checkout da InfinitePay (E3, CHECKOUT_ENABLED): pedido, "Já paguei" e webhook. Sem isto essas rotas não existem. */
   readonly checkout?: Pick<
     CheckoutService,
@@ -257,6 +259,7 @@ export function buildServer({
       accounts: accounts.service,
       origin: accounts.origin,
       checkout: billing.checkout,
+      checkoutHost: billing.checkoutHost,
     });
   }
   // Webhook público do checkout (spec 031, E3): corpo não confiado, só grava a referência e confirma por consulta.
