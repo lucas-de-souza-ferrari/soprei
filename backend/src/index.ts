@@ -1,4 +1,5 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { BillingService } from './application/billing/billing.service.js';
 import { OnboardingService } from './application/onboarding/onboarding.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
 import { ContactSchedulingService } from './application/schedule/contact-scheduling.service.js';
@@ -43,6 +44,9 @@ import {
   PrismaProductRepository,
   PrismaOnboardingStore,
   PrismaStockMovementRepository,
+  PrismaBillingRepository,
+  PrismaEntitlementReader,
+  PrismaUsageMeter,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
 import { WhatsappGraphAdminClient } from './infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.js';
@@ -141,6 +145,23 @@ async function main(): Promise<void> {
     metrics,
   });
   await warmUpAuth(auth);
+  // Planos e assinaturas (spec 031): só com BILLING_ENABLED. Desligada, nada abaixo é criado e o atendimento e
+  // as rotas têm exatamente o comportamento e o custo de antes.
+  const billing = config.BILLING_ENABLED
+    ? {
+        settings: {
+          graceDays: config.BILLING_GRACE_DAYS,
+          trialDays: config.BILLING_TRIAL_DAYS,
+          trialTokens: config.BILLING_TRIAL_TOKENS,
+        },
+        entitlements: new PrismaEntitlementReader(prisma, {
+          graceDays: config.BILLING_GRACE_DAYS,
+          trialDays: config.BILLING_TRIAL_DAYS,
+          trialTokens: config.BILLING_TRIAL_TOKENS,
+        }),
+        usage: new PrismaUsageMeter(prisma),
+      }
+    : undefined;
   const attendance = new AttendanceService({
     companies: companyRepository,
     conversations: new PrismaConversationRepository(prisma),
@@ -154,6 +175,7 @@ async function main(): Promise<void> {
       inFlightTimeoutMs: config.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS,
       scheduleAiEnabled: config.SCHEDULE_AI_ENABLED,
     },
+    ...(billing === undefined ? {} : { entitlements: billing.entitlements, usage: billing.usage }),
     // Base de conhecimento da empresa (spec 026): recuperação por busca textual, fail-open.
     knowledge: new PrismaKnowledgeRetriever(prisma),
     // Horários livres da agenda (spec 027): só leitura, fail-open.
@@ -247,6 +269,7 @@ async function main(): Promise<void> {
       }),
       connections,
       metrics,
+      ...(billing === undefined ? {} : { usage: billing.usage }),
       queue: inboundQueue.queue,
       batch: batchSettings(config),
       logger: channelLogger,
@@ -295,6 +318,14 @@ async function main(): Promise<void> {
               ),
               loginLocks: auth.sessions,
               loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
+              ...(billing === undefined
+                ? {}
+                : {
+                    billing: {
+                      trialDays: billing.settings.trialDays,
+                      graceDays: billing.settings.graceDays,
+                    },
+                  }),
               // Só id e resultado: nunca e-mail, código nem credenciais SMTP.
               onVerificationMail: (result, accountId) => {
                 metrics.countVerificationEmail(result);
@@ -380,6 +411,20 @@ async function main(): Promise<void> {
           },
         }),
     ...(whatsappRoutes === undefined ? {} : { whatsapp: whatsappRoutes }),
+    ...(billing === undefined
+      ? {}
+      : {
+          billing: {
+            service: new BillingService({
+              billing: new PrismaBillingRepository(prisma),
+              settings: {
+                ...billing.settings,
+                allowSopreiPaysMeta: config.SOPREI_PAYS_META_ENABLED,
+              },
+            }),
+            entitlements: billing.entitlements,
+          },
+        }),
     readiness: {
       database: () => infrastructure.database.check(),
       redis: () => infrastructure.redis.check(),

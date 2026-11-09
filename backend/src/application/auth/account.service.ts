@@ -64,6 +64,11 @@ export class AccountService {
       >;
       loginSecret: string | Buffer;
       now?: () => Date;
+      /**
+       * Cobrança (spec 031): só com `BILLING_ENABLED`. Presente, a criação de empresa confere acesso e limite
+       * do plano e liga a empresa à assinatura da conta; ausente, o comportamento é o de sempre.
+       */
+      billing?: { readonly trialDays: number; readonly graceDays: number };
       /** Fonte do código de 6 dígitos (padrão: `crypto.randomInt`); os testes injetam valores. */
       randomInt?: RandomInt;
       /** Resultado do envio em segundo plano; só id e resultado, nunca e-mail nem código. */
@@ -398,7 +403,13 @@ export class AccountService {
   }
   async createCompany(secret: string, name: string) {
     const { account } = await this.session(secret);
-    return withPermissions(await this.deps.accounts.createCompany(account.id, name));
+    const { billing } = this.deps;
+    const created = await this.deps.accounts.createCompany(
+      account.id,
+      name,
+      billing === undefined ? undefined : { ...billing, now: this.now() },
+    );
+    return withPermissions(created);
   }
   async selectCompany(secret: string, id: string): Promise<void> {
     const { account } = await this.session(secret);

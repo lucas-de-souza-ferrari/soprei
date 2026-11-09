@@ -31,6 +31,13 @@ export const MODEL_SCOPES = {
   Appointment: 'tenant',
   PlatformAdmin: 'global',
   Account: 'global',
+  // Cobranca (spec 031): da CONTA, nao da empresa; a barreira e o repositorio por AccountId/SubscriptionId.
+  Plan: 'global',
+  PlanPrice: 'global',
+  Subscription: 'global',
+  PaymentOrder: 'global',
+  UsageCounter: 'global',
+  PaymentNotice: 'global',
 } as const satisfies Record<Prisma.ModelName, ModelScope>;
 
 /** Operações de model que carregam um `where` que pode (e precisa) conter `companyId`. */

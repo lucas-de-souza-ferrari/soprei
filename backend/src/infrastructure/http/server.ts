@@ -6,6 +6,11 @@ import type { AuthService } from '../../application/auth/auth.service.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
+import type { BillingService } from '../../application/billing/billing.service.js';
+import type { EntitlementReader } from '../../application/ports/entitlement-reader.js';
+import { billingController } from '../../presentation/billing/billing.controller.js';
+import { adminEntitlementsController } from '../../presentation/admin/entitlements.controller.js';
+import { registerEntitlementGate } from './entitlement-gate.js';
 import type { CompanyService } from '../../application/companies/company.service.js';
 import type { InvitationService } from '../../application/invitations/invitation.service.js';
 import type { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
@@ -83,7 +88,18 @@ export interface WhatsappRoutesParams {
   readonly intake: Pick<ChannelIntakeService, 'accept'>;
 }
 
+/**
+ * Cobrança (spec 031). Opt-in: sem isto (`BILLING_ENABLED=false`) nada é limitado, as rotas de cobrança não
+ * existem (404) e as rotas de tenant têm exatamente o custo de antes.
+ */
+export interface BillingRoutesParams {
+  readonly service: Pick<BillingService, 'overview'>;
+  readonly entitlements: Pick<EntitlementReader, 'forCompany'>;
+}
+
 export interface BuildServerParams {
+  /** Cobrança por planos (spec 031); precisa de `accounts` para as rotas da conta. */
+  readonly billing?: BillingRoutesParams;
   readonly accounts?: {
     service: AccountService;
     origin: string;
@@ -145,6 +161,7 @@ export function buildServer({
   rateLimit,
   trustProxy = false,
   accounts,
+  billing,
 }: BuildServerParams): FastifyInstance {
   const app = Fastify({
     loggerInstance: logger,
@@ -213,6 +230,16 @@ export function buildServer({
     });
   }
 
+  // Política de assinatura das escritas de tenant (spec 031): só com a cobrança ligada.
+  if (billing !== undefined) registerEntitlementGate(app, billing.entitlements);
+  if (billing !== undefined && accounts !== undefined) {
+    void app.register(billingController, {
+      service: billing.service,
+      accounts: accounts.service,
+      origin: accounts.origin,
+    });
+  }
+
   void app.register(healthController, { readiness });
   if (metrics !== undefined && metricsToken !== undefined && metricsToken !== '') {
     void app.register(metricsController, { token: metricsToken, source: metrics });
@@ -268,6 +295,12 @@ export function buildServer({
         setup: admin.channelSetup,
       });
     }
+    void app.register(adminEntitlementsController, {
+      prefix: '/admin/companies',
+      auth,
+      metrics,
+      entitlements: billing?.entitlements,
+    });
     void app.register(adminPersonaController, {
       prefix: '/admin/companies',
       auth,

@@ -1,6 +1,7 @@
 import type {
   AttendanceUnitOfWork,
   Company,
+  CompanyEntitlements,
   CompanyId,
   CompanyRepository,
   Conversation,
@@ -16,6 +17,8 @@ import {
   MESSAGE_CONTENT_MAX_LENGTH,
   SCHEDULE_AI_MAX_MY_APPOINTMENTS,
   SCHEDULE_AI_TURN_TIMEOUT_MS,
+  type QuotaBlockReason,
+  quotaBlockReason,
   SCHEDULE_RETRIEVAL_TIMEOUT_MS,
 } from '../../domain/index.js';
 import { ConflictError, ExternalServiceError, ForbiddenError } from '../../shared/errors/index.js';
@@ -35,7 +38,9 @@ import {
   type LlmUsage,
 } from '../ports/llm-provider.js';
 import { buildKnowledgeQuery } from '../knowledge/query.js';
+import type { EntitlementReader } from '../ports/entitlement-reader.js';
 import type { KnowledgeRetriever } from '../ports/knowledge-retriever.js';
+import type { UsageMeter } from '../ports/usage-meter.js';
 import type { ScheduleAvailabilityReader } from '../ports/schedule-availability-reader.js';
 import type { ContactScheduling } from '../schedule/contact-scheduling.service.js';
 import { hasScheduleIntent, scheduleIntentText } from '../schedule/intent.js';
@@ -108,6 +113,12 @@ export interface AttendanceMetrics {
   countScheduleToolTurn?(result: ScheduleToolTurnResult): void;
   /** Rodadas de ferramenta de um turno com ferramentas oferecidas (spec 028). */
   observeScheduleToolRounds?(rounds: number): void;
+  /** A IA deixou de responder por cota esgotada ou assinatura inativa (spec 031). Conjunto fixo. */
+  countQuotaBlock?(reason: QuotaBlockReason): void;
+  /** A medição de uso falhou e a resposta seguiu (spec 031). Contador sem labels. */
+  countUsageMeterError?(): void;
+  /** A leitura das cotas falhou e o atendimento seguiu sem limite (fail-open, spec 031). Sem labels. */
+  countEntitlementError?(): void;
 }
 
 /**
@@ -189,6 +200,13 @@ export interface AttendanceDeps {
    * opção da empresa desligada, as ferramentas são só de consulta.
    */
   readonly scheduling?: ContactScheduling;
+  /**
+   * Cotas e módulos da empresa (spec 031). Só existe com `BILLING_ENABLED`; sem isto o atendimento é o de
+   * sempre, sem nenhuma leitura extra.
+   */
+  readonly entitlements?: EntitlementReader;
+  /** Medição de tokens por assinatura (spec 031). Só existe com `BILLING_ENABLED`. */
+  readonly usage?: Pick<UsageMeter, 'record'>;
 }
 
 /** Um bloco do `systemPrompt` (conhecimento ou agenda) com as fontes e os números que ele traz. */
@@ -245,9 +263,11 @@ export interface AcceptedMessage {
  * - `resend`: não havia o que responder, mas a última resposta gravada ainda não tem `sentAt`: o
  *   chamador a envia (sem nova chamada ao LLM).
  * - `empty`: nada pendente e nada a reenviar.
+ * - `blocked`: cota esgotada ou assinatura inativa (spec 031): o provedor NÃO foi chamado e nada deve ser
+ *   enviado ao contato; as mensagens seguem pendentes.
  */
 export interface PendingResponse {
-  readonly outcome: 'answered' | 'resend' | 'empty';
+  readonly outcome: 'answered' | 'resend' | 'empty' | 'blocked';
   readonly conversationId: string | null;
   readonly reply: AttendanceReply | null;
   /** Quantas mensagens do contato a resposta juntou (0 em `resend` e `empty`). */
@@ -449,15 +469,30 @@ export class AttendanceService {
     const hasMorePending = fetched.length > batch.length;
     const startedAt = performance.now();
 
+    // Cotas e módulos (spec 031): uma leitura por turno, ANTES de qualquer trabalho; esgotada (a que
+    // estourar primeiro) ou assinatura inativa, o provedor não é chamado e nada sai ao contato.
+    const subject = { conversationId: conversation.id, messageId: last.id };
+    const entitlements = await this.readEntitlements(company, subject);
+    if (this.blockedBy(company, subject, entitlements) !== null) {
+      return {
+        outcome: 'blocked',
+        conversationId: conversation.id,
+        reply: null,
+        batchSize: 0,
+        hasMorePending: false,
+      };
+    }
+
     const userMessage = batch.map((message) => message.content).join(BATCH_SEPARATOR);
     // O histórico é tudo o que veio ANTES da primeira mensagem do lote.
     const history = await this.loadHistory(companyId, first);
     const prompt = await this.buildPrompt(
       company,
-      { conversationId: conversation.id, messageId: last.id },
+      subject,
       userMessage,
       history,
       { contactRef, origin: 'channel' },
+      entitlements,
     );
     const outcome = await this.callProvider(
       companyId,
@@ -799,13 +834,27 @@ export class AttendanceService {
     const companyId = company.id;
     const startedAt = performance.now();
 
+    // Cotas e módulos (spec 031): o simulador também respeita a cota; a mensagem fica gravada, sem resposta.
+    const subject = { conversationId: message.conversationId, messageId: message.id };
+    const entitlements = await this.readEntitlements(company, subject);
+    const blocked = this.blockedBy(company, subject, entitlements);
+    if (blocked !== null) {
+      throw new ForbiddenError(
+        blocked === 'inactive'
+          ? 'Assinatura inativa: a IA está pausada'
+          : 'Cota de uso da assinatura esgotada: a IA está pausada',
+        { code: blocked === 'inactive' ? 'SUBSCRIPTION_INACTIVE' : 'QUOTA_EXCEEDED' },
+      );
+    }
+
     const history = await this.loadHistory(companyId, message);
     const prompt = await this.buildPrompt(
       company,
-      { conversationId: message.conversationId, messageId: message.id },
+      subject,
       message.content,
       history,
       contact,
+      entitlements,
     );
     const input: LlmGenerateInput = {
       // Persona, estilo e (spec 026) o bloco de conhecimento vão no systemPrompt; o texto do
@@ -881,6 +930,7 @@ export class AttendanceService {
     queryText: string,
     history: readonly LlmTurn[],
     contact: ContactSubject,
+    entitlements?: CompanyEntitlements,
   ): Promise<{
     readonly systemPrompt: string;
     readonly sources: readonly KnowledgeSource[];
@@ -890,8 +940,19 @@ export class AttendanceService {
   }> {
     const base = buildSystemPrompt(company);
     const lastUserTurn = history.findLast((turn) => turn.role === 'user')?.content;
-    const knowledge = await this.knowledgePart(company, subject, queryText, lastUserTurn);
-    const schedule = await this.schedulePart(company, subject, queryText, lastUserTurn);
+    // Módulos contratados (spec 031): sem Estoque a IA não recupera produtos; sem Agenda não há bloco, lista
+    // de agendamentos nem ferramentas (o pedido ao provedor volta a ser o de antes). Sem leitura = liberado.
+    const knowledge = await this.knowledgePart(
+      company,
+      subject,
+      queryText,
+      lastUserTurn,
+      entitlements?.stock !== false,
+    );
+    const schedule =
+      entitlements?.agenda === false
+        ? EMPTY_PART
+        : await this.schedulePart(company, subject, queryText, lastUserTurn);
     const tooling = await this.toolsPart(company, subject, contact, schedule);
     // No modo de escrita, a linha "você NÃO marca" do bloco da agenda dá lugar à da escrita por ferramenta.
     const scheduleBlock = tooling.write
@@ -1002,6 +1063,7 @@ export class AttendanceService {
     subject: { readonly conversationId: string; readonly messageId: string },
     queryText: string,
     lastUserTurn: string | undefined,
+    includeProducts = true,
   ): Promise<PromptPart> {
     const retriever = this.deps.knowledge;
     if (retriever === undefined) return EMPTY_PART;
@@ -1011,11 +1073,13 @@ export class AttendanceService {
       return EMPTY_PART;
     }
     try {
-      const retrieval = await withTimeout(
+      const retrieved = await withTimeout(
         retriever.retrieve(company.id, tsquery),
         this.deps.options.knowledgeTimeoutMs ?? KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
         'knowledge',
       );
+      // Sem o módulo Estoque os produtos nunca chegam ao prompt (spec 031).
+      const retrieval = includeProducts ? retrieved : { ...retrieved, products: [] };
       const prompt = buildKnowledgePrompt(retrieval);
       if (prompt.block === null) {
         this.recordKnowledge('skipped');
@@ -1227,6 +1291,7 @@ export class AttendanceService {
 
     if (result === 'ok' && text !== undefined) {
       this.recordTokens(provider, usage);
+      await this.recordUsage(companyId, subject, usage);
       return { ok: true, text, usage, toolRounds, toolCalls };
     }
 
@@ -1301,6 +1366,99 @@ export class AttendanceService {
       this.deps.metrics?.observeLlmRequest(sample);
     } catch (err) {
       this.deps.logger.warn({ err }, 'falha ao registrar métrica do LLM');
+    }
+  }
+
+  /**
+   * Cotas e módulos do turno (spec 031): **uma leitura por turno**, no início. Sem leitor (cobrança
+   * desligada) devolve `undefined` sem custo algum. **Fail-open**: falha da leitura atende sem limite
+   * (não se bloqueia o contato por falha nossa; o custo fica limitado pelo teto de turno), com `warn`
+   * só de ids e a métrica de erro.
+   */
+  private async readEntitlements(
+    company: Company,
+    subject: { readonly conversationId: string; readonly messageId: string },
+  ): Promise<CompanyEntitlements | undefined> {
+    const reader = this.deps.entitlements;
+    if (reader === undefined) return undefined;
+    try {
+      return await reader.forCompany(company.id);
+    } catch (error) {
+      try {
+        this.deps.metrics?.countEntitlementError?.();
+      } catch (err) {
+        this.deps.logger.warn({ err }, 'falha ao registrar métrica de cota');
+      }
+      this.deps.logger.warn(
+        {
+          companyId: company.id,
+          conversationId: subject.conversationId,
+          messageId: subject.messageId,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+        'cotas da assinatura indisponíveis; atendendo sem limite',
+      );
+      return undefined;
+    }
+  }
+
+  /** Por que a IA não responde agora (ou `null`); registra a métrica e o log (só ids e o motivo). */
+  private blockedBy(
+    company: Company,
+    subject: { readonly conversationId: string; readonly messageId: string },
+    entitlements: CompanyEntitlements | undefined,
+  ): QuotaBlockReason | null {
+    if (entitlements === undefined) return null;
+    const reason = quotaBlockReason(entitlements);
+    if (reason === null) return null;
+    try {
+      this.deps.metrics?.countQuotaBlock?.(reason);
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de cota');
+    }
+    this.deps.logger.info(
+      {
+        companyId: company.id,
+        conversationId: subject.conversationId,
+        messageId: subject.messageId,
+        reason,
+      },
+      'IA em pausa por cota ou assinatura; nada enviado ao contato e as mensagens seguem pendentes',
+    );
+    return reason;
+  }
+
+  /**
+   * Soma os tokens do turno (`inputTokens + outputTokens`, o turno inteiro com as rodadas de ferramenta) à
+   * assinatura da empresa (spec 031). Resposta sem `usage` não conta. **Falha da medição nunca derruba a
+   * resposta** (`warn` só de ids e `usage_meter_errors_total`).
+   */
+  private async recordUsage(
+    companyId: CompanyId,
+    subject: LlmSubject,
+    usage: LlmUsage | undefined,
+  ): Promise<void> {
+    const meter = this.deps.usage;
+    if (meter === undefined || usage === undefined) return;
+    const tokens = usage.inputTokens + usage.outputTokens;
+    if (!(tokens > 0)) return;
+    try {
+      await meter.record(companyId, tokens);
+    } catch (error) {
+      try {
+        this.deps.metrics?.countUsageMeterError?.();
+      } catch (err) {
+        this.deps.logger.warn({ err }, 'falha ao registrar métrica de medição');
+      }
+      this.deps.logger.warn(
+        {
+          companyId,
+          conversationId: subject.conversationId,
+          messageId: subject.messageId,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+        'falha ao medir o uso de tokens; a resposta segue',
+      );
     }
   }
 

@@ -154,3 +154,12 @@ export type {
 } from './knowledge.js';
 export * from './schedule.js';
 export * from './schedule-ai.js';
+export * from './billing.js';
+export type {
+  BillingRepository,
+  CatalogEntry,
+  CompanyBillingPolicy,
+  OrderSummary,
+  TrialSettings,
+  UsageWindow,
+} from './repositories/billing.repository.js';

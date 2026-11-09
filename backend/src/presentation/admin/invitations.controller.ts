@@ -9,6 +9,7 @@ import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { NotFoundError } from '../../shared/errors/index.js';
 import { isUuid } from '../../shared/utils/index.js';
 import { authenticateHook, requirePermission, membershipAuth } from '../common/auth.hooks.js';
+import { subscriptionExempt } from '../common/entitlement-config.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { listQuerySchema } from './attendance.validators.js';
 import { createInvitationBodySchema } from './invitations.validators.js';
@@ -64,7 +65,8 @@ export const adminInvitationsController: FastifyPluginCallback<
   AdminInvitationsControllerOptions
 > = (app, { auth, metrics, invitations }, done) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
-  const config = rateLimitProfile('admin');
+  // Gestão de equipe segue com a assinatura inativa (spec 031: lista de exceções declarada).
+  const config = { ...rateLimitProfile('admin'), ...subscriptionExempt() };
   const guard = (permission: Permission): onRequestAsyncHookHandler =>
     requirePermission(permission, { companyParam: 'companyId', metrics });
 

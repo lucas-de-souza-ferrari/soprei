@@ -281,6 +281,42 @@ describe('parseConfig', () => {
       }
     });
 
+    it('planos e assinaturas (spec 031): tudo desligado por padrão, literais true/false e valores padrão', () => {
+      const off = parseConfig(VALID_ENV);
+      assert.ok(off.ok);
+      assert.equal(off.value.BILLING_ENABLED, false);
+      assert.equal(off.value.SOPREI_PAYS_META_ENABLED, false);
+      assert.equal(off.value.BILLING_GRACE_DAYS, 5);
+      assert.equal(off.value.BILLING_TRIAL_DAYS, 7);
+      assert.equal(off.value.BILLING_TRIAL_TOKENS, 300_000);
+      const on = parseConfig({ ...VALID_ENV, BILLING_ENABLED: 'true' });
+      assert.ok(on.ok);
+      assert.equal(on.value.BILLING_ENABLED, true);
+      for (const value of ['1', 'yes', 'TRUE']) {
+        assert.equal(parseConfig({ ...VALID_ENV, BILLING_ENABLED: value }).ok, false, value);
+        assert.equal(
+          parseConfig({ ...VALID_ENV, SOPREI_PAYS_META_ENABLED: value }).ok,
+          false,
+          value,
+        );
+      }
+      assert.equal(parseConfig({ ...VALID_ENV, BILLING_TRIAL_DAYS: '0' }).ok, false);
+      assert.equal(parseConfig({ ...VALID_ENV, BILLING_GRACE_DAYS: '-1' }).ok, false);
+    });
+
+    it('gate do modo S (spec 031): SOPREI_PAYS_META_ENABLED exige BILLING_ENABLED=true', () => {
+      const alone = parseConfig({ ...VALID_ENV, SOPREI_PAYS_META_ENABLED: 'true' });
+      assert.equal(alone.ok, false);
+      assert.match(alone.error.message, /SOPREI_PAYS_META_ENABLED: exige BILLING_ENABLED=true/);
+      const both = parseConfig({
+        ...VALID_ENV,
+        BILLING_ENABLED: 'true',
+        SOPREI_PAYS_META_ENABLED: 'true',
+      });
+      assert.ok(both.ok);
+      assert.equal(both.value.SOPREI_PAYS_META_ENABLED, true);
+    });
+
     it('com SCHEDULE_AI_ENABLED, "em andamento" precisa passar do prazo de 30 s do laço', () => {
       const result = parseConfig({
         ...VALID_ENV,

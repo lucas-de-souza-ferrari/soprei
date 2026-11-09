@@ -74,6 +74,79 @@ function permissionProblem(permissions: readonly unknown[]): string | undefined 
   return undefined;
 }
 
+/**
+ * Rotas de tenant que seguem funcionando com a assinatura inativa (spec 031): leitura é sempre liberada;
+ * entre as escritas, só a gestão de equipe, desconectar o canal e (GET) o próprio `entitlements`.
+ */
+const EXEMPT_ROUTES: readonly string[] = [
+  'GET /admin/companies/:companyId/entitlements',
+  'DELETE /admin/companies/:companyId/channel',
+  'POST /admin/companies/:companyId/invitations',
+  'POST /admin/companies/:companyId/invitations/:invitationId/resend',
+  'DELETE /admin/companies/:companyId/invitations/:invitationId',
+  'POST /admin/companies/:companyId/memberships',
+  'PATCH /admin/companies/:companyId/memberships/:membershipId',
+  'POST /admin/companies/:companyId/memberships/:membershipId/password',
+  'GET /admin/companies/:companyId/invitations',
+  'GET /admin/companies/:companyId/memberships',
+];
+
+/** Problema da política de assinatura de uma rota de tenant (spec 031), ou `undefined` se está certa. */
+function entitlementPolicyProblem(route: {
+  readonly url: string;
+  readonly method: string | string[];
+  readonly config: Record<string, unknown>;
+}): string | undefined {
+  const tenant = route.url.startsWith('/admin/companies/:companyId/');
+  if (!tenant) return undefined;
+  const module = route.url.includes('/schedule/')
+    ? 'schedule'
+    : route.url.includes('/inventory/')
+      ? 'inventory'
+      : undefined;
+  if (module !== undefined && route.config.requiresModule !== module) {
+    return `rota ${module}/* deve declarar requireModule("${module}")`;
+  }
+  if (module === undefined && route.config.requiresModule !== undefined) {
+    return 'declara um módulo que a rota não usa';
+  }
+  return undefined;
+}
+
+describe('inventário: o verificador da política de assinatura (spec 031)', () => {
+  it('falha para rota schedule/inventory sem módulo e para módulo em rota que não é de módulo', () => {
+    const base = { method: 'POST', config: {} };
+    assert.match(
+      entitlementPolicyProblem({
+        ...base,
+        url: '/admin/companies/:companyId/inventory/products',
+      }) ?? '',
+      /deve declarar requireModule/,
+    );
+    assert.match(
+      entitlementPolicyProblem({ ...base, url: '/admin/companies/:companyId/schedule/services' }) ??
+        '',
+      /deve declarar requireModule/,
+    );
+    assert.equal(
+      entitlementPolicyProblem({
+        ...base,
+        url: '/admin/companies/:companyId/inventory/products',
+        config: { requiresModule: 'inventory' },
+      }),
+      undefined,
+    );
+    assert.match(
+      entitlementPolicyProblem({
+        ...base,
+        url: '/admin/companies/:companyId/persona',
+        config: { requiresModule: 'schedule' },
+      }) ?? '',
+      /não usa/,
+    );
+  });
+});
+
 describe('inventário: o verificador de permissão de rota de tenant (spec 008)', () => {
   it('falha para rota que só declara requireMembership, para dois hooks e para permissão desconhecida', async () => {
     const app = buildServer({ logger, readiness: ALL_UP });
@@ -240,6 +313,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/channel/embedded-signup',
       '/admin/companies/:companyId/channel/setup',
       '/admin/companies/:companyId/persona',
+      '/admin/companies/:companyId/entitlements',
       '/admin/companies/:companyId/onboarding',
       '/admin/companies/:companyId/knowledge/documents',
       '/admin/companies/:companyId/knowledge/documents/:documentId',
@@ -401,6 +475,23 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       'GET:persona:manage',
       'PUT:persona:manage',
     ]);
+
+    // Spec 031: `entitlements` é lido por qualquer papel (conversation:read) e é isento da política de assinatura.
+    assert.deepEqual(declared('/admin/companies/:companyId/entitlements'), [
+      'GET:conversation:read',
+    ]);
+    // Política de assinatura (spec 031): toda rota `schedule/*` e `inventory/*` declara o módulo; toda escrita de
+    // tenant é barrada por assinatura inativa, salvo a lista curta e declarada de exceções.
+    for (const route of routes) {
+      const problem = entitlementPolicyProblem(route);
+      assert.equal(problem, undefined, `${String(route.method)} ${route.url}: ${String(problem)}`);
+    }
+    const exempt = routes
+      .filter((route) => route.config.subscriptionExempt === true)
+      .flatMap((route) => [route.method].flat().map((method) => method + ' ' + route.url))
+      .filter((entry) => !entry.startsWith('HEAD'))
+      .sort();
+    assert.deepEqual(exempt, [...EXEMPT_ROUTES].sort());
 
     // Regra do projeto: rota nova declara o perfil (cair em `public` por omissão é só a rede de
     // segurança). Só a infraestrutura fica sem limite, com opt-out explícito.

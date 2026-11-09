@@ -2,6 +2,7 @@ import type { CompanyId } from '../value-objects/company-id.js';
 import type { MembershipId } from '../value-objects/membership-id.js';
 import type { AccountId } from '../value-objects/account-id.js';
 import type { MembershipRole } from '../entities/membership.js';
+import type { CompanyBillingPolicy } from './billing.repository.js';
 
 export interface Account {
   readonly id: AccountId;
@@ -113,7 +114,15 @@ export interface AccountRepository {
   clearResetCode(id: string, hash: string): Promise<void>;
   listMemberships(accountId: string): Promise<readonly AccountMembership[]>;
   membership(accountId: string, companyId: CompanyId): Promise<AccountMembership | null>;
-  createCompany(accountId: string, name: string): Promise<AccountMembership>;
+  /**
+   * Cria a empresa com o vínculo `OWNER`. Com `billing` (spec 031, cobrança ligada) a mesma transação que trava
+   * a conta garante a assinatura, confere acesso e limite de empresas do plano e grava `subscriptionId`.
+   */
+  createCompany(
+    accountId: string,
+    name: string,
+    billing?: CompanyBillingPolicy,
+  ): Promise<AccountMembership>;
   /** Última empresa selecionada pela conta (spec 029): só uma dica, sempre revalidada contra os vínculos. */
   lastCompanyId(accountId: string): Promise<string | null>;
   /** Grava a dica da última empresa (spec 029); quem chama já conferiu o vínculo. */

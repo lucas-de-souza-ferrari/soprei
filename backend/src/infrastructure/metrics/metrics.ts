@@ -1,4 +1,4 @@
-import type { AuditAction, Permission } from '../../domain/index.js';
+import type { AuditAction, Permission, QuotaBlockReason } from '../../domain/index.js';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 
 /** Fotografia do pool de conexões (mesma forma de `Database.poolMetrics()`). */
@@ -209,6 +209,14 @@ export interface Metrics {
   countScheduleAction(action: ScheduleAction, result: ScheduleActionResult): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027). Conjunto fixo. */
   countScheduleContext(result: ScheduleContextResult): void;
+  /** A IA deixou de responder por cota esgotada ou assinatura inativa (spec 031). Conjunto fixo. */
+  countQuotaBlock(reason: QuotaBlockReason): void;
+  /** Uma mensagem de saída ao contato foi contada na assinatura (spec 031). Sem labels. */
+  countUsageSentMessage(): void;
+  /** A medição de uso falhou e o fluxo seguiu (spec 031). Sem labels. */
+  countUsageMeterError(): void;
+  /** A leitura das cotas falhou e o atendimento seguiu sem limite (spec 031). Sem labels. */
+  countEntitlementError(): void;
   /** Uma chamada de ferramenta da agenda terminou (spec 028). */
   countScheduleToolCall(tool: ScheduleToolLabel, result: ScheduleToolCallResult): void;
   /** Um turno com ferramentas de agenda terminou (spec 028). */
@@ -380,6 +388,28 @@ export function createMetrics(): Metrics {
     name: 'schedule_context_total',
     help: 'Consultas de horários livres para o prompt da IA por resultado (spec 027, conjunto fixo)',
     labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
+  const quotaBlocks = new Counter({
+    name: 'quota_blocks_total',
+    help: 'Vezes em que a IA deixou de responder por cota ou assinatura inativa (spec 031, motivo fixo)',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  });
+  const usageSentMessages = new Counter({
+    name: 'usage_sent_messages_total',
+    help: 'Mensagens de saída ao contato contadas na assinatura (spec 031)',
+    registers: [registry],
+  });
+  const usageMeterErrors = new Counter({
+    name: 'usage_meter_errors_total',
+    help: 'Falhas da medição de uso que não derrubaram o fluxo (spec 031)',
+    registers: [registry],
+  });
+  const entitlementErrors = new Counter({
+    name: 'entitlement_errors_total',
+    help: 'Falhas na leitura das cotas; o atendimento seguiu sem limite (spec 031)',
     registers: [registry],
   });
 
@@ -632,6 +662,18 @@ export function createMetrics(): Metrics {
     },
     countScheduleContext(result) {
       scheduleContext.inc({ result });
+    },
+    countQuotaBlock(reason) {
+      quotaBlocks.inc({ reason });
+    },
+    countUsageSentMessage() {
+      usageSentMessages.inc();
+    },
+    countUsageMeterError() {
+      usageMeterErrors.inc();
+    },
+    countEntitlementError() {
+      entitlementErrors.inc();
     },
     countScheduleToolCall(tool, result) {
       scheduleToolCalls.inc({ tool, result });

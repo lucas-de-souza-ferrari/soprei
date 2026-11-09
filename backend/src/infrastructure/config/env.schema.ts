@@ -123,6 +123,14 @@ export const envSchema = z
     // Ferramentas de agenda da IA (spec 028). Chave global, desligada por padrão: ligada, a IA pode
     // consultar os horários livres por ferramenta (E1; marcar, cancelar e remarcar vêm nas etapas seguintes).
     SCHEDULE_AI_ENABLED: booleanLiteral(false),
+    // Planos e assinaturas (spec 031). Chave global, desligada por padrão: desligada, NADA é cobrado, limitado nem
+    // medido (o comportamento é o de antes). O catálogo e os preços ficam no banco, nunca em variável de ambiente.
+    BILLING_ENABLED: booleanLiteral(false),
+    // Gate do modo "o Soprei paga a Meta" (spec 031, D0): só liga depois de o E0 confirmar a linha de crédito.
+    SOPREI_PAYS_META_ENABLED: booleanLiteral(false),
+    BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(60).default(5),
+    BILLING_TRIAL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+    BILLING_TRIAL_TOKENS: z.coerce.number().int().min(1).max(100_000_000).default(300_000),
     // Provedor Anthropic (spec 014). A chave só é exigida com `LLM_PROVIDER=anthropic` e nunca vai
     // a log, métrica, erro nem resposta. `ANTHROPIC_BASE_URL` existe para os testes (servidor falso).
     ANTHROPIC_API_KEY: optionalSecret,
@@ -261,6 +269,14 @@ export const envSchema = z
         code: 'custom',
         path: ['RATE_LIMIT_ENABLED'],
         message: 'não pode ser "false" em produção (a proteção contra abuso ficaria desligada)',
+      });
+    }
+    // O modo S depende da cobrança: a flag sozinha não tem efeito algum e é um erro de configuração.
+    if (env.SOPREI_PAYS_META_ENABLED && !env.BILLING_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SOPREI_PAYS_META_ENABLED'],
+        message: 'exige BILLING_ENABLED=true',
       });
     }
     refineWhatsapp(env, ctx);

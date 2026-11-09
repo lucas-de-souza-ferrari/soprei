@@ -30,6 +30,8 @@ import {
 } from '../ports/message-sender.js';
 import type { ChannelCredentials, ChannelCredentialsResult } from '../ports/channel-credentials.js';
 import type { CompanyId } from '../../domain/index.js';
+import type { EntitlementReader } from '../ports/entitlement-reader.js';
+import type { UsageMeter } from '../ports/usage-meter.js';
 import { CHANNEL_NOTICE_TEXTS } from './channel-texts.js';
 import {
   type ChannelBatchSettings,
@@ -152,6 +154,9 @@ function setup(
     attendance?: Partial<InboundAttendance>;
     messages?: Partial<InMemoryAttendanceStore['messages']>;
     batch?: Partial<ChannelBatchSettings>;
+    /** Cobrança (spec 031): medidor de respostas enviadas e leitor de cotas; ausentes = cobrança desligada. */
+    usage?: Pick<UsageMeter, 'recordSent'>;
+    entitlements?: EntitlementReader;
   } = {},
 ): Harness {
   let offset = 0;
@@ -171,6 +176,7 @@ function setup(
     llm,
     logger: logs.logger,
     options: { llmTimeoutMs: 300, inFlightTimeoutMs: IN_FLIGHT_MS, now },
+    ...(overrides.entitlements === undefined ? {} : { entitlements: overrides.entitlements }),
   });
   const sender = new FakeSender();
   const credentials = new FakeCredentials(companies);
@@ -183,6 +189,7 @@ function setup(
     sender,
     credentials,
     connections: credentials,
+    ...(overrides.usage === undefined ? {} : { usage: overrides.usage }),
     queue: scheduler,
     batch: { ...BATCH, ...overrides.batch },
     logger: logs.logger,
@@ -1315,5 +1322,85 @@ describe('ChannelInboundProcessor: credencial por empresa (spec 015)', () => {
     );
     assert.equal(h.sender.calls.length, 0);
     assert.deepEqual(h.credentials.marks, []);
+  });
+});
+
+describe('ChannelInboundProcessor: medição de respostas enviadas (spec 031, E2)', () => {
+  class FakeUsage implements Pick<UsageMeter, 'recordSent'> {
+    readonly sent: string[] = [];
+    fail = false;
+    recordSent(companyId: CompanyId): Promise<void> {
+      if (this.fail) return Promise.reject(new Error('falha com ' + SECRET_TEXT));
+      this.sent.push(companyId);
+      return Promise.resolve();
+    }
+  }
+
+  it('uma resposta enviada com sucesso conta 1 (por empresa); texto, contato e wamid nunca vão ao medidor nem ao log', async () => {
+    const usage = new FakeUsage();
+    const h = setup({ usage });
+    const company = await newCompany(h, 'alfa', '555001');
+    await flow(h, textJob(company.id), MORE);
+    assert.deepEqual(usage.sent, [company.id]);
+    const raw = h.logs.raw();
+    assert.equal(raw.includes(SECRET_TEXT), false);
+    assert.equal(raw.includes(CONTACT), false);
+  });
+
+  it('reenvio de resposta já enviada não conta de novo (a guarda do sentAt)', async () => {
+    const usage = new FakeUsage();
+    const h = setup({ usage });
+    const company = await newCompany(h, 'alfa');
+    await flow(h, textJob(company.id), MORE);
+    await flow(h, textJob(company.id), MORE);
+    assert.equal(usage.sent.length, 1);
+  });
+
+  it('falha no envio não conta', async () => {
+    const usage = new FakeUsage();
+    const h = setup({ usage });
+    const company = await newCompany(h, 'alfa');
+    h.sender.script(Result.err(retryable()));
+    await assert.rejects(flow(h, textJob(company.id), MORE));
+    assert.deepEqual(usage.sent, []);
+  });
+
+  it('falha do medidor não impede o envio nem a marca sentAt: só log com ids', async () => {
+    const usage = new FakeUsage();
+    usage.fail = true;
+    const h = setup({ usage });
+    const company = await newCompany(h, 'alfa');
+    const outcome = await flow(h, textJob(company.id), MORE);
+    assert.equal(outcome, 'done');
+    assert.equal(h.sender.calls.length, 1);
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.ok(reply?.sentAt instanceof Date);
+    assert.equal(h.logs.raw().includes(SECRET_TEXT), false);
+  });
+
+  it('cota esgotada: nenhuma mensagem sai, o provedor não é chamado e as mensagens seguem pendentes', async () => {
+    const usage = new FakeUsage();
+    const h = setup({
+      usage,
+      entitlements: {
+        forCompany: () =>
+          Promise.resolve({
+            access: 'ok' as const,
+            agenda: true,
+            stock: true,
+            tokens: { used: 5, limit: 100 },
+            replies: { used: 10, limit: 10 },
+          }),
+      },
+    });
+    const company = await newCompany(h, 'alfa');
+    const outcome = await flow(h, textJob(company.id), MORE);
+    assert.equal(outcome, 'done');
+    assert.equal(h.sender.calls.length, 0);
+    assert.equal(h.llm.calls.length, 0);
+    assert.deepEqual(usage.sent, []);
+    assert.equal(await h.service.hasPendingMessages(company.id, CONTACT), true);
+    // Nenhum próximo turno é agendado para o excedente: nada foi respondido.
+    assert.equal(h.scheduler.calls.filter((call) => call.schedule.delayMs === 0).length, 0);
   });
 });
