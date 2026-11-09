@@ -214,7 +214,8 @@ export class PrismaBillingRepository implements BillingRepository {
                 ? {}
                 : { whatsappBillingMode: 'CUSTOMER_PAYS_META' as const }),
             },
-            orderBy: [{ version: 'desc' }],
+            // Ordem estável (mensal antes de anual, pela ordem do enum): a tela e os testes não dependem do acaso.
+            orderBy: [{ version: 'desc' }, { cycle: 'asc' }],
           },
         },
       });
