@@ -44,6 +44,8 @@ test('a aba Equipe fica depois de Persona e Conhecimento e antes de Testar (e Pr
       'estoque',
       'equipe',
       'testar',
+      // Spec 031 (E4): só para a conta titular, antes de Primeiros passos.
+      'assinatura',
       'primeirosPassos',
     ],
   );

@@ -3,6 +3,7 @@ import {
   type CatalogEntry,
   metaEstimateMilliCents,
   type OrderSummary,
+  type PendingChange,
   type PlanPriceRecord,
   quotaLimits,
   resolveAccess,
@@ -35,8 +36,12 @@ export interface BillingOverview {
     readonly access: AccessLevel;
     readonly currentPeriodStart: Date;
     readonly currentPeriodEnd: Date;
+    /** Fim da carência (vencimento mais os dias de carência): a tela diz até quando tudo continua funcionando. */
+    readonly graceEndsAt: Date;
     readonly trialEndsAt: Date | null;
     readonly cancelAtPeriodEnd: boolean;
+    /** Troca agendada para a próxima renovação (a tela mostra e deixa desfazer); nulo = nenhuma. */
+    readonly pendingChange: PendingChange | null;
     readonly maxCompanies: number;
     readonly companies: number;
     readonly whatsappBillingMode: WhatsappBillingMode;
@@ -107,8 +112,12 @@ export class BillingService {
         access,
         currentPeriodStart: subscription.currentPeriodStart,
         currentPeriodEnd: subscription.currentPeriodEnd,
+        graceEndsAt: new Date(
+          subscription.currentPeriodEnd.getTime() + Math.max(0, settings.graceDays) * 86_400_000,
+        ),
         trialEndsAt: subscription.trialEndsAt,
         cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+        pendingChange: subscription.pendingChange,
         maxCompanies: subscription.plan.maxCompanies,
         companies,
         whatsappBillingMode: mode,

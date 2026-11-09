@@ -6,6 +6,7 @@ import {
   ListChecks,
   MessageSquare,
   Package,
+  CreditCard,
   Radio,
   UserRound,
   Users,
@@ -29,6 +30,7 @@ const ICONS: Readonly<Record<AreaPage, LucideIcon>> = {
   estoque: Package,
   equipe: Users,
   testar: FlaskConical,
+  assinatura: CreditCard,
 };
 
 export interface AppShellProps {

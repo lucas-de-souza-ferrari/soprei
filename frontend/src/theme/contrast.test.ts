@@ -109,6 +109,18 @@ const textPairs: [string, string][] = [
   // aviso fixo do exemplo (foreground em muted) e cartão "Configuração" (card-foreground em card).
   ['color-success', 'card'],
   ['color-success', 'muted'],
+  // Spec 031 (E4): tela de Assinatura. Cartões e histórico em card (card-foreground e muted-foreground sobre
+  // card), faixas de aviso e estimativa da Meta sobre muted (foreground e muted-foreground), alertas de cota em
+  // texto (primary = atenção, destructive = esgotada) e o preenchimento das barras de uso contra a trilha muted
+  // (primary e destructive sobre muted, acima do mínimo de 3:1 de componente).
+  ['card-foreground', 'card'],
+  ['muted-foreground', 'card'],
+  ['foreground', 'muted'],
+  ['muted-foreground', 'muted'],
+  ['primary', 'card'],
+  ['destructive', 'card'],
+  ['primary', 'muted'],
+  ['destructive', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],

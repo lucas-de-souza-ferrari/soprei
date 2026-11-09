@@ -112,7 +112,7 @@ function toCheckResponse({ order, result }: OrderCheckResult): object {
 }
 
 /** Corpo de `GET /account/billing`: datas em ISO UTC e dinheiro em centavos; nenhum dado de outra conta. */
-export function toBillingResponse(overview: BillingOverview): object {
+export function toBillingResponse(overview: BillingOverview, checkoutEnabled = false): object {
   const { subscription, usage } = overview;
   return {
     subscription:
@@ -122,6 +122,7 @@ export function toBillingResponse(overview: BillingOverview): object {
             ...subscription,
             currentPeriodStart: subscription.currentPeriodStart.toISOString(),
             currentPeriodEnd: subscription.currentPeriodEnd.toISOString(),
+            graceEndsAt: subscription.graceEndsAt.toISOString(),
             trialEndsAt: subscription.trialEndsAt?.toISOString() ?? null,
           },
     usage:
@@ -158,6 +159,8 @@ export function toBillingResponse(overview: BillingOverview): object {
       })),
     })),
     trial: overview.trial,
+    // Sem checkout (CHECKOUT_ENABLED desligado) a tela mostra o plano mas não oferece pagar nem trocar.
+    checkoutEnabled,
   };
 }
 
@@ -186,7 +189,7 @@ export const billingController: FastifyPluginCallback<BillingControllerOptions> 
   const config = rateLimitProfile('admin');
   app.get('/account/billing', { config }, async (request) => {
     const account = await accounts.me(accountCookie(request.headers.cookie));
-    return toBillingResponse(await service.overview(account.id));
+    return toBillingResponse(await service.overview(account.id), checkout !== undefined);
   });
 
   if (checkout !== undefined) {

@@ -22,8 +22,10 @@ const OVERVIEW: BillingOverview = {
     access: 'ok',
     currentPeriodStart: new Date('2026-11-10T12:00:00Z'),
     currentPeriodEnd: new Date('2026-11-17T12:00:00Z'),
+    graceEndsAt: new Date('2026-11-22T12:00:00Z'),
     trialEndsAt: new Date('2026-11-17T12:00:00Z'),
     cancelAtPeriodEnd: false,
+    pendingChange: null,
     maxCompanies: 1,
     companies: 1,
     whatsappBillingMode: 'CUSTOMER_PAYS_META',
@@ -102,12 +104,22 @@ describe('GET /account/billing (spec 031, E1)', () => {
     // A conta vem SÓ do cookie: o accountId da query é ignorado.
     assert.deepEqual(seen.overview, [ACCOUNT_ID]);
     const body = JSON.parse(response.body) as {
-      subscription: { currentPeriodEnd: string; whatsappNotice: string };
+      checkoutEnabled: boolean;
+      subscription: {
+        currentPeriodEnd: string;
+        graceEndsAt: string;
+        whatsappNotice: string;
+        pendingChange: unknown;
+      };
       usage: { metaEstimate: { isEstimate: boolean } };
     };
     assert.equal(body.subscription.currentPeriodEnd, '2026-11-17T12:00:00.000Z');
+    assert.equal(body.subscription.graceEndsAt, '2026-11-22T12:00:00.000Z');
     assert.equal(body.subscription.whatsappNotice, 'NOT_INCLUDED');
     assert.equal(body.usage.metaEstimate.isEstimate, true);
+    // Sem o checkout ligado a tela não oferece pagar; a troca agendada (nenhuma) vem na leitura.
+    assert.equal(body.checkoutEnabled, false);
+    assert.equal(body.subscription.pendingChange, null);
     await app.close();
   });
 

@@ -15,7 +15,8 @@ export type AreaPage =
   | 'conhecimento'
   | 'estoque'
   | 'equipe'
-  | 'testar';
+  | 'testar'
+  | 'assinatura';
 
 /** Ordem do menu: Conversas é a primeira aba e a página inicial de quem pode ler (spec 024). */
 export const AREA_PAGES: readonly AreaPage[] = [
@@ -28,6 +29,9 @@ export const AREA_PAGES: readonly AreaPage[] = [
   'estoque',
   'equipe',
   'testar',
+  // Assinatura (spec 031, E4): só para a conta titular com a cobrança ligada; o site acrescenta a permissão
+  // de conta abaixo. Fica antes de Primeiros passos, que continua por último.
+  'assinatura',
   // Assistente de primeiros passos (spec 030): só com `onboarding:manage`. Fica por último para nunca ser a
   // primeira tela permitida (a página inicial continua sendo Conversas).
   'primeirosPassos',
@@ -53,6 +57,7 @@ const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   // Equipe (spec 025): depois de Persona e antes de Testar, só com `membership:read`.
   equipe: '/painel/equipe',
   testar: '/painel/testar',
+  assinatura: '/painel/assinatura',
 };
 
 export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
@@ -66,7 +71,14 @@ export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   estoque: 'Estoque',
   equipe: 'Equipe',
   testar: 'Testar',
+  assinatura: 'Assinatura',
 };
+
+/**
+ * Permissão de CONTA (não de papel): o site a acrescenta às permissões da empresa só para a conta titular da
+ * assinatura e com a cobrança ligada. É conveniência de tela; o backend barra de verdade (cookie da conta).
+ */
+export const BILLING_PERMISSION = 'account:billing';
 
 /** Permissão que dá acesso a cada aba. */
 const REQUIRED: Readonly<Record<AreaPage, string>> = {
@@ -80,6 +92,7 @@ const REQUIRED: Readonly<Record<AreaPage, string>> = {
   estoque: 'inventory:manage',
   equipe: 'membership:read',
   testar: 'conversation:simulate',
+  assinatura: BILLING_PERMISSION,
 };
 
 export function areaPath(page: AreaPage): string {

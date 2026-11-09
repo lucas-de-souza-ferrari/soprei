@@ -9,7 +9,10 @@ import {
 import { Check, Circle, MinusCircle } from 'lucide-react';
 import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
-import type { AreaPage } from './company-nav';
+import { ModuleInvite } from './AccessNotice';
+import type { Entitlements } from './billing-api';
+import { hasModule, WHATSAPP_NOT_INCLUDED } from './billing-rules';
+import { BILLING_PERMISSION, type AreaPage } from './company-nav';
 import { ConfirmDialog } from './ConfirmDialog';
 import { EstoquePage } from './EstoquePage';
 import { KnowledgePage } from './KnowledgePage';
@@ -35,6 +38,8 @@ export interface OnboardingPageProps extends PageProps {
   /** Troca o passo no endereço (`replace` quando só se normaliza o endereço, sem nova entrada no histórico). */
   readonly onStep: (step: WizardStepId, replace: boolean) => void;
   readonly onNavigate: (page: AreaPage) => void;
+  /** Módulos contratados (spec 031): sem Agenda ou Estoque o passo vira o convite para contratar. */
+  readonly entitlements?: Entitlements | null;
 }
 
 type StepStatus = 'done' | 'skipped' | 'pending';
@@ -79,6 +84,7 @@ export function OnboardingPage({
   step,
   onStep,
   onNavigate,
+  entitlements = null,
 }: OnboardingPageProps) {
   const [state, setState] = useState<OnboardingState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -260,6 +266,15 @@ export function OnboardingPage({
           />
         );
       case 'servicos':
+        if (!hasModule(entitlements, 'agenda')) {
+          return (
+            <ModuleInvite
+              module="agenda"
+              holder={permissions.includes(BILLING_PERMISSION)}
+              onOpenSubscription={() => onNavigate('assinatura')}
+            />
+          );
+        }
         return (
           <OnboardingServices
             key={companyId}
@@ -270,6 +285,15 @@ export function OnboardingPage({
           />
         );
       case 'estoque':
+        if (!hasModule(entitlements, 'stock')) {
+          return (
+            <ModuleInvite
+              module="stock"
+              holder={permissions.includes(BILLING_PERMISSION)}
+              onOpenSubscription={() => onNavigate('assinatura')}
+            />
+          );
+        }
         return (
           <StockStep
             key={companyId}
@@ -286,6 +310,7 @@ export function OnboardingPage({
             companyId={companyId}
             settle={settle}
             canOpenChannel={permissions.includes('channel:read')}
+            showWhatsappCost={entitlements !== null}
             onNavigate={onNavigate}
           />
         );
@@ -493,9 +518,12 @@ function TestStep({
   companyId,
   settle,
   canOpenChannel,
+  showWhatsappCost,
   onNavigate,
 }: PageProps & {
   readonly canOpenChannel: boolean;
+  /** Com a cobrança ligada, o passo que sugere conectar o WhatsApp avisa que o plano não inclui o custo da Meta. */
+  readonly showWhatsappCost: boolean;
   readonly onNavigate: (page: AreaPage) => void;
 }) {
   return (
@@ -510,6 +538,11 @@ function TestStep({
           <p className="m-0 text-sm">
             Quando estiver pronto, conecte o WhatsApp da empresa para atender contatos de verdade.
           </p>
+          {showWhatsappCost && (
+            <p className="m-0 text-sm text-muted-foreground" data-testid="aviso-whatsapp">
+              {WHATSAPP_NOT_INCLUDED}
+            </p>
+          )}
           <div>
             <Button variant="outline" onClick={() => onNavigate('canal')}>
               Conectar o WhatsApp

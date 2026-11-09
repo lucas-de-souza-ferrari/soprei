@@ -1,8 +1,17 @@
 import { useCallback, useRef } from 'react';
+import { AccessNotice, ModuleInvite } from './AccessNotice';
 import { AgendaConfigPage } from './AgendaConfigPage';
 import { AgendaPage } from './AgendaPage';
 import { ChannelPage } from './ChannelPage';
-import { allowedPages, canOpen, type ConversasRoute, type AreaPage } from './company-nav';
+import type { Entitlements } from './billing-api';
+import { hasModule, moduleOfPage, type CheckoutReturn } from './billing-rules';
+import {
+  allowedPages,
+  BILLING_PERMISSION,
+  canOpen,
+  type ConversasRoute,
+  type AreaPage,
+} from './company-nav';
 import { ConversationPage } from './ConversationPage';
 import { EstoquePage } from './EstoquePage';
 import { KnowledgePage } from './KnowledgePage';
@@ -11,6 +20,7 @@ import { failureOf } from './company-api';
 import { OnboardingPage } from './OnboardingPage';
 import type { WizardStepId } from './onboarding-steps';
 import { PersonaPage } from './PersonaPage';
+import { SubscriptionPage } from './SubscriptionPage';
 import { TeamPage } from './TeamPage';
 import type { Role } from './team-rules';
 import { TestPage } from './TestPage';
@@ -35,6 +45,14 @@ export interface CompanyAreaProps {
   readonly onOpenConversation: (conversationId: string) => void;
   readonly onBackToConversations: () => void;
   readonly onNavigate: (page: AreaPage) => void;
+  /** Acesso da empresa (spec 031): faixa de estado e módulos contratados; `null` = sem cobrança ou sem leitura. */
+  readonly entitlements: Entitlements | null;
+  /** Volta do checkout (só em memória) e avisos de que a assinatura mudou (o site relê o acesso). */
+  readonly checkoutReturn: CheckoutReturn | null;
+  readonly onReturnConsumed: () => void;
+  readonly onBillingChanged: () => void;
+  /** Leva à tela de empresas (onde se cria a primeira e começa o teste gratuito). */
+  readonly onOpenCompanies: () => void;
   /** 401: a sessão acabou; o site volta ao login. */
   readonly onSession: () => void;
   /** 404: a empresa selecionada mudou (outra aba, suspensão); o site recarrega e volta à lista. */
@@ -55,6 +73,11 @@ export function CompanyArea({
   onOpenConversation,
   onBackToConversations,
   onNavigate,
+  entitlements,
+  checkoutReturn,
+  onReturnConsumed,
+  onBillingChanged,
+  onOpenCompanies,
   onSession,
   onChanged,
 }: CompanyAreaProps) {
@@ -77,10 +100,27 @@ export function CompanyArea({
 
   const pages = allowedPages(company.permissions);
   const allowed = canOpen(page, company.permissions);
+  // Assinatura é da CONTA: só o titular a vê (o site acrescenta a permissão de conta a ele).
+  const holder = company.permissions.includes(BILLING_PERMISSION);
+  const openSubscription = useCallback(() => onNavigate('assinatura'), [onNavigate]);
+  const needed = moduleOfPage(page);
+  const locked = needed !== null && !hasModule(entitlements, needed);
 
   return (
     <>
-      {!allowed ? (
+      {page !== 'assinatura' && (
+        <AccessNotice
+          entitlements={entitlements}
+          holder={holder}
+          onOpenSubscription={openSubscription}
+        />
+      )}
+      {!allowed && page === 'assinatura' ? (
+        <p className="m-0 py-2">
+          Esta conta não tem assinatura própria (ela é da pessoa titular da conta) ou a cobrança não
+          está habilitada neste ambiente.
+        </p>
+      ) : !allowed ? (
         <p className="m-0 py-2">
           {pages.length === 0
             ? 'Você não tem permissão para usar nenhuma tela desta empresa.'
@@ -107,6 +147,16 @@ export function CompanyArea({
             onBack={onBackToConversations}
           />
         )
+      ) : locked && needed !== null ? (
+        <ModuleInvite module={needed} holder={holder} onOpenSubscription={openSubscription} />
+      ) : page === 'assinatura' ? (
+        <SubscriptionPage
+          checkoutReturn={checkoutReturn}
+          onReturnConsumed={onReturnConsumed}
+          onChanged={onBillingChanged}
+          onSession={onSession}
+          onOpenCompanies={onOpenCompanies}
+        />
       ) : page === 'primeirosPassos' ? (
         <OnboardingPage
           key={company.companyId}
@@ -116,6 +166,7 @@ export function CompanyArea({
           step={wizardStep}
           onStep={onWizardStep}
           onNavigate={onNavigate}
+          entitlements={entitlements}
         />
       ) : page === 'agenda' ? (
         <AgendaPage

@@ -11,6 +11,8 @@ import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
 import { AppShell } from './company/AppShell';
+import { loadEntitlements, probeBilling, type Entitlements } from './company/billing-api';
+import { hasModule, moduleOfPage, type CheckoutReturn } from './company/billing-rules';
 import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
 import { InvitePage } from './invite/InvitePage';
@@ -19,6 +21,7 @@ import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
 import {
   allowedPages,
   AREA_LABELS,
+  BILLING_PERMISSION,
   canOpen,
   type ConversasRoute,
   conversasPath,
@@ -98,13 +101,26 @@ function bootLanding(initial: Page): Page | 'auto' {
 export interface AccountAppProps {
   /** Token do convite lido do fragmento pelo `main.tsx` (spec 025); só vive em memória. */
   readonly initialInviteToken?: string | null;
+  /** Volta do checkout lida da query pelo `main.tsx` (spec 031, E4); só vive em memória. */
+  readonly initialCheckoutReturn?: CheckoutReturn | null;
 }
 
-export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) {
+export function AccountApp({
+  initialInviteToken = null,
+  initialCheckoutReturn = null,
+}: AccountAppProps = {}) {
   const [page, setPage] = useState<Page>(pageForPath(location.pathname));
   // O convite aberto fica só em memória: atravessa o login (`/entrar`) e volta, nunca vai a armazenamento.
   const [inviteToken, setInviteToken] = useState<string | null>(initialInviteToken);
   const [session, setSession] = useState<Session | null>(null);
+  // Assinatura (spec 031, E4): o acesso da empresa selecionada (faixa e módulos) e se a conta é a titular.
+  const [entitlements, setEntitlements] = useState<Entitlements | null>(null);
+  const [billingKind, setBillingKind] = useState<'holder' | 'none' | 'off'>('off');
+  const [checkoutReturn, setCheckoutReturn] = useState<CheckoutReturn | null>(
+    initialCheckoutReturn,
+  );
+  const checkoutReturnRef = useRef<CheckoutReturn | null>(initialCheckoutReturn);
+  checkoutReturnRef.current = checkoutReturn;
   const [companies, setCompanies] = useState<Company[]>([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -153,6 +169,22 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   ) => {
     let landing = requested;
     let replaceUrl = requestedReplace;
+    // Leituras auxiliares da Assinatura (spec 031): feitas uma vez por empresa, antes de decidir a tela e
+    // reaproveitadas depois. Qualquer falha vira "sem cobrança" (nada é escondido).
+    let probed: {
+      companyId: string | null;
+      kind: 'holder' | 'none' | 'off';
+      access: Entitlements | null;
+    } | null = null;
+    const probe = async (companyId: string | null) => {
+      if (probed !== null && probed.companyId === companyId) return probed;
+      const [kind, access] = await Promise.all([
+        probeBilling(),
+        companyId === null ? Promise.resolve(null) : loadEntitlements(companyId),
+      ]);
+      probed = { companyId, kind, access };
+      return probed;
+    };
     let current = sessionSchema.parse(await api('/auth/session'));
     const list = companiesSchema.parse(await api('/account/companies'));
     if (generation.current !== stamp) return;
@@ -181,10 +213,28 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       const opened = list.items.find((item) => item.companyId === current.selectedCompanyId);
       landing =
         opened === undefined ? 'companies' : (allowedPages(opened.permissions)[0] ?? 'conversas');
+      // Voltando do checkout depois de um login: abre a Assinatura para confirmar o pagamento.
+      if (opened !== undefined && checkoutReturnRef.current !== null) landing = 'assinatura';
+      // Titular com a assinatura encerrada: o login abre a Assinatura (como voltar a usar), não as Conversas.
+      else if (opened !== undefined) {
+        const info = await probe(opened.companyId);
+        if (generation.current !== stamp) return;
+        if (info.kind === 'holder' && info.access?.access === 'blocked') landing = 'assinatura';
+      }
       replaceUrl = true;
       setRoute({ kind: 'list' });
       setWizardStep(null);
     }
+    // Assinatura (spec 031): leituras auxiliares; qualquer falha vira "sem cobrança" (nada é escondido).
+    const selectedId = current.selectedCompanyId;
+    const info = await probe(
+      selectedId !== null && list.items.some((item) => item.companyId === selectedId)
+        ? selectedId
+        : null,
+    );
+    if (generation.current !== stamp) return;
+    setBillingKind(info.kind);
+    setEntitlements(info.access);
     setSession(current);
     setCompanies(list.items);
     const target =
@@ -580,7 +630,33 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       </AlertContent>
     </Alert>
   );
-  const areaCompany = isAreaPage(page) && !booting && session ? selectedCompany : undefined;
+  const baseAreaCompany = isAreaPage(page) && !booting && session ? selectedCompany : undefined;
+  // A conta titular ganha a permissão de CONTA que abre a Assinatura (conveniência de tela; o servidor barra).
+  const areaCompany =
+    baseAreaCompany === undefined
+      ? undefined
+      : billingKind === 'holder'
+        ? { ...baseAreaCompany, permissions: [...baseAreaCompany.permissions, BILLING_PERMISSION] }
+        : baseAreaCompany;
+  // Abas de módulo (Agenda, Estoque) somem sem o módulo contratado; sem leitura do acesso nada some.
+  const menuPages = (permissions: readonly string[]) =>
+    allowedPages(permissions).filter((item) => {
+      const needed = moduleOfPage(item);
+      return needed === null || hasModule(entitlements, needed);
+    });
+  // Relê o acesso e o titular depois de uma mudança na assinatura (o menu e a faixa acompanham).
+  const refreshAccess = () => {
+    const stamp = generation.current;
+    const selectedId = session?.selectedCompanyId ?? null;
+    void Promise.all([
+      probeBilling(),
+      selectedId === null ? Promise.resolve(null) : loadEntitlements(selectedId),
+    ]).then(([kind, access]) => {
+      if (generation.current !== stamp) return;
+      setBillingKind(kind);
+      setEntitlements(access);
+    });
+  };
   const switcherItem = (item: Company) => ({
     companyId: item.companyId,
     name: item.name,
@@ -600,7 +676,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
         banner={noticeNode}
         current={switcherItem(areaCompany)}
         companies={companies.map(switcherItem)}
-        pages={allowedPages(areaCompany.permissions)}
+        pages={menuPages(areaCompany.permissions)}
         page={isAreaPage(page) ? page : 'conversas'}
         email={session.email}
         busy={busy}
@@ -619,6 +695,11 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
           onOpenConversation={(id) => goConversations({ kind: 'detail', id })}
           onBackToConversations={() => goConversations({ kind: 'list' })}
           onNavigate={openArea}
+          entitlements={entitlements}
+          checkoutReturn={checkoutReturn}
+          onReturnConsumed={() => setCheckoutReturn(null)}
+          onBillingChanged={refreshAccess}
+          onOpenCompanies={() => openArea('companies')}
           onSession={sessionLost}
           onChanged={companyChanged}
         />
