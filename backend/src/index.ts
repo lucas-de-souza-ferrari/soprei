@@ -1,4 +1,5 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { BillingNoticeService } from './application/billing/billing-notice.service.js';
 import { BillingService } from './application/billing/billing.service.js';
 import { CheckoutService } from './application/billing/checkout.service.js';
 import { PaymentReconciler } from './application/billing/payment-reconciler.js';
@@ -51,6 +52,7 @@ import {
   PrismaProductRepository,
   PrismaOnboardingStore,
   PrismaStockMovementRepository,
+  PrismaBillingNoticeRepository,
   PrismaBillingRepository,
   PrismaCheckoutRepository,
   PrismaPendingReplyReader,
@@ -154,6 +156,10 @@ async function main(): Promise<void> {
     metrics,
   });
   await warmUpAuth(auth);
+  // Um só mailer SMTP para contas (confirmação, recuperação) e convites e avisos de cobrança; só com contas globais ligadas.
+  const accountMailer = config.ACCOUNTS_ENABLED
+    ? new SmtpVerificationMailer(smtpMailerOptions(config))
+    : undefined;
   // Planos e assinaturas (spec 031): só com BILLING_ENABLED. Desligada, nada abaixo é criado e o atendimento e
   // as rotas têm exatamente o comportamento e o custo de antes.
   const billing = config.BILLING_ENABLED
@@ -189,7 +195,23 @@ async function main(): Promise<void> {
             timeoutMs: config.BILLING_HTTP_TIMEOUT_MS,
             checkoutHost: config.INFINITEPAY_CHECKOUT_HOST,
           });
+          // Avisos de cobrança por e-mail (E5): só com o mailer das contas (BILLING_ENABLED exige ACCOUNTS_ENABLED).
+          const notices =
+            accountMailer === undefined
+              ? undefined
+              : new BillingNoticeService({
+                  repository: new PrismaBillingNoticeRepository(prisma),
+                  mailer: accountMailer,
+                  logger,
+                  metrics,
+                  settings: {
+                    graceDays: config.BILLING_GRACE_DAYS,
+                    trialTokens: config.BILLING_TRIAL_TOKENS,
+                    appOrigin: config.APP_ORIGIN,
+                  },
+                });
           const verifier = new PaymentVerifier({
+            ...(notices === undefined ? {} : { notifier: notices }),
             checkout: repository,
             provider,
             graceDays: config.BILLING_GRACE_DAYS,
@@ -207,6 +229,7 @@ async function main(): Promise<void> {
           });
           return {
             verifier,
+            notices,
             reconciler: new PaymentReconciler({ checkout: repository, verifier, logger }),
             service: new CheckoutService({
               billing: new PrismaBillingRepository(prisma),
@@ -366,10 +389,6 @@ async function main(): Promise<void> {
     );
   }
 
-  // Um só mailer SMTP para contas (confirmação, recuperação) e convites; só com contas globais ligadas.
-  const accountMailer = config.ACCOUNTS_ENABLED
-    ? new SmtpVerificationMailer(smtpMailerOptions(config))
-    : undefined;
   const app = buildServer({
     ...(config.ACCOUNTS_ENABLED && accountMailer !== undefined
       ? {
@@ -562,11 +581,21 @@ async function main(): Promise<void> {
       run: () => checkout.reconciler.runOnce(),
       intervalMinutes: config.BILLING_RECONCILE_INTERVAL_MINUTES,
     });
+    // Avisos de cobrança por e-mail (E5): timer PRÓPRIO (padrão 60 min; 0 desliga só ele), sem sobreposição.
+    const noticeTimer = startPurgeTimer({
+      enabled: checkout.notices !== undefined,
+      run: () => checkout.notices?.runOnce() ?? Promise.resolve(),
+      intervalMinutes: config.BILLING_NOTICE_INTERVAL_MINUTES,
+    });
     const purgeTimer = infrastructure.accountPurge;
     infrastructure.accountPurge = {
       async stop() {
         // allSettled: se um dos timers falhar ao parar, os outros e o drain ainda rodam.
-        const results = await Promise.allSettled([purgeTimer?.stop(), reconcileTimer?.stop()]);
+        const results = await Promise.allSettled([
+          purgeTimer?.stop(),
+          reconcileTimer?.stop(),
+          noticeTimer?.stop(),
+        ]);
         // O desligamento também espera as confirmações em segundo plano (webhook já respondido).
         await checkout.verifier.drain();
         const failed = results.find((result) => result.status === 'rejected');

@@ -155,6 +155,13 @@ export type {
 export * from './schedule.js';
 export * from './schedule-ai.js';
 export * from './billing.js';
+export * from './billing-notices.js';
+export type {
+  BillingNoticeRepository,
+  NoticeCandidate,
+  NoticeRecipient,
+  NoticeTarget,
+} from './repositories/billing-notice.repository.js';
 export type {
   BillingRepository,
   CatalogEntry,

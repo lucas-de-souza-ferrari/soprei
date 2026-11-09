@@ -123,3 +123,32 @@ test('convite: assunto fixo sem nome de empresa, texto simples, link em linha pr
     },
   );
 });
+
+test('aviso de cobrança: texto simples sem HTML; a falha vira erro fixo, sem eco do destinatário nem do texto', async () => {
+  const { sent, mailer } = capture();
+  await mailer.sendBillingNotice('titular@example.test', {
+    subject: 'Assunto fixo',
+    text: 'Corpo do aviso',
+  });
+  assert.equal(sent.length, 1);
+  const message = sent[0];
+  assert.ok(message);
+  assert.equal(message.to, 'titular@example.test');
+  assert.equal(message.subject, 'Assunto fixo');
+  assert.equal(message.text, 'Corpo do aviso');
+  assert.equal(message.html, undefined);
+
+  const failing = new SmtpVerificationMailer(BASE, {
+    sendMail: (options) => Promise.reject(new Error(`recusou ${JSON.stringify(options.to)}`)),
+  });
+  await assert.rejects(
+    failing.sendBillingNotice('titular@example.test', { subject: 'S', text: 'segredo-do-texto' }),
+    (error: unknown) => {
+      assert.ok(error instanceof ServiceUnavailableError);
+      assert.equal(error.message, 'Não foi possível enviar o aviso de cobrança.');
+      assert.ok(!JSON.stringify(error).includes('titular@example.test'));
+      assert.ok(!JSON.stringify(error).includes('segredo-do-texto'));
+      return true;
+    },
+  );
+});

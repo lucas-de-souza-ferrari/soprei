@@ -154,6 +154,9 @@ export const envSchema = z
     CHECKOUT_SEND_CUSTOMER_EMAIL: booleanLiteral(false),
     // Reconciliação de pagamentos: timer PRÓPRIO (minutos; 0 desliga só ela; independe do expurgo de contas).
     BILLING_RECONCILE_INTERVAL_MINUTES: z.coerce.number().int().min(0).max(1_440).default(10),
+    // Avisos de cobrança por e-mail (E5): tarefa própria (minutos; 0 desliga só ela). Só vale com BILLING_ENABLED e
+    // CHECKOUT_ENABLED (sem como pagar, não há o que avisar).
+    BILLING_NOTICE_INTERVAL_MINUTES: z.coerce.number().int().min(0).max(1_440).default(60),
     // Provedor Anthropic (spec 014). A chave só é exigida com `LLM_PROVIDER=anthropic` e nunca vai
     // a log, métrica, erro nem resposta. `ANTHROPIC_BASE_URL` existe para os testes (servidor falso).
     ANTHROPIC_API_KEY: optionalSecret,

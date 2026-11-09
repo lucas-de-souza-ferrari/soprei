@@ -374,6 +374,15 @@ describe('parseConfig', () => {
         assert.equal(ok.value.CHECKOUT_SEND_CUSTOMER_EMAIL, false);
         assert.equal(ok.value.INFINITEPAY_CHECKOUT_HOST, 'checkout.infinitepay.com.br');
         assert.equal(ok.value.BILLING_RECONCILE_INTERVAL_MINUTES, 10);
+        assert.equal(ok.value.BILLING_NOTICE_INTERVAL_MINUTES, 60);
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, BILLING_NOTICE_INTERVAL_MINUTES: '0' }).ok,
+          true,
+        );
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, BILLING_NOTICE_INTERVAL_MINUTES: '-1' }).ok,
+          false,
+        );
         assert.equal(
           parseConfig({ ...CHECKOUT_ON, BILLING_RECONCILE_INTERVAL_MINUTES: '0' }).ok,
           true,

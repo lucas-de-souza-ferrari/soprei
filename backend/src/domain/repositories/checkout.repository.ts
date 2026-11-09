@@ -45,6 +45,8 @@ export type GrantResult =
       readonly subscriptionId: string;
       readonly periodStart: Date;
       readonly periodEnd: Date;
+      /** Renovação que aplicou a troca de plano agendada (só para o aviso por e-mail). */
+      readonly appliedPendingChange?: boolean;
     }
   /**
    * Nada foi concedido: o pedido já foi concedido (ou está FAILED, ou não existe), ou a referência da

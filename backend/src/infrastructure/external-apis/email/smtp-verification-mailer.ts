@@ -4,6 +4,10 @@ import {
   invitationMailText,
 } from '../../../application/invitations/invitation-mail.js';
 import type {
+  BillingMailer,
+  BillingNoticeMail,
+} from '../../../application/ports/billing-mailer.js';
+import type {
   CompanyInvitationMail,
   InvitationMailer,
   PasswordResetMailer,
@@ -43,7 +47,7 @@ export function buildTransportOptions(options: SmtpMailerOptions): Record<string
 }
 
 export class SmtpVerificationMailer
-  implements VerificationMailer, PasswordResetMailer, InvitationMailer
+  implements VerificationMailer, PasswordResetMailer, InvitationMailer, BillingMailer
 {
   private readonly transport: MailTransport;
   private readonly from: string;
@@ -109,6 +113,16 @@ export class SmtpVerificationMailer
       INVITATION_MAIL_SUBJECT,
       [invitationMailText(mail)],
       'Não foi possível enviar o convite.',
+    );
+  }
+
+  sendBillingNotice(email: string, mail: BillingNoticeMail): Promise<void> {
+    // Falha fixa: nunca ecoa destinatário, texto nem link.
+    return this.send(
+      email,
+      mail.subject,
+      [mail.text],
+      'Não foi possível enviar o aviso de cobrança.',
     );
   }
 

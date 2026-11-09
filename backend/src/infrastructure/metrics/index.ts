@@ -10,6 +10,8 @@ export type {
   AuthLogoutScope,
   AccountPurgeRunResult,
   BillingCheckResult,
+  BillingNoticeResult,
+  BillingNoticeRunResult,
   BillingOrderKind,
   BillingOrderResult,
   BillingWebhookResult,

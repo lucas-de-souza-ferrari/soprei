@@ -1,4 +1,9 @@
-import type { AuditAction, Permission, QuotaBlockReason } from '../../domain/index.js';
+import type {
+  AuditAction,
+  BillingNoticeKind,
+  Permission,
+  QuotaBlockReason,
+} from '../../domain/index.js';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 
 /** Fotografia do pool de conexões (mesma forma de `Database.poolMetrics()`). */
@@ -144,6 +149,9 @@ export type BillingOrderResult =
   | 'renewal_stale';
 export type BillingWebhookResult =
   'recorded' | 'duplicate' | 'unknown_order' | 'bad_token' | 'throttled' | 'invalid' | 'error';
+/** Resultado de um aviso de cobrança por e-mail (spec 031, E5). Conjunto fixo. */
+export type BillingNoticeResult = 'sent' | 'failed' | 'skipped_recipient';
+export type BillingNoticeRunResult = 'ok' | 'error';
 export type BillingCheckResult =
   | 'paid'
   | 'already_paid'
@@ -254,6 +262,10 @@ export interface Metrics {
   countBillingWebhook(result: BillingWebhookResult): void;
   /** Uma confirmação de pagamento por payment_check terminou (spec 031, E3). Conjunto fixo. */
   countBillingCheck(result: BillingCheckResult): void;
+  /** Um aviso de cobrança por e-mail terminou (spec 031, E5). Conjuntos fixos; nenhum id, valor ou e-mail. */
+  countBillingNotice(kind: BillingNoticeKind, result: BillingNoticeResult): void;
+  /** Uma execução da tarefa periódica de avisos terminou (spec 031, E5). */
+  countBillingNoticeRun(result: BillingNoticeRunResult): void;
   /** Uma chamada de ferramenta da agenda terminou (spec 028). */
   countScheduleToolCall(tool: ScheduleToolLabel, result: ScheduleToolCallResult): void;
   /** Um turno com ferramentas de agenda terminou (spec 028). */
@@ -459,6 +471,18 @@ export function createMetrics(): Metrics {
   const billingChecks = new Counter({
     name: 'billing_checks_total',
     help: 'Confirmações de pagamento (payment_check) por resultado (spec 031, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const billingNotices = new Counter({
+    name: 'billing_notices_total',
+    help: 'Avisos de cobrança por e-mail por tipo e resultado (spec 031, conjuntos fixos)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const billingNoticeRuns = new Counter({
+    name: 'billing_notice_runs_total',
+    help: 'Execuções da tarefa de avisos de cobrança por resultado (spec 031, E5)',
     labelNames: ['result'] as const,
     registers: [registry],
   });
@@ -738,6 +762,12 @@ export function createMetrics(): Metrics {
     },
     countBillingCheck(result) {
       billingChecks.inc({ result });
+    },
+    countBillingNotice(kind, result) {
+      billingNotices.inc({ kind, result });
+    },
+    countBillingNoticeRun(result) {
+      billingNoticeRuns.inc({ result });
     },
     countScheduleToolCall(tool, result) {
       scheduleToolCalls.inc({ tool, result });

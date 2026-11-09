@@ -3,6 +3,7 @@ import type { CheckoutRepository } from '../../domain/index.js';
 import type { BillingCheckResult, Metrics } from '../../infrastructure/metrics/index.js';
 import { messageRef } from '../../shared/utils/index.js';
 import type { PaymentCheckOutcome, PaymentProvider } from '../ports/payment-provider.js';
+import type { BillingNoticeService } from './billing-notice.service.js';
 import type { PendingReplyResumer } from './pending-reply-resumer.js';
 
 /**
@@ -29,6 +30,8 @@ export interface PaymentVerifierDeps {
   readonly logger: FastifyBaseLogger;
   readonly metrics?: Pick<Metrics, 'countBillingCheck' | 'countBillingOrder'> | undefined;
   readonly resumer?: Pick<PendingReplyResumer, 'resume'> | undefined;
+  /** Avisos por e-mail do pagamento concedido (E5); falha nunca derruba a confirmação. */
+  readonly notifier?: Pick<BillingNoticeService, 'paymentGranted'> | undefined;
   readonly now?: (() => Date) | undefined;
   /** Espera entre as tentativas da confirmação em segundo plano (injetável nos testes). */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
@@ -253,6 +256,19 @@ export class PaymentVerifier {
     if (resumer !== undefined) {
       // Em segundo plano: o "Já paguei" e o webhook não esperam o reagendamento das mensagens.
       this.track(resumer.resume(granted.subscriptionId, order.id).then(() => undefined));
+    }
+    const notifier = this.deps.notifier;
+    if (notifier !== undefined) {
+      // Em segundo plano e depois do commit: o recibo por e-mail não atrasa nem derruba a confirmação (o
+      // serviço nunca rejeita) e o drain() do desligamento o espera.
+      this.track(
+        notifier.paymentGranted({
+          subscriptionId: granted.subscriptionId,
+          paidAt: now,
+          orderKind: order.kind,
+          appliedPendingChange: granted.appliedPendingChange === true,
+        }),
+      );
     }
     return { result: 'paid' };
   }

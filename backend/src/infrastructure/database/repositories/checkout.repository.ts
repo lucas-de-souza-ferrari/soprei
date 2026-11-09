@@ -388,6 +388,7 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
             subscriptionId: subscription.id,
             periodStart: period.periodStart,
             periodEnd: period.periodEnd,
+            appliedPendingChange: inForce && matchesPending && !matchesCurrent,
           };
         },
         { maxWait: 30_000, timeout: 30_000 },
