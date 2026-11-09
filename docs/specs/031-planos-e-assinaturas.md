@@ -1,0 +1,367 @@
+# 031 — Planos e assinaturas (cobrança pela InfinitePay)
+
+- **Status:** aprovada (2026-11-09, dono: "Aprovo tudo", com D0 a D14 como recomendadas: lançamento no modo C (a empresa paga a Meta direto), modo S (Soprei paga a Meta) desligado até o E0 confirmar a linha de crédito). Conferido pelo dono em 2026-11-09: o portfólio dono do app não tem linha de crédito nem parceiros (não é Solution Partner); o app tem whatsapp_business_messaging e whatsapp_business_management aprovados na análise de 2026-07-05
+- **Branch:** `spec/031-planos-e-assinaturas`
+- **Depende de:** 017 (contas), 022 (vocabulário), 025 (convites), 026 (conhecimento e estoque), 027 e 028 (agenda e a IA na agenda), 029 e 030 (painel e assistente de primeiros passos), 014 (uso de tokens do provedor)
+- **Observação de numeração:** conferido em `docs/specs/` (existem 001 a 030, **não há 031**) e em `docs/context.md` (nenhuma spec 031 reservada). Esta spec **passa pelo `reviewer`** antes do merge (dinheiro, controle de acesso, endpoint público de pagamento). Nenhum código de produção foi escrito para ela.
+- **Fatos sobre a InfinitePay e o preço da IA:** vieram de **busca na web**; a documentação oficial **não foi lida** por quem escreveu a spec. Tudo o que está marcado **(S#)** é **suposição** a conferir no **E0** antes de qualquer código de cobrança.
+
+## Objetivo
+
+Hoje qualquer conta cria até 20 empresas e usa a IA, a Agenda e o Estoque sem limite nem custo. Esta spec cria **planos pagos**: 3 planos (mensais e anuais) que limitam **quantas empresas** a conta pode ter e **quantas respostas enviadas e quantos tokens de IA** ela usa por mês (o custo do WhatsApp na Meta **não** está incluído: ver D0), mais dois **módulos opcionais**, **Agenda** e **Estoque**, contratados à parte por um acréscimo de valor. A cobrança é feita pela **InfinitePay**. Agora porque o produto já tem o que vender (026 a 030) e a IA real (014) tem custo por uso que precisa ser medido e limitado antes de empresas reais.
+
+## Estado atual (lido no código)
+
+- **Conta e empresas:** `Account` é model **global**. Criar empresa é `POST /account/companies` (`AccountService.createCompany` -> `PrismaAccountRepository.createCompany`, em `infrastructure/database/repositories/account.repository.ts`): numa transação trava a conta (`FOR NO KEY UPDATE`), exige conta ativa e e-mail confirmado, **conta as empresas em que a conta tem vínculo** (`company.count({ memberships: { some: { accountId } } })`), recusa com 409 acima de **20 fixos no código** e cria `Company` + `Membership` `OWNER` + auditoria. `Company` é model global sem ligação direta com uma conta; só os vínculos (`Membership.accountId`) ligam as duas pontas. **Não existe hoje o conceito de "conta dona da empresa" nem de plano.**
+- **Uso de tokens já é lido, mas só vai a métrica e log:** `LlmReply.usage` (`inputTokens`, `outputTokens`, `cacheReadTokens?`) chega em `AttendanceService.callProvider` (`application/attendance/attendance.service.ts`, ~linha 1156), que o repassa a `recordTokens` (métrica `llm_tokens_total{provider,type}`) e a `usageFields` (log, só números). Um turno com ferramentas da agenda (028) soma **todas as rodadas** no mesmo `usage` (o provedor conduz o laço). O ponto é único para os dois caminhos (simulador `respond()` e canal `respondToPending()`).
+- **Permissões** (`domain/permissions.ts`): mapa fixo papel -> permissões; Agenda (`schedule:read|manage|configure`), Estoque (`inventory:manage`) e Conhecimento (`knowledge:manage`) **não dependem de nada além do papel**. A IA lê agenda e estoque (026 e 027) e escreve na agenda (028) só com `SCHEDULE_AI_ENABLED` e a opção da empresa.
+- **`MODEL_SCOPES`** (`infrastructure/database/extensions/tenant-scope.ts`): só `tenant` e `global`; todo model novo precisa de classificação (o compilador exige). `Account` e `Company` são `global`.
+- **Painel:** shell da 029 (`frontend/src/company/AppShell.tsx`, `company-nav.ts` com `REQUIRED` por aba), `AccountApp.tsx` (login, empresas, convite) e o assistente da 030 (`OnboardingPage`, passos Serviços e Estoque opcionais). `localStorage` guarda **só** o tema.
+- **Config** (`infrastructure/config/env.schema.ts`): variáveis validadas em Zod, regras cruzadas no `superRefine`, `booleanLiteral`; segredos saem por `redact`.
+- **E-mail:** `AccountMailer`/`InvitationMailer` (SMTP genérico, envio em segundo plano com `drain()`), timer de expurgo (`startPurgeTimer`, `ACCOUNT_PURGE_INTERVAL_MINUTES`).
+
+## Premissas e a conta dos preços (recomendação; **o dono decide**, ver D1)
+
+**Premissas (S1 e S2 não confirmadas):** Claude Haiku 5.5 a US$ 0,10 por milhão de tokens de entrada e US$ 0,50 de saída (prompts até 100 mil tokens); leitura de cache ~10% da entrada; câmbio R$ 5,50 por US$ (S2).
+
+- Resposta típica: ~3.500 tokens de entrada (persona, conhecimento, agenda, histórico) + ~200 de saída = 3.700 tokens = US$ 0,00035 + US$ 0,0001 = **US$ 0,00045, ou ~R$ 0,0025**.
+- Com **folga de 2x** (ferramentas da agenda, retentativas, prompts maiores): **~R$ 0,006 por resposta**. Esta é a conta usada abaixo.
+- Conclusão: o custo de tokens é uma fração **pequena** do preço; a cota de tokens é **limite de uso e proteção contra abuso**. **Atenção:** o custo variável dominante é o da **Meta** por mensagem enviada (seção "Custo do WhatsApp"), pago pela empresa na recomendação; as tabelas de margem abaixo **não incluem a Meta** (hipótese A, a empresa paga) e a seção seguinte mostra a hipótese B.
+
+**Suposições de custo (todas a conferir; o dono corrige):** taxa da InfinitePay **até 3,5% no cartão e 0% no Pix** (S3, a tabela mostra o **pior caso, cartão**); imposto **~6%** sobre a receita (depende do regime do dono, não é decisão técnica); infraestrutura **R$ 3 por empresa por mês** (**chute**: a ser medido na hospedagem, que ainda não está decidida).
+
+**Catálogo proposto (centavos no banco; reais aqui):**
+
+| Plano        | Empresas | Tokens por mês | ~Respostas (3.700 tokens) | Mensal | Agenda | Estoque |
+| ------------ | :------: | :------------: | :-----------------------: | :----: | :----: | :-----: |
+| Essencial    |    1     |      3 M       |           ~800            | R$ 59  | + R$ 29 | + R$ 19 |
+| Profissional |    3     |      12 M      |          ~3.200           | R$ 149 | + R$ 49 | + R$ 39 |
+| Escala       |    10    |      40 M      |          ~10.800          | R$ 349 | + R$ 99 | + R$ 79 |
+
+Os módulos valem para **todas as empresas da conta**. **Anual:** 12 vezes o mensal com **20% de desconto**, pago adiantado (Essencial R$ 566,40; Profissional R$ 1.430,40; Escala R$ 3.350,40; os acréscimos entram na mesma conta). **A cota de tokens do plano anual continua mensal** (ver D5): o anual paga adiantado, não dá 12 meses de tokens de uma vez.
+
+**Margem mensal, no pior caso** (cota 100% usada, folga 2x, cartão a 3,5%, imposto 6%, infra R$ 3 por empresa **com todas as empresas do plano criadas**; "sem add-ons" e "com Agenda + Estoque"):
+
+| Plano (mensal)                  | Receita | Tokens | Taxa  | Imposto | Infra | Custo total | Margem (R$) | Margem |
+| ------------------------------- | ------: | -----: | ----: | ------: | ----: | ----------: | ----------: | -----: |
+| Essencial, sem add-ons          |      59 |   4,80 |  2,07 |    3,54 |     3 |       13,41 |       45,59 |  77,3% |
+| Essencial + Agenda              |      88 |   4,80 |  3,08 |    5,28 |     3 |       16,16 |       71,84 |  81,6% |
+| Essencial + Agenda + Estoque    |     107 |   4,80 |  3,75 |    6,42 |     3 |       17,97 |       89,03 |  83,2% |
+| Profissional, sem add-ons       |     149 |  19,20 |  5,22 |    8,94 |     9 |       42,36 |      106,64 |  71,6% |
+| Profissional + Agenda + Estoque |     237 |  19,20 |  8,30 |   14,22 |     9 |       50,72 |      186,28 |  78,6% |
+| Escala, sem add-ons             |     349 |  64,80 | 12,22 |   20,94 |    30 |      127,96 |      221,04 |  63,3% |
+| Escala + Agenda + Estoque       |     527 |  64,80 | 18,45 |   31,62 |    30 |      144,87 |      382,13 |  72,5% |
+
+**Margem anual** (12 meses; receita já com 20% de desconto; mesmas premissas, 12 vezes os custos mensais com tokens e infra; taxa e imposto sobre o valor pago):
+
+| Plano (anual)                   | Receita | Tokens | Taxa  | Imposto | Infra | Custo total | Margem (R$) | Margem |
+| ------------------------------- | ------: | -----: | ----: | ------: | ----: | ----------: | ----------: | -----: |
+| Essencial, sem add-ons          |  566,40 |  57,60 | 19,82 |   33,98 |    36 |      147,40 |      419,00 |  74,0% |
+| Essencial + Agenda + Estoque    | 1.027,20 |  57,60 | 35,95 |   61,63 |    36 |      191,18 |      836,02 |  81,4% |
+| Profissional, sem add-ons       | 1.430,40 | 230,40 | 50,06 |   85,82 |   108 |      474,28 |      956,12 |  66,8% |
+| Profissional + Agenda + Estoque | 2.275,20 | 230,40 | 79,63 |  136,51 |   108 |      554,54 |    1.720,66 |  75,6% |
+| Escala, sem add-ons             | 3.350,40 | 777,60 | 117,26 |  201,02 |   360 |    1.455,88 |    1.894,52 |  56,5% |
+| Escala + Agenda + Estoque       | 5.059,20 | 777,60 | 177,07 |  303,55 |   360 |    1.618,22 |    3.440,98 |  68,0% |
+
+Leitura: todas as combinações ficam **positivas mesmo no pior caso**; a menor margem é o **Escala anual sem add-ons (56,5%)**, puxada pelos tokens com folga 2x e pela infra por empresa. Com Pix a taxa cai a 0 e as margens sobem ~3 pontos. **Se a taxa real, o câmbio, o imposto ou a infra forem maiores, o Escala é o primeiro a apertar**; o dono pode subir o preço dele ou reduzir a cota (D1). O uso real tende a ser muito menor que 100% da cota.
+
+## Custo do WhatsApp (Meta): o principal custo variável (S9, não confirmado na fonte oficial)
+
+**Fato novo (informado pelo dono; fontes secundárias, página oficial da Meta **não lida**):** a partir de **1º de outubro de 2026** a mensagem de serviço (texto livre, resposta ao contato dentro das 24 h) passou a ser cobrada **por mensagem entregue** (não mais por conversa de 24 h), pelo preço de **utilidade**; no Brasil, **~R$ 0,035 por mensagem** (US$ 0,0068; marketing ~R$ 0,3217). Uma fonte cita **1.000 respostas de serviço gratuitas por número por mês** (**não confirmado**); cobrança em BRL desde 1º/jul/2026 para contas elegíveis. Fontes (não lidas): https://digisac.com.br/blog/preco-whatsapp-api-outubro-2026 , https://chatmaxima.com/pt-br/whatsapp-api-pricing/brazil/ , https://support.wati.io/pt-BR/articles/16954666-alteracoes-nos-precos-da-whatsapp-business-platform-api-mensagens-de-servico-e-anuncios-click-to-message . Conferir no **E0** em https://developers.facebook.com/docs/whatsapp/pricing e na tabela BRL **da conta do dono**.
+
+**Impacto:** R$ 0,035 por resposta é **6 a 14 vezes** o custo de tokens (R$ 0,0025 a R$ 0,006). **O custo da Meta passa a ser o principal custo variável**, bem maior que a IA.
+
+**Custo da Meta por plano** (respostas incluídas x R$ 0,035; hipótese de 1 número por empresa e uso **uniforme** entre os números, sem franquia e com a franquia de 1.000 gratuitas por número, S9):
+
+| Plano        | Respostas incluídas | Meta sem franquia | % do preço mensal | Números | Franquia gratuita (S9) | Meta com franquia |
+| ------------ | :-----------------: | ----------------: | :---------------: | :-----: | :--------------------: | ----------------: |
+| Essencial    |         800         |          R$ 28,00 |       47,5%       |    1    |         1.000          |            R$ 0,00 |
+| Profissional |        3.200        |         R$ 112,00 |       75,2%       |    3    |         3.000          |            R$ 7,00 |
+| Escala       |       10.800        |         R$ 378,00 |      108,3%       |   10    |         10.000         |           R$ 28,00 |
+
+**Quem paga a Meta é a decisão mais importante da spec (D0, abaixo).** Hoje (Tech Provider, Embedded Signup da 023, cada empresa com o **próprio WABA**, spec 015) a Meta cobra a **forma de pagamento do WABA da própria empresa**, não o Soprei (S10). **O dono decidiu que quer UMA cobrança só** (o Soprei paga a Meta e embute no plano), o que depende de uma **linha de crédito da Meta** que o Tech Provider **não tem** (ver "Caminhos" em D0). Por isso a spec tem **dois modos de cobrança do WhatsApp**, lado a lado, e um **gate**: o modo "Soprei paga a Meta" só liga depois de o E0 confirmar a linha de crédito.
+
+**Margem dos 3 planos nas duas hipóteses (modo atual, plano sem Meta, e a conta de absorver com os preços antigos 59/149/349)** (mesmas premissas das tabelas de margem abaixo; pior caso: cota 100% usada, cartão 3,5%, imposto 6%, infra R$ 3 por empresa):
+
+| Plano (mensal)                  | **A: a empresa paga a Meta** (margem) | B: Soprei absorve, **sem franquia** (custo Meta, margem) | B: absorve, **com franquia** (margem) |
+| ------------------------------- | :-----------------------------------: | :------------------------------------------------------: | :-----------------------------------: |
+| Essencial R$ 59                 |            R$ 45,59 (77,3%)           |               + R$ 28: R$ 17,59 (29,8%)                  |          R$ 45,59 (77,3%)             |
+| Essencial + Agenda + Estoque 107 |           R$ 89,03 (83,2%)           |               + R$ 28: R$ 61,03 (57,0%)                  |          R$ 89,03 (83,2%)             |
+| Profissional R$ 149             |           R$ 106,64 (71,6%)           |             + R$ 112: **-R$ 5,36 (-3,6%)**               |          R$ 99,64 (66,9%)             |
+| Profissional + Agenda + Estoque 237 |       R$ 186,28 (78,6%)           |               + R$ 112: R$ 74,28 (31,3%)                 |          R$ 179,28 (75,6%)            |
+| Escala R$ 349                   |           R$ 221,04 (63,3%)           |             + R$ 378: **-R$ 156,96 (-45,0%)**            |          R$ 193,04 (55,3%)            |
+| Escala + Agenda + Estoque 527   |           R$ 382,13 (72,5%)           |               + R$ 378: R$ 4,13 (0,8%)                   |          R$ 354,13 (67,2%)            |
+
+**Quais preços deixam de fechar se o Soprei absorver (sem franquia): o Profissional (R$ 149) e o Escala (R$ 349) dão prejuízo no pior caso** (o Meta de R$ 112 e de R$ 378 consome ou passa o preço), e o Essencial cai a 29,8%. No anual o efeito é o mesmo ou pior (Essencial 14,7%, Profissional -27,1%, Escala -78,8%, com 12 vezes o custo da Meta e o desconto de 20%). Com a franquia confirmada o problema some quase todo, **mas a franquia é por número e depende de S9**; por isso a recomendação é **não absorver** e **não** construir o preço sobre uma franquia não confirmada.
+
+**Economia que já existe:** o **agrupamento de mensagens da 013** responde **uma vez por lote** de mensagens rápidas do mesmo contato; cada lote evitado é uma resposta a menos cobrada. Os "respostas incluídas" acima são **mensagens de saída**, que é o que a Meta cobra; o número real de mensagens enviadas tende a ficar **abaixo** do número de mensagens recebidas por causa do agrupamento (não quantificado, a medir).
+
+## Dois modos de cobrança do WhatsApp (lado a lado)
+
+`PlanPrice.whatsappBillingMode` (por **versão de preço**): `CUSTOMER_PAYS_META` (modo C, a empresa paga a Meta direto; **é o que vale no lançamento**) ou `SOPREI_PAYS_META` (o Soprei paga a Meta e embute no plano; **só pode ser ativado depois de o E0 confirmar a linha de crédito**, ver gate em "Configuração"). A tela de Planos mostra **os valores e as cotas do modo da versão de preço vigente**, e o aviso correspondente ("não inclui o custo do WhatsApp" ou "inclui as mensagens do WhatsApp até a cota de respostas").
+
+| | **Modo C: `CUSTOMER_PAYS_META`** (lançamento) | **Modo S: `SOPREI_PAYS_META`** (depois da linha de crédito) |
+| --- | --- | --- |
+| Quem paga a Meta | a empresa, direto, no WABA dela | o Soprei, e embute no plano |
+| Essencial (1 empresa) | R$ 59, 800 respostas, 3 M tokens | **R$ 79, 500 respostas**, 4 M tokens |
+| Profissional (3 empresas) | R$ 149, 3.200 respostas, 12 M tokens | **R$ 199, 1.500 respostas**, 12 M tokens |
+| Escala (10 empresas) | R$ 349, 10.800 respostas, 40 M tokens | **R$ 599, 5.000 respostas**, 40 M tokens |
+| Agenda / Estoque (iguais) | +29/+49/+99 e +19/+39/+79 | +29/+49/+99 e +19/+39/+79 |
+| Anual | 20% de desconto | 20% de desconto |
+| Cota que manda | respostas **e** tokens (a que estourar primeiro) | **respostas enviadas** (a unidade que gera custo); tokens são só a proteção de IA, ~2x o esperado (4 M, 12 M, 40 M) |
+| Pacote de respostas extras | opcional (E6) | **necessário** (protege a margem) |
+| Margem mensal, sem add-ons (pior caso) | 77,3% / 71,6% / 63,3% | 60,8% / 55,1% / 51,3% (sem franquia); 82,9% / 81,5% / 80,5% (com franquia S9) |
+
+### Modo S: premissas e margem (cálculo mostrado)
+
+**Custo por resposta enviada:** Meta R$ 0,035 + tokens R$ 0,006 (folga 2x) = **R$ 0,041** (S9). **Mais** R$ 3 de infra por empresa por mês, taxa do cartão 3,5% e imposto 6% (**9,5% do preço**, aplicado também aos add-ons). Pior caso: cota de respostas 100% usada. **Com franquia** (S9, 1.000 respostas gratuitas por número por mês, **não confirmada**): a Meta custa R$ 0 em todos os planos (500, 1.500 e 5.000 respostas ficam dentro de 1.000, 3.000 e 10.000 por número, com uso uniforme) e o custo por resposta cai a R$ 0,006. Preço efetivo por resposta: 79/500 = R$ 0,158; 199/1.500 = R$ 0,133; 599/5.000 = R$ 0,120.
+
+**Mensal:**
+
+| Plano | Receita | Respostas (R$ 0,041) | Taxa+imposto (9,5%) | Infra | Custo | Margem sem franquia | Margem **com** franquia (custo: tokens + 9,5% + infra) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Essencial | 79 | 20,50 | 7,51 | 3 | 31,01 | **R$ 47,99 (60,8%)** | R$ 65,50 (82,9%) |
+| Essencial + Agenda + Estoque | 127 | 20,50 | 12,07 | 3 | 35,57 | R$ 91,44 (72,0%) | R$ 108,94 (85,8%) |
+| Profissional | 199 | 61,50 | 18,91 | 9 | 89,41 | **R$ 109,60 (55,1%)** | R$ 162,10 (81,5%) |
+| Profissional + Agenda + Estoque | 287 | 61,50 | 27,27 | 9 | 97,77 | R$ 189,24 (65,9%) | R$ 241,74 (84,2%) |
+| Escala | 599 | 205,00 | 56,91 | 30 | 291,91 | **R$ 307,10 (51,3%)** | R$ 482,10 (80,5%) |
+| Escala + Agenda + Estoque | 777 | 205,00 | 73,82 | 30 | 308,82 | R$ 468,19 (60,3%) | R$ 643,19 (82,8%) |
+
+**Anual** (12 meses, receita = 9,6 x preço mensal por causa do desconto de 20%; custos de respostas e infra x 12):
+
+| Plano | Receita | Respostas | Taxa+imposto | Infra | Custo | Margem sem franquia | Margem com franquia |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Essencial | 758,40 | 246,00 | 72,05 | 36 | 354,05 | R$ 404,35 (53,3%) | R$ 614,35 (81,0%) |
+| Essencial + Agenda + Estoque | 1.219,20 | 246,00 | 115,82 | 36 | 397,82 | R$ 821,38 (67,4%) | R$ 1.031,38 (84,6%) |
+| Profissional | 1.910,40 | 738,00 | 181,49 | 108 | 1.027,49 | R$ 882,91 (46,2%) | R$ 1.512,91 (79,2%) |
+| Profissional + Agenda + Estoque | 2.755,20 | 738,00 | 261,74 | 108 | 1.107,74 | R$ 1.647,46 (59,8%) | R$ 2.277,46 (82,7%) |
+| Escala | 5.750,40 | 2.460,00 | 546,29 | 360 | 3.366,29 | **R$ 2.384,11 (41,5%)** | R$ 4.484,11 (78,0%) |
+| Escala + Agenda + Estoque | 7.459,20 | 2.460,00 | 708,62 | 360 | 3.528,62 | R$ 3.930,58 (52,7%) | R$ 6.030,58 (80,8%) |
+
+**Ponto em que o plano deixa de ter margem se a Meta subir o preço** (sem add-ons, sem franquia, cota 100% usada, mesmas premissas; margem zero quando o preço da Meta por resposta chega a): mensal: Essencial **R$ 0,131** (3,7x o atual), Profissional **R$ 0,108** (3,1x), Escala **R$ 0,096** (2,75x); anual: Essencial R$ 0,102 (2,9x), Profissional R$ 0,084 (2,4x), **Escala R$ 0,066 (1,9x)**. Se a Meta subir **50%** (R$ 0,0525): Escala mensal cai a R$ 219,60 (36,7%) e o **Escala anual a R$ 1.334,11 (23,2%)**. O **Escala anual é o mais exposto** (desconto + maior volume). Por isso o preço da Meta por resposta fica **no catálogo versionado** e o reajuste é repassável (ver "Reajuste").
+
+### Pacote de respostas extras (necessário no modo S; E6 cortável no modo C)
+
+Pacote sugerido: **500 respostas por R$ 59** (~R$ 0,118 por resposta), comprado **por link da InfinitePay** (um `PaymentOrder` de `kind = EXTRA_PACK`, valor do catálogo, mesmo fluxo e mesma idempotência do E3), com **validade do ciclo de uso** (credita `UsageCounter.extraReplies` da janela atual e expira com ela; não acumula). Cada resposta extra soma também tokens proporcionais à cota de tokens (8.000 por resposta). **Margem do pacote** (custo R$ 0,041 por resposta, taxa+imposto 9,5%, sem infra nova): receita 59, custo 20,50 + 5,61 = 26,11, **margem R$ 32,89 (55,8%)**; com franquia (custo R$ 0,006): R$ 50,39 (85,4%). Margem zero se a Meta chegar a ~R$ 0,10 por resposta (2,9x). **Ao estourar a cota (inclusive a extra) a IA para, as mensagens ficam pendentes e só o dono é avisado** (e-mail e painel, com o botão "Comprar pacote"); **nenhuma mensagem ao contato por padrão** (D13). A compra com cota esgotada reativa a IA na hora (as mensagens pendentes são respondidas na próxima mensagem do contato, como já é o comportamento da 013).
+
+### Reajuste do preço da Meta (cláusula e mecanismo)
+
+- O custo da Meta por resposta (`PlanPrice.metaPerReplyMilliCents`, com `validFrom`) e o preço de plano e pacote ficam **no catálogo versionado e append-only**; mudar é **linha nova** com a data de vigência, nunca editar a antiga.
+- **Mudança de preço para quem já assina só vale no próximo ciclo**, com **aviso por e-mail com antecedência** (recomendação: 30 dias, `PaymentNotice` do tipo `PRICE_CHANGE`) e a tela mostrando o valor do próximo ciclo antes de pagar. O pedido `RENEWAL` usa a versão vigente **na data da geração**.
+- **Cláusula nos termos de uso (redação do dono, fora do que o agente escreve):** o preço pode ser reajustado quando a Meta (ou o parceiro de soluções) alterar o custo por mensagem ou a franquia, com aviso prévio; quem não aceitar cancela antes do próximo ciclo.
+
+## Comportamento esperado
+
+### Modelo de dados (migration aditiva; D2, D3, D4)
+
+**A assinatura é da CONTA** (quem paga é quem cria; as empresas ficam "dentro" dela). Models novos, todos **globais** na classificação do `MODEL_SCOPES` (não têm `companyId`), mas **cada acesso é por identificador de conta ou de assinatura, nunca "solto"**: o repositório exige `AccountId` (ou `SubscriptionId` já derivado dele) como primeiro parâmetro, nos moldes do `PrismaTenantRepository`, e o teste de isolamento prova que uma conta não enxerga a assinatura, a ordem nem o uso de outra.
+
+| Model | Campos principais (resumo) |
+| --- | --- |
+| `Plan` (catálogo) | `code` (`ESSENTIAL`, `PROFESSIONAL`, `SCALE`), `name`, `maxCompanies`, `monthlyTokens`, `monthlyReplies` (cota de respostas enviadas), `metaEstimateMilliCents` (estimativa da Meta por mensagem, só exibição, S9), `version`, `active` |
+| `PlanPrice` | `planId`, `cycle` (`MONTHLY`, `ANNUAL`), `baseCents`, `agendaCents`, `stockCents`, **`whatsappBillingMode`** (`CUSTOMER_PAYS_META` ou `SOPREI_PAYS_META`), `metaPerReplyMilliCents`, `extraPackCents`, `extraPackReplies`, `version`, `validFrom`; **append-only** (preço novo = linha nova; quem já assinou mantém a sua versão até o próximo ciclo) |
+| `Subscription` (1 por conta) | `accountId` (único), `planId`, `priceId`, `cycle`, `agendaEnabled`, `stockEnabled`, `status` (`TRIAL`, `ACTIVE`, `PAST_DUE`, `CANCELLED`, `EXPIRED`), `currentPeriodStart`, `currentPeriodEnd`, `trialEndsAt`, `cancelAtPeriodEnd`, `pendingChange` (plano, ciclo e módulos do próximo ciclo; nulo se não há) |
+| `PaymentOrder` | `id` (UUID nosso = o identificador do pedido que mandamos à InfinitePay), `subscriptionId`, `kind` (`NEW`, `RENEWAL`, `UPGRADE`, `EXTRA_PACK`), `amountCents`, `breakdown` (plano, ciclo, módulos e versão de preço, **copiados** no momento), `status` (`PENDING`, `PAID`, `EXPIRED`, `FAILED`), `checkoutUrl`, `providerTransactionRef`, `paidAt`, `periodStart`, `periodEnd`, `expiresAt` |
+| `UsageCounter` | `subscriptionId`, `windowStart` (início da janela mensal de uso), `tokens` (inteiro de 64 bits), `sentMessages` (mensagens de saída ao contato, inteiro de 64 bits), `extraReplies` (respostas extras compradas na janela), `unique(subscriptionId, windowStart)`; só números |
+| `PaymentNotice` | marca de aviso já enviado (`kind`, `subscriptionId`, `windowStart`/`periodEnd`) para o e-mail não repetir |
+
+`Company` ganha `subscriptionId` (FK anulável para `Subscription`, `onDelete: Restrict`), **gravado na criação da empresa**, dentro da transação que já trava a conta. É a **única ponte** de `companyId` para a assinatura (lida só pelo `EntitlementReader`, ver abaixo) e **o que conta o limite de empresas** (empresas **da assinatura** não removidas, no lugar de "empresas em que a conta tem vínculo": quem entra numa empresa alheia por convite não consome o limite dele). O teto fixo de 20 empresas por conta **continua** como defesa. Convites e membros **não** são limitados.
+
+**Dinheiro sempre em centavos inteiros** (`Int`/`BigInt`), moeda fixa BRL. **Preço e catálogo ficam no banco**, com sementes na migration (D4). O valor cobrado **sai sempre do catálogo no servidor**, nunca do navegador: o corpo do pedido de checkout leva só `{ planCode, cycle, agenda, stock }`.
+
+### Estados da assinatura e acesso (função pura, relógio injetado)
+
+`resolveAccess(subscription, now)` devolve o que a empresa pode fazer agora; o estado guardado é a base, o **efetivo é derivado do tempo** (nada depende de um timer ter rodado).
+
+| Estado | Quando | IA e escrita no painel | Leitura, exportação, login |
+| --- | --- | --- | --- |
+| `TRIAL` | conta nova, até `trialEndsAt` (D7) | liberado, com a cota do teste | liberado |
+| `ACTIVE` | período pago vigente | liberado, conforme plano e módulos | liberado |
+| `PAST_DUE` | passou de `currentPeriodEnd`, dentro da **carência** (D6, padrão 5 dias) | **liberado**, com faixa de aviso | liberado |
+| `CANCELLED` | a pessoa cancelou a renovação; vale até `currentPeriodEnd` | liberado até o fim do período; depois vira `EXPIRED` | liberado |
+| `EXPIRED` | acabou o teste, ou o período mais a carência | **bloqueado** (ver abaixo) | **liberado**; nada é apagado |
+
+**Bloqueio (D6):** a IA **para** de responder (ver "Cota e bloqueio" abaixo), e as **escritas** de conteúdo no painel recusam com 403 de `code` próprio (`SUBSCRIPTION_INACTIVE`); **leitura, exportação, login, tela de Assinatura, desconectar o canal e sair seguem funcionando**; **nenhum dado é apagado**. Reativar (pagar) restaura tudo na hora.
+
+### Módulos (Agenda e Estoque) e limite de empresas
+
+- **Permissão por papel continua como hoje; o módulo é uma segunda condição.** Um hook `requireModule('schedule' | 'inventory')` roda **depois** do `requirePermission` (ordem: 401 -> 403 plataforma -> 404 -> 403 papel -> 403 módulo). **Escrita** em rota de Agenda ou Estoque sem o módulo: 403 `MODULE_NOT_CONTRACTED`; **leitura** (`GET`) continua, para a pessoa ver o que já tem (dado preservado). O inventário de rotas (`rate-limit.test.ts`) passa a falhar se uma rota `schedule/*` ou `inventory/*` não declarar o módulo (as de Conhecimento **não** são módulo: são do plano base; ver D9).
+- **A IA respeita o módulo:** sem **Estoque**, o `KnowledgeRetriever` não devolve produtos (nem o prompt os cita); sem **Agenda**, não há bloco `<agenda>`, nem `<meus_agendamentos>`, nem ferramentas (o pedido ao provedor volta a ser o de antes), mesmo com `SCHEDULE_AI_ENABLED` e a opção da empresa ligadas. As duas leituras do `EntitlementReader` acontecem **uma vez por turno**, no início de `buildPrompt`.
+- **Limite de empresas:** `POST /account/companies` confere, **dentro da transação que já trava a conta**, o plano vigente (`resolveAccess` com permissão de criar) e `contagem < plan.maxCompanies`; senão 403 `PLAN_COMPANY_LIMIT` (ou `SUBSCRIPTION_INACTIVE` se expirou). **Downgrade** para um plano com limite menor que o número de empresas atuais é **recusado** (409 `PLAN_DOWNGRADE_BLOCKED`, sem apagar nada). Se o período acabar com mais empresas que o novo limite, nada é removido: só novas criações ficam recusadas.
+- **Sem assinatura nenhuma** (conta existente antes da 031, ou conta que ainda não criou empresa) vale a regra de D8.
+
+### Medição de uso e cota de respostas e de tokens (D5)
+
+- **Duas unidades, vale a que estourar primeiro:** (1) **respostas enviadas** (mensagens de saída ao contato), **a unidade que gera custo na Meta**; (2) **tokens medidos pelo `usage` real** do provedor, somando `inputTokens + outputTokens` (a leitura de cache **não** é cobrada à parte), que protege o custo da IA. Cada plano tem `monthlyReplies` (800, 3.200 e 10.800, como em "Custo do WhatsApp") e `monthlyTokens`; a tela mostra as duas barras.
+- **Medição das respostas:** no ponto do envio do `flush` (`ChannelInboundProcessor`, logo **depois** do `sendText` bem-sucedido e junto do `markSent`), através de uma porta `UsageMeter.recordSent(companyId)` que faz `increment` de `sentMessages` no mesmo `UsageCounter`. **Conta mensagem de saída efetivamente enviada** (reenvio de resposta já gravada conta uma vez só: a mesma guarda de `sentAt` do `markSent`; o simulador do painel **não** conta, pois não passa pela Meta). Sem texto, sem contato, sem `contactRef`. Falha ao medir não derruba nada (mesma regra do `UsageMeter` de tokens). Entrega at-least-once da 011 pode contar uma resposta duplicada em caso raro (aceito, a estimativa não é fatura).
+- **Estimativa de custo na Meta (exibição, S9):** a tela mostra **"Estimativa de custo na Meta este mês"** = `sentMessages x metaEstimateMilliCents`, **marcada como estimativa**, com o aviso de que o valor real vem da fatura da Meta (franquia gratuita, impostos, categoria e tabela podem mudar; **não promete valor exato**). O número por mensagem fica **no catálogo** (e não em código) para ajustar sem deploy.
+- **Tokens (unidade de proteção de IA):** mostra-se também em "respostas aproximadas" (tokens / 3.700), **só como ajuda visual**.
+- **Onde mede:** em `AttendanceService.callProvider`, **no mesmo ponto** que já chama `recordTokens`, através de uma porta nova `UsageMeter.record(companyId, tokens)` (`application/ports/`), com a implementação Prisma em `infrastructure/database/repositories/`. A implementação resolve `companyId -> subscriptionId` **no servidor** (nunca vem de header, corpo ou token do navegador) e faz **um** `updateMany`/`upsert` com `increment` em `UsageCounter(subscriptionId, windowStart)` (**atômico, sem SQL cru**, sem ler-e-gravar). Não grava texto, contato nem conversa. **Falha ao medir nunca derruba a resposta** (try/catch com `warn` só de ids e métrica `usage_meter_errors_total`), mas a falha fica visível (é um fail-open **da medição**, não da cota).
+- **Janela de uso:** `usageWindowStart(now, currentPeriodStart)` (pura): janelas **mensais ancoradas no início do período pago** (para o anual, o mês 1, 2, 3 ... do período); `now` sempre injetado.
+- **Cota e bloqueio (D5, D13):** **antes** de chamar o LLM (nos dois caminhos), o `EntitlementReader` devolve `{ accessAllowed, tokensRemaining, repliesRemaining }`. Com **qualquer** cota esgotada (a que estourar primeiro) ou o acesso bloqueado, **o provedor não é chamado e a IA deixa de responder**. **Por padrão nenhuma mensagem é enviada ao contato** (cada mensagem enviada seria **mais uma cobrada pela Meta** e a empresa já estourou a cota): as mensagens do contato ficam gravadas e pendentes, a conversa continua visível no painel, e **só o dono é avisado**, por e-mail e por faixa no painel. A cota é **verificada antes e consumida depois**: um turno pode estourar a cota em até uma resposta (aceito; o teto de 4 rodadas e 30 s da 028 limita o excesso). **Opção (D13, não é o padrão):** um aviso ao contato **no máximo 1 por dia por contato** (chave `<prefixo>quota-notice:<HMAC(companyId, contactRef)>`, TTL 24 h, Redis; Redis fora = não envia), com texto constante, `isFallback = true`, **contabilizado em `sentMessages`** como qualquer outra mensagem de saída.
+- **Alertas ao dono (D5, E5):** e-mail a **80%** e a **100%** da janela, **de cada cota** (respostas e tokens; uma vez por janela e por tipo, `PaymentNotice`); a tela mostra as barras de uso.
+- **Empresa suspensa continua sem receber nada** (regra da 011): o estado de assinatura não a reativa.
+
+### Checkout InfinitePay (E3; D10)
+
+**Desenho recomendado: não depender de cobrança recorrente automática por API (S4).** A cada ciclo o Soprei gera **um link de checkout novo**; o pagamento aprovado **estende o período**. Alternativa em D10 (recorrência/Pix Automático, se o E0 confirmar que há API).
+
+1. **Criar o pedido:** `POST /account/billing/orders` (cookie da conta, CSRF por `Origin` + `X-Soprei-App: web`, perfil `admin`; `{ planCode, cycle, agenda, stock }` com Zod `strict`). O servidor calcula o valor pelo catálogo, grava `PaymentOrder` `PENDING` (id = UUID **gerado por nós**) e chama a InfinitePay para criar o link, informando o id do pedido como identificador do pedido e a **`webhook_url`** (S5). Devolve `{ orderId, checkoutUrl, amountCents, expiresAt }`; o navegador **abre o link hospedado**. Nunca aceita preço, desconto ou período do navegador. No máximo **1 pedido `PENDING` por assinatura e tipo** (o novo substitui o anterior, que vira `EXPIRED`); teto de pedidos por conta e dia (constante).
+2. **Webhook:** `POST /webhooks/infinitepay/:orderId` (**pública**, perfil de rate limit `webhook`, sem cookie, sem CSRF; só existe com `BILLING_ENABLED=true`). **O corpo não é confiado** (a busca não mostrou assinatura; S6): ele é lido com Zod tolerante e **limite de 16 KiB** só para extrair referências; a decisão vem **sempre** da consulta de status à InfinitePay (`payment_check`, S5) feita pelo servidor com o identificador **do nosso `PaymentOrder`** (lido do banco pelo `:orderId`, que é um UUID v7 não adivinhável), nunca com valores do corpo. Resposta: 200 depois de gravar a notificação e consultar; falha da consulta ou do banco = 5xx (a InfinitePay deve repetir; S7); pedido inexistente ou já `PAID` = 200 sem efeito (idempotente).
+3. **Conceder:** se o status consultado é "pago" **e o valor pago confere com o `amountCents` do pedido**, uma transação faz `updateMany({ id, status: 'PENDING' } -> PAID)` (**idempotência por pedido**: quem atualiza 0 linhas não concede de novo), grava `paidAt`, e **estende o período** (`currentPeriodStart/End`, novo plano, ciclo e módulos do `breakdown`, estado `ACTIVE`; renovação antecipada soma a partir do fim atual, não do pagamento; vencida e paga na carência continua do fim anterior). Valor diferente: não concede, marca `FAILED`, log `warn` só com ids.
+4. **Reconciliação (porque o webhook pode não chegar):** (a) botão "Já paguei" (`POST /account/billing/orders/:orderId/check`, só do dono do pedido) que refaz a consulta; (b) tarefa periódica no **mesmo timer** do expurgo que consulta pedidos `PENDING` das últimas 48 h (limite por execução). `payment_check` é lido **com prazo** (`BILLING_HTTP_TIMEOUT_MS`), `redirect: 'manual'`, teto de resposta (64 KiB) e o erro leva só `{ operation, httpStatus, retryable }` (nunca o corpo), como o adaptador Graph da 015.
+5. **Pedidos expiram** (`expiresAt`, padrão 24 h); pagamento de link expirado ainda é aceito se o `payment_check` confirmar e o valor conferir (o dinheiro não se perde).
+6. **Troca no meio do ciclo (D11):** **upgrade** gera um pedido `UPGRADE` com a **diferença proporcional** aos dias que faltam, e vale ao pagar (o período não muda; a janela de uso mantém o que já foi gasto); **downgrade e retirada de módulo** viram `pendingChange` para o **próximo ciclo**, sem devolução.
+7. **Cancelar:** `POST /account/billing/cancel` marca `cancelAtPeriodEnd`; não há reembolso automático (fora de escopo). Reativar antes do fim é desmarcar.
+8. **Renovação:** `RENEWAL` é criado quando a pessoa clica em "Renovar" (ou pelo e-mail de aviso, que leva à tela) e aceita pagar com o período ainda vigente; nada é cobrado sozinho.
+
+### Rotas e telas
+
+- **Conta** (`presentation/billing/`, cookie da conta, perfil `admin`, nenhuma permissão de papel nova: a assinatura é **da conta**): `GET /account/billing` (plano, ciclo, módulos, estado efetivo, período, uso da janela, pedidos recentes, catálogo para exibição), `POST /account/billing/orders`, `POST .../orders/:orderId/check`, `POST /account/billing/change` (D11), `POST /account/billing/cancel` e `.../reactivate`. `:orderId` fora do formato = 404 uniforme; pedido de **outra conta** = o mesmo 404.
+- **Empresa** (qualquer papel): `GET /admin/companies/:companyId/entitlements` -> `{ access: 'ok' | 'grace' | 'blocked', agenda: boolean, stock: boolean, tokens: { used, limit } | null, replies: { used, limit } | null }`, **sem dinheiro e sem dados de outra empresa** (`requirePermission('conversation:read')`, 401 -> 403 -> 404 -> 403). O site usa para esconder abas de módulos e mostrar a faixa de carência ou bloqueio a todos os papéis; a **barreira é o backend**.
+- **Painel:** nova tela **Assinatura** (`/painel/assinatura`, no shell da 029, também acessível por "Gerenciar conta" sem empresa selecionada): escolher plano, ciclo mensal ou anual (mostrando a economia), marcar Agenda e/ou Estoque, ver o total **que vem do servidor**, **Pagar** (abre o link), estado, próximo vencimento, barras de **uso de respostas enviadas e de tokens**, a **"Estimativa de custo na Meta este mês"** (marcada como estimativa), o aviso fixo **"O plano não inclui o custo das mensagens do WhatsApp: a Meta cobra direto da conta do WhatsApp da sua empresa"** (também na tela de planos antes de pagar e **no passo do assistente da 030 que sugere conectar o WhatsApp**), histórico de pedidos (data, valor, estado) e Cancelar. Quem **não é a titular** da assinatura (entrou por convite) vê só o estado, sem preço nem botões. **O fluxo da 030:** o assistente e o login para quem está **sem assinatura** ou `EXPIRED` abrem a tela Assinatura (com a explicação do teste gratuito, D7); passos de Serviços e Estoque aparecem só com o módulo contratado (o `GET .../onboarding` só devolve `schedule`/`inventory` se o módulo existe; sem ele o passo vira "Contratar na Assinatura"). `localStorage` continua só com o tema.
+
+### Configuração (`.env.example`, validada em `env.schema.ts`)
+
+**`SOPREI_PAYS_META_ENABLED`** (`true`/`false` literais, **padrão `false`**; **gate do modo S**: sem ela nenhuma versão de preço `SOPREI_PAYS_META` pode ser ativada nem aparece na tela; o dono só a liga **depois de o E0 confirmar a linha de crédito (S10)**; exige `BILLING_ENABLED=true`; uma versão de preço `SOPREI_PAYS_META` com a flag desligada é recusada na criação e ignorada na leitura), `BILLING_ENABLED` (`true`/`false` literais, **padrão `false`**: desligada, **nada é cobrado, limitado nem medido de forma bloqueante**; permite fundir a spec sem afetar o dono; D8), `INFINITEPAY_API_BASE_URL` (`http://` só fora de produção; existe para o servidor falso), `INFINITEPAY_HANDLE` (identificador da conta de recebimento; S5), `INFINITEPAY_WEBHOOK_BASE_URL` (origem pública do **backend** para montar a `webhook_url`; obrigatória com `BILLING_ENABLED`), `BILLING_HTTP_TIMEOUT_MS`, `BILLING_GRACE_DAYS` (padrão 5), `BILLING_TRIAL_DAYS` (padrão 7), `BILLING_TRIAL_TOKENS` (padrão 300000). Preços **não** são variável de ambiente (ficam no catálogo do banco). Nenhum segredo da InfinitePay foi identificado como necessário (S5); se o E0 achar um, entra no `redact`. Com `BILLING_ENABLED=true`, `TRUST_PROXY` precisa estar explícito (a rota pública divide cota por IP, como o webhook da 011).
+
+### Privacidade e LGPD
+
+Guarda-se **só**: ids do pedido, valores, datas, estado, forma de pagamento (Pix ou cartão) e a referência de transação da InfinitePay. **Nunca** número de cartão, CVV, nem corpo do webhook cru. O pagamento acontece **na página hospedada**; o Soprei **não repassa** e-mail ou documento da conta ao checkout por padrão (a InfinitePay coleta o que precisa; se o E0 exigir um dado do pagador, entra o mínimo e o dado vai só ao provedor, nunca a log, label, URL ou métrica). Log só com `accountId`, `orderId`, ação e resultado; métricas `billing_orders_total{kind,result}`, `billing_webhooks_total{result}`, `billing_checks_total{result}`, `quota_blocks_total{reason}` (`reason`: `replies`, `tokens`, `inactive`), `usage_sent_messages_total`, `usage_meter_errors_total` (conjuntos fixos; nenhum id, valor ou e-mail em label). `redact` ganha `checkoutUrl` e `providerTransactionRef`. Retenção de pedidos para fins fiscais: pendência (junto com a retenção/LGPD geral, e com a nota fiscal, ver "Fora de escopo").
+
+## Etapas (cada uma cabe num PR pequeno e pode ser cortada)
+
+- **E0, passo zero (dono e/ou implementer; nada de código):** conferir **na documentação oficial e com o suporte da InfinitePay** os itens S4 a S8 abaixo, **e o item S9 (preço da mensagem de serviço, franquia gratuita e quem é cobrado) em https://developers.facebook.com/docs/whatsapp/pricing e na tabela BRL da conta do dono na Meta, e o item S10 (**confirmar a linha de crédito** pelo caminho A ou B, **as taxas e o contrato do parceiro**, a tabela BRL vigente e o que muda no onboarding), que é o **gate do modo S**: sem o S10 confirmado o modo S não liga**, e registrar as respostas no "Registro" desta spec; **sem o E0, o E3 não começa** (E1, E2 e E4 não dependem dele e podem rodar com o servidor falso).
+- **E1, catálogo, assinatura e estados:** migration (`Plan`, `PlanPrice` com sementes, `Subscription`, `PaymentOrder`, `UsageCounter`, `PaymentNotice`, `Company.subscriptionId`), classificação em `MODEL_SCOPES`, `resolveAccess` e `usageWindowStart` puras, repositórios, `EntitlementReader`, `GET /account/billing` e `.../entitlements`, limite de empresas em `createCompany`, trial automático (D7, D8). Sem cobrança ainda.
+- **E2, medição e aplicação:** `UsageMeter` de tokens no `callProvider` e de respostas enviadas no envio do `flush`, cota de respostas e de tokens antes do provedor (sem aviso ao contato por padrão, D13), módulos (`requireModule`, retriever sem produtos, prompt sem agenda, ferramentas), bloqueio de escrita por `SUBSCRIPTION_INACTIVE`, inventário de rotas.
+- **E3, checkout InfinitePay:** adaptador (`InfinitepayClient`, porta `PaymentProvider`), `POST .../orders`, webhook, `payment_check`, concessão idempotente e extensão de período, reconciliação ("Já paguei" e tarefa), servidor falso (`test-support/fake-infinitepay.ts`, `node:http`, porta 0).
+- **E4, tela de Assinatura:** `/painel/assinatura`, mudança de plano e cancelamento (D11), faixas de estado, integração com a 030 e o menu, e2e Playwright com API falsa (desktop e celular, claro e escuro; pares de contraste novos em `contrast.test.ts`).
+- **E6, pacote de respostas extras (necessário no modo S; cortável se só o modo C for lançado):** `EXTRA_PACK` no checkout, `extraReplies` na cota, botão "Comprar pacote" na tela e no e-mail de cota esgotada, preço de pacote do catálogo. Depende do E3.
+- **E5, teste, alertas e carência:** e-mails (aviso de vencimento a 7 dias e 1 dia, vencido, 80% e 100% da cota, pagamento recebido) em segundo plano, `PaymentNotice`, carência na prática (`PAST_DUE` -> `EXPIRED` visível), tarefa no timer.
+
+## Critérios de aceite
+
+Cada item deve ter teste automatizado. Nenhum teste chama a InfinitePay real nem o provedor de IA real.
+
+**E1 (catálogo, assinatura, estados)**
+- [ ] A migration cria os models, as sementes (3 planos, preços mensais e anuais) e `Company.subscriptionId`; o teste de drift do schema e o de cobertura de `MODEL_SCOPES` passam; `Plan`, `PlanPrice`, `Subscription`, `PaymentOrder`, `UsageCounter`, `PaymentNotice` estão classificados como `global`.
+- [ ] `resolveAccess(subscription, now)` (pura, `now` injetado) devolve o esperado para `TRIAL` dentro e fora do prazo, `ACTIVE`, `PAST_DUE` dentro da carência, `CANCELLED` antes e depois do fim, `EXPIRED`, e para o instante exato do vencimento e da carência (limites).
+- [ ] `usageWindowStart` devolve a janela mensal correta, para o plano mensal e para o anual (mês 1, 6 e 12), com período que começa no dia 31 e em ano bissexto.
+- [ ] Um repositório de assinatura exige `AccountId` como primeiro parâmetro; o teste de isolamento mostra que a conta B **não** lê, atualiza nem cria pedido sobre a assinatura da conta A (resultado igual ao de inexistente).
+- [ ] `POST /account/companies` recusa a empresa acima de `maxCompanies` com 403 `PLAN_COMPANY_LIMIT`, com **duas requisições simultâneas** no limite criando só uma (a trava da conta serializa); a empresa criada grava `subscriptionId`; quem entra por convite numa empresa alheia **não** consome o limite.
+- [ ] Downgrade para plano com limite menor que o número de empresas responde 409 `PLAN_DOWNGRADE_BLOCKED` e não muda nada.
+- [ ] `GET /admin/companies/:companyId/entitlements`: 401 sem cookie, 404 para empresa de outra conta, resposta **sem valores em dinheiro**, e papéis `AGENT` e `VIEWER` o veem; empresa da assinatura A nunca devolve dado da B.
+- [ ] Com `BILLING_ENABLED=false` nada é limitado (criar empresa, IA, módulos) e as rotas de cobrança e o webhook respondem 404.
+
+**E2 (medição e aplicação)**
+- [ ] Um turno do atendimento com `usage` conhecido incrementa o `UsageCounter` da assinatura da empresa em `inputTokens + outputTokens` (simulador e canal); um turno com ferramentas da agenda soma o `usage` do turno inteiro; resposta sem `usage` não incrementa.
+- [ ] **Atomicidade:** 50 incrementos concorrentes resultam na soma exata (sem perda).
+- [ ] Falha do `UsageMeter` (banco) não impede a resposta ao contato, loga `warn` só com ids e conta `usage_meter_errors_total`.
+- [ ] Uma resposta enviada pelo canal (`flush` com `sendText` bem-sucedido) incrementa `sentMessages` da assinatura da empresa em 1; reenvio de resposta já enviada não conta de novo; o simulador do painel não conta; falha no envio não conta; 50 envios concorrentes somam exato; falha do medidor não impede o envio nem o `markSent`; o `UsageCounter` e o log não têm texto, contato nem `contactRef` (captura de log com sentinela).
+- [ ] Com **qualquer** das duas cotas (respostas ou tokens) esgotada o **provedor não é chamado** (o `mock` conta zero chamadas) e **nenhuma mensagem sai ao contato por padrão** (o `Graph` falso não recebe envio; as mensagens ficam pendentes e visíveis no painel); a empresa de **outra assinatura** segue respondendo; com a janela nova (mês seguinte) volta a responder. Com a opção do aviso ligada (D13): no máximo 1 aviso por dia por contato, contado em `sentMessages`.
+- [ ] A estimativa na Meta devolvida pela API é `sentMessages x metaEstimateMilliCents` do catálogo, rotulada como estimativa, e muda quando o catálogo muda.
+- [ ] Com acesso bloqueado (`EXPIRED`) a IA não responde, as escritas de conteúdo respondem 403 `SUBSCRIPTION_INACTIVE` e as leituras (`GET` de conversas, agenda, estoque) seguem 200; **nenhum dado é apagado**; pagar restaura sem outra ação.
+- [ ] Sem o módulo Estoque: `POST/PATCH` de produtos e ajustes respondem 403 `MODULE_NOT_CONTRACTED`, `GET` segue 200, o prompt **não** contém produtos e `sources` não os cita. Sem Agenda: escritas de agenda 403, `GET` 200, o prompt não tem `<agenda>` nem `<meus_agendamentos>`, as ferramentas não são oferecidas mesmo com `SCHEDULE_AI_ENABLED` e a opção da empresa ligadas, e o pedido ao provedor é idêntico ao de antes.
+- [ ] Ordem de recusa: 401 -> 403 plataforma -> 404 (`:companyId` alheio) -> 403 papel -> 403 módulo (teste por rota, e `PlatformAdmin` segue sem acesso).
+- [ ] O inventário de rotas falha se uma rota `schedule/*` ou `inventory/*` não declarar o módulo, ou se uma rota de escrita de tenant não declarar a política de assinatura (ou estar na lista de exceções declarada: Assinatura, `entitlements`, desconectar o canal).
+- [ ] Texto de mensagem, persona, contato e `contactRef` **não** aparecem em log, métrica nem no `UsageCounter` (captura de log com sentinela).
+
+**E3 (checkout)**
+- [ ] `POST /account/billing/orders` ignora qualquer valor, desconto ou período enviado no corpo (schema `strict` recusa; o valor sai do catálogo), grava o pedido `PENDING` com o `breakdown` e a versão do preço, chama o servidor falso com o `webhook_url` do pedido e devolve `checkoutUrl`; um segundo pedido `PENDING` do mesmo tipo expira o primeiro.
+- [ ] Webhook com status **pago** no servidor falso e valor igual: pedido `PAID`, período estendido (mensal e anual), estado `ACTIVE`, plano e módulos do `breakdown` aplicados; **o mesmo webhook repetido 10 vezes, em paralelo, concede uma única vez** (período e `paidAt` iguais).
+- [ ] Webhook cujo **corpo diz "pago"** mas o `payment_check` do servidor falso diz "não pago": nada é concedido. Corpo com valor diferente do pedido ou `payment_check` com valor diferente: não concede, pedido `FAILED`.
+- [ ] Webhook para `:orderId` inexistente, malformado ou de outra assinatura: 200 sem efeito (ou 404 uniforme), sem vazar existência; corpo maior que 16 KiB: 413/400 sem processar; falha da consulta (timeout, 5xx do servidor falso) devolve 5xx e **não** concede; uma nova entrega depois concede.
+- [ ] O erro do adaptador carrega só `{ operation, httpStatus, retryable }`; um servidor falso que **ecoa o token, o link e o corpo** no erro prova que nada vaza em log, métrica, erro nem resposta.
+- [ ] A rota do webhook tem perfil de rate limit declarado; o 429 funciona; o IP não vai a log nem a label.
+- [ ] "Já paguei" e a reconciliação periódica concedem um pedido pago cujo webhook nunca chegou, e **não** consultam pedidos de outra conta; a reconciliação respeita o limite por execução e não se sobrepõe.
+- [ ] Upgrade gera pedido com a diferença proporcional calculada com `now` injetado (casos: primeiro dia, último dia, anual); downgrade e retirada de módulo viram `pendingChange` e só valem no ciclo seguinte; nada é cobrado nem muda na hora.
+
+**E4 (tela)**
+- [ ] A tela mostra os totais **vindos do servidor** (o navegador não calcula preço), estados, vencimento, uso e histórico; quem não é titular não vê preço nem botão; teste e2e do fluxo escolher -> pagar (abre o link falso) -> "Já paguei" -> estado ativo.
+- [ ] Sem assinatura ou com `EXPIRED`, o login e o assistente da 030 levam à tela Assinatura; passos Serviços e Estoque aparecem só com o módulo; as abas Agenda e Estoque somem sem o módulo e forçar a URL mostra "não contratado" **sem chamar a API de escrita**.
+- [ ] Contraste mínimo 4,5:1 nos dois temas para os pares novos; mensagens de erro escolhidas por `status` e `error.code`, nunca pelo texto do servidor; nada de assinatura, valor ou id em `localStorage`, `sessionStorage`, URL, título ou `console`.
+
+**Modos de cobrança do WhatsApp, reajuste e pacote (E1, E2, E6)**
+- [ ] `whatsappBillingMode` existe por versão de preço; a API de planos e a tela devolvem preços, cotas e o aviso do modo da versão vigente (C: "não inclui o custo do WhatsApp"; S: "inclui até N respostas"); a assinatura mantém o modo da versão que contratou até o próximo ciclo.
+- [ ] **Gate:** com `SOPREI_PAYS_META_ENABLED=false` (padrão) criar ou ativar versão de preço `SOPREI_PAYS_META` é recusado, o catálogo público não a lista e nenhum pedido a usa; com a flag ligada e `BILLING_ENABLED=false` a configuração é recusada no boot.
+- [ ] Preço novo no catálogo (linha nova com `validFrom` futuro) **não altera** assinatura em curso nem pedido `PENDING`; o `RENEWAL` seguinte usa a versão vigente na geração; o aviso `PRICE_CHANGE` sai uma vez, com a antecedência configurada, e é registrado em `PaymentNotice`.
+- [ ] Pacote extra: `POST /account/billing/orders` com `kind: EXTRA_PACK` ignora valor do corpo (vem do catálogo); webhook pago concede **uma vez** (idempotente) e soma `extraReplies` na janela atual; a cota efetiva é `monthlyReplies + extraReplies`; com a janela nova o pacote expira e não acumula; pacote de outra assinatura nunca soma na minha; sem assinatura ativa a compra é recusada.
+- [ ] No modo S, a cota esgotada (inclusive a extra) para a IA, não envia nada ao contato, avisa só o dono (e-mail e painel) e a compra do pacote reativa na hora.
+
+**E5 (alertas, trial, carência)**
+- [ ] Conta nova ganha `TRIAL` de `BILLING_TRIAL_DAYS` com `BILLING_TRIAL_TOKENS` (sem cartão), **uma vez por conta** (criar de novo não reinicia); ao fim vira `EXPIRED`.
+- [ ] A tela de Assinatura e o passo de WhatsApp do assistente da 030 mostram o aviso de que o plano **não inclui** o custo da Meta (teste de componente e e2e).
+- [ ] Alertas a 80% e 100% de cada cota (respostas e tokens) e avisos de vencimento (7 dias, 1 dia, vencido) saem **uma vez** cada (`PaymentNotice`), em segundo plano com `drain()` no desligamento, com texto simples em português, **sem valor de cartão, link de pagamento no corpo do e-mail se o E0 disser que o link é sensível, nem dado de outra conta**; falha de SMTP só em métrica e log.
+- [ ] Depois de `currentPeriodEnd`, a empresa continua funcionando por `BILLING_GRACE_DAYS` com faixa de aviso e, passada a carência, bloqueia (relógio injetado, sem sleep).
+
+## Casos de borda e erros
+
+- **Webhook antes de o pedido ser gravado, repetido ou fora de ordem:** o pedido sempre é gravado **antes** de se chamar a InfinitePay, então o webhook acha a linha; repetição é idempotente; pedido já `EXPIRED` mas pago de fato é concedido.
+- **Dois pagamentos do mesmo pedido** (link aberto duas vezes): o segundo é detectado no `payment_check` (se o provedor permitir; S8) ou concede uma vez só e registra métrica; devolução manual é do dono (sem reembolso automático).
+- **Falha ao criar o link** (InfinitePay fora): 502 com `code` fixo, **nada** fica `PENDING` pendurado (o pedido é apagado ou marcado `FAILED` na mesma operação).
+- **Pagamento entre "vencer" e "expirar":** concedido a partir do fim anterior; a carência não cobra juros nem multa.
+- **Mudança de preço no catálogo:** vale só para pedidos novos; a assinatura mantém `priceId` até o próximo ciclo (a pessoa vê o valor do próximo ciclo antes de pagar).
+- **Fuso e fim de mês:** períodos e janelas em UTC com aritmética de data pura (mensal ancorado no dia; dia 31 vai para o último dia do mês curto), testada.
+- **Banco fora:** cota e acesso são lidos do banco; falha ao **ler** a cota é fail-**open** para o atendimento com `warn` e métrica (não se bloqueia contato por falha nossa; o custo é limitado pelo teto de turno), e fail-**closed** para **conceder** (nunca se concede sem gravar).
+- **Empresa criada sem assinatura** (cobrança desligada ou conta antiga): `subscriptionId` nulo vale como "sem limite" **somente** com `BILLING_ENABLED=false`; com a cobrança ligada ver D8.
+- **Conta desativada ou removida** com assinatura ativa: a assinatura não concede acesso a conta desativada; sem exclusão em cascata de pedidos (`Restrict`).
+
+## Isolamento entre empresas
+
+**Toca em dados da empresa de dois jeitos:** (1) o `UsageMeter` e o `EntitlementReader` recebem o `CompanyId` **só** do contexto do atendimento/identidade (nunca de header, corpo ou argumento de ferramenta) e o resolvem para a assinatura **no servidor** (`Company.subscriptionId`, lido por `findFirst` com o `id` da empresa); (2) as rotas `/admin/companies/:companyId/entitlements` e as de módulo usam a barreira de sempre (404 se `:companyId` difere do selecionado). Os models de cobrança são **da conta**, não de empresa: classificados `global`, mas acessados **só por repositório que exige `AccountId`/`SubscriptionId`** e sem rota que aceite `accountId` do navegador (a conta vem **só** do cookie). **Testes:** conta A não lê/cria/atualiza assinatura, pedido, uso nem "Já paguei" da conta B (404 uniforme); empresa da assinatura A nunca consome a cota da B; o contador de uma empresa não aparece em `entitlements` de outra; `createCompany` conta só as empresas da assinatura; o webhook com `orderId` de outra conta **não** concede nada a quem não é o dono do pedido (a concessão vai só à assinatura do pedido); varredura do `site-bridge.integration.test.ts` estendida às rotas novas; o `PlatformAdmin` continua sem acesso a dados de empresa.
+
+## Fora de escopo
+
+Nota fiscal (NFS-e) e cadastro fiscal do pagador (**pendência do dono**, registrar no contexto); cupom, desconto promocional e afiliados; pacote extra de **tokens** (o de **respostas** entrou, E6); repasse **por fatura** da Meta (o repasse é por reajuste de catálogo); virar Solution Partner ou fechar o contrato de Multi-Partner Solution (é trabalho do dono e do E0; a spec só prepara o modo S); multi-moeda e outras formas de pagamento além das do checkout hospedado; **reembolso automático** e disputas (estorno é manual); cobrança recorrente automática por API (**só se o E0 provar que existe**, aí vira spec nova ou D10); faturamento por empresa (a assinatura é da conta); cobrança por uso real de tokens (pós-pago); relatório financeiro e painel do administrador da plataforma sobre receita; limite de membros, convites ou conversas; mudar o preço de quem já assinou no meio do ciclo; teste de carga do webhook.
+
+## Decisões em aberto (**o dono decide**; recomendação primeiro)
+
+- **D0 (a mais importante) Quem paga a Meta pelas mensagens do WhatsApp (S9, S10).** **Escolha do dono (2026-11-09): quer UMA cobrança só** (o Soprei paga a Meta e embute no plano; a empresa não recebe fatura da Meta). Isso exige uma **linha de crédito** da Meta (S10, a confirmar no E0): só um **Solution Partner** a tem e pode estendê-la às empresas que onboarda (a Meta cobra o parceiro, que fatura a empresa); um **Tech Provider** (o Soprei hoje, Embedded Signup da 023) **não tem linha de crédito** e a empresa cadastra o próprio meio de pagamento na Meta; um Tech Provider pode formar uma **Multi-Partner Solution** com um Solution Partner existente que compartilha a linha de crédito; virar Solution Partner é **processo demorado**. **Caminhos:** **(A) virar Solution Partner** (tudo seu, margem maior, prazo longo e requisitos da Meta; a confirmar); **(B) Multi-Partner Solution com um Solution Partner/BSP** (mais rápido; **muda**: o parceiro vira parte do onboarding e da faturação das mensagens, contrato e dados de cobrança com o parceiro, possível mudança no fluxo do Embedded Signup e do WABA; **o parceiro cobra uma taxa** sobre as mensagens ou por número, **valor a confirmar**, que entra no custo por resposta); **(C) manter Tech Provider com a empresa pagando a Meta direto** (modelo atual, sem mudar nada). **Recomendação em dois estágios:** **(1) lançar já no modo C** (`CUSTOMER_PAYS_META`: preço sem Meta 59/149/349, aviso claro na tela de Planos e no assistente da 030, estimativa do custo da Meta) **enquanto o E0 avança com A ou B**; **(2) migrar para o modo S** (`SOPREI_PAYS_META`, 79/199/599 com cota de respostas, pacote extra obrigatório) **só quando a linha de crédito existir**, ligando `SOPREI_PAYS_META_ENABLED` (gate) e publicando versão de preço nova; quem já assina mantém o modo até o próximo ciclo, com aviso por e-mail. Escolher A ou B é do dono (depende do prazo, do contrato e da taxa do parceiro). *Alternativa a esta recomendação:* esperar a linha de crédito e lançar só no modo S (um preço só desde o primeiro dia, mas atrasa a receita). A decisão muda D1, D5 e D13.
+- **D1 Preços, cotas e desconto.** *Recomendação:* **dois conjuntos, um por modo** (ver "Dois modos de cobrança do WhatsApp"): **modo C** 59/149/349 com cota de respostas de 800/3.200/10.800 e tokens de 3 M/12 M/40 M (margem mensal sem add-ons 77,3%/71,6%/63,3%; anual 74,0%/66,8%/56,5%); **modo S** 79/199/599 com 500/1.500/5.000 respostas (margem mensal sem add-ons 60,8%/55,1%/51,3% sem franquia; anual 53,3%/46,2%/41,5%); Agenda 29/49/99 e Estoque 19/39/79 em ambos; anual com 20% de desconto. Ajustar se a taxa real, o imposto, o câmbio, a infra, a taxa do parceiro (caminho B) ou o preço da Meta forem diferentes; **o Escala anual no modo S é o mais exposto** (margem zero se a Meta chegar a ~R$ 0,066 por resposta, 1,9x o atual). *Alternativas:* anual de 15% a 25% (no modo S, 20% corta bastante a margem; considerar 10% a 15%); cota de respostas menor no Escala; Estoque incluso no Profissional; subir o modo S se o parceiro (B) cobrar taxa.
+- **D2 De quem é a assinatura.** *Recomendação:* **da conta** que cria, com as empresas dentro do limite do plano (`Company.subscriptionId`); convidados não consomem o limite. *Alternativa:* assinatura por empresa (mais simples de explicar, mas multiplica cobranças e quebra "plano com 3 empresas").
+- **D3 Onde mora o dado.** *Recomendação:* models **globais** com repositório que exige `AccountId`/`SubscriptionId`. *Alternativa:* uma nova classe `account` no `MODEL_SCOPES` com a mesma barreira da `tenant-scope` para contas (mais seguro, mais trabalho; pode ser feito na própria E1 se o `reviewer` pedir).
+- **D4 Catálogo em constante ou tabela.** *Recomendação:* **tabela** semeada pela migration, versionada e append-only (muda preço sem afetar quem já assinou, sem deploy). *Alternativa:* constantes em código (mais simples; mudar preço exige deploy e não preserva o histórico).
+- **D5 Unidade e estouro da cota.** *Recomendação:* **duas cotas, vale a que estourar primeiro**: **respostas enviadas** (mensagens de saída, o que a Meta cobra, medidas no envio) e **tokens medidos** (`input + output` do `usage`, o que a IA custa); ao estourar, **a IA deixa de responder e o contato não recebe mensagem** (D13), alerta ao dono a 80% e 100% de cada cota, **estimativa de custo na Meta** exibida como estimativa (modo C); **pacote de respostas extras** (500 por R$ 59, ~R$ 0,118 por resposta, por link da InfinitePay, validade do ciclo; **necessário no modo S**, opcional no C; E6); a cota do anual é **mensal**. No modo S a cota que manda é a de **respostas**; os tokens são só proteção. *Alternativas:* só tokens (como na primeira versão, mas **não limita o custo da Meta**); só respostas; pacote de outro tamanho ou preço; bloquear só no fim do ciclo (custo sem teto); pacote que acumula entre ciclos (mais complexo, passivo contábil).
+- **D6 Carência e bloqueio.** *Recomendação:* **5 dias** de carência com a IA e o painel funcionando e faixa de aviso; depois, a IA e as escritas param, **leitura, exportação e login seguem** e **nada é apagado**.
+- **D7 Teste gratuito.** *Recomendação:* **7 dias, 300 mil tokens, sem cartão, com Agenda e Estoque liberados**, uma vez por conta com e-mail confirmado (custo de IA ~R$ 0,50 por teste no pior caso). *Risco aceito:* várias contas para repetir o teste (a defesa é o e-mail confirmado e o rate limit; sem telefone ou documento). *Alternativa:* sem teste (cobrar antes de criar a empresa).
+- **D8 Conta sem assinatura e o dono hoje.** *Recomendação:* `BILLING_ENABLED=false` por padrão (nada muda até o dono ligar); ao ligar, a migration de ativação dá `TRIAL` a toda conta existente com empresa e a conta nova ganha o trial ao confirmar o e-mail; sem trial e sem plano = só leitura. *Alternativa:* plano gratuito permanente (ver se o produto quer).
+- **D9 O que é módulo.** *Recomendação:* só **Agenda** e **Estoque** (o Conhecimento/documentos fica no plano base). *Alternativa:* Conhecimento também opcional.
+- **D10 Renovação.** *Recomendação:* **um link por ciclo** (E3) com aviso por e-mail, sem depender de recorrência por API (S4). *Alternativa:* se o E0 confirmar recorrência ou Pix Automático por API, uma spec nova troca a renovação manual por automática.
+- **D11 Troca no meio do ciclo.** *Recomendação:* **upgrade** cobra a diferença proporcional e vale ao pagar; **downgrade e retirada de módulo** valem no próximo ciclo, sem devolução; downgrade abaixo do número de empresas é recusado. *Alternativa:* tudo só no próximo ciclo (mais simples, o cliente espera).
+- **D12 Quem pode pagar e ver preço.** *Recomendação:* só a **conta titular** (cookie da conta); `OWNER` por convite vê o estado, não preço nem botões. *Alternativa:* `OWNER` da empresa também paga (exige a conta titular consentir).
+- **D13 Aviso ao contato ao estourar a cota.** *Recomendação:* **não enviar aviso ao contato** (cada mensagem enviada é mais uma cobrada pela Meta, **à empresa no modo C e ao Soprei no modo S**, onde estaria acima da cota paga); **a IA deixa de responder**, as mensagens ficam pendentes e visíveis, e **só o dono é avisado**, por e-mail e por faixa no painel. *Alternativa:* um texto neutro ao contato (ex.: "No momento não consigo responder; a equipe retornará em breve"), **no máximo 1 por dia por contato e contabilizado** em `sentMessages`; o dono aprova a redação.
+- **D14 Lugar da `webhook_url`.** *Recomendação:* `/webhooks/infinitepay/:orderId` (UUID não adivinhável como camada extra, sem confiar no corpo). *Alternativa:* uma rota sem o id (depende só do identificador do corpo, pior).
+
+## Suposições a conferir no E0 (S1 a S9)
+
+- **S9** Meta (WhatsApp): desde 1º/out/2026 a mensagem de serviço dentro da janela de 24 h é cobrada **por mensagem entregue** pelo preço de utilidade (~R$ 0,035 no Brasil; marketing ~R$ 0,3217); possível **franquia de 1.000 respostas de serviço gratuitas por número por mês** (não confirmada); cobrança em BRL desde 1º/jul/2026 para contas elegíveis; **quem é cobrado é o WABA da empresa** (cada empresa conecta o seu, 015 e 023). Conferir na página oficial e na tabela da conta.
+- **S10** Solution Partner x Tech Provider (fontes secundárias e a documentação da Meta, **não lida a fundo**: https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/overview ): só um **Solution Partner** tem **linha de crédito**, que pode ser estendida às empresas que onboarda (a Meta cobra o parceiro, que fatura a empresa); o **Tech Provider** (nosso caso hoje) não tem linha de crédito e a empresa cadastra o próprio meio de pagamento; um Tech Provider pode formar uma **Multi-Partner Solution** com um Solution Partner que compartilha a linha de crédito; tornar-se Solution Partner é demorado. **A conferir no E0:** se a linha de crédito existe e em que condições para o caminho A ou B, requisitos e prazo do A, **taxas e contrato do parceiro no B**, o que muda no Embedded Signup e no WABA, a **tabela BRL vigente** e quem aparece como cobrado na fatura. **O modo S só liga (`SOPREI_PAYS_META_ENABLED`) depois desta confirmação.**
+
+- **S1** Preço do Haiku 5.5 (US$ 0,10 e US$ 0,50 por milhão) e leitura de cache (~10% da entrada): conferir na página oficial de preços da Anthropic.
+- **S2** Câmbio de R$ 5,50 por US$: só premissa.
+- **S3** Taxas da InfinitePay (até 3,5% no cartão, 0% no Pix; parcelamento em até 12x): conferir tabela vigente do contrato do dono.
+- **S4** A API pública é o **Checkout Integrado** (link hospedado com Pix ou cartão até 12x por POST, consulta `payment_check`, webhook de pagamento aprovado na `webhook_url`); **a recorrência é produto do painel e não tem endpoint de API confirmado**; há notícia de **Pix Automático** sem detalhe técnico. Fontes (busca, **não lidas**): https://www.infinitepay.io/checkout-documentacao , https://www.infinitepay.io/desenvolvedores , https://www.infinitepay.io/recorrencia-assinatura . Perguntar ao suporte se há recorrência ou Pix Automático por API.
+- **S5** Nomes e formato reais: endpoint de criar link, campos (handle, itens, valor em centavos, identificador do pedido, `webhook_url`, URL de retorno), endpoint e parâmetros do `payment_check`, ambiente de teste (sandbox), e **se existe segredo/token** de autenticação.
+- **S6** O webhook **não tem assinatura** confirmada: por isso o desenho não confia no corpo e consulta o status. Conferir se há cabeçalho de assinatura (se houver, validar também, **além** do `payment_check`).
+- **S7** Política de **retentativa** do webhook (quantas, intervalo, que status aciona) e prazo de resposta.
+- **S8** O `payment_check` informa **valor pago, forma e estado** de forma que se possa conferir o valor? Um link pode ser pago duas vezes? O link expira?
+
+## Riscos
+
+- **Dinheiro e acesso:** conceder sem pagamento real (corpo falso, valor errado, repetição) é o risco central; mitigado por consulta ao provedor, conferência de valor, idempotência por `updateMany` condicional e pedido gerado por nós. O `reviewer` revisa.
+- **Renovação manual aumenta a perda de assinantes** (esquecem de pagar): mitigado por e-mails e carência; a recorrência automática depende do E0.
+- **Webhook sem assinatura** e público: aceitamos que qualquer um dispare uma consulta (custo pequeno, limitado por rate limit e por pedido).
+- **Medição de tokens por turno** só enxerga o que o provedor devolve; chamadas que falham sem `usage` custam e não contam (limite: teto de turno e rate limit).
+- **Cota verificada antes e consumida depois** permite estouro de uma resposta por concorrência (aceito); concorrência alta de um mesmo contato pode furar o aviso por dia (aceito).
+- **Modo S (Soprei paga a Meta):** a margem depende de o preço da Meta não subir muito (margem zero a 1,9x a 3,7x o preço atual, ver a tabela) e de o parceiro (caminho B) não cobrar taxa que a consuma; mitigado por cota de respostas, pacote extra (R$ 0,118 por resposta), reajuste repassável com aviso, e pelo **gate** (só liga com a linha de crédito confirmada). Risco de **passivo**: o Soprei paga a Meta antes de receber se a fatura vier depois do uso (a margem pede reserva de caixa). Risco de **prazo e dependência** de um parceiro (B) ou de um processo longo (A). **Migrar do modo C para o S** muda o preço de quem já assina (só no próximo ciclo, com aviso e direito de cancelar). Se alguma empresa mantiver o WABA com o meio de pagamento próprio, **ela seria cobrada duas vezes** (pelo Soprei no plano e pela Meta): o onboarding do modo S precisa garantir que o WABA use a linha de crédito (detalhe a definir após o E0).
+- **Custo da Meta (S9) no modo C:** se a empresa paga a Meta, ela pode **achar o produto caro ou se surpreender com a fatura** (mitigado pelo aviso na tela e no assistente e pela estimativa, que não é fatura). Preço e franquia da Meta podem mudar sem aviso; o valor da estimativa fica no catálogo. Contar a mensagem **no envio** pode divergir da cobrança (reenvio, falha depois do envio, categoria da mensagem); aceito, é estimativa.
+- **Número e margem dependem de suposições** (S1 a S3, S9 e infra); o dono confirma antes de publicar preços.
+- **Dado fiscal e retenção** (nota fiscal, LGPD de pedidos) ficam pendentes; **antes de cobrar de empresa real**, o dono decide nota fiscal e base legal.
+
+## Decisões e dependências novas
+
+Nenhuma dependência nova prevista (`fetch` nativo, Zod, Prisma, Redis e o mailer já existentes). Migration aditiva (models globais novos, `companies.subscription_id`, sementes do catálogo, sem `CREATE EXTENSION`). Variáveis de ambiente novas listadas em "Configuração". Passos do dono depois do merge: `pnpm db:migrate:deploy`, decidir D1 a D14, fazer o E0, criar a conta de recebimento na InfinitePay, configurar o domínio público do backend para a `webhook_url`, e só então ligar `BILLING_ENABLED=true`.
+
+## Registro da implementação
+
+(vazio; preenchido pelo implementer. O E0 registra aqui as respostas do dono e do suporte da InfinitePay.)
