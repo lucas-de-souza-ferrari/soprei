@@ -376,6 +376,17 @@ Nota fiscal (NFS-e) e cadastro fiscal do pagador (**pendência do dono**, regist
   - (f) decisão do dono sobre `assured_installments` (quem paga as taxas de parcelamento; recomendação: **0**, repassar ao pagador) e sobre um **desconto de Pix** como incentivo.
 
 
+### Segunda rodada do E0 (2026-11-09): respostas obtidas pelo dono; **origem não oficial, o estilo é o de um assistente de IA, tudo a confirmar na documentação oficial, no app ou no contrato antes de cobrar de verdade**
+
+- **Resposta do `POST /links`:** `{ "url": "https://checkout.infinitepay.com.br/..." }` (confirmar no primeiro teste real).
+- **`payment_check` exige a API Key** (header `X-Api-Key`, a mesma da criação); a conta dona da chave precisa ser a do pagamento, senão **403**. A API Key tem o formato `inchk_...`. *Decisão de desenho:* o adaptador **sempre** envia o `X-Api-Key` no `payment_check` (não custa nada se não for exigido) e trata 401 e 403 como erro de configuração, não como "pagamento não feito". Nunca chamar do navegador.
+- **Taxas (a conferir no app e no contrato do dono):** Pix **0%**, na hora; cartão de crédito varia pelo faturamento mensal e pelo prazo de recebimento: plano inicial (até R$ 20 mil por mês) **3,15%** à vista e **12,40%** em 12x (D+1); acima de R$ 20 mil, 2,89% e 10,12%; acima de R$ 40 mil, 2,79% e 9,56%; acima de R$ 80 mil, 2,69% e 8,99%. Parcelado em até 12x, o valor total é antecipado. A spec usava até 3,5% no cartão como premissa (S3): continua cobrindo o plano inicial.
+- **Retentativas do webhook (a confirmar):** até **5 tentativas** (a inicial e 4 retentativas), com intervalos de **1, 5, 15 e 60 minutos** após cada falha; depois disso o evento é descartado. Duplicatas são possíveis: **idempotência por `transaction_nsu`/`order_nsu`**. Contingência com `payment_check` (cron ou quando o cliente volta à página), o que a spec já prevê (reconciliação periódica e "Já paguei").
+- **Valor mínimo:** **R$ 1,00** por link (`price` mínimo 100) e cada parcela também precisa ser de pelo menos R$ 1,00. Não é problema para os planos (o menor é R$ 19).
+- **Limite de requisições:** não é divulgado; excesso devolve **429**. *Decisão de desenho:* criar um link por pedido do cliente, com backoff em 429, sem laço de retentativa agressivo.
+- **Decisão do dono: repassar as taxas de parcelamento (`assured_installments = 0`).** Com 0, as taxas do cartão vão para o pagador **em todas as parcelas, inclusive à vista** (o pagador vê um valor um pouco maior no cartão; no Pix, sem acréscimo). O valor a conferir no `payment_check` continua sendo o **`amount`** (valor do link, igual ao do pedido); o `paid_amount` maior que o `amount` é esperado. Se o dono preferir absorver a taxa do cartão à vista, basta `assured_installments = 1` (campo do catálogo, sem mudança de código). O **desconto de Pix** (`options.discounts.pix`) fica como incentivo opcional, valor a decidir pelo dono.
+
+
 ## Riscos
 
 - **Dinheiro e acesso:** conceder sem pagamento real (corpo falso, valor errado, repetição) é o risco central; mitigado por consulta ao provedor, conferência de valor, idempotência por `updateMany` condicional e pedido gerado por nós. O `reviewer` revisa.
