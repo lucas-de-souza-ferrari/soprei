@@ -76,7 +76,15 @@ export class PrismaEntitlementReader implements EntitlementReader {
 
   private async adopt(companyId: CompanyId, now: Date): Promise<SubscriptionRecord | null> {
     const owner = await this.db.membership.findFirst({
-      where: { companyId, role: 'OWNER', accountId: { not: null } },
+      // Só vínculo OWNER ATIVO, de conta ATIVA e com e-mail confirmado: quem foi desativado não herda a
+      // empresa nem o teste gratuito.
+      where: {
+        companyId,
+        role: 'OWNER',
+        status: 'ACTIVE',
+        accountId: { not: null },
+        account: { status: 'ACTIVE', emailVerifiedAt: { not: null } },
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: { accountId: true },
     });

@@ -271,6 +271,14 @@ export const envSchema = z
         message: 'não pode ser "false" em produção (a proteção contra abuso ficaria desligada)',
       });
     }
+    // A cobrança vive nas rotas e na sessão da conta: sem contas globais ela não tem como funcionar.
+    if (env.BILLING_ENABLED && !env.ACCOUNTS_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BILLING_ENABLED'],
+        message: 'exige ACCOUNTS_ENABLED=true',
+      });
+    }
     // O modo S depende da cobrança: a flag sozinha não tem efeito algum e é um erro de configuração.
     if (env.SOPREI_PAYS_META_ENABLED && !env.BILLING_ENABLED) {
       ctx.addIssue({

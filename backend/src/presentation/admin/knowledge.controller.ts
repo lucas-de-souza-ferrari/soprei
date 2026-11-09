@@ -6,6 +6,8 @@ import { hasPermission, type KnowledgeDocument } from '../../domain/index.js';
 import { ForbiddenError } from '../../shared/errors/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, membershipAuth, requirePermission } from '../common/auth.hooks.js';
+import { subscriptionExempt } from '../common/entitlement-config.js';
+import type { EntitlementReader } from '../../application/ports/entitlement-reader.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { listQuerySchema } from './attendance.validators.js';
 import { createDocumentBodySchema, documentParamsSchema } from './knowledge.validators.js';
@@ -17,6 +19,8 @@ export interface AdminKnowledgeControllerOptions {
   readonly knowledge: Pick<KnowledgeService, 'list' | 'create' | 'delete'>;
   /** Dados de exemplo (spec 026, E3); sem isto as rotas `.../knowledge/sample` não existem. */
   readonly sample?: Pick<SampleDataService, 'load' | 'remove'> | undefined;
+  /** Cobrança (spec 031): sem o módulo Estoque o exemplo carrega só os documentos. */
+  readonly entitlements?: Pick<EntitlementReader, 'forCompany'> | undefined;
 }
 
 /** Documento para o navegador: tamanho, trechos e pré-visualização; nunca o texto inteiro. */
@@ -48,7 +52,7 @@ function toDocumentResponse(document: KnowledgeDocument): {
  */
 export const adminKnowledgeController: FastifyPluginCallback<AdminKnowledgeControllerOptions> = (
   app,
-  { auth, metrics, knowledge, sample },
+  { auth, metrics, knowledge, sample, entitlements },
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
@@ -75,7 +79,8 @@ export const adminKnowledgeController: FastifyPluginCallback<AdminKnowledgeContr
 
   app.delete(
     '/:companyId/knowledge/documents/:documentId',
-    { config, onRequest },
+    // Apagar o próprio dado segue com a assinatura inativa (spec 031).
+    { config: { ...config, ...subscriptionExempt() }, onRequest },
     async (request, reply) => {
       const { documentId } = documentParamsSchema.parse(request.params);
       const { companyId, membershipId } = membershipAuth(request);
@@ -93,7 +98,10 @@ export const adminKnowledgeController: FastifyPluginCallback<AdminKnowledgeContr
     app.post('/:companyId/knowledge/sample', { config, onRequest }, async (request, reply) => {
       const { companyId, membershipId, role } = membershipAuth(request);
       if (!hasPermission(role, 'inventory:manage')) throw new ForbiddenError();
-      const result = await sample.load(companyId, membershipId);
+      // Sem o módulo Estoque contratado (spec 031) só os documentos de exemplo entram.
+      const stock =
+        entitlements === undefined ? true : (await entitlements.forCompany(companyId)).stock;
+      const result = await sample.load(companyId, membershipId, { includeProducts: stock });
       request.log.info(
         { companyId, membershipId, created: result.created },
         'dados de exemplo carregados',

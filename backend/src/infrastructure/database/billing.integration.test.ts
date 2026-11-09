@@ -591,3 +591,84 @@ describe('EntitlementReader e UsageMeter (spec 031, E2)', () => {
     );
   });
 });
+
+describe('revisão da 031: adoção só por OWNER ativo e limite com empresas antigas', () => {
+  const now = new Date('2026-11-10T12:00:00Z');
+
+  it('adopt ignora OWNER desativado, de conta desativada ou sem e-mail confirmado (não herda a empresa nem o teste)', async () => {
+    const owners = [
+      { label: 'vinc-off', membership: { status: 'DISABLED' as const }, account: {} },
+      { label: 'conta-off', membership: {}, account: { status: 'DISABLED' as const } },
+      { label: 'sem-email', membership: {}, account: { emailVerifiedAt: null } },
+    ];
+    for (const owner of owners) {
+      const account = await newAccount(owner.label);
+      const company = await tenants.createCompany('adopt-neg');
+      await db().membership.create({
+        data: {
+          companyId: company.id,
+          accountId: account,
+          email: `${owner.label}@exemplo.test`,
+          passwordHash: 'account-managed',
+          role: 'OWNER',
+          ...owner.membership,
+        },
+      });
+      await db().account.updateMany({ where: { id: account }, data: owner.account });
+      assert.equal((await reader(() => now).forCompany(company.id)).access, 'blocked', owner.label);
+      assert.equal(
+        await db().subscription.count({ where: { accountId: account } }),
+        0,
+        owner.label,
+      );
+    }
+  });
+
+  it('conta com 3 empresas antigas e a cobrança ligada: criar a 4ª no Essencial dá PLAN_COMPANY_LIMIT e adota as antigas', async () => {
+    const account = await newAccount('antigas');
+    const olds: CompanyId[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const c = await accountsRepo.createCompany(account, `Antiga ${String(i)}`);
+      tenants.track(c.companyId);
+      olds.push(c.companyId);
+    }
+    await assert.rejects(
+      () => accountsRepo.createCompany(account, 'Quarta', policy(now)),
+      (error: unknown) => error instanceof ForbiddenError && error.code === 'PLAN_COMPANY_LIMIT',
+    );
+    // A recusa desfaz a transação (nada foi adotado); a adoção real acontece quando a criação passa.
+    const proAccount = await newAccount('antigas-pro');
+    const c1 = await accountsRepo.createCompany(proAccount, 'Antiga');
+    tenants.track(c1.companyId);
+    const trial = await billing.ensureTrial(proAccount, now, SETTINGS);
+    subscriptionIds.add(trial.id);
+    const pro = await db().plan.findFirst({ where: { code: 'PROFESSIONAL' } });
+    assert.ok(pro !== null);
+    await db().subscription.updateMany({ where: { id: trial.id }, data: { planId: pro.id } });
+    await createCompanyFor(proAccount, now);
+    assert.equal(await billing.countCompanies(proAccount), 2, 'a antiga foi adotada e conta');
+    assert.equal(olds.length, 3);
+  });
+
+  it('duas adoções simultâneas da mesma conta resultam em uma assinatura e todas as empresas ligadas a ela', async () => {
+    const account = await newAccount('adopt-race');
+    const ids: CompanyId[] = [];
+    for (let i = 0; i < 2; i += 1) {
+      const c = await accountsRepo.createCompany(account, `R${String(i)}`);
+      tenants.track(c.companyId);
+      ids.push(c.companyId);
+    }
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => reader(() => now).forCompany(ids[i % 2] as CompanyId)),
+    );
+    assert.ok(results.every((r) => r.access === 'ok'));
+    assert.equal(
+      await db().subscription.count({ where: { accountId: account } }),
+      1,
+      'uma só assinatura (motivo: account_id único e skipDuplicates na corrida)',
+    );
+    const rows = await db().company.findMany({ where: { id: { in: ids } } });
+    assert.equal(new Set(rows.map((r) => r.subscriptionId)).size, 1);
+    assert.ok(rows[0]?.subscriptionId !== null);
+  });
+});

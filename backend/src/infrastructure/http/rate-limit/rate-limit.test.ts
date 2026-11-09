@@ -81,6 +81,7 @@ function permissionProblem(permissions: readonly unknown[]): string | undefined 
 const EXEMPT_ROUTES: readonly string[] = [
   'GET /admin/companies/:companyId/entitlements',
   'DELETE /admin/companies/:companyId/channel',
+  'DELETE /admin/companies/:companyId/knowledge/documents/:documentId',
   'POST /admin/companies/:companyId/invitations',
   'POST /admin/companies/:companyId/invitations/:invitationId/resend',
   'DELETE /admin/companies/:companyId/invitations/:invitationId',

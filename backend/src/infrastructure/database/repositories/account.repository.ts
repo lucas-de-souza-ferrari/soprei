@@ -383,6 +383,16 @@ export class PrismaAccountRepository implements AccountRepository {
           if (access === 'blocked') {
             throw new ForbiddenError('Assinatura inativa', { code: 'SUBSCRIPTION_INACTIVE' });
           }
+          // Empresas antigas da conta (OWNER ativo, ainda sem assinatura) são adotadas antes de contar:
+          // senão o limite do plano seria burlado por quem já tinha empresas.
+          await tx.company.updateMany({
+            where: {
+              subscriptionId: null,
+              deletedAt: null,
+              memberships: { some: { accountId, role: 'OWNER', status: 'ACTIVE' } },
+            },
+            data: { subscriptionId: subscription.id },
+          });
           const owned = await tx.company.count({
             where: { subscriptionId: subscription.id, deletedAt: null },
           });

@@ -17,7 +17,8 @@ export interface AdminEntitlementsControllerOptions {
 /**
  * `GET /admin/companies/:companyId/entitlements` (spec 031): o que a empresa selecionada pode fazer
  * agora, para qualquer papel. **Sem dinheiro** e só da empresa do token (404 se `:companyId` difere,
- * antes de qualquer outra coisa). O site o usa para esconder abas de módulos e mostrar as faixas de
+ * antes de qualquer outra coisa). **Efeito colateral:** com a cobrança ligada, ler os entitlements de uma
+ * empresa sem assinatura a ADOTA (assinatura da conta do OWNER ativo e, uma vez por conta, o teste gratuito). O site o usa para esconder abas de módulos e mostrar as faixas de
  * carência e bloqueio; a barreira é o backend.
  */
 export const adminEntitlementsController: FastifyPluginCallback<

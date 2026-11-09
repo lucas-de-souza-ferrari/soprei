@@ -322,6 +322,7 @@ export function buildServer({
         metrics,
         knowledge: admin.knowledge,
         sample: admin.sample,
+        entitlements: billing?.entitlements,
       });
     }
     if (admin.inventory !== undefined) {

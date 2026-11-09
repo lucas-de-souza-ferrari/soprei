@@ -384,4 +384,11 @@ Nenhuma dependência nova prevista (`fetch` nativo, Zod, Prisma, Redis e o maile
 9. O gate de escrita **não** barra a gestão de equipe (`memberships`, `invitations`), desconectar o canal e `entitlements`; a lista é fixa no teste de inventário.
 10. `BILLING_ENABLED=true` agora **não deve ser ligado** num banco com dados reais antes do E3: ninguém consegue pagar, então depois do teste (7 dias) a empresa fica só em leitura.
 
+### Ajustes da revisão (E1 e E2)
+
+- **I-1:** `BILLING_ENABLED=true` exige `ACCOUNTS_ENABLED=true` (recusado no boot; config.test.ts). A adoção considera só vínculo `OWNER` **ativo**, de conta **ativa** e com e-mail confirmado; senão a empresa fica bloqueada e nenhum teste gratuito nasce (billing.integration.test.ts).
+- **I-2:** `createCompany` adota, dentro da transação que trava a conta e antes de contar, as empresas em que a conta é `OWNER` ativo e que ainda não têm assinatura; conta com 3 empresas antigas não cria a 4ª no Essencial (`PLAN_COMPANY_LIMIT`, testes de integração e de rota).
+- **Sugestões atendidas:** `GET .../entitlements` documentado como podendo adotar a empresa e iniciar o teste, com teste de corrida de adoções simultâneas (uma só assinatura; pool 30); `DELETE` de documento do Conhecimento é isento do bloqueio por assinatura (apagar o próprio dado); `knowledge/sample` carrega só os documentos sem o módulo Estoque (`knowledge-billing.test.ts`).
+- **Registrados, sem mudança:** tokens de chamadas que falham (`max_tokens`, recusa, retentativas do SDK) não são medidos (o `usage` só chega em resposta utilizável); a leitura de cota e de módulo é **fail-open** (recomenda-se alerta em `entitlement_errors_total`); `entitlements` devolve a qualquer papel o uso agregado da conta (tokens e respostas usados e limite; sensibilidade baixa); **para o E3:** o pagamento aprovado deve reativar a IA e reagendar o `flush` das mensagens pendentes (hoje elas só são respondidas na próxima mensagem do contato).
+
 **Fontes consultadas:** spec 031, AGENTS.md, código das specs 015, 017, 026 a 030; nada da InfinitePay nem da Meta foi lido ou chamado.

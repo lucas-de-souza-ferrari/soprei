@@ -10,6 +10,14 @@ const VALID_ENV = {
   JWT_SECRET,
 };
 
+const ACCOUNTS_ON = {
+  ACCOUNTS_ENABLED: 'true',
+  APP_ORIGIN: 'http://127.0.0.1:5173',
+  EMAIL_PROVIDER_HOST: '127.0.0.1',
+  EMAIL_PROVIDER_PORT: '1025',
+  EMAIL_PROVIDER_FROM: 'noreply@example.test',
+};
+
 describe('parseConfig', () => {
   it('aplica defaults e converte PORT para número', () => {
     const result = parseConfig({ ...VALID_ENV, PORT: '8080' });
@@ -289,7 +297,7 @@ describe('parseConfig', () => {
       assert.equal(off.value.BILLING_GRACE_DAYS, 5);
       assert.equal(off.value.BILLING_TRIAL_DAYS, 7);
       assert.equal(off.value.BILLING_TRIAL_TOKENS, 300_000);
-      const on = parseConfig({ ...VALID_ENV, BILLING_ENABLED: 'true' });
+      const on = parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, BILLING_ENABLED: 'true' });
       assert.ok(on.ok);
       assert.equal(on.value.BILLING_ENABLED, true);
       for (const value of ['1', 'yes', 'TRUE']) {
@@ -304,12 +312,20 @@ describe('parseConfig', () => {
       assert.equal(parseConfig({ ...VALID_ENV, BILLING_GRACE_DAYS: '-1' }).ok, false);
     });
 
+    it('BILLING_ENABLED exige ACCOUNTS_ENABLED=true (a cobrança vive na sessão da conta)', () => {
+      const alone = parseConfig({ ...VALID_ENV, BILLING_ENABLED: 'true' });
+      assert.equal(alone.ok, false);
+      assert.match(alone.error.message, /BILLING_ENABLED: exige ACCOUNTS_ENABLED=true/);
+      assert.ok(parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, BILLING_ENABLED: 'true' }).ok);
+    });
+
     it('gate do modo S (spec 031): SOPREI_PAYS_META_ENABLED exige BILLING_ENABLED=true', () => {
       const alone = parseConfig({ ...VALID_ENV, SOPREI_PAYS_META_ENABLED: 'true' });
       assert.equal(alone.ok, false);
       assert.match(alone.error.message, /SOPREI_PAYS_META_ENABLED: exige BILLING_ENABLED=true/);
       const both = parseConfig({
         ...VALID_ENV,
+        ...ACCOUNTS_ON,
         BILLING_ENABLED: 'true',
         SOPREI_PAYS_META_ENABLED: 'true',
       });

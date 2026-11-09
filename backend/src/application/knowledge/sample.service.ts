@@ -39,11 +39,15 @@ export class SampleDataService {
    * responde "nada criado" (sem documentos duplicados). Os produtos já são protegidos pelo SKU único
    * do banco; entre processos, só documentos repetidos seriam possíveis (o servidor roda em um processo).
    */
-  load(companyId: CompanyId, membershipId: string): Promise<SampleLoadResult> {
+  load(
+    companyId: CompanyId,
+    membershipId: string,
+    options: { readonly includeProducts?: boolean } = {},
+  ): Promise<SampleLoadResult> {
     const previous = this.queues.get(companyId) ?? Promise.resolve();
     const run = previous.then(
-      () => this.loadNow(companyId, membershipId),
-      () => this.loadNow(companyId, membershipId),
+      () => this.loadNow(companyId, membershipId, options),
+      () => this.loadNow(companyId, membershipId, options),
     );
     const tail = run.catch(() => undefined);
     this.queues.set(companyId, tail);
@@ -53,7 +57,11 @@ export class SampleDataService {
     return run;
   }
 
-  private async loadNow(companyId: CompanyId, membershipId: string): Promise<SampleLoadResult> {
+  private async loadNow(
+    companyId: CompanyId,
+    membershipId: string,
+    options: { readonly includeProducts?: boolean },
+  ): Promise<SampleLoadResult> {
     const { documents, products, knowledge, inventory } = this.deps;
     const [docTotal, docSamples, productTotal, productSamples] = await Promise.all([
       documents.countDocuments(companyId),
@@ -73,6 +81,8 @@ export class SampleDataService {
       }
       created = true;
     }
+    // Sem o módulo Estoque (spec 031) só os documentos de exemplo são carregados.
+    if (options.includeProducts === false) return { created };
     const bySku = new Map(productSamples.map((product) => [product.sku, product]));
     for (const sample of SAMPLE_PRODUCTS) {
       const existing = bySku.get(sample.sku);

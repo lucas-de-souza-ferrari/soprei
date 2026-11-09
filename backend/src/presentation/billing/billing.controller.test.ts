@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import type { AccountService } from '../../application/auth/account.service.js';
 import type { BillingOverview } from '../../application/billing/billing.service.js';
 import { buildServer } from '../../infrastructure/http/server.js';
-import { UnauthorizedError } from '../../shared/errors/index.js';
+import { ForbiddenError, UnauthorizedError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 
@@ -126,6 +126,39 @@ describe('GET /account/billing (spec 031, E1)', () => {
       payload: { amountCents: 1 },
     });
     assert.equal(post.statusCode, 404);
+    await app.close();
+  });
+});
+
+describe('POST /account/companies com o limite do plano (spec 031, revisão)', () => {
+  it('a recusa do plano chega como 403 com o código PLAN_COMPANY_LIMIT', async () => {
+    const accounts = {
+      me: () =>
+        Promise.resolve({ id: ACCOUNT_ID, email: 'x@exemplo.test', selectedCompanyId: null }),
+      tenantIdentity: () => Promise.resolve(null),
+      drain: () => Promise.resolve(),
+      createCompany: () =>
+        Promise.reject(new ForbiddenError('Limite', { code: 'PLAN_COMPANY_LIMIT' })),
+    } as unknown as AccountService;
+    const app = buildServer({
+      logger: captureLogs().logger,
+      readiness: {
+        database: () => Promise.resolve(Result.ok(undefined)),
+        redis: () => Promise.resolve(Result.ok(undefined)),
+      },
+      accounts: { service: accounts, origin: ORIGIN, secure: false },
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/account/companies',
+      headers: { cookie: `soprei_session=${SECRET}`, origin: ORIGIN, 'x-soprei-app': 'web' },
+      payload: { name: 'Quarta' },
+    });
+    assert.equal(response.statusCode, 403);
+    assert.equal(
+      (JSON.parse(response.body) as { error: { code: string } }).error.code,
+      'PLAN_COMPANY_LIMIT',
+    );
     await app.close();
   });
 });
