@@ -1,6 +1,6 @@
 # 034 — Capacidade do canal (worker concorrente e processo robusto)
 
-- **Status:** rascunho
+- **Status:** aprovada (2026-11-11, dono: "Aprovo as recomendações"; D1 a D5 como recomendadas)
 - **Branch:** `spec/034-capacidade-do-canal` (uma branch por etapa, se o dono preferir PRs menores; ver "Etapas")
 - **Depende de:** 011 (fila e worker), 013 (agrupamento e `flush`), 005 (rate limit e `TRUST_PROXY`), 004 (métricas). Conversa com a **033** (deploy): esta spec entrega o que a 033 precisa para dimensionar e separar processos; não decide hospedagem.
 - **Esta spec passa pelo `reviewer`** antes do merge (mexe em endpoint público, no limite do webhook e no caminho que carrega o `CompanyId` do job).
@@ -144,7 +144,7 @@ Nenhuma consulta nova e nenhum caminho novo para o `CompanyId`: ele continua nas
 
 ## Decisões e dependências novas
 
-Nenhuma dependência nova. Decisões para o dono (recomendação primeiro):
+Nenhuma dependência nova. **Decididas pelo dono em 2026-11-11: as cinco pela opção recomendada** (D1 instante de recebimento; D2 padrão 10 com `DB_POOL_MAX` 20; D3 timers só em `worker` e `all`; D4 6000 por 60 s; D5 E1 a E3 num PR, E4 e E5 em outro). As alternativas ficam registradas:
 
 - **D1. De onde vem a ordem das mensagens.**
   - **Recomendado:** instante de recebimento no webhook (`receivedAt`, milissegundos, com desempate por posição no lote). Simples, não depende da fila e funciona com várias instâncias.
