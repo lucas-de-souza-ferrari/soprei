@@ -1,6 +1,6 @@
 # 037 — Deploy com rollback e staging
 
-- **Status:** rascunho
+- **Status:** aprovada pelo dono em 2026-11-11, com D1 a D12 como recomendadas (E3 adiada, D9)
 - **Branch:** `spec/037-deploy-e-staging` (um PR por etapa: E1, E2 e, se o dono quiser, E3)
 - **Depende de:** 033 (esta spec **recorta** dela a E4, deploy, e a D7, staging; o resto continua lá), 036 (`.nvmrc`, versão do Node de PRs e produção), 034 (`SHUTDOWN_TIMEOUT_MS`), 032 (nenhum dado real vai ao staging enquanto ela não existir).
 - **Observação de numeração:** conferido em `docs/specs/` em 2026-11-11: existem 001 a 034 e 036 em arquivo (a 035 está **reservada** para "eficiência do turno" e não tem arquivo); esta é a **037**.
