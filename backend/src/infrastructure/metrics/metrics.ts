@@ -345,7 +345,7 @@ export interface Metrics {
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
   /**
-   * Liga `queue_jobs{queue,state}` às contagens da fila (spec 034), lidas só na coleta e com prazo
+   * Liga `queue_jobs{queue,state}` às contagens da fila (spec 034), lidas a cada `render` e com prazo
    * curto. Falha ou demora deixam o gauge sem amostra e contam `queue_metrics_errors_total`.
    */
   bindQueue(queue: string, source: () => Promise<Record<string, number>>): void;
@@ -745,37 +745,42 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
   const queueSources = new Map<string, () => Promise<Record<string, number>>>();
-  new Gauge({
+  const queueJobsByState = new Gauge({
     name: 'queue_jobs',
     help: 'Jobs da fila por estado (waiting, active, delayed, failed)',
     labelNames: ['queue', 'state'] as const,
     registers: [registry],
-    async collect() {
-      // Sem amostra antiga: se a leitura falhar, a série some em vez de mostrar um valor velho.
-      this.reset();
-      for (const [queue, source] of queueSources) {
-        let timer: NodeJS.Timeout | undefined;
-        try {
-          const counts = await Promise.race([
-            source(),
-            new Promise<never>((_resolve, reject) => {
-              timer = setTimeout(() => {
-                reject(new Error('prazo da leitura da fila'));
-              }, QUEUE_COUNTS_TIMEOUT_MS);
-            }),
-          ]);
-          for (const state of QUEUE_JOB_STATES) {
-            this.set({ queue, state }, counts[state] ?? 0);
-          }
-        } catch {
-          // Nunca o erro em si (o ioredis anexa os argumentos do comando): só a contagem.
-          queueMetricsErrors.inc();
-        } finally {
-          if (timer !== undefined) clearTimeout(timer);
-        }
-      }
-    },
   });
+  /**
+   * Lê as contagens das filas ligadas e atualiza `queue_jobs`. Roda em `render`, **antes** de o
+   * registro serializar: o prom-client coleta as métricas em paralelo, então um contador
+   * incrementado dentro do `collect` de outra métrica só apareceria na coleta seguinte.
+   */
+  const refreshQueueJobs = async (): Promise<void> => {
+    // Sem amostra antiga: se a leitura falhar, a série some em vez de mostrar um valor velho.
+    queueJobsByState.reset();
+    for (const [queue, source] of queueSources) {
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const counts = await Promise.race([
+          source(),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error('prazo da leitura da fila'));
+            }, QUEUE_COUNTS_TIMEOUT_MS);
+          }),
+        ]);
+        for (const state of QUEUE_JOB_STATES) {
+          queueJobsByState.set({ queue, state }, counts[state] ?? 0);
+        }
+      } catch {
+        // Nunca o erro em si (o ioredis anexa os argumentos do comando): só a contagem.
+        queueMetricsErrors.inc();
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+  };
 
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
@@ -795,7 +800,10 @@ export function createMetrics(): Metrics {
   return {
     registry,
     contentType: registry.contentType,
-    render: () => registry.metrics(),
+    render: async () => {
+      await refreshQueueJobs();
+      return registry.metrics();
+    },
     observeHttpRequest({ method, route, statusCode, durationSeconds }) {
       const labels = { method, route, status_class: statusClass(statusCode) };
       httpRequests.inc(labels);

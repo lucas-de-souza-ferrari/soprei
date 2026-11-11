@@ -487,6 +487,7 @@ describe('POST /webhooks/whatsapp (conteúdo)', () => {
         'content',
         'messageId',
         'phoneNumberId',
+        'receivedAt',
         'sender',
       ]);
     });

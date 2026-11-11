@@ -357,15 +357,15 @@ describe('instante de recebimento no banco (spec 034)', () => {
       [b, 'b', 'a'],
     ] as const) {
       const rows = await rowsOf(company.id, contact);
-      const users = rows.filter((row) => row.role === 'USER');
+      const contactRows = rows.filter((row) => row.role === 'USER');
       assert.deepEqual(
-        users.map((row) => row.content),
+        contactRows.map((row) => row.content),
         [`${own}1`, `${own}2`],
       );
-      assert.ok(users.every((row) => !row.content.startsWith(foreign)));
+      assert.ok(contactRows.every((row) => !row.content.startsWith(foreign)));
       const reply = rows.find((row) => row.role === 'ASSISTANT');
       assert.ok(reply !== undefined);
-      assert.ok(users.every((row) => row.answeredById === reply.id));
+      assert.ok(contactRows.every((row) => row.answeredById === reply.id));
     }
   });
 });

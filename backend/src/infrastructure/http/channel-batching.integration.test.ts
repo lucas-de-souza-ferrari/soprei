@@ -756,8 +756,8 @@ describe('worker concorrente no canal (spec 034)', () => {
         await sendMany(h, number, contact, texts);
         await waitFor(async () => {
           const rows = await stored(company, contact);
-          const users = rows.filter((m) => m.role === 'USER');
-          return users.length === 10 && users.every((m) => m.answeredById !== null);
+          const contactRows = rows.filter((m) => m.role === 'USER');
+          return contactRows.length === 10 && contactRows.every((m) => m.answeredById !== null);
         }, 'as dez mensagens respondidas');
         await waitFor(async () => (await sentCount(company, contact)) >= 1, 'resposta enviada');
         await sleep(400);
@@ -825,9 +825,9 @@ describe('worker concorrente no canal (spec 034)', () => {
           [companyB, numberB, 'B-', 'A-'],
         ] as const) {
           const rows = await stored(company, same);
-          const users = rows.filter((m) => m.role === 'USER');
+          const contactRows = rows.filter((m) => m.role === 'USER');
           assert.deepEqual(
-            users.map((m) => m.content),
+            contactRows.map((m) => m.content),
             [`${prefix}um`, `${prefix}dois`, `${prefix}tres`],
           );
           assert.ok(rows.every((m) => !m.content.includes(foreign)));
