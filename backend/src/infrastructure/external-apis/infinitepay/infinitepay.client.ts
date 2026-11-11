@@ -19,7 +19,7 @@ import {
 
 /** Nome do campo que traz a lista de itens no corpo de POST /links (a confirmar no primeiro teste real). */
 /** Host do link de pagamento no exemplo de resposta da documentação (a confirmar no teste real). */
-export const DEFAULT_CHECKOUT_HOST = 'checkout.infinitepay.com.br';
+export const DEFAULT_CHECKOUT_HOST = 'checkout.infinitepay.io';
 const ITEMS_FIELD = 'items';
 /** Teto da espera sugerida por Retry-After (nunca dorme mais que isto por uma instrução do provedor). */
 const MAX_RETRY_AFTER_MS = 60_000;

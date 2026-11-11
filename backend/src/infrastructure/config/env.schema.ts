@@ -173,7 +173,7 @@ export const envSchema = z
       z
         .string()
         .regex(/^[A-Za-z0-9.-]{1,253}$/, 'deve ser só o nome do host')
-        .default('checkout.infinitepay.com.br'),
+        .default('checkout.infinitepay.io'),
     ),
     // LGPD: o e-mail da conta só vai ao provedor se o dono confirmar (decisão do dono). Padrão false.
     CHECKOUT_SEND_CUSTOMER_EMAIL: booleanLiteral(false),

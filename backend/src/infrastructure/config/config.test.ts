@@ -373,7 +373,7 @@ describe('parseConfig', () => {
         const ok = parseConfig({ ...CHECKOUT_ON, TRUST_PROXY: '127.0.0.1,::1' });
         assert.ok(ok.ok);
         assert.equal(ok.value.CHECKOUT_SEND_CUSTOMER_EMAIL, false);
-        assert.equal(ok.value.INFINITEPAY_CHECKOUT_HOST, 'checkout.infinitepay.com.br');
+        assert.equal(ok.value.INFINITEPAY_CHECKOUT_HOST, 'checkout.infinitepay.io');
         assert.equal(ok.value.BILLING_RECONCILE_INTERVAL_MINUTES, 10);
         assert.equal(ok.value.BILLING_NOTICE_INTERVAL_MINUTES, 60);
         assert.equal(

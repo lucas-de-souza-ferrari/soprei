@@ -169,13 +169,13 @@ describe('InfinitepayClient.createLink (spec 031, E3)', () => {
             }),
           ),
       });
-    const ok = await make('https://checkout.infinitepay.com.br/abc').createLink(LINK_INPUT);
+    const ok = await make('https://checkout.infinitepay.io/abc').createLink(LINK_INPUT);
     assert.ok(ok.ok);
     for (const url of [
       'https://outro.exemplo/abc',
-      'https://checkout.infinitepay.com.br.atacante.exemplo/abc',
-      'https://user:senha@checkout.infinitepay.com.br/abc',
-      'https://checkout.infinitepay.com.br@atacante.exemplo/abc',
+      'https://checkout.infinitepay.io.atacante.exemplo/abc',
+      'https://user:senha@checkout.infinitepay.io/abc',
+      'https://checkout.infinitepay.io@atacante.exemplo/abc',
     ]) {
       const bad = await make(url).createLink(LINK_INPUT);
       assert.ok(!bad.ok, url);
@@ -305,8 +305,8 @@ describe('InfinitepayClient: motivos finos e 3xx (spec 031, revisão)', () => {
   it('S2: o erro de link inválido leva um motivo fixo (host, esquema, credenciais, formato) sem expor o link', async () => {
     const cases: [string, string][] = [
       ['https://atacante.exemplo/x', 'unexpected_host'],
-      ['http://checkout.infinitepay.com.br/x', 'scheme'],
-      ['https://u:p@checkout.infinitepay.com.br/x', 'credentials'],
+      ['http://checkout.infinitepay.io/x', 'scheme'],
+      ['https://u:p@checkout.infinitepay.io/x', 'credentials'],
       ['não é url', 'format'],
     ];
     for (const [url, detail] of cases) {
