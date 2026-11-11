@@ -1,6 +1,6 @@
 # 034 — Capacidade do canal (worker concorrente e processo robusto)
 
-- **Status:** aprovada (2026-11-11, dono: "Aprovo as recomendações"; D1 a D5 como recomendadas)
+- **Status:** em implementação (E1 a E3 escritas em 2026-11-11, aguardando o CI; E4 e E5 não feitas). Aprovada (2026-11-11, dono: "Aprovo as recomendações"; D1 a D5 como recomendadas)
 - **Branch:** `spec/034-capacidade-do-canal` (uma branch por etapa, se o dono preferir PRs menores; ver "Etapas")
 - **Depende de:** 011 (fila e worker), 013 (agrupamento e `flush`), 005 (rate limit e `TRUST_PROXY`), 004 (métricas). Conversa com a **033** (deploy): esta spec entrega o que a 033 precisa para dimensionar e separar processos; não decide hospedagem.
 - **Esta spec passa pelo `reviewer`** antes do merge (mexe em endpoint público, no limite do webhook e no caminho que carrega o `CompanyId` do job).
@@ -45,7 +45,7 @@ A E1 é a que muda a capacidade. E2 e E3 devem entrar **antes** de subir `QUEUE_
 - Nova variável **`QUEUE_CONCURRENCY`** (inteiro, 1 a 100, padrão conforme a decisão D2). O worker usa esse valor; o log de início informa a concorrência real. Com `1`, o comportamento é o de hoje.
 - Regra cruzada na config: `DB_POOL_MAX` precisa ser **maior ou igual a `QUEUE_CONCURRENCY` + 5** (folga para as requisições HTTP e os timers); senão o boot falha com mensagem clara.
 - O comentário e o texto do `AGENTS.md` que dizem "concorrência 1" passam a descrever a regra nova (a ordem vem de `receivedAt`, não da fila).
-- A janela do lote (013) não muda de regra: continua contando a partir do `createdAt` da mensagem mais antiga pendente, que agora é o instante de recebimento. Efeito: o tempo que a mensagem esperou na fila passa a contar para a janela, o que é o comportamento desejado sob carga.
+- A janela do lote (013) não muda de regra nem de conta: a espera continua sendo calculada pela diferença entre o `createdAt` da mensagem que está sendo agendada e o da mais antiga pendente, que agora são instantes de recebimento. O tempo que o job esperou na fila **não** é descontado da janela (correção feita na implementação: a primeira versão desta spec dizia o contrário).
 
 ### E2: processo robusto
 
@@ -167,3 +167,46 @@ Nenhuma dependência nova. **Decididas pelo dono em 2026-11-11: as cinco pela op
 - Meta, referência do webhook de mensagem de texto (campo `timestamp`): <https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/reference/messages/text>
 - Anthropic, limites de taxa (tiers, RPM, ITPM, OTPM, cabeçalhos): <https://platform.claude.com/docs/en/api/rate-limits>
 - **D5. Escopo do PR.** **Recomendado:** E1 a E3 num PR e E4 e E5 em outro. Alternativa: tudo junto.
+
+## Registro da implementação
+
+**E1 a E3, 2026-11-11, Claude Code (Fable 5.2), branch `spec/034-capacidade-do-canal`. E4 (`PROCESS_ROLE`) e E5 (limite do webhook) não foram feitas** (decisão D5: outro PR).
+
+**Validação feita:** só as checagens estáticas (`pnpm typecheck`, `pnpm lint`, `pnpm format:check`), conforme a regra de validação do `AGENTS.md` (decisão do dono, 2026-11-03). **Nenhum teste foi executado localmente**: os critérios de aceite ficam desmarcados até o CI rodar em Node 22 e na LTS. Os testes abaixo foram escritos e compilam.
+
+| Critério | Teste |
+| --- | --- |
+| E1: `receivedAt` crescente no lote | `whatsapp-webhook.controller.test.ts` ("instante de recebimento (spec 034)"), `channel-intake.service.test.ts` |
+| E1: `createdAt = receivedAt`; sem o campo, relógio do banco | `attendance-batching.service.test.ts` e `attendance-batching.integration.test.ts` ("instante de recebimento") |
+| E1: ordem inversa de processamento | os dois acima e `channel-inbound.processor.test.ts` ("ordem por instante de recebimento") |
+| E1: reentrega não muda o `createdAt` | `attendance-batching.service.test.ts`, `attendance-batching.integration.test.ts` |
+| E1: `receivedAt` implausível ignorado, com `warn` sem texto nem contato | `attendance-batching.service.test.ts` |
+| E1: job antigo sem `receivedAt` | `inbound-job-queue.test.ts`, `channel-inbound.processor.test.ts` |
+| E1: quatro jobs ativos juntos | `inbound-queue.integration.test.ts` ("worker concorrente e métricas") |
+| E1: dez mensagens do mesmo contato; um `flush` por contato | `channel-batching.integration.test.ts` ("worker concorrente no canal") e `inbound-queue.integration.test.ts` |
+| E1: duas empresas com o mesmo contato em paralelo | `channel-batching.integration.test.ts`, `attendance-batching.integration.test.ts`; contexto de log por job em `inbound-queue.integration.test.ts` |
+| E1: regras de config | `config.test.ts` ("capacidade do canal (spec 034)") |
+| E1: concorrência 1 sem mudança | os testes antigos da fila não passam `concurrency` (padrão 1) e há um teste novo do padrão |
+| E2: erros fatais, prazo, sinal repetido | `process-guard.test.ts` |
+| E2: espera do worker derivada e regra cruzada | `config.test.ts` |
+| E3: `queue_jobs` igual a `jobCounts()`; duração e espera; Redis fora | `inbound-queue.integration.test.ts`, `metrics.test.ts` |
+| E3: labels fixos | `metrics.test.ts` |
+
+**Desvios da spec, com motivo:**
+
+- **Erros fatais testados com emissor falso, não em processo filho.** A guarda recebe o alvo (`process`) e a função de saída por injeção; o teste unitário cobre log, métrica, desligamento, código de saída, prazo e sinal repetido sem depender de sinais do sistema (no Windows `SIGTERM` não é entregue a processos filhos da mesma forma). Falta um teste de processo real; fica como pendência.
+- **A regra `DB_POOL_MAX >= QUEUE_CONCURRENCY + 5` e a de `SHUTDOWN_TIMEOUT_MS` só valem com `WHATSAPP_ENABLED=true`**: sem o canal não existe worker, e aplicar a regra sempre quebraria instalações sem canal por uma variável que não usam.
+- **`receivedAt` chega ao atendimento por um terceiro parâmetro** (`AcceptInboundOptions`), não pelo schema da mensagem: `inboundMessageSchema` é o mesmo do simulador, e quem usa o simulador não pode escolher a data da mensagem.
+- **`QueueSettings.concurrency` é opcional** (ausente = 1), para os testes existentes da fila continuarem iguais; em produção `queueSettings(config)` sempre o preenche.
+- **`queue_job_wait_seconds` só é medida na primeira tentativa** (nas seguintes o intervalo inclui o backoff).
+- **Dois testes existentes do webhook mudaram de asserção** (`whatsapp-webhook.controller.test.ts`): comparavam a mensagem inteira entregue ao intake, que agora tem `receivedAt`; passaram a comparar os campos do payload.
+- **O log "encerrando servidor" leva `reason` em vez de `signal`** (o motivo pode ser um erro fatal).
+
+**Limitações conhecidas (além das de "Casos de borda"):**
+
+- A resposta do lote fica com `createdAt` = última do lote + 1 ms. Se o `flush` responder só a primeira mensagem de um lote do webhook antes de a segunda ser gravada, a resposta e a segunda mensagem empatam no mesmo milissegundo e a ordem entre elas cai no `id`. Exige que o `flush` rode entre dois aceites do mesmo lote, o que a janela torna raro.
+- `SHUTDOWN_TIMEOUT_MS` é o prazo do processo; quem o supervisiona (systemd, contêiner) precisa esperar pelo menos esse tempo antes de matar (registrar na 033).
+
+**Arquivos:** `application/ports/inbound-job-queue.ts`, `application/channel/channel-intake.service.ts` e `channel-inbound.processor.ts`, `application/attendance/attendance.service.ts`, `presentation/webhooks/whatsapp-webhook.controller.ts`, `infrastructure/process-guard.ts` (novo), `infrastructure/queue/inbound-queue.ts`, `infrastructure/metrics/`, `infrastructure/config/` (`env.schema.ts`, `whatsapp.ts`, `index.ts`), `src/index.ts`, `.env.example`, `.env.test.example`, `AGENTS.md`. Sem migration, sem dependência nova.
+
+**Passos do dono:** conferir que o `backend/.env` não fixa `DB_POOL_MAX` abaixo de 15 (o padrão novo é 20; com o canal ligado e `DB_POOL_MAX=10` o boot falha com mensagem clara); reiniciar o backend; conferir o tier da conta em `platform.claude.com/usage/limits` antes de subir `QUEUE_CONCURRENCY` além de 10.
