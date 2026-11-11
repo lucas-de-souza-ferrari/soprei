@@ -712,3 +712,198 @@ describe('fila de entrada: agendamento do flush (spec 013)', () => {
     assert.equal(calls[1]?.context.attempt, 2);
   });
 });
+
+describe('fila de entrada: worker concorrente e métricas (spec 034)', () => {
+  /** Porta que segura os jobs dentro do handler até o teste liberar. */
+  function gate(): { readonly wait: Promise<void>; release(): void } {
+    let release: () => void = () => undefined;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return {
+      wait,
+      release: () => {
+        release();
+      },
+    };
+  }
+
+  it('com concurrency 4, quatro jobs de empresas diferentes ficam ativos ao mesmo tempo, cada um no seu contexto', async () => {
+    const { handle, logs } = setup({ settings: { ...SETTINGS, concurrency: 4 } });
+    const hold = gate();
+    let active = 0;
+    let peak = 0;
+    const { handler, calls } = recordingHandler(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      logs.logger.info('job ativo');
+      await hold.wait;
+      // Depois da espera (outros jobs rodaram no meio), o contexto ainda é o deste job.
+      logs.logger.info('job retomado');
+      active -= 1;
+      return 'done' as const;
+    });
+    handle.startWorker(handler);
+    const jobs = [textJob(), textJob(), textJob(), textJob()];
+    for (const job of jobs) assert.ok((await handle.queue.enqueue(job)).ok);
+
+    try {
+      await waitFor(() => active === 4, 'quatro jobs ativos juntos');
+    } finally {
+      hold.release();
+    }
+    await waitFor(() => active === 0 && calls.length === 4, 'os quatro terminaram');
+
+    assert.equal(peak, 4);
+    for (const message of ['job ativo', 'job retomado']) {
+      const lines = logs.lines().filter((entry) => entry.msg === message);
+      assert.deepEqual(
+        new Set(lines.map((entry) => entry.companyId)),
+        new Set(jobs.map((job) => job.companyId)),
+        `cada job loga a sua empresa em "${message}"`,
+      );
+      assert.deepEqual(
+        new Set(lines.map((entry) => entry.requestId)),
+        new Set(jobs.map((job) => job.requestId)),
+      );
+    }
+    assert.ok(!logs.raw().includes(SECRET_TEXT));
+    assert.ok(!logs.raw().includes(CONTACT));
+  });
+
+  it('sem concurrency nas opções (padrão 1), o segundo job só começa quando o primeiro termina', async () => {
+    const { handle } = setup();
+    const hold = gate();
+    let active = 0;
+    let peak = 0;
+    const { handler, calls } = recordingHandler(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await hold.wait;
+      active -= 1;
+      return 'done' as const;
+    });
+    handle.startWorker(handler);
+    assert.ok((await handle.queue.enqueue(textJob())).ok);
+    assert.ok((await handle.queue.enqueue(textJob())).ok);
+
+    try {
+      await waitFor(() => calls.length === 1, 'primeiro job ativo');
+      await sleep(300);
+      assert.equal(calls.length, 1, 'o segundo espera o primeiro');
+    } finally {
+      hold.release();
+    }
+    await waitFor(() => calls.length === 2 && active === 0, 'os dois terminaram');
+    assert.equal(peak, 1);
+  });
+
+  it('com concurrency 4, o flush de um mesmo contato nunca roda duas vezes ao mesmo tempo', async () => {
+    const { handle } = setup({ settings: { ...SETTINGS, concurrency: 4 } });
+    const contact = flushJob();
+    const other = flushJob();
+    const activeByCompany = new Map<string, number>();
+    let overlap = false;
+    let sawBothCompanies = false;
+    const { handler, calls } = recordingHandler(async (job) => {
+      const current = (activeByCompany.get(job.companyId) ?? 0) + 1;
+      activeByCompany.set(job.companyId, current);
+      if (current > 1) overlap = true;
+      if (activeByCompany.size === 2 && [...activeByCompany.values()].every((n) => n > 0)) {
+        sawBothCompanies = true;
+      }
+      await sleep(250);
+      activeByCompany.set(job.companyId, (activeByCompany.get(job.companyId) ?? 1) - 1);
+      return 'done' as const;
+    });
+    handle.startWorker(handler);
+
+    // O mesmo contato pede resposta três vezes enquanto o primeiro flush roda; outro contato em paralelo.
+    assert.ok((await handle.queue.scheduleFlush(contact, { delayMs: 0, mode: 'ensure' })).ok);
+    assert.ok((await handle.queue.scheduleFlush(other, { delayMs: 0, mode: 'ensure' })).ok);
+    await waitFor(() => calls.length >= 2, 'os dois contatos em atendimento');
+    assert.ok((await handle.queue.scheduleFlush(contact, { delayMs: 0, mode: 'ensure' })).ok);
+    assert.ok((await handle.queue.scheduleFlush(contact, { delayMs: 0, mode: 'slide' })).ok);
+
+    // O flush guardado (`keepLastIfActive`) roda depois que o ativo termina.
+    await waitFor(() => calls.length >= 3, 'o flush guardado rodou');
+    await waitFor(() => [...activeByCompany.values()].every((n) => n === 0), 'tudo terminou');
+    await sleep(400);
+
+    assert.equal(overlap, false, 'nunca dois flush do mesmo contato ao mesmo tempo');
+    assert.equal(sawBothCompanies, true, 'contatos diferentes rodaram em paralelo');
+    assert.equal(
+      calls.filter((call) => call.job.companyId === other.companyId).length,
+      1,
+      'o outro contato rodou uma vez',
+    );
+  });
+
+  it('queue_jobs em /metrics bate com jobCounts()', async () => {
+    const { handle, metrics } = setup();
+    metrics.bindQueue(INBOUND_QUEUE_NAME, () => handle.jobCounts());
+    for (let i = 0; i < 3; i += 1) assert.ok((await handle.queue.enqueue(textJob())).ok);
+    assert.ok(
+      (await handle.queue.scheduleFlush(flushJob(), { delayMs: 60_000, mode: 'slide' })).ok,
+    );
+
+    const counts = await handle.jobCounts();
+    const body = await metrics.render();
+
+    assert.equal(counts.waiting, 3);
+    assert.equal(counts.delayed, 1);
+    for (const state of ['waiting', 'active', 'delayed', 'failed'] as const) {
+      assert.ok(
+        body.includes(
+          `queue_jobs{queue="${INBOUND_QUEUE_NAME}",state="${state}"} ${String(counts[state] ?? 0)}\n`,
+        ),
+        state,
+      );
+    }
+  });
+
+  it('cada job processado deixa uma observação de duração e de espera, com o tipo certo', async () => {
+    const { handle, metrics } = setup({ settings: { ...SETTINGS, concurrency: 2 } });
+    const { handler, calls } = recordingHandler();
+    handle.startWorker(handler);
+    assert.ok((await handle.queue.enqueue(textJob())).ok);
+    assert.ok((await handle.queue.scheduleFlush(flushJob(), { delayMs: 0, mode: 'ensure' })).ok);
+    await waitFor(() => calls.length === 2, 'os dois jobs');
+
+    await waitFor(async () => {
+      const body = await metrics.render();
+      return ['text', 'flush'].every(
+        (kind) =>
+          body.includes(
+            `queue_job_duration_seconds_count{queue="${INBOUND_QUEUE_NAME}",kind="${kind}"} 1`,
+          ) &&
+          body.includes(
+            `queue_job_wait_seconds_count{queue="${INBOUND_QUEUE_NAME}",kind="${kind}"} 1`,
+          ),
+      );
+    }, 'duração e espera observadas por tipo');
+  });
+
+  it('Redis da fila fora: /metrics responde, queue_jobs fica sem amostra e o erro é contado', async () => {
+    const logs = captureLogs();
+    const metrics = createMetrics();
+    const handle = createInboundQueue({
+      redisUrl: withPort(config.REDIS_URL, await getClosedPort()),
+      settings: SETTINGS,
+      logger: logs.logger,
+      metrics,
+      prefix: uniquePrefix(),
+      enqueueTimeoutMs: 300,
+    });
+    open.push(handle);
+    metrics.bindQueue(INBOUND_QUEUE_NAME, () => handle.jobCounts());
+
+    const begin = Date.now();
+    const body = await metrics.render();
+
+    assert.ok(Date.now() - begin < 5_000, 'a coleta não fica pendurada');
+    assert.ok(!body.includes('queue_jobs{'));
+    assert.ok(body.includes('queue_metrics_errors_total 1'));
+    assert.ok(body.includes('process_cpu_user_seconds_total'));
+  });
+});

@@ -48,6 +48,21 @@ export interface WhatsappWebhookControllerOptions {
   /** Entrada do canal: resolve a empresa pelo número do negócio e enfileira. */
   readonly intake: Pick<ChannelIntakeService, 'accept'>;
   readonly metrics?: WebhookMetrics;
+  /** Relógio do carimbo de recebimento das mensagens (padrão: relógio do servidor; testes injetam). */
+  readonly now?: () => Date;
+}
+
+/**
+ * Carimba cada mensagem do lote com o instante de recebimento (spec 034): a de índice `i` recebe
+ * `base + i ms`, então duas mensagens do mesmo lote nunca empatam e a ordem do payload é preservada
+ * mesmo com os jobs processados em paralelo.
+ */
+export function stampReceivedAt<T extends object>(
+  messages: readonly T[],
+  base: Date,
+): (T & { readonly receivedAt: Date })[] {
+  const baseMs = base.getTime();
+  return messages.map((message, index) => ({ ...message, receivedAt: new Date(baseMs + index) }));
 }
 
 /** `hub.challenge` é um inteiro na prática; aceita só um token simples, nada que possa virar markup. */
@@ -74,7 +89,7 @@ const verificationQuerySchema = z.object({
  */
 export const whatsappWebhookController: FastifyPluginCallback<WhatsappWebhookControllerOptions> = (
   app,
-  { appSecret, verifyToken, intake, metrics },
+  { appSecret, verifyToken, intake, metrics, now = () => new Date() },
   done,
 ) => {
   const config = rateLimitProfile('webhook');
@@ -175,7 +190,7 @@ export const whatsappWebhookController: FastifyPluginCallback<WhatsappWebhookCon
       const summary: IntakeSummary =
         parsed.messages.length === 0
           ? { enqueued: 0, discarded: 0, failed: 0 }
-          : await intake.accept(parsed.messages, request.id);
+          : await intake.accept(stampReceivedAt(parsed.messages, now()), request.id);
 
       if (summary.failed > 0) {
         count('enqueue_failed');

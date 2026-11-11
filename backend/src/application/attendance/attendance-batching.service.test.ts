@@ -16,6 +16,8 @@ import {
   type AttendanceMetrics,
   AttendanceService,
   type BatchResult,
+  RECEIVED_AT_MAX_FUTURE_MS,
+  RECEIVED_AT_MAX_PAST_MS,
 } from './attendance.service.js';
 import type { BatchLimits } from './attendance.schemas.js';
 
@@ -695,5 +697,118 @@ describe('privacidade no agrupamento (spec 013)', () => {
     assert.ok(raw.includes('mensagem do contato aceita'));
     assert.ok(raw.includes('lote de mensagens atendido'));
     assert.deepEqual(h.metrics.batches, [{ size: 2, result: 'answered' }]);
+  });
+});
+
+describe('AttendanceService.acceptInboundMessage: instante de recebimento (spec 034)', () => {
+  // O relógio dos testes começa em 2026-01-01T00:00:00Z e anda 10 ms por leitura.
+  const CLOCK_START = Date.UTC(2026, 0, 1);
+  const received = (offsetMs: number): Date => new Date(CLOCK_START - 5_000 + offsetMs);
+
+  const acceptAt = (
+    h: Harness,
+    company: Company,
+    text: string,
+    externalId: string,
+    receivedAt?: Date,
+  ) =>
+    h.service.acceptInboundMessage(
+      company.id,
+      { contactRef: 'contato-034', text, externalId },
+      receivedAt === undefined ? {} : { receivedAt },
+    );
+
+  it('a mensagem é gravada com createdAt = receivedAt', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'recebida-a');
+    const at = received(0);
+
+    const accepted = await acceptAt(h, company, 'oi', 'wamid.034.1', at);
+
+    assert.equal(accepted.status, 'accepted');
+    assert.equal(accepted.messageCreatedAt.getTime(), at.getTime());
+    const [stored] = h.store.allMessages();
+    assert.equal(stored?.createdAt.getTime(), at.getTime());
+  });
+
+  it('sem receivedAt vale o relógio de quem grava (comportamento anterior)', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'recebida-b');
+    const accepted = await acceptAt(h, company, 'oi', 'wamid.034.2');
+    assert.ok(accepted.messageCreatedAt.getTime() > CLOCK_START);
+  });
+
+  it('duas mensagens gravadas na ordem inversa à de recebimento ficam pendentes e vão ao modelo na ordem de recebimento', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'recebida-c');
+    // A segunda mensagem do contato é processada ANTES da primeira (jobs em paralelo).
+    await acceptAt(h, company, 'segunda', 'wamid.034.b', received(1));
+    await acceptAt(h, company, 'primeira', 'wamid.034.a', received(0));
+
+    const response = await h.service.respondToPending(company.id, 'contato-034', LIMITS);
+
+    assert.equal(response.outcome, 'answered');
+    assert.equal(response.batchSize, 2);
+    assert.equal(h.llm.calls[0]?.userMessage, 'primeira\nsegunda');
+    const contactMessages = sorted(h.store.allMessages()).filter((m) => m.role === 'USER');
+    assert.deepEqual(
+      contactMessages.map((m) => m.content),
+      ['primeira', 'segunda'],
+    );
+  });
+
+  it('reentrega do mesmo externalId com outro receivedAt não muda o createdAt gravado', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'recebida-d');
+    const first = await acceptAt(h, company, 'oi', 'wamid.034.dup', received(0));
+
+    const again = await acceptAt(h, company, 'oi', 'wamid.034.dup', received(3_000));
+
+    assert.equal(again.status, 'pending');
+    assert.equal(again.messageId, first.messageId);
+    assert.equal(again.messageCreatedAt.getTime(), first.messageCreatedAt.getTime());
+    assert.equal(h.store.allMessages().length, 1);
+  });
+
+  it('receivedAt velho demais, no futuro ou inválido é ignorado, com warn sem texto nem contato', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'recebida-e');
+    const tooOld = new Date(CLOCK_START - RECEIVED_AT_MAX_PAST_MS - 60_000);
+    const tooNew = new Date(CLOCK_START + RECEIVED_AT_MAX_FUTURE_MS + 600_000);
+
+    const old = await acceptAt(h, company, SECRET_TEXT, 'wamid.034.old', tooOld);
+    const future = await acceptAt(h, company, SECRET_TEXT, 'wamid.034.new', tooNew);
+    const invalid = await acceptAt(h, company, SECRET_TEXT, 'wamid.034.nan', new Date(Number.NaN));
+
+    for (const accepted of [old, future, invalid]) {
+      assert.equal(accepted.status, 'accepted');
+      // Relógio de quem grava: logo depois do início do relógio de teste.
+      assert.ok(accepted.messageCreatedAt.getTime() > CLOCK_START);
+      assert.ok(accepted.messageCreatedAt.getTime() < CLOCK_START + 60_000);
+    }
+    const warns = h.logs
+      .lines()
+      .filter(
+        (line) =>
+          line.msg === 'instante de recebimento fora da faixa aceita; usando o relógio do banco',
+      );
+    assert.equal(warns.length, 3);
+    const raw = h.logs.raw();
+    assert.ok(!raw.includes(SECRET_TEXT));
+    assert.ok(!raw.includes('contato-034'));
+  });
+
+  it('o limite da faixa é aceito (exatamente 24 h atrás e 1 min à frente da leitura do relógio)', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'recebida-f');
+    // Folga de 1 s para as leituras do relógio de teste (10 ms cada) até a checagem.
+    const edgePast = new Date(CLOCK_START - RECEIVED_AT_MAX_PAST_MS + 1_000);
+    const edgeFuture = new Date(CLOCK_START + RECEIVED_AT_MAX_FUTURE_MS);
+
+    const past = await acceptAt(h, company, 'a', 'wamid.034.p', edgePast);
+    const future = await acceptAt(h, company, 'b', 'wamid.034.f', edgeFuture);
+
+    assert.equal(past.messageCreatedAt.getTime(), edgePast.getTime());
+    assert.equal(future.messageCreatedAt.getTime(), edgeFuture.getTime());
   });
 });

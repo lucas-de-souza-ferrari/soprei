@@ -108,6 +108,24 @@ export interface ChannelSendSample {
   readonly durationSeconds: number;
 }
 
+/** Estados de job expostos em `queue_jobs` (spec 034; conjunto fixo). */
+export const QUEUE_JOB_STATES = ['waiting', 'active', 'delayed', 'failed'] as const;
+/** Tipos de job da fila do canal (label `kind`; conjunto fixo). */
+export type QueueJobKind = 'text' | 'notice' | 'flush';
+/** Prazo da leitura das contagens da fila durante a coleta de `/metrics`. */
+export const QUEUE_COUNTS_TIMEOUT_MS = 1_000;
+/** De 5 ms a 60 s: cobre o aceite (banco) e o turno inteiro (modelo + envio). */
+export const QUEUE_JOB_DURATION_BUCKETS: readonly number[] = [
+  0.005, 0.025, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60,
+];
+/** De 10 ms a 5 min: espera na fila além do atraso agendado. */
+export const QUEUE_JOB_WAIT_BUCKETS: readonly number[] = [
+  0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300,
+];
+
+/** Erro fatal do processo (spec 034). */
+export type ProcessFatalErrorKind = 'unhandled_rejection' | 'uncaught_exception';
+
 /** Resultado de um job da fila: `completed`, `retried`, `failed` ou `discarded`. */
 export type QueueJobResult = 'completed' | 'retried' | 'failed' | 'discarded';
 
@@ -326,6 +344,19 @@ export interface Metrics {
   countCompanyInvitationEmail(result: InvitationEmailResult): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
+  /**
+   * Liga `queue_jobs{queue,state}` às contagens da fila (spec 034), lidas só na coleta e com prazo
+   * curto. Falha ou demora deixam o gauge sem amostra e contam `queue_metrics_errors_total`.
+   */
+  bindQueue(queue: string, source: () => Promise<Record<string, number>>): void;
+  /** Um job rodou no handler: duração e, se informada, a espera na fila (spec 034). */
+  observeQueueJob(
+    queue: string,
+    kind: QueueJobKind,
+    sample: { readonly durationSeconds: number; readonly waitSeconds?: number },
+  ): void;
+  /** Erro fatal não tratado no processo (spec 034). */
+  countProcessFatalError(kind: ProcessFatalErrorKind): void;
 }
 
 /** De 5 ms a 10 s. */
@@ -688,6 +719,64 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const queueJobDuration = new Histogram({
+    name: 'queue_job_duration_seconds',
+    help: 'Tempo de um job da fila dentro do handler, por fila e tipo (text, notice, flush)',
+    labelNames: ['queue', 'kind'] as const,
+    buckets: [...QUEUE_JOB_DURATION_BUCKETS],
+    registers: [registry],
+  });
+  const queueJobWait = new Histogram({
+    name: 'queue_job_wait_seconds',
+    help: 'Espera de um job na fila além do atraso agendado, por fila e tipo',
+    labelNames: ['queue', 'kind'] as const,
+    buckets: [...QUEUE_JOB_WAIT_BUCKETS],
+    registers: [registry],
+  });
+  const queueMetricsErrors = new Counter({
+    name: 'queue_metrics_errors_total',
+    help: 'Falhas ao ler as contagens da fila durante a coleta de métricas',
+    registers: [registry],
+  });
+  const processFatalErrors = new Counter({
+    name: 'process_fatal_errors_total',
+    help: 'Erros fatais não tratados no processo por tipo (unhandled_rejection, uncaught_exception)',
+    labelNames: ['kind'] as const,
+    registers: [registry],
+  });
+  const queueSources = new Map<string, () => Promise<Record<string, number>>>();
+  new Gauge({
+    name: 'queue_jobs',
+    help: 'Jobs da fila por estado (waiting, active, delayed, failed)',
+    labelNames: ['queue', 'state'] as const,
+    registers: [registry],
+    async collect() {
+      // Sem amostra antiga: se a leitura falhar, a série some em vez de mostrar um valor velho.
+      this.reset();
+      for (const [queue, source] of queueSources) {
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          const counts = await Promise.race([
+            source(),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => {
+                reject(new Error('prazo da leitura da fila'));
+              }, QUEUE_COUNTS_TIMEOUT_MS);
+            }),
+          ]);
+          for (const state of QUEUE_JOB_STATES) {
+            this.set({ queue, state }, counts[state] ?? 0);
+          }
+        } catch {
+          // Nunca o erro em si (o ioredis anexa os argumentos do comando): só a contagem.
+          queueMetricsErrors.inc();
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      }
+    },
+  });
+
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
     name: 'db_pool_connections',
@@ -862,6 +951,16 @@ export function createMetrics(): Metrics {
     },
     bindPool(source) {
       poolSource = source;
+    },
+    bindQueue(queue, source) {
+      queueSources.set(queue, source);
+    },
+    observeQueueJob(queue, kind, { durationSeconds, waitSeconds }) {
+      queueJobDuration.observe({ queue, kind }, durationSeconds);
+      if (waitSeconds !== undefined) queueJobWait.observe({ queue, kind }, waitSeconds);
+    },
+    countProcessFatalError(kind) {
+      processFatalErrors.inc({ kind });
     },
   };
 }

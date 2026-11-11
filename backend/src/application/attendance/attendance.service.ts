@@ -241,6 +241,22 @@ export interface AttendanceResult {
   readonly sources: readonly KnowledgeSource[];
 }
 
+/**
+ * Faixa em que o instante de recebimento informado pelo canal é aceito (spec 034). Fora dela (job
+ * muito antigo, relógio errado ou job adulterado) a mensagem usa o relógio do banco.
+ */
+export const RECEIVED_AT_MAX_PAST_MS = 24 * 60 * 60 * 1000;
+export const RECEIVED_AT_MAX_FUTURE_MS = 60 * 1000;
+
+export interface AcceptInboundOptions {
+  /**
+   * Instante em que o webhook recebeu a mensagem (spec 034): vira o `createdAt` dela, para que a
+   * ordem das mensagens do contato não dependa da ordem em que os jobs são processados. Ausente ou
+   * implausível: vale o relógio do banco.
+   */
+  readonly receivedAt?: Date;
+}
+
 /** O que `acceptInboundMessage` fez com a mensagem do contato (spec 013). */
 export interface AcceptedMessage {
   readonly conversationId: string;
@@ -372,6 +388,7 @@ export class AttendanceService {
   async acceptInboundMessage(
     companyId: CompanyId,
     rawInput: InboundMessage,
+    options: AcceptInboundOptions = {},
   ): Promise<AcceptedMessage> {
     const input = inboundMessageSchema.parse(rawInput);
     // Empresa inexistente/removido (404) ou suspenso (403): antes de gravar qualquer coisa.
@@ -380,7 +397,11 @@ export class AttendanceService {
       throw new ForbiddenError('Empresa suspensa', { context: { companyId } });
     }
 
-    const stored = await this.storeInbound(companyId, input);
+    const stored = await this.storeInbound(
+      companyId,
+      input,
+      this.plausibleReceivedAt(companyId, options.receivedAt),
+    );
     const [oldest] = await this.deps.messages.listPending(
       companyId,
       stored.message.conversationId,
@@ -668,6 +689,7 @@ export class AttendanceService {
   private async storeInbound(
     companyId: CompanyId,
     input: InboundMessage,
+    createdAt?: Date,
   ): Promise<{ readonly message: Message; readonly status: AcceptedMessage['status'] }> {
     const { contactRef, text, externalId } = input;
 
@@ -685,6 +707,7 @@ export class AttendanceService {
           role: 'USER',
           content: text,
           ...(externalId === undefined ? {} : { externalId }),
+          ...(createdAt === undefined ? {} : { createdAt }),
         });
       });
       return { message, status: 'accepted' };
@@ -695,6 +718,29 @@ export class AttendanceService {
       if (existing === null) throw error;
       return existing;
     }
+  }
+
+  /** O `receivedAt` do canal, se estiver numa faixa plausível; senão `undefined` (relógio do banco). */
+  private plausibleReceivedAt(
+    companyId: CompanyId,
+    receivedAt: Date | undefined,
+  ): Date | undefined {
+    if (receivedAt === undefined) return undefined;
+    const receivedMs = receivedAt.getTime();
+    const nowMs = this.now().getTime();
+    if (
+      Number.isFinite(receivedMs) &&
+      receivedMs >= nowMs - RECEIVED_AT_MAX_PAST_MS &&
+      receivedMs <= nowMs + RECEIVED_AT_MAX_FUTURE_MS
+    ) {
+      return receivedAt;
+    }
+    // Só o id da empresa: nem o instante informado nem nada da mensagem.
+    this.deps.logger.warn(
+      { companyId },
+      'instante de recebimento fora da faixa aceita; usando o relógio do banco',
+    );
+    return undefined;
   }
 
   private async inspectAccepted(

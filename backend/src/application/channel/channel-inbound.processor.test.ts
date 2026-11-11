@@ -214,7 +214,8 @@ function setup(
 /** Os métodos do serviço de atendimento ligados à instância (para poder sobrescrever só alguns). */
 function bind(service: AttendanceService): InboundAttendance {
   return {
-    acceptInboundMessage: (companyId, input) => service.acceptInboundMessage(companyId, input),
+    acceptInboundMessage: (companyId, input, options) =>
+      service.acceptInboundMessage(companyId, input, options),
     respondToPending: (companyId, contactRef, limits, options) =>
       service.respondToPending(companyId, contactRef, limits, options),
     hasPendingMessages: (companyId, contactRef) =>
@@ -1402,5 +1403,42 @@ describe('ChannelInboundProcessor: medição de respostas enviadas (spec 031, E2
     assert.equal(await h.service.hasPendingMessages(company.id, CONTACT), true);
     // Nenhum próximo turno é agendado para o excedente: nada foi respondido.
     assert.equal(h.scheduler.calls.filter((call) => call.schedule.delayMs === 0).length, 0);
+  });
+});
+
+describe('ChannelInboundProcessor: ordem por instante de recebimento (spec 034)', () => {
+  // O relógio do teste começa em 2026-01-01T00:00:00Z; os carimbos ficam pouco antes dele.
+  const receivedAt = (offsetMs: number): string =>
+    new Date(Date.UTC(2026, 0, 1) - 5_000 + offsetMs).toISOString();
+
+  it('jobs text do mesmo contato processados na ordem inversa: o lote vai ao modelo na ordem de recebimento', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'ordem', '555034');
+    // Com o worker concorrente, o job da segunda mensagem pode terminar antes do da primeira.
+    await h.processor.process(
+      textJob(company.id, { text: 'dois', externalId: 'wamid.o2', receivedAt: receivedAt(1) }),
+      MORE,
+    );
+    await h.processor.process(
+      textJob(company.id, { text: 'um', externalId: 'wamid.o1', receivedAt: receivedAt(0) }),
+      MORE,
+    );
+
+    assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
+
+    assert.equal(h.llm.calls.length, 1);
+    assert.equal(h.llm.calls[0]?.userMessage, 'um\ndois');
+    assert.equal(h.sender.calls.length, 1);
+    const raw = h.logs.raw();
+    assert.ok(!raw.includes(CONTACT));
+  });
+
+  it('job antigo, sem receivedAt, é aceito e respondido como antes', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'legado', '555035');
+    assert.equal(await h.processor.process(textJob(company.id), MORE), 'done');
+    assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
+    assert.equal(h.llm.calls.length, 1);
+    assert.equal(h.sender.calls.length, 1);
   });
 });

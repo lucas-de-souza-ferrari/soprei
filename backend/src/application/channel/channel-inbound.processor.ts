@@ -17,6 +17,7 @@ import type { SecretString } from '../../shared/types/index.js';
 import { messageRef } from '../../shared/utils/index.js';
 import { describeError } from './describe-error.js';
 import type {
+  AcceptInboundOptions,
   AcceptedMessage,
   PendingResponse,
   RespondToPendingOptions,
@@ -46,7 +47,11 @@ import type { ChannelLogger } from './channel-intake.service.js';
 
 /** O que o processador precisa do atendimento (o `AttendanceService` satisfaz). */
 export interface InboundAttendance {
-  acceptInboundMessage(companyId: CompanyId, input: InboundMessage): Promise<AcceptedMessage>;
+  acceptInboundMessage(
+    companyId: CompanyId,
+    input: InboundMessage,
+    options?: AcceptInboundOptions,
+  ): Promise<AcceptedMessage>;
   respondToPending(
     companyId: CompanyId,
     contactRef: string,
@@ -198,11 +203,12 @@ export class ChannelInboundProcessor {
     let delayMs: number;
     let mode: 'slide' | 'ensure';
     try {
-      const accepted = await this.deps.attendance.acceptInboundMessage(companyId, {
-        contactRef: job.contactRef,
-        text: job.text,
-        externalId: job.externalId,
-      });
+      const accepted = await this.deps.attendance.acceptInboundMessage(
+        companyId,
+        { contactRef: job.contactRef, text: job.text, externalId: job.externalId },
+        // Spec 034: a mensagem é gravada com o instante em que o webhook a recebeu.
+        job.receivedAt === undefined ? {} : { receivedAt: new Date(job.receivedAt) },
+      );
       if (accepted.status === 'answered') {
         this.deps.logger.info(
           { companyId, ...refs },

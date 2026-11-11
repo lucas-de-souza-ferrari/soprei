@@ -708,3 +708,140 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
     );
   });
 });
+
+describe('worker concorrente no canal (spec 034)', () => {
+  /** Fila com quatro jobs ao mesmo tempo (o padrão dos outros testes deste arquivo é 1). */
+  const CONCURRENT_QUEUE = { ...QUEUE_SETTINGS, concurrency: 4 };
+
+  /** Um único webhook com várias mensagens de texto do mesmo contato, na ordem dada. */
+  async function sendMany(
+    h: Harness,
+    number: string,
+    contact: string,
+    texts: readonly string[],
+  ): Promise<void> {
+    const body = JSON.stringify(
+      webhookPayload([
+        {
+          phoneNumberId: number,
+          messages: texts.map((text) => ({
+            id: fakeWamid(contact, `-${randomUUID()}`),
+            from: contact,
+            text,
+          })),
+        },
+      ]),
+    );
+    const response = await h.app.inject({
+      method: 'POST',
+      url: '/webhooks/whatsapp',
+      headers: {
+        'content-type': 'application/json',
+        'x-hub-signature-256': signWebhookBody(body, APP_SECRET),
+      },
+      payload: body,
+    });
+    assert.equal(response.statusCode, 200);
+  }
+
+  it('dez mensagens seguidas do mesmo contato, com quatro jobs em paralelo: nenhuma pulada, nenhuma duplicada, na ordem de recebimento', async () => {
+    await withHarness(
+      { windowMs: 1_500 },
+      async (h) => {
+        const number = phoneNumberId();
+        const company = await newCompany('conc-ordem', number);
+        const contact = contactNumber();
+        const texts = Array.from({ length: 10 }, (_, i) => `m${String(i + 1).padStart(2, '0')}`);
+
+        await sendMany(h, number, contact, texts);
+        await waitFor(async () => {
+          const rows = await stored(company, contact);
+          const users = rows.filter((m) => m.role === 'USER');
+          return users.length === 10 && users.every((m) => m.answeredById !== null);
+        }, 'as dez mensagens respondidas');
+        await waitFor(async () => (await sentCount(company, contact)) >= 1, 'resposta enviada');
+        await sleep(400);
+
+        const rows = await stored(company, contact);
+        // Gravadas em paralelo, mas ordenadas pelo instante de recebimento (a ordem do payload).
+        assert.deepEqual(
+          rows.filter((m) => m.role === 'USER').map((m) => m.content),
+          texts,
+        );
+        // O que o modelo recebeu, somando os turnos: cada mensagem uma vez, na ordem.
+        assert.deepEqual(
+          h.llm.calls.flatMap((call) => call.userMessage.split('\n')),
+          texts,
+        );
+        const replies = rows.filter((m) => m.role === 'ASSISTANT');
+        assert.equal(replies.length, h.llm.calls.length, 'uma resposta por turno');
+        assert.equal(graph.requests.length, replies.length, 'um envio por resposta');
+        const raw = h.logs.raw();
+        assert.ok(!raw.includes(contact));
+        assert.ok(!raw.includes('m01'));
+      },
+      CONCURRENT_QUEUE,
+    );
+  });
+
+  it('duas empresas com o mesmo contato atendidas em paralelo: histórico, persona, resposta e número de envio não se misturam', async () => {
+    await withHarness(
+      { windowMs: 1_000 },
+      async (h) => {
+        const numberA = phoneNumberId();
+        const numberB = phoneNumberId();
+        const companyA = await newCompany('conc-a', numberA);
+        const companyB = await newCompany('conc-b', numberB);
+        const same = contactNumber();
+
+        await Promise.all([
+          sendMany(h, numberA, same, ['A-um', 'A-dois', 'A-tres']),
+          sendMany(h, numberB, same, ['B-um', 'B-dois', 'B-tres']),
+        ]);
+        await waitFor(
+          async () =>
+            (await sentCount(companyA, same)) === 1 && (await sentCount(companyB, same)) === 1,
+          'uma resposta por empresa',
+        );
+        await sleep(300);
+
+        const byText = new Map(h.llm.calls.map((call) => [call.userMessage, call]));
+        assert.deepEqual([...byText.keys()].sort(), [
+          'A-um\nA-dois\nA-tres',
+          'B-um\nB-dois\nB-tres',
+        ]);
+        const callA = byText.get('A-um\nA-dois\nA-tres');
+        const callB = byText.get('B-um\nB-dois\nB-tres');
+        assert.match(callA?.systemPrompt ?? '', /conc-a/);
+        assert.doesNotMatch(callA?.systemPrompt ?? '', /conc-b/);
+        assert.match(callB?.systemPrompt ?? '', /conc-b/);
+        assert.doesNotMatch(callB?.systemPrompt ?? '', /conc-a/);
+        assert.deepEqual(callA?.history, []);
+        assert.deepEqual(callB?.history, []);
+
+        // Cada empresa só tem as suas mensagens e a sua resposta, enviada pelo seu número.
+        for (const [company, number, prefix, foreign] of [
+          [companyA, numberA, 'A-', 'B-'],
+          [companyB, numberB, 'B-', 'A-'],
+        ] as const) {
+          const rows = await stored(company, same);
+          const users = rows.filter((m) => m.role === 'USER');
+          assert.deepEqual(
+            users.map((m) => m.content),
+            [`${prefix}um`, `${prefix}dois`, `${prefix}tres`],
+          );
+          assert.ok(rows.every((m) => !m.content.includes(foreign)));
+          assert.equal(
+            graph.requests.filter(
+              (request) =>
+                request.phoneNumberId === number && (request.body as { to: string }).to === same,
+            ).length,
+            1,
+          );
+        }
+        assert.equal(graph.requests.length, 2);
+      },
+      CONCURRENT_QUEUE,
+    );
+  });
+});

@@ -5,6 +5,30 @@ import { isValidSmtpHost } from './email.js';
 import { parseTrustProxy, type TrustProxySetting } from './trust-proxy.js';
 
 /** Mínimo do `JWT_SECRET` (spec 007): 32 caracteres, ou seja, 256 bits para o HS256. */
+/** Folga somada à espera do worker no encerramento (spec 034). */
+export const WORKER_CLOSE_MARGIN_MS = 5_000;
+
+/**
+ * Quanto o worker espera os jobs ativos no encerramento (spec 034): o turno mais longo possível
+ * (prazo do modelo, ou o do turno com ferramentas da 028 quando ligado) mais o envio ao canal e uma
+ * folga. Derivado da config, para não cortar um turno que ainda está dentro do prazo.
+ */
+export function workerCloseTimeoutMs(env: {
+  readonly LLM_TIMEOUT_MS: number;
+  readonly WHATSAPP_SEND_TIMEOUT_MS: number;
+  readonly SCHEDULE_AI_ENABLED: boolean;
+}): number {
+  const turnMs = env.SCHEDULE_AI_ENABLED
+    ? Math.max(env.LLM_TIMEOUT_MS, SCHEDULE_AI_TURN_TIMEOUT_MS)
+    : env.LLM_TIMEOUT_MS;
+  return turnMs + env.WHATSAPP_SEND_TIMEOUT_MS + WORKER_CLOSE_MARGIN_MS;
+}
+
+/**
+ * Folga do pool do banco além dos jobs do canal (spec 034): conexões para as requisições HTTP e as
+ * tarefas periódicas enquanto todos os jobs estão ativos.
+ */
+export const DB_POOL_QUEUE_HEADROOM = 5;
 export const JWT_SECRET_MIN_LENGTH = 32;
 export const METRICS_TOKEN_MIN_LENGTH = 32;
 
@@ -84,7 +108,8 @@ export const envSchema = z
     REDIS_URL: z
       .string({ error: 'variável obrigatória ausente' })
       .regex(/^rediss?:\/\//, 'deve ser uma URL redis:// ou rediss://'),
-    DB_POOL_MAX: z.coerce.number().int().min(1).max(200).default(10),
+    // Com o canal ligado precisa ser >= QUEUE_CONCURRENCY + DB_POOL_QUEUE_HEADROOM (spec 034).
+    DB_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
     DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1).max(3_600_000).default(30_000),
     DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1).max(120_000).default(5_000),
     DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).max(600_000).default(30_000),
@@ -224,6 +249,11 @@ export const envSchema = z
     QUEUE_BACKOFF_MS: z.coerce.number().int().min(1).max(3_600_000).default(10_000),
     QUEUE_KEEP_COMPLETED_SECONDS: z.coerce.number().int().min(1).max(2_592_000).default(3_600),
     QUEUE_KEEP_FAILED_SECONDS: z.coerce.number().int().min(1).max(2_592_000).default(86_400),
+    // Jobs processados ao mesmo tempo pelo worker (spec 034). A ordem das mensagens de um contato vem
+    // do instante de recebimento no webhook, não da fila; 1 reproduz o comportamento antigo.
+    QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
+    // Prazo global do desligamento gracioso (spec 034): passou disso, o processo sai com código 1.
+    SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(300_000).default(60_000),
     // Agrupamento de mensagens rápidas do canal (spec 013). Janela deslizante com teto de espera;
     // `CHANNEL_BATCH_WINDOW_MS=0` desliga a espera. Só valem com o canal habilitado.
     CHANNEL_BATCH_WINDOW_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
@@ -499,6 +529,12 @@ function refineWhatsapp(
     readonly WHATSAPP_API_BASE_URL: string;
     readonly QUEUE_ATTEMPTS: number;
     readonly QUEUE_BACKOFF_MS: number;
+    readonly QUEUE_CONCURRENCY: number;
+    readonly DB_POOL_MAX: number;
+    readonly SHUTDOWN_TIMEOUT_MS: number;
+    readonly LLM_TIMEOUT_MS: number;
+    readonly WHATSAPP_SEND_TIMEOUT_MS: number;
+    readonly SCHEDULE_AI_ENABLED: boolean;
     readonly ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: number;
     readonly CHANNEL_BATCH_WINDOW_MS: number;
     readonly CHANNEL_BATCH_MAX_WAIT_MS: number;
@@ -585,6 +621,24 @@ function refineWhatsapp(
       code: 'custom',
       path: ['WHATSAPP_VERIFY_TOKEN'],
       message: `precisa ter no mínimo ${String(WHATSAPP_VERIFY_TOKEN_MIN_LENGTH)} caracteres`,
+    });
+  }
+  // Cada job ativo pode segurar uma conexão; o resto do pool atende o HTTP e as tarefas periódicas.
+  if (env.DB_POOL_MAX < env.QUEUE_CONCURRENCY + DB_POOL_QUEUE_HEADROOM) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['DB_POOL_MAX'],
+      message: `DB_POOL_MAX (${String(env.DB_POOL_MAX)}) precisa ser maior ou igual a QUEUE_CONCURRENCY (${String(env.QUEUE_CONCURRENCY)}) + ${String(DB_POOL_QUEUE_HEADROOM)}, senão os jobs do canal esgotam o pool do banco`,
+    });
+  }
+  // O desligamento espera os jobs ativos (um turno inteiro: modelo + envio); com prazo global menor
+  // que isso, todo deploy cortaria respostas em andamento.
+  const workerCloseMs = workerCloseTimeoutMs(env);
+  if (env.SHUTDOWN_TIMEOUT_MS <= workerCloseMs) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['SHUTDOWN_TIMEOUT_MS'],
+      message: `SHUTDOWN_TIMEOUT_MS (${String(env.SHUTDOWN_TIMEOUT_MS)} ms) precisa ser maior que a espera do worker no encerramento (${String(workerCloseMs)} ms = prazo do turno + WHATSAPP_SEND_TIMEOUT_MS + ${String(WORKER_CLOSE_MARGIN_MS)} ms)`,
     });
   }
   // Tempo total de espera das retentativas (10 + 20 + 40 + 80 s com os padrões). Se não passar de

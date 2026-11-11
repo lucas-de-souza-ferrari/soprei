@@ -24,6 +24,8 @@ export interface QueueSettings {
   readonly backoffMs: number;
   readonly keepCompletedSeconds: number;
   readonly keepFailedSeconds: number;
+  /** Quantos jobs o worker processa ao mesmo tempo (spec 034). Ausente = 1. */
+  readonly concurrency?: number;
 }
 
 /** Agrupamento de mensagens rápidas do canal (spec 013). */
@@ -84,6 +86,7 @@ export function queueSettings(config: Config): QueueSettings {
     backoffMs: config.QUEUE_BACKOFF_MS,
     keepCompletedSeconds: config.QUEUE_KEEP_COMPLETED_SECONDS,
     keepFailedSeconds: config.QUEUE_KEEP_FAILED_SECONDS,
+    concurrency: config.QUEUE_CONCURRENCY,
   };
 }
 

@@ -33,3 +33,43 @@ describe('identidade dos jobs do canal (spec 022)', () => {
     assert.equal(channelJobSchema.safeParse({ ...rest, clientId: companyId }).success, false);
   });
 });
+
+describe('instante de recebimento no job (spec 034)', () => {
+  const base = {
+    kind: 'text',
+    companyId: COMPANY,
+    phoneNumberId: '123',
+    contactRef: '5511999990000',
+    externalId: 'wamid.ABC',
+    requestId: 'req-12345678',
+    text: 'oi',
+  };
+
+  it('job antigo, sem receivedAt, continua válido', () => {
+    const parsed = channelJobSchema.parse(base);
+    assert.equal('receivedAt' in parsed, false);
+  });
+
+  it('receivedAt em ISO UTC é aceito em text e notice', () => {
+    const receivedAt = new Date(Date.UTC(2026, 10, 11, 12, 0, 0, 123)).toISOString();
+    const text = channelJobSchema.parse({ ...base, receivedAt });
+    assert.equal(text.kind === 'text' ? text.receivedAt : undefined, receivedAt);
+    const notice = channelJobSchema.parse({
+      ...base,
+      kind: 'notice',
+      reason: 'unsupported_type',
+      receivedAt,
+    });
+    assert.equal(notice.kind === 'notice' ? notice.receivedAt : undefined, receivedAt);
+  });
+
+  it('receivedAt que não é um instante ISO é recusado', () => {
+    for (const receivedAt of ['ontem', '2026-11-11', 1_762_862_400_000, '']) {
+      assert.equal(
+        channelJobSchema.safeParse({ ...base, receivedAt }).success,
+        false,
+        String(receivedAt),
+      );
+    }
+  });
+});

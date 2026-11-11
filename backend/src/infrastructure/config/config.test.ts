@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { DB_POOL_QUEUE_HEADROOM, workerCloseTimeoutMs } from './env.schema.js';
 import { parseConfig } from './parse-config.js';
 
 const JWT_SECRET = 'j'.repeat(32);
@@ -71,7 +72,7 @@ describe('parseConfig', () => {
     it('aplica os defaults', () => {
       const result = parseConfig(VALID_ENV);
       assert.ok(result.ok);
-      assert.equal(result.value.DB_POOL_MAX, 10);
+      assert.equal(result.value.DB_POOL_MAX, 20);
       assert.equal(result.value.DB_POOL_IDLE_TIMEOUT_MS, 30_000);
       assert.equal(result.value.DB_POOL_CONNECTION_TIMEOUT_MS, 5_000);
       assert.equal(result.value.DB_STATEMENT_TIMEOUT_MS, 30_000);
@@ -1090,5 +1091,94 @@ describe('parseConfig', () => {
         }).ok,
       );
     });
+  });
+});
+
+describe('parseConfig: capacidade do canal (spec 034)', () => {
+  const CHANNEL_ON = {
+    ...VALID_ENV,
+    WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
+    WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
+    WHATSAPP_APP_ID: '123456789012345',
+    CHANNEL_CREDENTIALS_KEYS: `k1:${'A'.repeat(43)}`,
+    CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: 'k1',
+    WHATSAPP_ENABLED: 'true',
+    TRUST_PROXY: 'false',
+  };
+
+  it('defaults: QUEUE_CONCURRENCY 10, DB_POOL_MAX 20, SHUTDOWN_TIMEOUT_MS 60000', () => {
+    const result = parseConfig(CHANNEL_ON);
+    assert.ok(result.ok);
+    assert.equal(result.value.QUEUE_CONCURRENCY, 10);
+    assert.equal(result.value.DB_POOL_MAX, 20);
+    assert.equal(result.value.SHUTDOWN_TIMEOUT_MS, 60_000);
+  });
+
+  it('QUEUE_CONCURRENCY aceita de 1 a 100 e recusa o resto', () => {
+    for (const value of ['1', '100']) {
+      const result = parseConfig({ ...CHANNEL_ON, QUEUE_CONCURRENCY: value, DB_POOL_MAX: '200' });
+      assert.ok(result.ok, value);
+      assert.equal(result.value.QUEUE_CONCURRENCY, Number(value));
+    }
+    for (const value of ['0', '101', '-1', '2.5', 'muitos']) {
+      const result = parseConfig({ ...VALID_ENV, QUEUE_CONCURRENCY: value });
+      assert.equal(result.ok, false, value);
+      assert.match(result.error.message, /QUEUE_CONCURRENCY/);
+    }
+  });
+
+  it('com o canal ligado, DB_POOL_MAX menor que QUEUE_CONCURRENCY + folga falha citando as duas variáveis', () => {
+    const exact = parseConfig({
+      ...CHANNEL_ON,
+      QUEUE_CONCURRENCY: '10',
+      DB_POOL_MAX: String(10 + DB_POOL_QUEUE_HEADROOM),
+    });
+    assert.ok(exact.ok);
+    const short = parseConfig({
+      ...CHANNEL_ON,
+      QUEUE_CONCURRENCY: '10',
+      DB_POOL_MAX: String(10 + DB_POOL_QUEUE_HEADROOM - 1),
+    });
+    assert.equal(short.ok, false);
+    assert.match(short.error.message, /DB_POOL_MAX/);
+    assert.match(short.error.message, /QUEUE_CONCURRENCY/);
+    // Subir só a concorrência além do pool padrão também é pego.
+    assert.equal(parseConfig({ ...CHANNEL_ON, QUEUE_CONCURRENCY: '16' }).ok, false);
+    // Sem o canal não existe worker: a regra não se aplica.
+    assert.ok(parseConfig({ ...VALID_ENV, QUEUE_CONCURRENCY: '50', DB_POOL_MAX: '5' }).ok);
+  });
+
+  it('SHUTDOWN_TIMEOUT_MS aceita de 5000 a 300000', () => {
+    for (const value of ['4999', '300001', 'abc']) {
+      const result = parseConfig({ ...VALID_ENV, SHUTDOWN_TIMEOUT_MS: value });
+      assert.equal(result.ok, false, value);
+      assert.match(result.error.message, /SHUTDOWN_TIMEOUT_MS/);
+    }
+    assert.ok(parseConfig({ ...VALID_ENV, SHUTDOWN_TIMEOUT_MS: '5000' }).ok);
+  });
+
+  it('a espera do worker é o prazo do turno + envio + folga, e cresce com as ferramentas da agenda', () => {
+    const base = {
+      LLM_TIMEOUT_MS: 15_000,
+      WHATSAPP_SEND_TIMEOUT_MS: 10_000,
+      SCHEDULE_AI_ENABLED: false,
+    };
+    assert.equal(workerCloseTimeoutMs(base), 30_000);
+    assert.equal(workerCloseTimeoutMs({ ...base, SCHEDULE_AI_ENABLED: true }), 45_000);
+    // Prazo do modelo maior que o do turno com ferramentas: vale o maior.
+    assert.equal(
+      workerCloseTimeoutMs({ ...base, LLM_TIMEOUT_MS: 40_000, SCHEDULE_AI_ENABLED: true }),
+      55_000,
+    );
+  });
+
+  it('com o canal ligado, SHUTDOWN_TIMEOUT_MS precisa ser maior que a espera do worker', () => {
+    // Padrões: espera de 30 000 ms.
+    const equal = parseConfig({ ...CHANNEL_ON, SHUTDOWN_TIMEOUT_MS: '30000' });
+    assert.equal(equal.ok, false);
+    assert.match(equal.error.message, /SHUTDOWN_TIMEOUT_MS/);
+    assert.ok(parseConfig({ ...CHANNEL_ON, SHUTDOWN_TIMEOUT_MS: '30001' }).ok);
+    // Sem o canal não há worker para esperar.
+    assert.ok(parseConfig({ ...VALID_ENV, SHUTDOWN_TIMEOUT_MS: '5000' }).ok);
   });
 });

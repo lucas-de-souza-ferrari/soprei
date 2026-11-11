@@ -364,3 +364,115 @@ describe('métricas das ferramentas de agenda da IA (spec 028)', () => {
     assert.match(body, /schedule_tool_rounds_bucket\{le="2"\} 1/);
   });
 });
+
+describe('métricas da fila e do processo (spec 034)', () => {
+  it('queue_jobs expõe os quatro estados com os valores da fonte, lidos na coleta', async () => {
+    const metrics = createMetrics();
+    let counts: Record<string, number> = { waiting: 3, active: 2, delayed: 5, failed: 1 };
+    metrics.bindQueue('channel-inbound', () => Promise.resolve(counts));
+
+    let body = await metrics.render();
+    assert.match(body, /queue_jobs\{queue="channel-inbound",state="waiting"\} 3/);
+    assert.match(body, /queue_jobs\{queue="channel-inbound",state="active"\} 2/);
+    assert.match(body, /queue_jobs\{queue="channel-inbound",state="delayed"\} 5/);
+    assert.match(body, /queue_jobs\{queue="channel-inbound",state="failed"\} 1/);
+
+    // Sem cache: a coleta seguinte lê de novo. Estado ausente na fonte vale 0; estado extra é ignorado.
+    counts = { waiting: 0, completed: 99 };
+    body = await metrics.render();
+    assert.match(body, /queue_jobs\{queue="channel-inbound",state="waiting"\} 0/);
+    assert.match(body, /queue_jobs\{queue="channel-inbound",state="active"\} 0/);
+    assert.doesNotMatch(body, /state="completed"/);
+  });
+
+  it('sem fila ligada, queue_jobs não tem amostra e a coleta funciona', async () => {
+    const body = await createMetrics().render();
+    assert.doesNotMatch(body, /queue_jobs\{/);
+    assert.match(body, /queue_metrics_errors_total 0/);
+  });
+
+  it('fonte que falha: /metrics responde, o gauge fica sem amostra e o erro é contado (sem o texto do erro)', async () => {
+    const metrics = createMetrics();
+    metrics.bindQueue('channel-inbound', () => Promise.reject(new Error('segredo-do-redis-034')));
+
+    const body = await metrics.render();
+
+    assert.doesNotMatch(body, /queue_jobs\{/);
+    assert.match(body, /queue_metrics_errors_total 1/);
+    assert.doesNotMatch(body, /segredo-do-redis-034/);
+    assert.match(await metrics.render(), /queue_metrics_errors_total 2/);
+  });
+
+  it('fonte que não responde: a coleta termina no prazo e conta o erro', async () => {
+    const metrics = createMetrics();
+    metrics.bindQueue(
+      'channel-inbound',
+      () => new Promise<Record<string, number>>(() => undefined),
+    );
+
+    const startedAt = Date.now();
+    const body = await metrics.render();
+
+    assert.ok(Date.now() - startedAt < 5_000, 'a coleta não pode ficar pendurada');
+    assert.match(body, /queue_metrics_errors_total 1/);
+    assert.doesNotMatch(body, /queue_jobs\{/);
+  });
+
+  it('observeQueueJob registra duração e espera por tipo; sem espera informada só a duração', async () => {
+    const metrics = createMetrics();
+    metrics.observeQueueJob('channel-inbound', 'flush', { durationSeconds: 2, waitSeconds: 0.2 });
+    metrics.observeQueueJob('channel-inbound', 'text', { durationSeconds: 0.01 });
+
+    const body = await metrics.render();
+
+    assert.match(
+      body,
+      /queue_job_duration_seconds_count\{queue="channel-inbound",kind="flush"\} 1/,
+    );
+    assert.match(body, /queue_job_duration_seconds_count\{queue="channel-inbound",kind="text"\} 1/);
+    assert.match(body, /queue_job_wait_seconds_count\{queue="channel-inbound",kind="flush"\} 1/);
+    assert.doesNotMatch(
+      body,
+      /queue_job_wait_seconds_count\{queue="channel-inbound",kind="text"\}/,
+    );
+    assert.match(
+      body,
+      /queue_job_duration_seconds_bucket\{le="2.5",queue="channel-inbound",kind="flush"\} 1/,
+    );
+  });
+
+  it('process_fatal_errors_total conta por tipo', async () => {
+    const metrics = createMetrics();
+    metrics.countProcessFatalError('unhandled_rejection');
+    metrics.countProcessFatalError('unhandled_rejection');
+    metrics.countProcessFatalError('uncaught_exception');
+    const body = await metrics.render();
+    assert.match(body, /process_fatal_errors_total\{kind="unhandled_rejection"\} 2/);
+    assert.match(body, /process_fatal_errors_total\{kind="uncaught_exception"\} 1/);
+  });
+
+  it('as métricas novas só têm labels dos conjuntos fixos', async () => {
+    const metrics = createMetrics();
+    metrics.bindQueue('channel-inbound', () => Promise.resolve({ waiting: 1 }));
+    metrics.observeQueueJob('channel-inbound', 'notice', { durationSeconds: 0.1, waitSeconds: 0 });
+    metrics.countProcessFatalError('uncaught_exception');
+    await metrics.render();
+
+    const allowed: Record<string, readonly string[]> = {
+      queue_jobs: ['queue', 'state'],
+      queue_job_duration_seconds: ['le', 'queue', 'kind'],
+      queue_job_wait_seconds: ['le', 'queue', 'kind'],
+      queue_metrics_errors_total: [],
+      process_fatal_errors_total: ['kind'],
+    };
+    for (const metric of await metrics.registry.getMetricsAsJSON()) {
+      const labels = allowed[metric.name];
+      if (labels === undefined) continue;
+      for (const value of metric.values) {
+        for (const label of Object.keys(value.labels)) {
+          assert.ok(labels.includes(label), `${metric.name} tem o label inesperado ${label}`);
+        }
+      }
+    }
+  });
+});

@@ -28,6 +28,7 @@ import {
   batchSettings,
   loadConfig,
   queueSettings,
+  workerCloseTimeoutMs,
   trustProxyMode,
   whatsappChannelConfig,
 } from './infrastructure/config/index.js';
@@ -76,7 +77,8 @@ import {
   AesGcmCredentialCipher,
   parseCredentialKeys,
 } from './infrastructure/security/aes-gcm-credential-cipher.js';
-import { createInboundQueue } from './infrastructure/queue/inbound-queue.js';
+import { createInboundQueue, INBOUND_QUEUE_NAME } from './infrastructure/queue/inbound-queue.js';
+import { installProcessGuard } from './infrastructure/process-guard.js';
 
 /** Espera da conexão Redis do rate limit no boot; passou disso, segue em fail-open com `warn`. */
 const RATE_LIMIT_READY_TIMEOUT_MS = 2_000;
@@ -98,7 +100,13 @@ async function main(): Promise<void> {
           settings: queueSettings(config),
           logger,
           metrics,
+          // Espera dos jobs ativos no encerramento: o turno mais longo possível (spec 034).
+          workerCloseTimeoutMs: workerCloseTimeoutMs(config),
         });
+  if (inboundQueue !== undefined) {
+    // Profundidade da fila em `/metrics` (spec 034), lida só na coleta.
+    metrics.bindQueue(INBOUND_QUEUE_NAME, () => inboundQueue.jobCounts());
+  }
 
   // Conexão própria das sessões (spec 007): fail-closed, sem fila offline e com prazo curto.
   const authRedis = createAuthRedis(config, logger);
@@ -606,21 +614,14 @@ async function main(): Promise<void> {
     };
   }
 
-  const stop = (signal: string): void => {
-    app.log.info({ signal }, 'encerrando servidor');
-    shutdown(app, infrastructure, app.log).then(
-      () => process.exit(0),
-      (err: unknown) => {
-        app.log.error({ err }, 'falha ao encerrar servidor');
-        process.exit(1);
-      },
-    );
-  };
-  process.once('SIGINT', () => {
-    stop('SIGINT');
-  });
-  process.once('SIGTERM', () => {
-    stop('SIGTERM');
+  // Sinais e erros fatais não tratados (spec 034): um único desligamento gracioso, com prazo global.
+  installProcessGuard({
+    target: process,
+    logger: app.log,
+    shutdown: () => shutdown(app, infrastructure, app.log),
+    timeoutMs: config.SHUTDOWN_TIMEOUT_MS,
+    exit: (code) => process.exit(code),
+    metrics,
   });
 
   try {

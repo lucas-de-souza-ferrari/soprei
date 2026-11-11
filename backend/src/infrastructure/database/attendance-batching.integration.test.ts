@@ -241,3 +241,131 @@ describe('última atividade da conversa pelos três caminhos de gravação (spec
     assert.deepEqual(await order(), ['ativ-y', 'ativ-x']);
   });
 });
+
+describe('instante de recebimento no banco (spec 034)', () => {
+  /** Carimbos recentes (dentro da faixa aceita), com milissegundos distintos. */
+  const receivedBase = (): number => Date.now() - 2_000;
+
+  const acceptAt = (
+    companyId: Parameters<typeof service.acceptInboundMessage>[0],
+    text: string,
+    contact: string,
+    id: string,
+    receivedAt?: Date,
+  ) =>
+    service.acceptInboundMessage(
+      companyId,
+      { contactRef: contact, text, externalId: id },
+      receivedAt === undefined ? {} : { receivedAt },
+    );
+
+  const rowsOf = async (companyId: string, contact: string) => {
+    const conversation = await conversations.findByContact(
+      companyId as Parameters<typeof conversations.findByContact>[0],
+      contact,
+    );
+    assert.ok(conversation !== null);
+    return database.prisma.message.findMany({
+      where: { companyId, conversationId: conversation.id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  };
+
+  it('grava createdAt = receivedAt; sem receivedAt vale o relógio do banco', async () => {
+    const company = await tenants.createCompany('rec-db');
+    const contact = 'contato-rec';
+    const at = new Date(receivedBase());
+    const before = Date.now();
+
+    const stamped = await acceptAt(company.id, 'carimbada', contact, 'rec-1', at);
+    const plain = await acceptAt(company.id, 'sem carimbo', contact, 'rec-2');
+
+    assert.equal(stamped.messageCreatedAt.getTime(), at.getTime());
+    // Relógio do banco: folga de 5 s para diferença entre o relógio do teste e o do Postgres.
+    assert.ok(plain.messageCreatedAt.getTime() >= before - 5_000);
+    const rows = await rowsOf(company.id, contact);
+    assert.deepEqual(
+      rows.map((row) => row.content),
+      ['carimbada', 'sem carimbo'],
+    );
+    assert.equal(rows[0]?.createdAt.getTime(), at.getTime());
+  });
+
+  it('mensagens gravadas na ordem inversa à de recebimento: pendentes e turno do modelo na ordem de recebimento', async () => {
+    const company = await tenants.createCompany('rec-ordem');
+    const contact = 'contato-ordem';
+    const base = receivedBase();
+    // Jobs em paralelo: a terceira e a segunda são gravadas antes da primeira.
+    await acceptAt(company.id, 'tres', contact, 'ord-3', new Date(base + 2));
+    await acceptAt(company.id, 'dois', contact, 'ord-2', new Date(base + 1));
+    await acceptAt(company.id, 'um', contact, 'ord-1', new Date(base));
+    llm.calls.length = 0;
+
+    const conversation = await conversations.findByContact(company.id, contact);
+    assert.ok(conversation !== null);
+    const pending = await messages.listPending(company.id, conversation.id, 10);
+    assert.deepEqual(
+      pending.map((message) => message.content),
+      ['um', 'dois', 'tres'],
+    );
+
+    const response = await service.respondToPending(company.id, contact, LIMITS);
+
+    assert.equal(response.outcome, 'answered');
+    assert.equal(response.batchSize, 3);
+    assert.equal(llm.calls[0]?.userMessage, 'um\ndois\ntres');
+    const rows = await rowsOf(company.id, contact);
+    assert.equal(rows.at(-1)?.role, 'ASSISTANT', 'a resposta fica depois da última do lote');
+    assert.equal(rows.at(-1)?.createdAt.getTime(), base + 3);
+  });
+
+  it('reentrega do mesmo externalId com outro receivedAt não muda o createdAt gravado', async () => {
+    const company = await tenants.createCompany('rec-dup');
+    const contact = 'contato-dup';
+    const base = receivedBase();
+    const first = await acceptAt(company.id, 'oi', contact, 'dup-1', new Date(base));
+
+    const again = await acceptAt(company.id, 'oi', contact, 'dup-1', new Date(base + 900));
+
+    assert.equal(again.status, 'pending');
+    assert.equal(again.messageId, first.messageId);
+    assert.equal(again.messageCreatedAt.getTime(), base);
+    assert.equal((await rowsOf(company.id, contact)).length, 1);
+  });
+
+  it('duas empresas com o mesmo contato e os mesmos instantes, gravadas em paralelo: cada lote só tem as suas mensagens', async () => {
+    const a = await tenants.createCompany('rec-iso-a');
+    const b = await tenants.createCompany('rec-iso-b');
+    const contact = 'contato-paralelo';
+    const base = receivedBase();
+    await Promise.all([
+      acceptAt(a.id, 'a2', contact, 'p2', new Date(base + 1)),
+      acceptAt(b.id, 'b2', contact, 'p2', new Date(base + 1)),
+      acceptAt(a.id, 'a1', contact, 'p1', new Date(base)),
+      acceptAt(b.id, 'b1', contact, 'p1', new Date(base)),
+    ]);
+    llm.calls.length = 0;
+
+    await Promise.all([
+      service.respondToPending(a.id, contact, LIMITS),
+      service.respondToPending(b.id, contact, LIMITS),
+    ]);
+
+    assert.deepEqual(llm.calls.map((call) => call.userMessage).sort(), ['a1\na2', 'b1\nb2']);
+    for (const [company, own, foreign] of [
+      [a, 'a', 'b'],
+      [b, 'b', 'a'],
+    ] as const) {
+      const rows = await rowsOf(company.id, contact);
+      const users = rows.filter((row) => row.role === 'USER');
+      assert.deepEqual(
+        users.map((row) => row.content),
+        [`${own}1`, `${own}2`],
+      );
+      assert.ok(users.every((row) => !row.content.startsWith(foreign)));
+      const reply = rows.find((row) => row.role === 'ASSISTANT');
+      assert.ok(reply !== undefined);
+      assert.ok(users.every((row) => row.answeredById === reply.id));
+    }
+  });
+});
