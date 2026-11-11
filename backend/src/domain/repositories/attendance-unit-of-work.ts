@@ -1,10 +1,13 @@
 import type { ConversationRepository } from './conversation.repository.js';
 import type { MessageRepository } from './message.repository.js';
+import type { NotificationRepository } from '../notifications.js';
 
 /** Os repositórios de uma transação do banco: tudo o que passa por eles confirma ou desfaz junto. */
 export interface AttendanceTransaction {
   readonly conversations: ConversationRepository;
   readonly messages: MessageRepository;
+  /** Notificações (spec 030): o pedido de atendimento humano grava junto com a resposta. */
+  readonly notifications: NotificationRepository;
 }
 
 /**

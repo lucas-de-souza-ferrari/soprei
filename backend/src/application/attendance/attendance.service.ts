@@ -1,4 +1,5 @@
 import type {
+  AttendanceTransaction,
   AttendanceUnitOfWork,
   Company,
   CompanyId,
@@ -9,11 +10,14 @@ import type {
   Message,
   MessageOrder,
   MessageRepository,
+  HandoffReason,
+  NotificationCreateResult,
   Page,
 } from '../../domain/index.js';
 import {
   KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
   MESSAGE_CONTENT_MAX_LENGTH,
+  NOTIFICATION_MAX_OPEN,
   SCHEDULE_RETRIEVAL_TIMEOUT_MS,
 } from '../../domain/index.js';
 import { ConflictError, ExternalServiceError, ForbiddenError } from '../../shared/errors/index.js';
@@ -28,6 +32,7 @@ import {
 import {
   LLM_ERROR_TYPE,
   type LlmGenerateInput,
+  type LlmHandoff,
   type LlmProvider,
   type LlmTurn,
   type LlmUsage,
@@ -87,6 +92,10 @@ export interface AttendanceMetrics {
   countKnowledgeRetrieval?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027, E3). Conjunto fixo. */
   countScheduleContext?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
+  /** O modelo pediu atendimento humano (spec 030), antes da deduplicação. Conjunto fixo de motivos. */
+  countHandoff?(reason: HandoffReason): void;
+  /** O que aconteceu com a notificação do pedido (spec 030): `created`, `deduplicated` ou `capped`. */
+  countNotificationCreated?(result: NotificationCreateResult): void;
 }
 
 export type BatchResult = 'answered' | 'empty' | 'capped';
@@ -113,6 +122,8 @@ export interface AttendanceOptions {
   readonly knowledgeTimeoutMs?: number;
   /** Prazo da leitura da agenda (spec 027, E3); padrão 1.500 ms. */
   readonly scheduleTimeoutMs?: number;
+  /** Teto de notificações abertas por empresa (spec 030); padrão `NOTIFICATION_MAX_OPEN`. */
+  readonly notificationMaxOpen?: number;
 }
 
 /** Uma página do histórico mais a conversa a que ela pertence (o painel abre o histórico pelo id). */
@@ -220,7 +231,13 @@ interface LlmSubject {
 }
 
 type LlmOutcome =
-  | { readonly ok: true; readonly text: string; readonly usage: LlmUsage | undefined }
+  | {
+      readonly ok: true;
+      readonly text: string;
+      readonly usage: LlmUsage | undefined;
+      /** O modelo pediu atendimento humano (spec 030). */
+      readonly handoff: LlmHandoff | undefined;
+    }
   | { readonly ok: false };
 
 /**
@@ -399,14 +416,18 @@ export class AttendanceService {
         systemPrompt: prompt.systemPrompt,
         history,
         userMessage,
+        allowHandoff: true,
       },
     );
     const replyText = outcome.ok ? outcome.text : ATTENDANCE_FALLBACK_TEXT;
     if (!outcome.ok) this.recordFallback();
 
+    const handoff = outcome.ok ? outcome.handoff : undefined;
     let reply: Message;
+    let notification: NotificationCreateResult | undefined;
     try {
-      // A resposta e a marca de "atendida" de todo o lote confirmam (ou desfazem) juntas.
+      // A resposta, a marca de "atendida" de todo o lote e a notificação de atendimento humano (spec 030)
+      // confirmam (ou desfazem) juntas.
       reply = await this.deps.unitOfWork.run(async (tx) => {
         const created = await tx.messages.create(companyId, {
           conversationId: conversation.id,
@@ -431,6 +452,7 @@ export class AttendanceService {
             context: { companyId },
           });
         }
+        notification = await this.createHandoff(tx, companyId, handoff, created);
         return created;
       });
     } catch (error) {
@@ -449,6 +471,7 @@ export class AttendanceService {
     }
 
     this.recordBatch(batch.length, hasMorePending);
+    this.recordHandoff(handoff, notification);
     this.deps.logger.info(
       {
         companyId,
@@ -463,6 +486,7 @@ export class AttendanceService {
         hasMorePending,
         ...prompt.stats,
         ...usageFields(outcome),
+        ...handoffFields(handoff, notification),
         durationMs: Math.round(performance.now() - startedAt),
       },
       'lote de mensagens atendido',
@@ -736,6 +760,7 @@ export class AttendanceService {
       systemPrompt: prompt.systemPrompt,
       history,
       userMessage: message.content,
+      allowHandoff: true,
     };
     const outcome = await this.callProvider(
       companyId,
@@ -750,16 +775,23 @@ export class AttendanceService {
     const replyText = outcome.ok ? outcome.text : ATTENDANCE_FALLBACK_TEXT;
     if (!outcome.ok) this.recordFallback();
 
+    const handoff = outcome.ok ? outcome.handoff : undefined;
     let reply: Message;
+    let notification: NotificationCreateResult | undefined;
     try {
-      reply = await this.deps.messages.create(companyId, {
-        conversationId: message.conversationId,
-        role: 'ASSISTANT',
-        content: replyText,
-        isFallback: !outcome.ok,
-        replyToId: message.id,
-        // A resposta nunca fica antes da pergunta, mesmo no mesmo milissegundo.
-        createdAt: new Date(Math.max(this.now().getTime(), message.createdAt.getTime() + 1)),
+      // Resposta e notificação de atendimento humano (spec 030) confirmam (ou desfazem) juntas.
+      reply = await this.deps.unitOfWork.run(async (tx) => {
+        const created = await tx.messages.create(companyId, {
+          conversationId: message.conversationId,
+          role: 'ASSISTANT',
+          content: replyText,
+          isFallback: !outcome.ok,
+          replyToId: message.id,
+          // A resposta nunca fica antes da pergunta, mesmo no mesmo milissegundo.
+          createdAt: new Date(Math.max(this.now().getTime(), message.createdAt.getTime() + 1)),
+        });
+        notification = await this.createHandoff(tx, companyId, handoff, created);
+        return created;
       });
     } catch (error) {
       if (!(error instanceof ConflictError)) throw error;
@@ -781,11 +813,56 @@ export class AttendanceService {
         isFallback: reply.isFallback,
         ...prompt.stats,
         ...usageFields(outcome),
+        ...handoffFields(handoff, notification),
         durationMs: Math.round(performance.now() - startedAt),
       },
       'mensagem atendida',
     );
+    this.recordHandoff(handoff, notification);
     return toResult(message, reply, false, prompt.sources);
+  }
+
+  /**
+   * Grava a notificação de atendimento humano (spec 030) dentro da transação da resposta: se a
+   * transação desfaz, não sobra notificação. Sem pedido do modelo, nada é feito.
+   */
+  private async createHandoff(
+    tx: AttendanceTransaction,
+    companyId: CompanyId,
+    handoff: LlmHandoff | undefined,
+    reply: Message,
+  ): Promise<NotificationCreateResult | undefined> {
+    if (handoff === undefined) return undefined;
+    return tx.notifications.createHandoff(
+      companyId,
+      {
+        reason: handoff.reason,
+        conversationId: reply.conversationId,
+        messageId: reply.id,
+        createdAt: reply.createdAt,
+      },
+      this.deps.options.notificationMaxOpen ?? NOTIFICATION_MAX_OPEN,
+    );
+  }
+
+  /** Métricas do pedido de humano, depois do commit. Falha de métrica nunca derruba o atendimento. */
+  private recordHandoff(
+    handoff: LlmHandoff | undefined,
+    notification: NotificationCreateResult | undefined,
+  ): void {
+    if (handoff === undefined) return;
+    try {
+      this.deps.metrics?.countHandoff?.(handoff.reason);
+      if (notification !== undefined) this.deps.metrics?.countNotificationCreated?.(notification);
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de atendimento humano');
+    }
+    if (notification === 'capped') {
+      this.deps.logger.warn(
+        { reason: 'notification_cap' },
+        'teto de notificações abertas da empresa atingido; pedido de atendimento humano não gravado',
+      );
+    }
   }
 
   /**
@@ -982,6 +1059,7 @@ export class AttendanceService {
     let cause: Error | undefined;
     let text: string | undefined;
     let usage: LlmUsage | undefined;
+    let handoff: LlmHandoff | undefined;
     // Estourou o prazo (ou terminou): aborta, para o provedor não seguir rodando e gastando cota.
     const controller = new AbortController();
 
@@ -1006,6 +1084,7 @@ export class AttendanceService {
         result = 'ok';
         text = outcome.value.text;
         usage = outcome.value.usage;
+        handoff = outcome.value.handoff;
       }
     } catch (error) {
       if (error instanceof TimeoutError) {
@@ -1028,7 +1107,7 @@ export class AttendanceService {
 
     if (result === 'ok' && text !== undefined) {
       this.recordTokens(provider, usage);
-      return { ok: true, text, usage };
+      return { ok: true, text, usage, handoff };
     }
 
     this.deps.logger.warn(
@@ -1152,4 +1231,13 @@ function selectBatch(pending: readonly Message[], limits: BatchLimits): Message[
     chars += added;
   }
   return batch;
+}
+
+/** Campos de log do pedido de humano (spec 030): só o motivo (enum) e o resultado, nunca texto. */
+function handoffFields(
+  handoff: LlmHandoff | undefined,
+  notification: NotificationCreateResult | undefined,
+): object {
+  if (handoff === undefined) return {};
+  return { handoff: true, handoffReason: handoff.reason, notification: notification ?? null };
 }

@@ -1,4 +1,10 @@
-import type { AuditAction, Permission } from '../../domain/index.js';
+import type {
+  AuditAction,
+  HandoffReason,
+  NotificationCreateResult,
+  NotificationKind,
+  Permission,
+} from '../../domain/index.js';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 
 /** Fotografia do pool de conexões (mesma forma de `Database.poolMetrics()`). */
@@ -182,6 +188,12 @@ export interface Metrics {
   countScheduleAction(action: ScheduleAction, result: ScheduleActionResult): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027). Conjunto fixo. */
   countScheduleContext(result: ScheduleContextResult): void;
+  /** O modelo pediu atendimento humano (spec 030), antes da deduplicação. Motivo de lista fixa. */
+  countHandoff(reason: HandoffReason): void;
+  /** Resultado da gravação de uma notificação (spec 030). Sem id, contato nem texto em label. */
+  countNotificationCreated(result: NotificationCreateResult): void;
+  /** Uma notificação foi marcada como resolvida (spec 030). */
+  countNotificationResolved(kind: NotificationKind): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
   /** O destino de uma mensagem de entrada do canal. */
@@ -345,6 +357,27 @@ export function createMetrics(): Metrics {
     name: 'schedule_context_total',
     help: 'Consultas de horários livres para o prompt da IA por resultado (spec 027, conjunto fixo)',
     labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
+  const handoffs = new Counter({
+    name: 'attendance_handoffs_total',
+    help: 'Pedidos de atendimento humano feitos pelo modelo, por motivo (spec 030, conjunto fixo)',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  });
+
+  const notificationsCreated = new Counter({
+    name: 'notifications_created_total',
+    help: 'Notificações por tipo e resultado da gravação (spec 030: created, deduplicated, capped)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+
+  const notificationsResolved = new Counter({
+    name: 'notifications_resolved_total',
+    help: 'Notificações marcadas como resolvidas, por tipo (spec 030)',
+    labelNames: ['kind'] as const,
     registers: [registry],
   });
 
@@ -571,6 +604,15 @@ export function createMetrics(): Metrics {
     },
     countScheduleContext(result) {
       scheduleContext.inc({ result });
+    },
+    countHandoff(reason) {
+      handoffs.inc({ reason });
+    },
+    countNotificationCreated(result) {
+      notificationsCreated.inc({ kind: 'HUMAN_HANDOFF', result });
+    },
+    countNotificationResolved(kind) {
+      notificationsResolved.inc({ kind });
     },
     countWebhookRequest(channel, result) {
       webhookRequests.inc({ channel, result });

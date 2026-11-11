@@ -29,6 +29,7 @@ export const MODEL_SCOPES = {
   ScheduleService: 'tenant',
   AvailabilityRule: 'tenant',
   Appointment: 'tenant',
+  Notification: 'tenant',
   PlatformAdmin: 'global',
   Account: 'global',
 } as const satisfies Record<Prisma.ModelName, ModelScope>;

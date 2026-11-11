@@ -32,6 +32,7 @@ export { PrismaConversationRepository } from './repositories/conversation.reposi
 export { PrismaPlatformAdminRepository } from './repositories/platform-admin.repository.js';
 export { PrismaMembershipRepository } from './repositories/membership.repository.js';
 export { PrismaMessageRepository } from './repositories/message.repository.js';
+export { PrismaNotificationRepository } from './repositories/notification.repository.js';
 export { withRepositoryErrors } from './repositories/repository-errors.js';
 export { PrismaTenantRepository } from './repositories/tenant.repository.base.js';
 export type { TenantModelOps, TenantWhere } from './repositories/tenant.repository.base.js';
