@@ -1,6 +1,6 @@
 # 036 — CI mais rápido
 
-- **Status:** rascunho
+- **Status:** em implementação (aprovada pelo dono em 2026-11-11 com D1 a D6 como recomendadas; implementada na branch, falta a medição no CI)
 - **Branch:** `spec/036-ci-mais-rapido`
 - **Depende de:** 001 (CI), 018 (testes de navegador). Não depende da 034 nem a toca.
 - **Observação de numeração:** conferido em `docs/specs/` e `docs/context.md` em 2026-11-11: existem 001 a 034 em arquivo. A **035** foi reservada em conversa com o dono para "eficiência do turno" (ainda sem arquivo); por isso esta é a **036**.
@@ -62,20 +62,20 @@ Um PR só. Como o workflow só é exercitado no próprio GitHub Actions, a ordem
 
 Os itens marcados **[teste]** viram um teste unitário que lê os arquivos como texto (mesmo modelo de `backend/src/domain-vocabulary.test.ts`, sem dependência nova); os marcados **[CI]** são conferidos na execução real e registrados, com o link da execução, no Registro da implementação.
 
-- [ ] **[teste]** Existe `.nvmrc` na raiz com uma major do Node que satisfaz `engines.node` dos três `package.json`; `ci.yml` usa `node-version-file: .nvmrc` e não contém mais `matrix.node` nem `lts/*`.
-- [ ] **[teste]** `ci.yml` tem os jobs `static`, `tests` e `browser`; só `tests` declara `services`; nenhum comando do job único de hoje ficou de fora (lista fixa no teste: `db:generate`, `typecheck`, `lint`, `format:check`, `build`, `db:migrate:deploy`, `pnpm test`, `pnpm test:integration`, `test:browser`).
-- [ ] **[teste]** `ci.yml` declara `concurrency` com grupo por PR (ou por ref) e `cancel-in-progress` verdadeiro **só** para `pull_request`.
-- [ ] **[teste]** `frontend/playwright.config.ts` tem `fullyParallel: true`, `workers` igual a 1 quando `CI` está definido e `retries` 1 no CI (inalterado); o job `browser` passa `--shard` com o índice e o total vindos da matriz.
-- [ ] **[teste]** O cache do navegador usa o caminho `~/.cache/ms-playwright` e uma chave que contém a versão do Playwright lida do lockfile ou do pacote instalado (nunca um valor escrito à mão).
-- [ ] **[teste]** `backend/package.json` mantém `--test-concurrency=1` em `test:integration`.
-- [ ] **[teste]** Existe um workflow agendado (cron semanal e `workflow_dispatch`) que roda a suíte nas versões definidas em D1 e não é disparado por `pull_request` nem por `push`.
+- [x] **[teste]** Existe `.nvmrc` na raiz com uma major do Node que satisfaz `engines.node` dos três `package.json`; `ci.yml` usa `node-version-file: .nvmrc` e não contém mais `matrix.node` nem `lts/*`.
+- [x] **[teste]** `ci.yml` tem os jobs `static`, `tests` e `browser`; só `tests` declara `services`; nenhum comando do job único de hoje ficou de fora (lista fixa no teste: `db:generate`, `typecheck`, `lint`, `format:check`, `build`, `db:migrate:deploy`, `pnpm test`, `pnpm test:integration`, `test:browser`).
+- [x] **[teste]** `ci.yml` declara `concurrency` com grupo por PR (ou por ref) e `cancel-in-progress` verdadeiro **só** para `pull_request`.
+- [x] **[teste]** `frontend/playwright.config.ts` tem `fullyParallel: true`, `workers` igual a 1 quando `CI` está definido e `retries` 1 no CI (inalterado); o job `browser` passa `--shard` com o índice e o total vindos da matriz.
+- [x] **[teste]** O cache do navegador usa o caminho `~/.cache/ms-playwright` e uma chave que contém a versão do Playwright lida do lockfile ou do pacote instalado (nunca um valor escrito à mão).
+- [x] **[teste]** `backend/package.json` mantém `--test-concurrency=1` em `test:integration`.
+- [x] **[teste]** Existe um workflow agendado (cron semanal e `workflow_dispatch`) que roda a suíte nas versões definidas em D1 e não é disparado por `pull_request` nem por `push`.
 - [ ] **[CI]** A soma dos testes de navegador de todas as fatias é **444** (o mesmo número de antes), com zero ignorados a mais; cada teste roda em exatamente uma fatia.
 - [ ] **[CI]** As contagens de testes unitários e de integração são iguais às da última execução antes da mudança.
 - [ ] **[CI]** Em **três execuções seguidas** de PR com o cache do navegador já aquecido, o tempo de relógio do workflow (da criação ao fim do último job) fica **abaixo de 10 minutos**; a primeira execução (cache vazio) fica abaixo de 12.
 - [ ] **[CI]** Dois pushes seguidos no mesmo PR: a execução do primeiro aparece como cancelada.
 - [ ] **[CI]** A execução semanal, disparada à mão uma vez por `workflow_dispatch`, termina verde nas versões de D1.
-- [ ] `AGENTS.md`, `CLAUDE.md`, `docs/agents/implementer.md` e `docs/handoff.md` não dizem mais que o CI dos PRs roda em duas versões (trechos em D1); `docs/context.md` ganha a decisão no histórico.
-- [ ] `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes.
+- [x] `AGENTS.md`, `CLAUDE.md`, `docs/agents/implementer.md` e `docs/handoff.md` não dizem mais que o CI dos PRs roda em duas versões (trechos em D1); `docs/context.md` ganha a decisão no histórico.
+- [x] `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes.
 
 ## Casos de borda e erros
 
@@ -169,4 +169,16 @@ Nenhuma dependência de pacote nova. Ações do GitHub usadas: as que já existe
 - **(S4)** `playwright install-deps chromium` existe na 1.64.1 e instala só as bibliotecas do sistema.
 - **(S5)** `--test-shard` está disponível no runner de testes do Node 24 e divide por arquivo.
 
-**Decisões tomadas durante a implementação:** (a preencher)
+**Decisões tomadas durante a implementação:** ver o Registro abaixo.
+
+## Registro da implementação (2026-11-11)
+
+- **Aprovação:** o dono aprovou D1 a D6 como recomendadas ("Aprovo tudo", 2026-11-11).
+- **Arquivos:** `.nvmrc` (`24`); `.github/workflows/ci.yml` (jobs `static`, `tests`, `browser` com 3 fatias, `concurrency`, gatilho `workflow_call` com as entradas `node-version` e `artifact-suffix`); `.github/workflows/node-compat.yml` (segunda-feira 06:00 UTC e `workflow_dispatch`; chama o `ci.yml` em `22` e `lts/*`); `frontend/playwright.config.ts` (`fullyParallel: true`, `workers` 1 no CI); `backend/src/ci-workflow.test.ts` (8 testes de texto, cobrem os critérios **[teste]**); `AGENTS.md`, `CLAUDE.md`, `docs/agents/implementer.md`, `docs/handoff.md`, `docs/context.md` e duas linhas da spec 033.
+- **Um arquivo de jobs só:** em vez de um terceiro arquivo reutilizável, o próprio `ci.yml` aceita `workflow_call`. Nos PRs a entrada `node-version` vem vazia e o `setup-node` usa o `.nvmrc`; na semanal a entrada tem precedência. O grupo de `concurrency` inclui a versão, para as duas pernas da semanal não se bloquearem; o sufixo do artefato evita nomes repetidos na mesma execução.
+- **Job `static` sem banco:** o `prisma generate` só lê `DATABASE_URL` (não conecta); o passo recebe a URL descartável do CI.
+- **Suposições conferidas:** S1 confirmada no calendário oficial (`nodejs/Release`, `schedule.json`): 22 até 2027-04-30, 24 até 2028-04-30, 26 LTS desde 2026-10-28. S4 confirmada (`playwright install-deps` e o caminho `~/.cache/ms-playwright` em playwright.dev/docs/browsers). **S2, S3 e S5 não conferidas** (S2 sai do `nproc` da primeira execução; S5 só importa se a E5 for necessária).
+- **Fatias:** `playwright test --list --shard=i/3` dá 148 + 148 + 148 = **444**, o total de antes.
+- **Validação local (Node 24.18, Windows, Edge):** `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes; `ci-workflow.test.ts` e `domain-vocabulary.test.ts` verdes (13 testes). Suíte de navegador completa com `fullyParallel` e os workers padrão da máquina: 428 passaram, 12 pulados, **4 falharam**. Repetidos com 1 worker (como no CI): `accounts.spec.ts:6` (temas claro e escuro, desktop) e `company.spec.ts:419` (mobile) passam, ou seja, são sensíveis a CPU disputada; `team.spec.ts:350` (mobile, "trocar de empresa durante o carregamento") **falha também sozinho com 1 worker**, portanto não depende desta mudança (a conferir no CI, onde a `main` estava verde). Nenhum teste foi alterado.
+- **Não feito:** a E5 (fatiar a integração) fica condicionada à medição. Os critérios **[CI]** dependem do push do dono: tempos por job, contagens de unitários e integração antes e depois, cancelamento e a execução semanal disparada à mão.
+- **Passos do dono:** dar o push e abrir o PR; se a `main` tiver verificações obrigatórias com os nomes antigos (`Node 22`, `Node lts/*`), trocá-las pelos novos (`Checagens estáticas e build`, `Testes unitários e de integração`, `Navegador (fatia 1)` a `(fatia 3)`); depois do merge, disparar "Compatibilidade do Node" uma vez pelo botão "Run workflow" (workflow agendado só existe a partir da `main`).
