@@ -79,6 +79,7 @@ describe('pipeline do CI (spec 036)', () => {
         'pnpm typecheck',
         'pnpm lint',
         'pnpm format:check',
+        'shellcheck deploy/*.sh',
         'pnpm build',
       ],
     );

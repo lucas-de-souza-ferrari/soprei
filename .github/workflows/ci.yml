@@ -56,6 +56,9 @@ jobs:
 
       - run: pnpm format:check
 
+      # Scripts de deploy (spec 037): o shellcheck já vem na imagem do runner (ubuntu-latest).
+      - run: shellcheck deploy/*.sh
+
       - run: pnpm build
 
   tests:
