@@ -1,6 +1,6 @@
 # 030 — Notificações no painel: a IA pede atendimento humano
 
-- **Status:** rascunho (aguardando o dono decidir D1 a D10)
+- **Status:** aprovada (2026-11-11, dono: "Aprovo tudo", D1 a D10 como recomendadas)
 - **Branch:** `spec/030-notificacoes`
 - **Depende de:** 010 e 013 (atendimento e lote), 014 (provedor Anthropic), 023 e 029 (área da empresa e Dashboard Shell), 024 (painel de conversas e `describeContact`), 008 (permissões)
 - **Observação de numeração:** a 028 segue **reservada** ao tool use da agenda (marcar pelo WhatsApp). Esta spec é a primeira a usar uma ferramenta (`tool use`) do provedor, mas só como **sinal**: a IA não executa nada, não grava nada visível ao contato e o servidor não faz laço de ferramentas. A 028 pode reaproveitar a mudança de porta daqui.
