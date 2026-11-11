@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react';
 import {
+  Bell,
   BookOpen,
   CalendarDays,
   FlaskConical,
@@ -27,6 +28,7 @@ const ICONS: Readonly<Record<AreaPage, LucideIcon>> = {
   estoque: Package,
   equipe: Users,
   testar: FlaskConical,
+  notificacoes: Bell,
 };
 
 export interface AppShellProps {
@@ -34,6 +36,8 @@ export interface AppShellProps {
   readonly title: string;
   /** Aviso do site (erro, informação) acima do conteúdo. */
   readonly banner?: ReactNode;
+  /** Ações à direita do título (spec 030: o sino de notificações). */
+  readonly headerActions?: ReactNode;
   readonly children: ReactNode;
   readonly current: SwitcherCompany;
   readonly companies: readonly SwitcherCompany[];
@@ -72,6 +76,7 @@ function ShellLink({ onClick, ...props }: ComponentProps<'a'>) {
 export function AppShell({
   title,
   banner,
+  headerActions,
   children,
   current,
   companies,
@@ -123,6 +128,7 @@ export function AppShell({
           if (isAreaPage(id)) onNavigate(id);
         }}
         title={title}
+        headerActions={headerActions}
         sidebarFooter={
           <div className="grid gap-3">
             <p className="m-0 truncate text-xs text-muted-foreground" title={email}>

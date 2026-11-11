@@ -1,3 +1,4 @@
+import { UserRound } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
@@ -194,6 +195,15 @@ export function ConversationsPage({
                   {item.channel === 'simulator' && (
                     <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">
                       Teste
+                    </span>
+                  )}
+                  {item.openHandoff === true && (
+                    <span
+                      data-testid="handoff-badge"
+                      className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground"
+                    >
+                      <UserRound aria-hidden="true" className="size-3" />
+                      Humano
                     </span>
                   )}
                 </span>

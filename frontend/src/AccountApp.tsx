@@ -13,6 +13,7 @@ import { ThemeToggle } from './components/motion/theme-toggle';
 import { AppShell } from './company/AppShell';
 import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
+import { NotificationBell } from './company/NotificationBell';
 import { InvitePage } from './invite/InvitePage';
 import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
 import {
@@ -113,6 +114,8 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(true);
   const [booting, setBooting] = useState(true);
+  /** Spec 030: muda quando uma notificação é resolvida, para o sino reler a contagem. */
+  const [bellRefresh, setBellRefresh] = useState(0);
   const [notice, setNotice] = useState<Notice>(null);
   const [invalid, setInvalid] = useState<{
     field: 'password' | 'confirmation' | 'verification';
@@ -572,6 +575,16 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       <AppShell
         title={AREA_LABELS[isAreaPage(page) ? page : 'conversas']}
         banner={noticeNode}
+        headerActions={
+          areaCompany.permissions.includes('notification:read') ? (
+            <NotificationBell
+              key={areaCompany.companyId}
+              companyId={areaCompany.companyId}
+              refreshKey={bellRefresh}
+              onOpen={() => openArea('notificacoes')}
+            />
+          ) : undefined
+        }
         current={switcherItem(areaCompany)}
         companies={companies.map(switcherItem)}
         pages={allowedPages(areaCompany.permissions)}
@@ -593,6 +606,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
           onNavigate={openArea}
           onSession={sessionLost}
           onChanged={companyChanged}
+          onNotificationsChanged={() => setBellRefresh((value) => value + 1)}
         />
       </AppShell>
     );

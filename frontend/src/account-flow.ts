@@ -22,6 +22,7 @@ const PATHS: Record<AccountPage, string> = {
   estoque: areaPath('estoque'),
   equipe: areaPath('equipe'),
   testar: areaPath('testar'),
+  notificacoes: areaPath('notificacoes'),
 };
 
 /** Caminhos que o `main.tsx` entrega ao `AccountApp` (além de tudo sob `/painel`). */

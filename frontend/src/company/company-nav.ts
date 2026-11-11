@@ -12,7 +12,8 @@ export type AreaPage =
   | 'conhecimento'
   | 'estoque'
   | 'equipe'
-  | 'testar';
+  | 'testar'
+  | 'notificacoes';
 
 /** Ordem do menu: Conversas é a primeira aba e a página inicial de quem pode ler (spec 024). */
 export const AREA_PAGES: readonly AreaPage[] = [
@@ -31,7 +32,7 @@ export const AREA_PAGES: readonly AreaPage[] = [
  * Telas da área que não são aba do menu (spec 027): a configuração da agenda abre por um botão da própria
  * Agenda e só com `schedule:configure`.
  */
-const HIDDEN_PAGES: readonly AreaPage[] = ['agendaConfig'];
+const HIDDEN_PAGES: readonly AreaPage[] = ['agendaConfig', 'notificacoes'];
 
 const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   conversas: '/painel/conversas',
@@ -46,6 +47,8 @@ const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   // Equipe (spec 025): depois de Persona e antes de Testar, só com `membership:read`.
   equipe: '/painel/equipe',
   testar: '/painel/testar',
+  // Notificações (spec 030): fora do menu; abre pelo sino do cabeçalho, com `notification:read`.
+  notificacoes: '/painel/notificacoes',
 };
 
 export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
@@ -58,6 +61,7 @@ export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   estoque: 'Estoque',
   equipe: 'Equipe',
   testar: 'Testar',
+  notificacoes: 'Notificações',
 };
 
 /** Permissão que dá acesso a cada aba. */
@@ -71,6 +75,7 @@ const REQUIRED: Readonly<Record<AreaPage, string>> = {
   estoque: 'inventory:manage',
   equipe: 'membership:read',
   testar: 'conversation:simulate',
+  notificacoes: 'notification:read',
 };
 
 export function areaPath(page: AreaPage): string {
