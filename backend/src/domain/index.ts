@@ -153,3 +153,22 @@ export type {
   NewKnowledgeDocument,
 } from './knowledge.js';
 export * from './schedule.js';
+export {
+  HANDOFF_REASONS,
+  isHandoffReason,
+  NOTIFICATION_KINDS,
+  NOTIFICATION_MAX_OPEN,
+  NOTIFICATION_STATUSES,
+} from './notifications.js';
+export type {
+  HandoffReason,
+  NewHandoffNotification,
+  Notification,
+  NotificationCreateResult,
+  NotificationKind,
+  NotificationRepository,
+  NotificationResolveResult,
+  NotificationStatus,
+  NotificationStatusFilter,
+  OpenHandoff,
+} from './notifications.js';

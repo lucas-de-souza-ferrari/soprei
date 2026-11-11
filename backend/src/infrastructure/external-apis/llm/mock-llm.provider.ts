@@ -28,6 +28,14 @@ export const MOCK_EMPTY_MARKER = '[[mock:empty]]';
 /** Texto do contato com este marcador faz o mock responder com texto grande demais. */
 export const MOCK_HUGE_MARKER = '[[mock:huge]]';
 
+/**
+ * Spec 030: com `allowHandoff`, o mock pede atendimento humano quando o texto do contato (minúsculas,
+ * sem acento) contém um destes trechos. Determinístico, para testes e demonstração.
+ */
+export const MOCK_HANDOFF_TRIGGERS = ['atendente', 'humano', 'falar com uma pessoa'] as const;
+/** Sufixo da resposta do mock quando ele pede atendimento humano. */
+export const MOCK_HANDOFF_SUFFIX = ' (atendimento humano solicitado)';
+
 /** Quanto do texto do contato o mock devolve no eco (para a resposta caber no limite). */
 const ECHO_MAX_CHARS = 500;
 /** Quanto da persona o mock cita na resposta. */
@@ -97,10 +105,17 @@ export class MockLlmProvider implements LlmProvider {
     const personaText = styleAt === -1 ? input.systemPrompt : input.systemPrompt.slice(0, styleAt);
     const persona = personaText.slice(0, PERSONA_PREVIEW_CHARS);
     const echo = text.slice(0, ECHO_MAX_CHARS);
+    const handoff = input.allowHandoff === true && asksForHuman(text);
     return Result.ok({
-      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}`,
+      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}${handoff ? MOCK_HANDOFF_SUFFIX : ''}`,
+      ...(handoff ? { handoff: { reason: 'CONTACT_REQUESTED' as const } } : {}),
     });
   }
+}
+
+function asksForHuman(text: string): boolean {
+  const normalized = text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  return MOCK_HANDOFF_TRIGGERS.some((trigger) => normalized.includes(trigger));
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { HandoffReason } from '../../domain/index.js';
 import type { ExternalServiceError } from '../../shared/errors/index.js';
 import type { Result } from '../../shared/types/index.js';
 
@@ -14,6 +15,11 @@ export interface LlmGenerateInput {
   readonly history: readonly LlmTurn[];
   /** A mensagem nova do contato; sempre um turno `user`, nunca misturada ao `systemPrompt`. */
   readonly userMessage: string;
+  /**
+   * Spec 030: oferece ao modelo o sinal "precisa de atendimento humano". Padrão `false`; sem ele o
+   * pedido ao provedor fica idêntico ao de antes. O provedor que não sabe sinalizar pode ignorar.
+   */
+  readonly allowHandoff?: boolean;
 }
 
 /** Tokens gastos numa chamada (só números; nunca texto). */
@@ -24,10 +30,24 @@ export interface LlmUsage {
   readonly cacheReadTokens?: number;
 }
 
+/** O modelo pediu atendimento humano (spec 030): só o motivo, de uma lista fixa; nunca texto livre. */
+export interface LlmHandoff {
+  readonly reason: HandoffReason;
+}
+
 export interface LlmReply {
   readonly text: string;
   readonly usage?: LlmUsage;
+  /** Presente só quando `allowHandoff` foi pedido e o modelo sinalizou. */
+  readonly handoff?: LlmHandoff;
 }
+
+/**
+ * Texto ao contato quando o modelo só sinaliza o pedido de humano, sem escrever resposta (spec 030).
+ * Constante: nunca promete prazo nem diz que alguém já está na conversa.
+ */
+export const HANDOFF_DEFAULT_REPLY =
+  'Vou chamar alguém da nossa equipe para continuar o seu atendimento. Assim que possível, uma pessoa vai falar com você.';
 
 export interface LlmGenerateOptions {
   /**

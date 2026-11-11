@@ -8,6 +8,7 @@ import {
   MOCK_EMPTY_MARKER,
   MOCK_FAIL_MARKER,
   MOCK_HANG_MARKER,
+  MOCK_HANDOFF_SUFFIX,
   MOCK_HUGE_MARKER,
   MockLlmProvider,
 } from './mock-llm.provider.js';
@@ -22,6 +23,31 @@ const input = (userMessage: string, history = 0) => ({
 });
 
 describe('MockLlmProvider', () => {
+  it('spec 030: com allowHandoff, pedido de atendente vira handoff CONTACT_REQUESTED', async () => {
+    const mock = new MockLlmProvider();
+    for (const text of [
+      'Quero falar com um ATENDENTE',
+      'tem algum humano aí?',
+      'Posso falar com uma pessoa?',
+    ]) {
+      const result = await mock.generate({ ...input(text), allowHandoff: true });
+      assert.ok(result.ok);
+      assert.deepEqual(result.value.handoff, { reason: 'CONTACT_REQUESTED' });
+      assert.ok(result.value.text.endsWith(MOCK_HANDOFF_SUFFIX));
+    }
+  });
+
+  it('spec 030: sem allowHandoff, ou sem pedido de humano, não há handoff', async () => {
+    const mock = new MockLlmProvider();
+    const without = await mock.generate(input('Quero falar com um atendente'));
+    assert.ok(without.ok);
+    assert.equal(without.value.handoff, undefined);
+    assert.ok(!without.value.text.endsWith(MOCK_HANDOFF_SUFFIX));
+    const common = await mock.generate({ ...input('Qual o horário?'), allowHandoff: true });
+    assert.ok(common.ok);
+    assert.equal(common.value.handoff, undefined);
+  });
+
   it('responde de forma determinística, citando persona e turnos de histórico', async () => {
     const mock = new MockLlmProvider();
     const first = await mock.generate(input('Olá', 3));

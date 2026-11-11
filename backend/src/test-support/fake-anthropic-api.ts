@@ -17,7 +17,13 @@ export interface AnthropicRequest {
 
 export type FakeContentBlock =
   | { readonly type: 'text'; readonly text: string }
-  | { readonly type: 'thinking'; readonly thinking: string; readonly signature?: string };
+  | { readonly type: 'thinking'; readonly thinking: string; readonly signature?: string }
+  | {
+      readonly type: 'tool_use';
+      readonly id: string;
+      readonly name: string;
+      readonly input: Record<string, unknown>;
+    };
 
 /** Como o servidor responde a um pedido. */
 export type AnthropicBehavior =

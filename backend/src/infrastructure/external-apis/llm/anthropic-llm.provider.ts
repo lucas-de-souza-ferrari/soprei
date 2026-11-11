@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { HANDOFF_REASONS, isHandoffReason, type HandoffReason } from '../../../domain/index.js';
 import {
+  HANDOFF_DEFAULT_REPLY,
   LLM_ERROR_TYPE,
   type LlmGenerateInput,
   type LlmGenerateOptions,
@@ -23,6 +25,37 @@ export interface AnthropicLlmProviderOptions {
   /** Prazo de cada tentativa no SDK (`LLM_TIMEOUT_MS`); o prazo total é do `AbortSignal` do serviço. */
   readonly timeoutMs: number;
 }
+
+/** Nome da única ferramenta oferecida ao modelo (spec 030): só um sinal, nunca executa nada. */
+export const HANDOFF_TOOL_NAME = 'solicitar_atendimento_humano';
+
+/**
+ * Linha fixa acrescentada ao `systemPrompt` só com `allowHandoff` (spec 030). Texto nosso; o do contato
+ * continua só no turno `user`.
+ */
+export const HANDOFF_SYSTEM_INSTRUCTION =
+  'Se o contato pedir para falar com uma pessoa, ou se você não puder resolver o pedido (assunto fora do que você sabe, reclamação, urgência ou assunto sensível), use a ferramenta solicitar_atendimento_humano e, na mesma resposta, diga ao contato que a equipe foi avisada. Não use a ferramenta em conversas comuns que você consegue atender. Nunca prometa prazo e nunca diga que uma pessoa já está na conversa.';
+
+/** A ferramenta de sinal: um único campo, enum fechado, `strict` (o modelo não inventa campos). */
+const HANDOFF_TOOL: Anthropic.Tool = {
+  name: HANDOFF_TOOL_NAME,
+  description:
+    'Avisa a equipe da empresa que esta conversa precisa de atendimento humano. Use quando o contato pedir uma pessoa ou quando você não puder resolver o pedido. Não executa nenhuma ação para o contato: continue respondendo a ele normalmente.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      motivo: {
+        type: 'string',
+        enum: [...HANDOFF_REASONS],
+        description:
+          'CONTACT_REQUESTED: o contato pediu uma pessoa; CANNOT_HELP: fora do que você sabe ou pode fazer; COMPLAINT: reclamação ou insatisfação; SENSITIVE: urgência, saúde, jurídico ou financeiro; OTHER: outro motivo.',
+      },
+    },
+    required: ['motivo'],
+    additionalProperties: false,
+  },
+  strict: true,
+};
 
 type Category = {
   readonly errorType: string;
@@ -92,6 +125,11 @@ const CATEGORY = {
     message: 'O modelo pausou o turno sem concluir a resposta',
     retryable: false,
   },
+  unknownTool: {
+    errorType: 'unexpected_tool_use',
+    message: 'O modelo pediu uma ferramenta que não foi oferecida',
+    retryable: false,
+  },
   stopReason: {
     errorType: 'unexpected_stop_reason',
     message: 'O modelo terminou por um motivo inesperado',
@@ -148,13 +186,19 @@ export class AnthropicLlmProvider implements LlmProvider {
     try {
       // Sem `temperature`, `top_p`, `top_k`, prefill, `tool_choice` nem `thinking`: o Haiku 5.5 recusa
       // os primeiros (400) e usa pensamento adaptivo por padrão, guiado por `effort`.
+      const allowHandoff = input.allowHandoff === true;
+      // Sem `allowHandoff` o pedido é idêntico ao de antes da spec 030 (nem `tools`, nem a linha extra).
       const response = await this.client.messages.create(
         {
           model: this.model,
           max_tokens: this.maxOutputTokens,
-          system: input.systemPrompt,
+          system: allowHandoff
+            ? `${input.systemPrompt}\n\n${HANDOFF_SYSTEM_INSTRUCTION}`
+            : input.systemPrompt,
           messages: toMessages(input),
           output_config: { effort: this.effort },
+          // Sem `tool_choice`: o padrão é `auto` (o Haiku 5.5 recusa o forçado).
+          ...(allowHandoff ? { tools: [HANDOFF_TOOL] } : {}),
         },
         options.signal === undefined ? {} : { signal: options.signal },
       );
@@ -168,17 +212,34 @@ export class AnthropicLlmProvider implements LlmProvider {
           return failure(CATEGORY.pauseTurn);
         case 'end_turn':
         case 'stop_sequence':
+        case 'tool_use':
           break;
         default:
           return failure(CATEGORY.stopReason);
       }
 
+      // Só a ferramenta oferecida conta; qualquer outra (ou ferramenta sem `allowHandoff`) é erro.
+      const toolUses = response.content.filter((block) => block.type === 'tool_use');
+      if (toolUses.some((block) => !allowHandoff || block.name !== HANDOFF_TOOL_NAME)) {
+        return failure(CATEGORY.unknownTool);
+      }
+      if (response.stop_reason === 'tool_use' && toolUses.length === 0) {
+        return failure(CATEGORY.stopReason);
+      }
+      const handoff = toolUses.length === 0 ? undefined : { reason: handoffReason(toolUses) };
+
       // Só blocos `text`; blocos de pensamento (ou outros) são ignorados.
       const text = response.content
         .flatMap((block) => (block.type === 'text' ? [block.text] : []))
         .join('');
-      if (text.trim().length === 0) return failure(CATEGORY.emptyResponse);
-      return Result.ok({ text, usage: toUsage(response.usage) });
+      const usage = toUsage(response.usage);
+      if (text.trim().length === 0) {
+        // Só o sinal, sem texto: o contato recebe o texto constante (sem segunda chamada).
+        if (handoff !== undefined)
+          return Result.ok({ text: HANDOFF_DEFAULT_REPLY, usage, handoff });
+        return failure(CATEGORY.emptyResponse);
+      }
+      return Result.ok({ text, usage, ...(handoff === undefined ? {} : { handoff }) });
     } catch (error) {
       return mapError(error);
     }
@@ -213,6 +274,21 @@ function toMessages(input: LlmGenerateInput): Anthropic.MessageParam[] {
     ...history.map((turn) => ({ role: turn.role, content: turn.content })),
     { role: 'user' as const, content: input.userMessage },
   ];
+}
+
+/**
+ * Primeiro motivo válido entre as chamadas da ferramenta. Motivo ausente ou fora da lista vira `OTHER`:
+ * o modelo quis um humano, o motivo é secundário. O `input` nunca vai a log nem a erro.
+ */
+function handoffReason(blocks: readonly Anthropic.ToolUseBlock[]): HandoffReason {
+  for (const block of blocks) {
+    const input: unknown = block.input;
+    if (typeof input === 'object' && input !== null && 'motivo' in input) {
+      const motivo: unknown = input.motivo;
+      if (isHandoffReason(motivo)) return motivo;
+    }
+  }
+  return 'OTHER';
 }
 
 function toUsage(usage: Anthropic.Usage): LlmUsage {
