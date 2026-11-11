@@ -36,6 +36,7 @@ export class FakeInfinitepayApi {
   private linkFailure: Failure | undefined;
   private checkFailure: Failure | undefined;
   private refsRequired = false;
+  private refsMode: 'reject' | 'silent' = 'reject';
   private echoReferences = true;
   private checkFailuresLeft = Number.POSITIVE_INFINITY;
   private linkResponse: unknown;
@@ -91,9 +92,13 @@ export class FakeInfinitepayApi {
     this.echoReferences = echo;
   }
 
-  /** O payment_check passa a recusar (400) a consulta sem transaction_nsu e slug. */
-  requireRefs(required: boolean): void {
+  /**
+   * O payment_check passa a exigir transaction_nsu e slug. `reject` (padrão) recusa com 400; `silent` imita
+   * o provedor real (teste de 2026-11-11): responde 200 {"success":false} sem as referências.
+   */
+  requireRefs(required: boolean, mode: 'reject' | 'silent' = 'reject'): void {
     this.refsRequired = required;
+    this.refsMode = mode;
   }
 
   /** Corpo de sucesso do POST /links diferente do padrão (formato inesperado, link malicioso...). */
@@ -150,7 +155,8 @@ export class FakeInfinitepayApi {
       if (await this.applyFailure(this.checkFailure, body, response)) return;
     }
     if (this.refsRequired && (body.transaction_nsu === undefined || body.slug === undefined)) {
-      send(response, 400, { message: 'transaction_nsu e slug obrigatorios' });
+      if (this.refsMode === 'silent') send(response, 200, { success: false });
+      else send(response, 400, { message: 'transaction_nsu e slug obrigatorios' });
       return;
     }
     const orderId = typeof body.order_nsu === 'string' ? body.order_nsu : '';

@@ -167,18 +167,17 @@ export class PaymentVerifier {
       if (!(await checkout.touchCheck(order.id, now, cooldownMs))) return { result: 'cooldown' };
     }
 
-    // 1ª tentativa: só handle e order_nsu. As referências vindas de fonte não confiável só entram se o
-    // provedor recusar a primeira com um 4xx específico (estratégia tolerante).
+    // 1ª tentativa: só handle e order_nsu. As referências vindas de fonte não confiável só entram numa
+    // segunda tentativa, quando a primeira não confirma: recusada com 4xx OU respondida com "não pago"
+    // (teste real, 2026-11-11: a InfinitePay responde 200 {"success":false} sem as referências e
+    // {"success":true,"paid":true,...} com elas). A concessão continua exigindo paid e amount iguais.
     let check = await provider.checkPayment({ orderId: order.id });
     const refs: PaymentHints = {
       transactionNsu: hints.transactionNsu ?? order.providerTransactionRef ?? undefined,
       slug: hints.slug ?? order.providerSlug ?? undefined,
     };
-    if (
-      !check.ok &&
-      check.error.reason === 'rejected' &&
-      (refs.transactionNsu !== undefined || refs.slug !== undefined)
-    ) {
+    const notConfirmed = check.ok ? !check.value.paid : check.error.reason === 'rejected';
+    if (notConfirmed && (refs.transactionNsu !== undefined || refs.slug !== undefined)) {
       check = await provider.checkPayment({ orderId: order.id, ...refs });
     }
     if (!check.ok) {

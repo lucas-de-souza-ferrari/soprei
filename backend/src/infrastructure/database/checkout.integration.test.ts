@@ -640,6 +640,46 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
     assert.equal(order.providerSlug, 'slug-ok');
   });
 
+  it('B1: o provedor real responde 200 {"success":false} sem as referências: a segunda tentativa com elas concede', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('silent');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    fake.requireRefs(true, 'silent');
+    try {
+      const before = fake.callsTo('/payment_check').length;
+      assert.equal(
+        await s.verifier.verify(created.orderId, {
+          transactionNsu: 'tx-silent',
+          slug: 'slug-silent',
+        }),
+        'paid',
+      );
+      const calls = fake.callsTo('/payment_check').slice(before);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(Object.keys(calls[0]?.body ?? {}).sort(), ['handle', 'order_nsu']);
+      assert.equal(calls[1]?.body.transaction_nsu, 'tx-silent');
+    } finally {
+      fake.requireRefs(false);
+    }
+  });
+
+  it('B1: o provedor responde "não pago" sem as referências e elas não vieram: not_paid, sem segunda chamada', async () => {
+    const s = stack();
+    const { account } = await accountWithTrial('silent-norefs');
+    const created = await s.service.createOrder(account, ESSENTIAL_AGENDA);
+    fake.markPaid(created.orderId, { amount: created.amountCents });
+    fake.requireRefs(true, 'silent');
+    try {
+      const before = fake.callsTo('/payment_check').length;
+      assert.equal(await s.verifier.verify(created.orderId), 'not_paid');
+      assert.equal(fake.callsTo('/payment_check').length - before, 1);
+    } finally {
+      fake.requireRefs(false);
+    }
+    assert.equal((await checkoutRepo.findOrder(account.id, created.orderId))?.status, 'PENDING');
+  });
+
   it('B1: o provedor exige as referências e elas não vieram: rejected, nada concedido, sem alarme', async () => {
     const s = stack();
     const { account } = await accountWithTrial('norefs');
