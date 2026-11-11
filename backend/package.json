@@ -21,6 +21,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
+    "config:check": "tsx src/infrastructure/config/check-cli.ts",
     "auth:cli": "tsx src/infrastructure/auth/cli/index.ts"
   },
   "license": "UNLICENSED",
