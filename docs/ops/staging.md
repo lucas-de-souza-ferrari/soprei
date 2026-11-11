@@ -14,6 +14,10 @@ O staging é **uma segunda instalação do Soprei** no servidor da produção, *
 | `.env`        | `backend/.env`                   | `/var/www/soprei-staging/backend/.env` (modo 600)                       |
 | Alvo do script| `deploy/targets/production.conf` | `deploy/targets/staging.conf`                                           |
 
+## Limite do isolamento: só de CONFIGURAÇÃO (decisão do dono, 2026-11-11)
+
+Enquanto staging e produção rodam **como o mesmo usuário do sistema** (`root`, mesmo PM2), o isolamento entre eles é **só de configuração**. Contra **erro de configuração** (URL errada no `.env`, senha trocada, limpeza de teste), o `REVOKE CONNECT`, a instância própria de Redis e as senhas diferentes protegem. Contra **execução de código no staging** (dependência comprometida, vulnerabilidade, quem tem a senha do nginx e explora algo), **não protegem**: o `.env` da produção é legível por `root`. Decisão do dono: o staging fica assim por enquanto, **somente com dados sintéticos**; o **usuário dedicado (D10) entra antes de qualquer dado real ou de abrir o staging ao público**.
+
 ## Passo a passo
 
 ### 1. DNS, clone e certificado

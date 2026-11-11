@@ -72,7 +72,10 @@ describe('deploy.sh (spec 037, E1)', () => {
     assert.match(code, /export DATABASE_URL=\$ENV_VALUE/);
     assert.doesNotMatch(code, /DATABASE_URL=\S+\s+pnpm/);
     // Os valores saem do arquivo por grep/cut-like, numa função só.
-    assert.equal(codeLines.filter((line) => /grep -E "\^\$1="/.test(line)).length, 1);
+    assert.equal(
+      codeLines.filter((line) => /grep -E "\^\(export\[\[:space:\]\]\+\)\?\$1="/.test(line)).length,
+      1,
+    );
   });
 
   it('usa flock não bloqueante numa trava global e ignora SIGHUP', () => {

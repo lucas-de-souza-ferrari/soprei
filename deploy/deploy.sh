@@ -69,6 +69,7 @@ ADOPT_PENDING=false
 TREE_CHANGED=false
 POINT_OF_NO_RETURN=false
 SITE_SWITCHED=false
+LEGACY_MOVED=false
 NEW_RELEASE=''
 PREV_SITE=''
 PM2_STATUS=''
@@ -92,7 +93,8 @@ BREAKING_KEYWORDS=''
 redact() {
   sed -u -E \
     -e 's#(postgres(ql)?|rediss?|amqp|mongodb)://[^[:space:]"'"'"']+#[redacted]#g' \
-    -e 's#(JWT_SECRET|[A-Za-z0-9_]*(KEY|SECRET|TOKEN|PSWD|PASSWORD))=[^[:space:]]+#\1=[redacted]#g'
+    -e 's#//[^/[:space:]]*:[^@[:space:]]*@#//[redacted]@#g' \
+    -e 's#(JWT_SECRET|[A-Za-z0-9_]*(KEY|SECRET|TOKEN|PSWD|PASSWORD))=[^[:space:]]+#\1=[redacted]#gI'
 }
 
 log() {
@@ -213,6 +215,15 @@ load_target() {
     [[ -n ${!required} ]] || die_early "alvo sem $required"
   done
   [[ $APP_DIR == /* ]] || die_early 'APP_DIR precisa ser caminho absoluto'
+  # Endurecimento do alvo: nada de "..", de componente começando com "-", nem de APP_DIR raso (nunca "/").
+  local path_key
+  for path_key in APP_DIR ENV_FILE PRE_MIGRATION_BACKUP; do
+    [[ ${!path_key} != *..* && ${!path_key} != */-* ]] || die_early "$path_key com '..' ou componente começando com '-'"
+  done
+  [[ $APP_DIR =~ ^/[^/]+/[^/]+ ]] || die_early 'APP_DIR raso demais (precisa de pelo menos dois níveis)'
+  [[ $PM2_APP != -* && $SITE_HOST != -* ]] || die_early 'PM2_APP e SITE_HOST não podem começar com "-"'
+  [[ $HEALTH_URL == http://127.0.0.1:* && $READY_URL == http://127.0.0.1:* ]] \
+    || die_early 'HEALTH_URL e READY_URL precisam começar com http://127.0.0.1:'
   [[ $ENV_FILE == "$APP_DIR/backend/.env" ]] \
     || die_early 'o arquivo de ambiente do alvo precisa ser APP_DIR/backend/.env (o dotenv lê o do diretório atual)'
   [[ $REQUIRE_STAGED == true || $REQUIRE_STAGED == false ]] || die_early 'REQUIRE_STAGED inválido'
@@ -238,11 +249,20 @@ open_log() {
 # Valor de uma variável do .env por grep e cut (sem source), em ENV_VALUE; nunca impresso.
 read_env_value() {
   local line
-  line=$(grep -E "^$1=" "$ENV_FILE" | tail -n 1 || true)
+  # Aceita "export NOME=valor". Valor entre aspas vai até a aspa de fechamento; sem aspas, um " #"
+  # começa comentário (como no dotenv).
+  line=$(grep -E "^(export[[:space:]]+)?$1=" "$ENV_FILE" | tail -n 1 | sed -E 's/^export[[:space:]]+//' || true)
   ENV_VALUE=${line#*=}
   ENV_VALUE=${ENV_VALUE%$'\r'}
-  if [[ $ENV_VALUE == \"*\" || $ENV_VALUE == \'*\' ]]; then
-    ENV_VALUE=${ENV_VALUE:1:${#ENV_VALUE}-2}
+  if [[ $ENV_VALUE == \"* ]]; then
+    ENV_VALUE=${ENV_VALUE#\"}
+    ENV_VALUE=${ENV_VALUE%%\"*}
+  elif [[ $ENV_VALUE == \'* ]]; then
+    ENV_VALUE=${ENV_VALUE#\'}
+    ENV_VALUE=${ENV_VALUE%%\'*}
+  else
+    ENV_VALUE=${ENV_VALUE%%[[:space:]]\#*}
+    ENV_VALUE=${ENV_VALUE%"${ENV_VALUE##*[![:space:]]}"}
   fi
 }
 
@@ -294,7 +314,8 @@ read_pm2() {
 
 http_code() {
   local code
-  code=$(curl -sS -o /dev/null --max-time 3 -w '%{http_code}' "$@" 9>&- 2>/dev/null) || code=000
+  # Primeiro argumento: a URL (depois de "--"); os demais são opções extras do curl.
+  code=$(curl -sS -o /dev/null --max-time 3 -w '%{http_code}' "${@:2}" -- "$1" 9>&- 2>/dev/null) || code=000
   printf '%s' "$code"
 }
 
@@ -305,7 +326,7 @@ probe_health() {
 site_ok() {
   local code ok
   local -a accepted
-  code=$(http_code --resolve "$SITE_HOST:443:127.0.0.1" "https://$SITE_HOST/")
+  code=$(http_code "https://$SITE_HOST/" --resolve "$SITE_HOST:443:127.0.0.1")
   IFS=, read -ra accepted <<<"$SITE_OK_CODES"
   for ok in "${accepted[@]}"; do
     if [[ $code == "$ok" ]]; then
@@ -396,6 +417,10 @@ load_state() {
     if [[ $ADOPT == true ]]; then
       ADOPT_PENDING=true
       CURRENT_SHA=$HEAD_SHA
+    elif [[ $FORCE == true ]]; then
+      # Recuperação de uma execução que morreu no meio: segue com o --ref pedido; a versão de volta
+      # em caso de falha é a REGISTRADA (a que o estado diz que está em execução), não o HEAD.
+      log "AVISO: o HEAD ($(short "$HEAD_SHA")) difere da versão registrada ($(short "$CURRENT_SHA")); seguindo por causa do --force. A versão de volta, se falhar, é a registrada"
     else
       die1 "o HEAD ($(short "$HEAD_SHA")) difere da versão registrada ($(short "$CURRENT_SHA")); uma execução anterior pode ter parado no meio. Rode --ref $CURRENT_SHA --force"
     fi
@@ -471,7 +496,7 @@ scan_migrations() {
     name=${name##*/}
     MIGRATION_NAMES+=("$name")
     sql=$(git -C "$APP_DIR" show "$TARGET_SHA:$file")
-    stripped=$(sed 's/--.*$//' <<<"$sql" | tr '\n' ' ')
+    stripped=$(git -C "$APP_DIR" show "$TARGET_SHA:$file" | sed 's/--.*$//' | tr '\n' ' ')
     if grep -Eiq "$BREAKING_PATTERN" <<<"$stripped"; then
       found=$(grep -Eio "$BREAKING_PATTERN" <<<"$stripped" | tr '[:lower:]' '[:upper:]' | sort -u | tr '\n' ',' || true)
       BREAKING_NAMES+=("$name")
@@ -535,6 +560,8 @@ generate_client() {
 
 build_backend() {
   (
+    # umask 022 só para o que o build gera (o 077 global é para log, estado, trava e backup).
+    umask 022
     cd "$APP_DIR/backend" || exit 1
     rm -rf dist.next
     run_cmd nice -n 10 env "NODE_OPTIONS=--max-old-space-size=$BUILD_MEMORY_MB" \
@@ -547,12 +574,16 @@ build_frontend() {
   stamp=$(date -u +%Y%m%d%H%M%S)
   NEW_RELEASE="${TARGET_SHA:0:12}-$stamp"
   (
+    # O nginx (outro usuário) precisa ler a release: umask 022 aqui e modo explícito depois.
+    umask 022
     cd "$APP_DIR/frontend" || exit 1
-    mkdir -p releases
+    mkdir -p releases || exit 1
+    chmod 755 releases || exit 1
     run_cmd nice -n 10 env "NODE_OPTIONS=--max-old-space-size=$BUILD_MEMORY_MB" \
       pnpm --filter soprei-frontend exec tsc --noEmit || exit 1
     run_cmd nice -n 10 env "NODE_OPTIONS=--max-old-space-size=$BUILD_MEMORY_MB" \
-      pnpm --filter soprei-frontend exec vite build --outDir "$APP_DIR/frontend/releases/$NEW_RELEASE"
+      pnpm --filter soprei-frontend exec vite build --outDir "$APP_DIR/frontend/releases/$NEW_RELEASE" || exit 1
+    chmod -R u=rwX,go=rX "releases/$NEW_RELEASE"
   )
 }
 
@@ -560,7 +591,7 @@ build_frontend() {
 prepare_version() {
   local sha=$1
   TREE_CHANGED=true
-  git -C "$APP_DIR" checkout --detach -q "$sha" || return 1
+  run_cmd git -C "$APP_DIR" checkout --detach -q "$sha" || return 1
   node_major_of_tree || return 1
   (cd "$APP_DIR" && run_cmd pnpm install --frozen-lockfile) || return 1
   generate_client || return 1
@@ -577,7 +608,7 @@ cleanup_waiting() {
 # Falhas antes de trocar: devolve a árvore à versão anterior e sai com 2 (ou 3 se não conseguir).
 restore_tree() {
   log "restaurando a árvore para $(short "$PREV_SHA")"
-  git -C "$APP_DIR" checkout --detach -q "$PREV_SHA" || return 1
+  run_cmd git -C "$APP_DIR" checkout --detach -q "$PREV_SHA" || return 1
   (cd "$APP_DIR" && run_cmd pnpm install --frozen-lockfile) || return 1
   generate_client || return 1
 }
@@ -645,15 +676,30 @@ run_migrations() {
 # Trocar, esperar a saúde, trocar o site
 # ---------------------------------------------------------------------------------------------
 
-swap_backend() {
+# Troca dist.next por dist guardando o dist antigo em "$1". Cada mv é conferido (esta função roda em
+# contexto de || e o set -e não vale): se o dist antigo não saiu do lugar, mv dist.next dist poria a
+# pasta nova DENTRO dele e a "troca" falsa passaria. Falhou no meio: devolve o dist antigo.
+swap_dist_dirs() {
+  local old=$1
   (
     cd "$APP_DIR/backend" || exit 1
-    rm -rf dist.prev dist.failed
+    rm -rf "$old" || exit 1
     if [[ -d dist ]]; then
-      mv dist dist.prev
+      if ! mv dist "$old" || [[ -e dist ]]; then
+        exit 1
+      fi
     fi
-    mv dist.next dist
-  ) || return 1
+    if ! mv -T dist.next dist || [[ -e dist.next ]]; then
+      if [[ ! -e dist && -d $old ]]; then
+        mv "$old" dist || true
+      fi
+      exit 1
+    fi
+  )
+}
+
+swap_backend() {
+  swap_dist_dirs dist.prev
 }
 
 reload_app() {
@@ -702,27 +748,45 @@ wait_healthy() {
 switch_site() {
   local fe="$APP_DIR/frontend" stamp
   PREV_SITE=''
-  mkdir -p "$fe/releases"
+  LEGACY_MOVED=false
+  # Valida e prepara TUDO antes de mexer na pasta atual (se algo falhar aqui, nada mudou).
+  [[ -f $fe/releases/$NEW_RELEASE/index.html ]] || { log 'a release nova do site não tem index.html'; return 1; }
+  (umask 022 && mkdir -p "$fe/releases") || return 1
+  chmod 755 "$fe/releases" || return 1
+  rm -rf "$fe/.dist.new"
+  ln -s "releases/$NEW_RELEASE" "$fe/.dist.new" || return 1
   if [[ -L $fe/dist ]]; then
     PREV_SITE=$(readlink "$fe/dist")
   elif [[ -d $fe/dist ]]; then
     # Primeira vez: o site era uma pasta real; vira uma release e passa a ser servido por atalho.
     stamp=$(date -u +%Y%m%d%H%M%S)
     PREV_SITE="releases/legacy-$stamp"
-    mv "$fe/dist" "$fe/$PREV_SITE"
+    if ! mv "$fe/dist" "$fe/$PREV_SITE"; then
+      rm -rf "$fe/.dist.new"
+      return 1
+    fi
+    LEGACY_MOVED=true
+    chmod 755 "$fe/$PREV_SITE" || true
   fi
-  [[ -f $fe/releases/$NEW_RELEASE/index.html ]] || { log 'a release nova do site não tem index.html'; return 1; }
-  ln -sfn "releases/$NEW_RELEASE" "$fe/.dist.new"
-  mv -T "$fe/.dist.new" "$fe/dist"
   SITE_SWITCHED=true
+  if ! mv -T "$fe/.dist.new" "$fe/dist"; then
+    log 'não consegui colocar o atalho do site no lugar'
+    return 1
+  fi
 }
 
+# Devolve o site ao que era antes de switch_site (inclusive a pasta real da primeira vez).
 restore_site() {
   local fe="$APP_DIR/frontend"
-  [[ $SITE_SWITCHED == true ]] || return 0
-  if [[ -n $PREV_SITE ]]; then
-    ln -sfn "$PREV_SITE" "$fe/.dist.new"
-    mv -T "$fe/.dist.new" "$fe/dist"
+  [[ $SITE_SWITCHED == true || $LEGACY_MOVED == true ]] || return 0
+  rm -rf "$fe/.dist.new"
+  if [[ $LEGACY_MOVED == true ]]; then
+    rm -f "$fe/dist"
+    mv "$fe/$PREV_SITE" "$fe/dist" || return 1
+    LEGACY_MOVED=false
+  elif [[ -n $PREV_SITE ]]; then
+    ln -s "$PREV_SITE" "$fe/.dist.new" || return 1
+    mv -T "$fe/.dist.new" "$fe/dist" || return 1
   else
     rm -f "$fe/dist"
   fi
@@ -742,7 +806,7 @@ prune_releases() {
     if ((count > 3)) && [[ releases/${dir##*/} != "$live" ]]; then
       rm -rf "${fe:?}/releases/${dir##*/}"
     fi
-  done < <(ls -1dt "$fe"/releases/* 2>/dev/null || true)
+  done < <(find "$fe/releases" -mindepth 1 -maxdepth 1 -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -755,14 +819,7 @@ rollback_code() {
   restore_site || return 1
   restore_tree || return 1
   build_backend || return 1
-  (
-    cd "$APP_DIR/backend" || exit 1
-    rm -rf dist.failed
-    if [[ -d dist ]]; then
-      mv dist dist.failed
-    fi
-    mv dist.next dist
-  ) || return 1
+  swap_dist_dirs dist.failed || return 1
   reload_app || return 1
   wait_healthy rollback || return 1
 }
@@ -804,7 +861,7 @@ run_deploy() {
   check_current_health
 
   log 'buscando a versão pedida (git fetch)'
-  git -C "$APP_DIR" fetch --prune --tags origin || die1 'git fetch falhou (rede ou chave); nada foi alterado'
+  run_cmd git -C "$APP_DIR" fetch --prune --tags origin || die1 'git fetch falhou (rede ou chave); nada foi alterado'
   resolve_ref
   check_staged_rule
   # Sem o app no PM2 (adoção de um ambiente novo) nada está rodando: implanta mesmo sendo o mesmo SHA.
@@ -849,7 +906,12 @@ run_deploy() {
     abort_before_swap 'db:migrate:deploy falhou ou estourou o prazo; nada foi trocado'
   fi
 
-  swap_backend || post_swap_failure 'a troca da pasta compilada falhou'
+  # Falha aqui (depois da migration, antes de recarregar): o app antigo segue no ar e saudável, nada
+  # foi trocado; só a árvore volta (sem recompilar o anterior e sem recarregar o PM2).
+  if ! swap_backend; then
+    list_unreverted_migrations
+    abort_before_swap 'a troca da pasta compilada falhou (o processo em execução não foi tocado)'
+  fi
   reload_app || post_swap_failure 'o PM2 não conseguiu recarregar o app'
   wait_healthy inject || post_swap_failure 'o sistema novo não ficou saudável'
   switch_site || post_swap_failure 'a troca do site falhou'

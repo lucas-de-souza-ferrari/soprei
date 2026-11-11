@@ -59,7 +59,7 @@ Para provar o rollback no staging: `deploy/deploy.sh --env staging --ref <sha> -
 
 ## O que o script confere antes de mexer (saída 1 se falhar)
 
-Trava global livre; árvore do Git limpa; `HEAD` igual ao SHA registrado (senão uma execução anterior parou no meio: rode `--ref <SHA registrado> --force`); Node na major do `.nvmrc`; `pnpm` na versão do `packageManager`; `.env` existente e com modo 600; pelo menos 2 GB livres; app presente no PM2 (exceto com `--adopt`); sistema respondendo agora (senão só segue com `--force`); `git fetch` funcionando; SHA do staging (produção); varredura das migrations que entram.
+Trava global livre; árvore do Git limpa; `HEAD` igual ao SHA registrado (senão uma execução anterior parou no meio: rode `--ref <SHA> --force`; com `--force` o script aceita o `HEAD` divergente, avisa no log e, se a nova tentativa falhar, a versão de volta é a **registrada**, não o `HEAD`); Node na major do `.nvmrc`; `pnpm` na versão do `packageManager`; `.env` existente e com modo 600; pelo menos 2 GB livres; app presente no PM2 (exceto com `--adopt`); sistema respondendo agora (senão só segue com `--force`); `git fetch` funcionando; SHA do staging (produção); varredura das migrations que entram.
 
 ## Política de migration (como o rollback fica seguro)
 
@@ -67,7 +67,8 @@ O rollback volta o **código**; **migration nunca é revertida** (o Prisma não 
 
 - **Regra:** toda migration deve ser **aditiva e compatível com a versão anterior do código** (coluna nova anulável ou com valor padrão, tabela nova, índice novo, valor novo de enum que só o código novo usa). Assim voltar o código é seguro mesmo com a migration aplicada.
 - **Aditiva não é o mesmo que compatível.** Parecem aditivos e **quebram** o código antigo: um índice **único** que a escrita antiga viola, um `CHECK` novo que dados gravados pela versão antiga violam, uma coluna `NOT NULL` com padrão que o código antigo sobrescreve com nulo. O revisor confere a compatibilidade em todo PR com migration.
-- **Como reconhecer uma migration não aditiva:** o `--dry-run` e o deploy **listam os arquivos de migration que entram** e **bloqueiam** (saída 1, nada alterado) os que contêm `DROP`, `RENAME`, `SET NOT NULL`, `ALTER COLUMN ... TYPE`, `TRUNCATE` ou `DELETE FROM` (inclui remoção de valor de enum, que o Prisma faz por `RENAME`/`DROP`) **sem** a linha `-- breaking-approved: <motivo>`. A varredura é por texto: **alarme, não prova** (falso positivo, como um `DROP` de coluna criada na mesma migration, e falso negativo em SQL incomum são possíveis).
+- **Como reconhecer uma migration não aditiva:** o `--dry-run` e o deploy **listam os arquivos de migration que entram** e **bloqueiam** (saída 1, nada alterado) os que contêm `DROP`, `RENAME`, `SET NOT NULL`, `ALTER COLUMN ... TYPE`, `TRUNCATE` ou `DELETE FROM` (inclui remoção de valor de enum, que o Prisma faz por `RENAME`/`DROP`) **sem** a linha `-- breaking-approved: <motivo>`. A varredura é por texto: **alarme, não prova** (falso positivo, como um `DROP` de coluna criada na mesma migration, e falso negativo em SQL incomum são possíveis). **Lacunas conhecidas, que NÃO disparam o alarme e quebram o código antigo:** `ADD COLUMN ... NOT NULL` sem valor padrão, índice **único** novo, `CHECK` novo, chave estrangeira nova que a escrita antiga viola. Só a revisão do PR pega esses casos.
+- **Instalar dependências e código gerado com o processo antigo no ar (D1, risco aceito):** o `pnpm install` e o `db:generate` mexem em `node_modules` e no cliente gerado do Prisma enquanto o processo antigo ainda roda; módulos carregados depois (importação tardia) podem vir da versão nova. Se o processo antigo cair nessa janela, o rollback refaz o caminho.
 - **Mudança destrutiva inevitável:** duas versões em sequência (**expandir**: adicionar o novo e passar o código a usá-lo; **contrair**, numa versão posterior: remover o antigo). Se o dono decide por uma versão só: a marca no arquivo, `--allow-breaking`, o backup antes da migration (em produção **exigido**: sem `PRE_MIGRATION_BACKUP` no alvo e com sucesso, o script recusa) e **sem rollback automático**: se a saúde falhar, o script para em `INTERVENÇÃO MANUAL` e manda restaurar o backup feito antes da migration ou corrigir para a frente.
 - **Migration que falha no meio:** o Prisma aplica cada migration numa transação; se falhar, ela fica registrada como falha e o próximo `migrate deploy` recusa até alguém resolver (`prisma migrate resolve`, decisão do dono, caso a caso). Conferir: `cd /var/www/soprei/backend && pnpm exec prisma migrate status` (com `DATABASE_URL` no ambiente, extraída do `.env` sem `source`). O script, nesse caso, **não troca nada**, restaura a árvore e sai com 2.
 
@@ -84,7 +85,13 @@ O rollback volta o **código**; **migration nunca é revertida** (o Prisma não 
 | Servidor sem espaço ou memória durante o build                               | O build falha, a árvore é restaurada, o processo em execução nunca foi tocado (saída 2). O `nice` e o teto de memória do build reduzem o risco de o PM2 ser sacrificado. |
 | Mesmo SHA                                                                    | Sai com 0 ("já está nessa versão"); `--force` reimplanta.                                                                                     |
 
+## Permissões de arquivos
+
+O script roda com `umask 077` (log, estado, trava e backup ficam privados). O **build** roda com `umask 022` e a release do site recebe `chmod -R u=rwX,go=rX` (`frontend/releases` e a pasta `legacy-*`, 755): o nginx roda como outro usuário e precisa ler o site. Se mexer nessas pastas à mão, mantenha o nginx com permissão de leitura.
+
 ## Restrições (valem sempre)
+
+- O isolamento do staging é só de configuração enquanto os dois ambientes rodam como o mesmo usuário (decisão do dono, 2026-11-11; ver [staging.md](staging.md)): só dados sintéticos até o usuário dedicado existir.
 
 - **Nunca** restaure um `pg_dump` de produção no staging, inteiro ou parcial, enquanto a spec 032 não definir retenção e anonimização (o staging nasce vazio e é preenchido pelo próprio sistema).
 - **Nunca** faça `source` do `.env` (valores com espaço e caracteres especiais quebram o shell, e o conteúdo não pode ir para o ambiente do script). Extraia o valor que precisar com `grep`/`cut`.

@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  statSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -89,6 +90,8 @@ case "$*" in
     # Imprime de propósito valores sensíveis: o filtro de redação do script tem de escondê-los.
     echo "DATABASE_URL=\${DATABASE_URL:-}"
     echo "JWT_SECRET=\${LEAK_JWT:-}"
+    echo "password=SENTINELA-PW apiKey=SENTINELA-APIKEY Token=SENTINELA-TOKEN"
+    echo "conectando em https://usuario:SENTINELA-URLPW@host.invalido/caminho"
     printf '%s' "\${DATABASE_URL:-}" > "$STUB_DIR/db_url_seen_generate"
     exit 0 ;;
   db:migrate:deploy)
@@ -156,7 +159,11 @@ case "$url" in
     if [ -f "$STUB_DIR/health_down" ]; then printf 000; exit 7; fi
     cur=$(sed -n 's#^// sha=##p' "$STUB_APP_DIR/backend/dist/index.js" 2>/dev/null)
     if [ -f "$STUB_DIR/health_bad_sha" ] && [ "$cur" = "$(cat "$STUB_DIR/health_bad_sha")" ]; then printf 503; else printf 200; fi ;;
-  *) printf '%s' "\${SITE_CODE:-200}" ;;
+  *)
+    # O site só responde 200 se o frontend/dist (atalho ou pasta) existe de verdade.
+    if [ -n "\${SITE_CODE:-}" ]; then printf '%s' "$SITE_CODE"
+    elif [ -f "$STUB_APP_DIR/frontend/dist/index.html" ]; then printf 200
+    else printf 404; fi ;;
 esac
 `;
 
@@ -273,7 +280,7 @@ function makeWorld(options: WorldOptions = {}): World {
   // O que existe só no servidor (fora do Git): o .env, a compilação e o site em uso.
   write(
     join(appDir, 'backend', '.env'),
-    `DATABASE_URL=postgresql://soprei:${DB_SENTINEL}@127.0.0.1:5432/soprei_test\nJWT_SECRET=${JWT_SENTINEL}\n`,
+    `export DATABASE_URL=postgresql://soprei:${DB_SENTINEL}@127.0.0.1:5432/soprei_test  # banco de teste\nJWT_SECRET=${JWT_SENTINEL}\n`,
     0o600,
   );
   chmodSync(join(appDir, 'backend', '.env'), 0o600);
@@ -395,7 +402,14 @@ function setStub(world: World, name: string, content = '1'): void {
 }
 
 function assertNoSecrets(result: RunResult): void {
-  for (const secret of [DB_SENTINEL, JWT_SENTINEL]) {
+  for (const secret of [
+    DB_SENTINEL,
+    JWT_SENTINEL,
+    'SENTINELA-PW',
+    'SENTINELA-APIKEY',
+    'SENTINELA-TOKEN',
+    'SENTINELA-URLPW',
+  ]) {
     assert.ok(!result.out.includes(secret), `a saída contém o segredo ${secret}`);
     assert.ok(!result.log.includes(secret), `o log contém o segredo ${secret}`);
   }
@@ -602,6 +616,11 @@ describe(
         `// sha=${world.prevSha}`,
       );
       assert.ok(!existsSync(join(world.appDir, 'backend', 'dist.next')));
+      // "export" e comentário no fim do .env não entram no valor entregue ao comando.
+      assert.equal(
+        readFileSync(join(world.stubDir, 'db_url_seen_generate'), 'utf8'),
+        `postgresql://soprei:${DB_SENTINEL}@127.0.0.1:5432/soprei_test`,
+      );
       assertNoSecrets(result);
     });
 
@@ -751,6 +770,19 @@ describe('deploy.sh: deploy concluído e redação de segredos', { skip: BASH_SK
         ),
       );
 
+      // O nginx (outro usuário) precisa ler o site: o umask 077 do script não pode vazar para a release.
+      const releasesDir = join(world.appDir, 'frontend', 'releases');
+      assert.equal(statSync(releasesDir).mode & 0o755, 0o755, 'releases/ precisa de 755');
+      for (const name of readdirSync(releasesDir)) {
+        assert.equal(
+          statSync(join(releasesDir, name)).mode & 0o055,
+          0o055,
+          `${name} ilegível para o grupo e outros`,
+        );
+      }
+      const release = readdirSync(releasesDir).find((name) => /^[0-9a-f]{12}-/.test(name)) ?? '';
+      assert.equal(statSync(join(releasesDir, release, 'index.html')).mode & 0o044, 0o044);
+
       // Ordem: backup, migration, depois o reload.
       const backup = indexOfEvent(result.events, 'backup');
       const migrate = indexOfEvent(result.events, 'db:migrate:deploy');
@@ -801,10 +833,125 @@ describe('deploy.sh: deploy concluído e redação de segredos', { skip: BASH_SK
       assert.equal(result.status, 2, result.out);
       assert.match(result.out, /site restaurado/);
       assert.equal(head(world), world.prevSha);
-      assert.ok(lstatSync(join(world.appDir, 'frontend', 'dist')).isSymbolicLink());
-      assert.match(readlinkSync(join(world.appDir, 'frontend', 'dist')), /^releases\/legacy-/);
+      // Na primeira vez a pasta real é movida e, no rollback, devolvida ao lugar (não vira atalho).
+      const dist = join(world.appDir, 'frontend', 'dist');
+      assert.ok(!lstatSync(dist).isSymbolicLink());
+      assert.match(readFileSync(join(dist, 'index.html'), 'utf8'), /legado/);
     },
   );
+});
+
+const STUB_MV = `#!/usr/bin/env bash
+# Falha de propósito quando os argumentos contêm MV_FAIL_SUBSTR; senão chama o mv de verdade.
+if [ -n "\${MV_FAIL_SUBSTR:-}" ] && [[ " $* " == *"$MV_FAIL_SUBSTR"* ]]; then
+  echo "mv falhou (dublê): $*" >&2
+  exit 1
+fi
+exec /usr/bin/mv "$@"
+`;
+
+describe('deploy.sh: falhas de troca, recuperação e alvo', { skip: BASH_SKIP }, () => {
+  it('I3/S7: mv que falha na troca do dist não vira "troca concluída" e o app antigo segue no ar (saída 2)', () => {
+    const world = makeWorld({ targetMigration: ADDITIVE });
+    write(join(world.stubDir, 'mv'), STUB_MV, 0o755);
+    // dist.prev residual de uma execução anterior.
+    write(join(world.appDir, 'backend', 'dist.prev', 'lixo.txt'), 'x');
+    const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha], {
+      MV_FAIL_SUBSTR: ' dist dist.prev',
+    });
+    assert.equal(result.status, 2, result.out);
+    assert.match(result.out, /o processo em execução não foi tocado/);
+    assert.match(result.out, /20261111000000_nova/);
+    assert.ok(!result.events.includes('startOrReload'), 'nada foi recarregado');
+    assert.equal(head(world), world.prevSha);
+    const dist = join(world.appDir, 'backend', 'dist');
+    assert.equal(readFileSync(join(dist, 'index.js'), 'utf8').trim(), `// sha=${world.prevSha}`);
+    assert.ok(
+      !existsSync(join(dist, 'dist.next')),
+      'a pasta nova não pode ter ido para dentro do dist',
+    );
+    assert.ok(!existsSync(join(world.appDir, 'backend', 'dist.next')));
+    assert.equal(stateOf(world, 'current'), world.prevSha);
+    assertNoSecrets(result);
+  });
+
+  it('I2: falha na troca do site na primeira vez devolve a pasta frontend/dist', () => {
+    const world = makeWorld();
+    write(join(world.stubDir, 'mv'), STUB_MV, 0o755);
+    const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha], {
+      MV_FAIL_SUBSTR: '.dist.new',
+    });
+    assert.equal(result.status, 2, result.out);
+    assert.match(result.out, /site restaurado/);
+    const dist = join(world.appDir, 'frontend', 'dist');
+    assert.ok(existsSync(join(dist, 'index.html')), 'frontend/dist precisa existir de novo');
+    assert.ok(!lstatSync(dist).isSymbolicLink());
+    assert.match(readFileSync(join(dist, 'index.html'), 'utf8'), /legado/);
+    assert.ok(!existsSync(join(world.appDir, 'frontend', '.dist.new')));
+    assert.equal(head(world), world.prevSha);
+  });
+
+  it('I1: HEAD diferente do registrado: recusa sem --force; com --force o plano segue e avisa', () => {
+    const world = makeWorld();
+    git(world.appDir, 'fetch', '-q', 'origin');
+    git(world.appDir, 'checkout', '-q', '--detach', world.targetSha); // execução que morreu no meio
+    const refused = deploy(world, ['--env', 'staging', '--ref', world.targetSha]);
+    assert.equal(refused.status, 1, refused.out);
+    assert.match(refused.out, /--force/);
+    const forced = deploy(world, [
+      '--env',
+      'staging',
+      '--ref',
+      world.targetSha,
+      '--force',
+      '--dry-run',
+    ]);
+    assert.equal(forced.status, 0, forced.out);
+    assert.match(forced.out, /seguindo por causa do --force/);
+    assert.match(forced.out, /PLANO/);
+  });
+
+  it(
+    'I1: a recuperação com --force reimplanta e reconcilia o estado',
+    { skip: SYMLINK_SKIP },
+    () => {
+      const world = makeWorld();
+      git(world.appDir, 'fetch', '-q', 'origin');
+      git(world.appDir, 'checkout', '-q', '--detach', world.targetSha);
+      const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha, '--force']);
+      assert.equal(result.status, 0, result.out);
+      assert.equal(head(world), world.targetSha);
+      assert.equal(stateOf(world, 'current'), world.targetSha);
+      assert.equal(stateOf(world, 'previous'), world.prevSha);
+    },
+  );
+
+  it('S6: alvo com URL de saúde fora do loopback, APP_DIR com ".." ou APP_DIR raso é recusado', () => {
+    const world = makeWorld();
+    const confPath = join(world.targetsDir, 'staging.conf');
+    const original = readFileSync(confPath, 'utf8');
+    writeFileSync(
+      confPath,
+      original.replace(
+        'HEALTH_URL=http://127.0.0.1:39999/health',
+        'HEALTH_URL=http://example.org/health',
+      ),
+    );
+    const url = deploy(world, ['--env', 'staging', '--dry-run']);
+    assert.equal(url.status, 1);
+    assert.match(url.out, /127\.0\.0\.1/);
+    writeFileSync(confPath, original.replace('APP_DIR=', 'APP_DIR=/tmp/../'));
+    const dots = deploy(world, ['--env', 'staging', '--dry-run']);
+    assert.equal(dots.status, 1);
+    assert.match(dots.out, /\.\./);
+    writeFileSync(
+      confPath,
+      original
+        .replace(/^APP_DIR=.*$/m, 'APP_DIR=/')
+        .replace(/^ENV_FILE=.*$/m, 'ENV_FILE=/backend/.env'),
+    );
+    assert.equal(deploy(world, ['--env', 'staging', '--dry-run']).status, 1);
+  });
 });
 
 describe('deploy.sh: trava global', { skip: FLOCK_SKIP }, () => {
