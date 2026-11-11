@@ -1,0 +1,23 @@
+# Unidade systemd do Redis do staging (spec 037, E2). Instalar como /etc/systemd/system/redis-staging.service
+# e depois: systemctl daemon-reload && systemctl enable --now redis-staging.
+# Alternativa: o modelo de instância do pacote da distribuição (conferir no servidor, S18 da spec).
+[Unit]
+Description=Redis do staging do Soprei (porta 6380)
+After=network.target
+
+[Service]
+Type=notify
+User=redis
+Group=redis
+ExecStart=/usr/bin/redis-server /etc/redis-staging/redis.conf --supervised systemd
+Restart=on-failure
+RuntimeDirectory=redis-staging
+StateDirectory=redis-staging
+LimitNOFILE=10032
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

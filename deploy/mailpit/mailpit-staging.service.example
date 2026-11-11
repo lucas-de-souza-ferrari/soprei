@@ -1,0 +1,33 @@
+# Unidade systemd do Mailpit do staging (spec 037, E2, D4): caixa de e-mail de teste local. Nenhum
+# e-mail sai do servidor. Instalar como /etc/systemd/system/mailpit-staging.service.
+#
+# SMTP em 127.0.0.1:1025 com STARTTLS obrigatório e certificado emitido por uma autoridade PRIVADA do
+# dono (o staging roda com NODE_ENV=production, que exige STARTTLS com certificado verificado; o Node do
+# staging confia nessa autoridade por NODE_EXTRA_CA_CERTS, definido em deploy/ecosystem.config.cjs).
+# O nome do certificado deve ser "localhost" (EMAIL_PROVIDER_HOST=localhost). A interface web fica em
+# 127.0.0.1:8025 e só é acessada por túnel SSH: ssh -L 8025:127.0.0.1:8025 <servidor>.
+# Conferir as opções na versão instalada (mailpit --help): S19 da spec.
+[Unit]
+Description=Mailpit do staging do Soprei
+After=network.target
+
+[Service]
+User=mailpit
+Group=mailpit
+ExecStart=/usr/local/bin/mailpit \
+  --listen 127.0.0.1:8025 \
+  --smtp 127.0.0.1:1025 \
+  --smtp-tls-cert /etc/soprei-staging/mailpit.crt \
+  --smtp-tls-key /etc/soprei-staging/mailpit.key \
+  --smtp-require-starttls \
+  --database /var/lib/mailpit-staging/mailpit.db \
+  --max 500
+Restart=on-failure
+StateDirectory=mailpit-staging
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

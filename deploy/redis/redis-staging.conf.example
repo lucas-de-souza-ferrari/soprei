@@ -1,0 +1,24 @@
+# Redis do STAGING do Soprei (spec 037, E2): segundo processo, com porta, diretório, senha e unidade
+# próprios. NÃO basta usar outro índice (/2) no Redis da produção: um FLUSHDB ou uma limpeza de teste no
+# staging jamais pode alcançar a produção, e a senha de um não pode abrir o outro.
+#
+# Instalação (feita pelo dono): copie para /etc/redis-staging/redis.conf, troque o marcador da senha
+# pelo valor escolhido (o valor fica só no servidor e no gerenciador de senhas do dono), modo 640,
+# dono root e grupo redis. O diretório de dados é /var/lib/redis-staging (dono redis).
+
+bind 127.0.0.1
+port 6380
+protected-mode yes
+daemonize no
+
+# Senha própria, DIFERENTE da do Redis da produção. Marcador: não é um valor.
+requirepass <SENHA_DO_REDIS_STAGING>
+
+dir /var/lib/redis-staging
+appendonly yes
+appendfsync everysec
+
+# A fila e as sessões não podem perder chave por pressão de memória: nunca evictar.
+maxmemory 256mb
+maxmemory-policy noeviction
+

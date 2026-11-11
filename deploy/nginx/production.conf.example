@@ -1,0 +1,56 @@
+# nginx da PRODUÇÃO do Soprei, como o repositório entende que ele é (spec 037, E2).
+#
+# ATENÇÃO: este arquivo foi RECONSTRUÍDO a partir da descrição do desenho (site e API no mesmo
+# hostname, /api/ com o prefixo removido e /webhooks/ para 127.0.0.1:3001, certbot) e NÃO foi copiado
+# do servidor (S20 da spec). O dono deve conferir com o arquivo real, ajustar este exemplo para ficar
+# igual a ele (sem segredo) e só então confiar nele como documentação. Ao conferir, troque também o
+# hostname abaixo se for outro.
+#
+# Cloudflare sem proxy (somente DNS). Com o proxy ligado seria preciso real_ip no nginx e TRUST_PROXY
+# com as faixas dela (fora de escopo).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name www.soprei.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name www.soprei.com;
+
+    ssl_certificate /etc/letsencrypt/live/www.soprei.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/www.soprei.com/privkey.pem;
+
+    # Site estático: frontend/dist é um atalho para a release atual (deploy/deploy.sh).
+    root /var/www/soprei/frontend/dist;
+    index index.html;
+
+    # API: o prefixo /api/ é removido antes de chegar ao backend (porta 3001, só em 127.0.0.1).
+    location /api/ {
+        proxy_pass http://127.0.0.1:3001/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # ACRESCENTA ao X-Forwarded-For (o backend usa TRUST_PROXY=127.0.0.1,::1).
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Webhooks da Meta e da InfinitePay.
+    location /webhooks/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}

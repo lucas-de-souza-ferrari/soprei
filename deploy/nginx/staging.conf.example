@@ -1,0 +1,61 @@
+# nginx do STAGING do Soprei (spec 037, E2). Exemplo: o dono copia para
+# /etc/nginx/sites-available/soprei-staging, troca <HOSTNAME_DO_STAGING> e roda o certbot (mesmo
+# procedimento da produção, que reescreve os blocos de certificado e o redirecionamento).
+#
+# Senha básica (D5): o cadastro do staging fica aberto, então sem a senha qualquer pessoa da internet
+# poderia criar contas no ambiente de teste. O arquivo de senhas NÃO está no repositório:
+#   htpasswd -c /etc/nginx/soprei-staging.htpasswd <usuario>     (como root; modo 640, grupo www-data)
+# Nenhum cabeçalho Authorization chega à API (a senha básica não pode vazar para ela, S6 da spec).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <HOSTNAME_DO_STAGING>;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name <HOSTNAME_DO_STAGING>;
+
+    ssl_certificate /etc/letsencrypt/live/<HOSTNAME_DO_STAGING>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<HOSTNAME_DO_STAGING>/privkey.pem;
+
+    # Staging não é indexado e só entra quem tem a senha.
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    auth_basic "Soprei staging";
+    auth_basic_user_file /etc/nginx/soprei-staging.htpasswd;
+
+    # Site estático: frontend/dist é um atalho para a release atual (deploy/deploy.sh).
+    root /var/www/soprei-staging/frontend/dist;
+    index index.html;
+
+    # API: o prefixo /api/ é removido antes de chegar ao backend (porta 3002, só em 127.0.0.1).
+    location /api/ {
+        proxy_pass http://127.0.0.1:3002/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # ACRESCENTA ao X-Forwarded-For (o backend usa TRUST_PROXY=127.0.0.1,::1).
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization "";
+    }
+
+    # Webhooks (no staging o canal WhatsApp e o checkout ficam desligados; a rota existe só por paridade).
+    location /webhooks/ {
+        proxy_pass http://127.0.0.1:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization "";
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}

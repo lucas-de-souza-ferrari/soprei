@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Exemplo do programa de PRE_MIGRATION_BACKUP (spec 037): cópia local de segurança antes de uma
+# migration. Instale FORA do repositório, como /usr/local/sbin/soprei-predeploy-backup (dono root,
+# modo 755), e aponte PRE_MIGRATION_BACKUP para ele em deploy/targets/production.conf.
+#
+# NÃO É BACKUP: é uma cópia no mesmo servidor, com dados pessoais (entra na política de retenção da
+# spec 032). Não leva senha em argumento nem em variável: o pg_dump roda como o usuário postgres por
+# autenticação local. Guarda só as 3 últimas cópias.
+set -euo pipefail
+umask 077
+
+dest=/var/backups/soprei-predeploy
+mkdir -p "$dest"
+chmod 700 "$dest"
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+runuser -u postgres -- pg_dump -Fc soprei >"$dest/soprei-$stamp.dump"
+
+# shellcheck disable=SC2012
+ls -1t "$dest"/soprei-*.dump | tail -n +4 | xargs -r rm -f
+echo "backup salvo em $dest/soprei-$stamp.dump"
