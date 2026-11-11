@@ -219,3 +219,10 @@ Nenhuma dependência nova. **Decididas pelo dono em 2026-11-11: as cinco pela op
 - **Fora desta spec:** `entitlement-gate.test.ts` já falhava na `main` desde o commit `502b4af`, que acrescentou `holder` à resposta de `GET .../entitlements` sem atualizar o teste. A expectativa foi corrigida em commit separado, para o CI poder ficar verde.
 
 **Verificação local depois das correções** (exceção da regra de validação: arquivos que falharam e a área afetada, um comando por vez, Node da máquina do dono): os dez arquivos de teste unitário tocados passam (338 testes); `inbound-queue.integration.test.ts` (30), `attendance-batching.integration.test.ts` (10) e `channel-batching.integration.test.ts` (14) passam contra `soprei_test` e o Redis `/15`; os testes novos da spec repetidos três vezes sem falha. **A suíte completa não foi executada localmente**, e nada foi rodado na segunda versão do Node: o CI continua sendo a palavra final.
+
+**Segunda rodada do CI (2026-11-11): unitários verdes; `pnpm test:integration` falhou em dois testes antigos, nenhum da spec 034.** Os testes novos desta spec passaram nas duas versões do Node. Correções, em commit separado:
+
+- `contact-scheduling.integration.test.ts` ("limites"): a parte que usa o relógio real pedia horários em `2026-11-11`, data fixa que venceu com o calendário (o pedido caía fora das regras). Passou a calcular um dia útil pelo menos dois dias à frente (`liveSlot`).
+- `checkout.integration.test.ts` ("cancelar marca o fim do período"): criava duas promessas que rejeitam e esperava uma de cada vez; a segunda rejeitava sem observador e o runner a contava como rejeição não capturada (intermitente; falhou só no Node 22). As ações passaram a ser criadas uma por vez.
+
+Verificação local: os dois arquivos passam contra `soprei_test` (19 e 63 testes).

@@ -1434,9 +1434,14 @@ describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)',
     assert.equal((await state(account.id))?.cancelAtPeriodEnd, false);
     // Depois de expirada (fim + carência) cancelar/reativar não se aplicam: é um pedido normal.
     clock = new Date('2027-03-01T00:00:00Z');
-    for (const action of [s.service.cancel(account.id), s.service.reactivate(account.id)]) {
+    // Uma ação por vez: criadas juntas, a segunda promessa rejeitava antes de alguém a observar e o
+    // runner a tratava como rejeição não capturada (falha intermitente).
+    for (const action of [
+      () => s.service.cancel(account.id),
+      () => s.service.reactivate(account.id),
+    ]) {
       await assert.rejects(
-        action,
+        action(),
         (error: unknown) => (error as { code?: string }).code === 'PLAN_CHANGE_UNAVAILABLE',
       );
     }

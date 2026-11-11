@@ -163,6 +163,19 @@ const book = (w: World, contactRef: string, start: string, label: string | null 
 const slot = (day: number, time: string): string =>
   `2026-11-${String(day).padStart(2, '0')}T${time}`;
 
+/**
+ * Horário num dia útil da agenda (terça a sexta) pelo menos dois dias depois do relógio REAL: para a
+ * parte do teste que usa o relógio real (a cota de criações lê o `created_at` do banco). Uma data
+ * fixa aqui vence com o calendário e o pedido passa a cair fora das regras.
+ */
+function liveSlot(time: string): string {
+  const day = new Date(Date.now() + 2 * 24 * 60 * 60_000);
+  while (![2, 3, 4, 5].includes(day.getUTCDay())) {
+    day.setUTCDate(day.getUTCDate() + 1);
+  }
+  return `${day.toISOString().slice(0, 10)}T${time}`;
+}
+
 function expectKind<K extends ContactOutcome['kind']>(
   outcome: ContactOutcome,
   kind: K,
@@ -324,7 +337,7 @@ describe('solicitar_agendamento: gravação, estado e idempotência (E2)', () =>
       await live.request(w.company.id, cycle, {
         serviceName: w.serviceName,
         customerLabel: null,
-        start: slot(11, '09:00'),
+        start: liveSlot('09:00'),
       }),
       'booked',
     );
@@ -336,7 +349,7 @@ describe('solicitar_agendamento: gravação, estado e idempotência (E2)', () =>
       await live.request(w.company.id, cycle, {
         serviceName: w.serviceName,
         customerLabel: null,
-        start: slot(11, '09:30'),
+        start: liveSlot('09:30'),
       }),
       'booked',
     );
@@ -345,7 +358,7 @@ describe('solicitar_agendamento: gravação, estado e idempotência (E2)', () =>
       await live.request(w.company.id, cycle, {
         serviceName: w.serviceName,
         customerLabel: null,
-        start: slot(11, '10:00'),
+        start: liveSlot('10:00'),
       }),
       'booked',
     );
@@ -353,7 +366,7 @@ describe('solicitar_agendamento: gravação, estado e idempotência (E2)', () =>
       await live.request(w.company.id, cycle, {
         serviceName: w.serviceName,
         customerLabel: null,
-        start: slot(11, '10:30'),
+        start: liveSlot('10:30'),
       }),
       'limit',
     );
