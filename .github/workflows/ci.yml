@@ -162,8 +162,10 @@ jobs:
       - if: steps.browsers.outputs.cache-hit != 'true'
         run: pnpm --filter soprei-frontend exec playwright install chromium
 
-      # As bibliotecas do sistema ficam fora do cache e a imagem do runner muda sem aviso.
-      - run: pnpm --filter soprei-frontend exec playwright install-deps chromium
+      # Sem instalar bibliotecas do sistema pelo apt: a imagem do runner já traz todas as que o Chromium
+      # usa (o apt só acrescentava fontes extras, que os testes não usam) e o apt já derrubou as três
+      # fatias por falha de DNS. Se uma imagem futura perder uma biblioteca, o navegador não abre e
+      # o erro é explícito; aí se volta a instalar só o que faltar.
 
       - run: pnpm --filter soprei-frontend test:browser --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 

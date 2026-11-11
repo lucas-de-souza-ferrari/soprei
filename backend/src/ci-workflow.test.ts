@@ -132,7 +132,11 @@ describe('pipeline do CI (spec 036)', () => {
       browser,
       /if: steps\.browsers\.outputs\.cache-hit != 'true'\n\s+run: .*playwright install chromium/,
     );
-    assert.match(browser, /playwright install-deps chromium/);
+    // O apt (bibliotecas do sistema) saiu do caminho: falhou por DNS do runner e só trazia fontes extras.
+    assert.ok(
+      !runsOf(browser).some((run) => /install-deps|--with-deps|apt(-get)? /.test(run)),
+      'o job browser não deve depender do apt',
+    );
   });
 
   it('a integração continua com um arquivo por vez', () => {
