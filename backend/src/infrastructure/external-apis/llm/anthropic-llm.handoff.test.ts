@@ -86,8 +86,10 @@ describe('AnthropicLlmProvider: pedido com e sem allowHandoff', () => {
     };
     assert.equal(schema.type, 'object');
     assert.deepEqual(Object.keys(schema.properties), ['motivo']);
-    assert.equal(schema.properties['motivo']?.type, 'string');
-    assert.deepEqual(schema.properties['motivo']?.enum, [
+    const motivo = schema.properties['motivo'];
+    assert.ok(motivo);
+    assert.equal(motivo.type, 'string');
+    assert.deepEqual(motivo.enum, [
       'CONTACT_REQUESTED',
       'CANNOT_HELP',
       'COMPLAINT',
@@ -98,7 +100,7 @@ describe('AnthropicLlmProvider: pedido com e sem allowHandoff', () => {
     assert.equal(schema.additionalProperties, false);
     assert.equal(sent['system'], `Persona X.\n\nResponda curto.\n\n${HANDOFF_SYSTEM_INSTRUCTION}`);
     // O texto do contato continua só no turno `user`.
-    assert.ok(!String(sent['system']).includes('Quero falar com uma pessoa'));
+    assert.ok(!sent['system'].includes('Quero falar com uma pessoa'));
     const messages = sent['messages'] as { role: string; content: string }[];
     assert.deepEqual(messages.at(-1), { role: 'user', content: 'Quero falar com uma pessoa' });
   });
