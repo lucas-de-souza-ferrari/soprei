@@ -4,7 +4,7 @@
 - **Branch:** `spec/034-capacidade-do-canal` (uma branch por etapa, se o dono preferir PRs menores; ver "Etapas")
 - **Depende de:** 011 (fila e worker), 013 (agrupamento e `flush`), 005 (rate limit e `TRUST_PROXY`), 004 (métricas). Conversa com a **033** (deploy): esta spec entrega o que a 033 precisa para dimensionar e separar processos; não decide hospedagem.
 - **Esta spec passa pelo `reviewer`** antes do merge (mexe em endpoint público, no limite do webhook e no caminho que carrega o `CompanyId` do job).
-- **Origem:** auditoria de 2026-11-11 (leitura do código, sem teste de carga). O que está marcado **(S)** é **suposição** a conferir; o resto foi lido no código.
+- **Origem:** auditoria de 2026-11-11 (leitura do código, sem teste de carga). O que está marcado **(S)** é **suposição** a conferir; o resto foi lido no código ou na documentação oficial listada em "Fontes externas".
 
 ## Objetivo
 
@@ -122,7 +122,7 @@ A E1 é a que muda a capacidade. E2 e E3 devem entrar **antes** de subir `QUEUE_
 
 - **Mensagem atrasada que chega depois da resposta:** se `m0` (recebida antes) só é gravada depois de o `flush` já ter respondido `m1`, `m0` entra como pendente com `createdAt` anterior ao da resposta já gravada e é respondida no próximo `flush`. O histórico fica com a resposta de `m0` posicionada logo depois de `m0` (regra "última do lote + 1 ms" da 013), antes de `m1`. Nada se perde nem duplica; a ordem visual das respostas pode não ser a ordem em que foram enviadas. Aceito como limitação (a janela do lote torna o caso raro).
 - **Relógios de instâncias diferentes:** com mais de uma instância `api`, o `receivedAt` vem do relógio de quem recebeu o webhook. Diferença de poucos milissegundos entre servidores pode inverter duas mensagens recebidas quase juntas por instâncias diferentes. Aceito; exige NTP nos servidores (registrar na 033).
-- **Limite do provedor de LLM:** concorrência alta pode esbarrar no limite de requisições da conta da Anthropic; o SDK repete (`LLM_MAX_RETRIES`) e, esgotado, o contato recebe o texto padrão. Por isso o padrão de `QUEUE_CONCURRENCY` é conservador e o dono confere o limite da conta antes de subir **(S)**.
+- **Limite do provedor de LLM:** concorrência alta pode esbarrar no limite de requisições da conta da Anthropic; o SDK repete (`LLM_MAX_RETRIES`) e, esgotado, o contato recebe o texto padrão. Os limites são por organização e por modelo, em requisições por minuto (RPM), tokens de entrada por minuto (ITPM, que **não** conta tokens lidos do cache) e tokens de saída por minuto (OTPM); o tier e os valores da conta aparecem em `platform.claude.com/usage/limits`. Na tabela padrão o Claude Haiku 5.5 tem 4.000 RPM, 2.000.000 ITPM e 400.000 OTPM no tier Start; organização nova pode começar no tier Evaluation, com limites menores que esses. Com `QUEUE_CONCURRENCY=10` e turnos de 2 s ou mais, o pico é de cerca de 300 requisições por minuto, bem abaixo do Start. O dono confere o tier real antes de subir a concorrência.
 - **Uma empresa com muito volume ocupa todas as vagas:** não há cota de concorrência por empresa nesta spec (ver "Fora de escopo"). A métrica `queue_job_wait_seconds` mostra o efeito.
 - **Pool do banco esgotado:** a regra cruzada da config evita o caso óbvio; esgotamento em pico vira erro transitório e a fila retenta com backoff (regra da 011).
 - **Memória:** cada job ativo mantém o histórico e o prompt em memória (até 12.000 caracteres de histórico mais 5.200 de contexto). Com concorrência 100 isso é pequeno perto dos 128 MiB por hash do `scrypt`; sem ação.
@@ -148,7 +148,7 @@ Nenhuma dependência nova. Decisões para o dono (recomendação primeiro):
 
 - **D1. De onde vem a ordem das mensagens.**
   - **Recomendado:** instante de recebimento no webhook (`receivedAt`, milissegundos, com desempate por posição no lote). Simples, não depende da fila e funciona com várias instâncias.
-  - Alternativa A: `timestamp` da Meta. Tem resolução de **segundos** **(S)**, então mensagens no mesmo segundo empatam e ainda precisariam de desempate.
+  - Alternativa A: `timestamp` da Meta. A referência do webhook o descreve como "Unix timestamp indicating when the webhook was triggered", uma string de 10 dígitos (exemplo `1739321024`), ou seja, **segundos** (a página não nomeia a unidade; os 10 dígitos são consistentes com segundos). Além de empatar mensagens enviadas no mesmo segundo, ele marca o disparo do webhook, não o envio pelo contato. Conferido em 2026-11-11.
   - Alternativa B: duas filas, uma de concorrência 1 só para gravar e outra concorrente para responder. Mantém a ordem pela fila, mas cria um novo gargalo global e exige concorrência global do BullMQ ao rodar mais de uma instância.
 - **D2. Padrão de `QUEUE_CONCURRENCY`.**
   - **Recomendado:** `10`, com `DB_POOL_MAX` padrão subindo de 10 para `20`. Já multiplica a vazão por dez e fica longe dos limites típicos de banco e do provedor.
@@ -159,5 +159,11 @@ Nenhuma dependência nova. Decisões para o dono (recomendação primeiro):
 - **D4. Padrão do limite do webhook.**
   - **Recomendado:** `6000` por 60 s. A defesa real da rota é a assinatura HMAC; o limite só protege contra inundação sem assinatura.
   - Alternativa: isentar a rota do rate limit. Mais simples, mas deixa o cálculo do HMAC (corpo de até 3 MiB) sem freio.
-  - **(S)** O comportamento da Meta diante de 429 repetidos (retentativas e possível desativação do webhook) não foi lido na documentação oficial; conferir antes de aprovar.
+  - Conferido na documentação da Meta em 2026-11-11: diante de resposta diferente de 200, "Meta retries delivery with decreasing frequency until the request succeeds, for up to 7 days", e "these retries can result in duplicate webhook notifications"; o payload pode ter até 3 MB. A documentação **não** diz que a assinatura do webhook é desativada por 429, nem informa os intervalos das retentativas, nem garante ordem de entrega. Consequência: um 429 nosso não perde a mensagem, mas a atrasa por um tempo que não controlamos e pode entregá-la fora de ordem, então o limite deve ficar bem acima do tráfego legítimo.
+
+### Fontes externas (lidas em 2026-11-11)
+
+- Meta, configuração de webhooks (retentativas, duplicatas, tamanho do payload): <https://developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks>
+- Meta, referência do webhook de mensagem de texto (campo `timestamp`): <https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/reference/messages/text>
+- Anthropic, limites de taxa (tiers, RPM, ITPM, OTPM, cabeçalhos): <https://platform.claude.com/docs/en/api/rate-limits>
 - **D5. Escopo do PR.** **Recomendado:** E1 a E3 num PR e E4 e E5 em outro. Alternativa: tudo junto.
