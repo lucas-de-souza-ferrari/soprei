@@ -138,7 +138,7 @@ describe('política de assinatura das escritas de tenant e rota de entitlements 
       headers: tokens.get('VIEWER') ?? owner(),
     });
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(JSON.parse(response.body), UNLIMITED_ENTITLEMENTS);
+    assert.deepEqual(JSON.parse(response.body), { ...UNLIMITED_ENTITLEMENTS, holder: false });
   });
 
   it('assinatura inativa: escrita 403 SUBSCRIPTION_INACTIVE; leitura segue 200; nada é gravado', async () => {
@@ -213,7 +213,8 @@ describe('política de assinatura das escritas de tenant e rota de entitlements 
     for (const role of MEMBERSHIP_ROLES) {
       const response = await withBilling.inject({ method: 'GET', url, headers: tokens.get(role) });
       assert.equal(response.statusCode, 200, role);
-      assert.deepEqual(JSON.parse(response.body), current);
+      // `holder` (só um booleano): o leitor falso deste teste não informa titular.
+      assert.deepEqual(JSON.parse(response.body), { ...current, holder: false });
       assert.doesNotMatch(response.body, /cents|price|valor/i);
     }
     assert.equal((await withBilling.inject({ method: 'GET', url })).statusCode, 401);
