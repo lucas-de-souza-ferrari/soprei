@@ -1,7 +1,8 @@
 import type { FastifyPluginCallback, onRequestAsyncHookHandler } from 'fastify';
 import { describeContact } from '../../application/attendance/contact-label.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
-import type { Conversation, Message, Permission } from '../../domain/index.js';
+import type { Conversation, Message, OpenHandoff, Permission } from '../../domain/index.js';
+import type { NotificationService } from '../../application/notifications/notification.service.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, requirePermission, membershipAuth } from '../common/auth.hooks.js';
@@ -19,6 +20,20 @@ export interface AdminAttendanceControllerOptions {
   readonly auth: Pick<AuthService, 'authenticate'>;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   readonly attendance: AttendanceService;
+  /** Spec 030: sem isto as conversas saem sem `openHandoff` (como antes). */
+  readonly notifications?: Pick<NotificationService, 'openHandoffs'> | undefined;
+}
+
+/** Pedido de atendimento humano aberto na conversa (spec 030); só id, motivo e quando. */
+function toOpenHandoffResponse(
+  handoff: OpenHandoff | undefined,
+): { notificationId: string; reason: string | null; createdAt: string } | null {
+  if (handoff === undefined) return null;
+  return {
+    notificationId: handoff.notificationId,
+    reason: handoff.reason,
+    createdAt: handoff.createdAt.toISOString(),
+  };
 }
 
 /**
@@ -80,7 +95,7 @@ function toMessageResponse(message: Message): {
  */
 export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceControllerOptions> = (
   app,
-  { auth, metrics, attendance },
+  { auth, metrics, attendance, notifications },
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
@@ -108,7 +123,17 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
       const { companyId } = membershipAuth(request);
       const query = listQuerySchema.parse(request.query);
       const page = await attendance.listConversations(companyId, toListOptions(query));
-      return { items: page.items.map(toConversationResponse), nextCursor: page.nextCursor };
+      const items = page.items.map(toConversationResponse);
+      if (notifications === undefined) return { items, nextCursor: page.nextCursor };
+      // Spec 030: selo "Humano" na lista (uma consulta em lote, sem N+1).
+      const open = await notifications.openHandoffs(
+        companyId,
+        items.map((item) => item.id),
+      );
+      return {
+        items: items.map((item) => ({ ...item, openHandoff: open.has(item.id) })),
+        nextCursor: page.nextCursor,
+      };
     },
   );
 
@@ -125,9 +150,17 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
         toListOptions(query),
         query.order,
       );
+      const conversation = toConversationResponse(page.conversation);
+      const open =
+        notifications === undefined
+          ? undefined
+          : await notifications.openHandoffs(companyId, [conversation.id]);
       return {
         // A conversa vai junto (rótulo mascarado e canal): o histórico abre pelo id, também ao recarregar.
-        conversation: toConversationResponse(page.conversation),
+        conversation:
+          open === undefined
+            ? conversation
+            : { ...conversation, openHandoff: toOpenHandoffResponse(open.get(conversation.id)) },
         items: page.items.map(toMessageResponse),
         nextCursor: page.nextCursor,
       };

@@ -187,6 +187,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           create: () => Promise.reject(new Error('inventário')),
           delete: () => Promise.reject(new Error('inventário')),
         },
+        notifications: {
+          list: () => Promise.reject(new Error('inventário')),
+          countOpen: () => Promise.reject(new Error('inventário')),
+          resolve: () => Promise.reject(new Error('inventário')),
+          openHandoffs: () => Promise.reject(new Error('inventário')),
+        },
         attendance: new AttendanceService({
           companies,
           conversations: store.conversations,
@@ -256,6 +262,9 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/schedule/blocks',
       '/admin/companies/:companyId/schedule/blocks/:blockId',
       '/admin/companies/:companyId/schedule/sample',
+      '/admin/companies/:companyId/notifications',
+      '/admin/companies/:companyId/notifications/summary',
+      '/admin/companies/:companyId/notifications/:notificationId/resolve',
       '/admin/companies/:companyId/memberships/:membershipId',
       '/admin/companies/:companyId/memberships/:membershipId/password',
       '/auth/login',
@@ -354,6 +363,17 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
     assert.deepEqual(
       declared('/admin/companies/:companyId/inventory/products/:productId/movements'),
       ['GET:inventory:manage'],
+    );
+    // Spec 030: notificações; todos leem, a resolução é de OWNER, ADMIN e AGENT.
+    assert.deepEqual(declared('/admin/companies/:companyId/notifications'), [
+      'GET:notification:read',
+    ]);
+    assert.deepEqual(declared('/admin/companies/:companyId/notifications/summary'), [
+      'GET:notification:read',
+    ]);
+    assert.deepEqual(
+      declared('/admin/companies/:companyId/notifications/:notificationId/resolve'),
+      ['POST:notification:resolve'],
     );
     // Spec 027: a agenda tem três permissões (ler, gerenciar agendamentos, configurar).
     const schedule = '/admin/companies/:companyId/schedule';

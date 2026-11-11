@@ -86,6 +86,12 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         }),
       count: (companyId) =>
         this.step(() => this.conversationRows.filter((row) => row.companyId === companyId).length),
+      findByIds: (companyId, ids) =>
+        this.step(() =>
+          this.conversationRows.filter(
+            (row) => row.companyId === companyId && ids.includes(row.id),
+          ),
+        ),
       findByContact: (companyId, contactRef) =>
         this.step(
           () =>

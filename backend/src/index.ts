@@ -1,5 +1,6 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
+import { NotificationService } from './application/notifications/notification.service.js';
 import { ScheduleSampleService } from './application/schedule/sample.service.js';
 import { ScheduleService } from './application/schedule/schedule.service.js';
 import { KnowledgeService } from './application/knowledge/knowledge.service.js';
@@ -29,6 +30,7 @@ import {
   PrismaAppointmentRepository,
   PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
+  PrismaNotificationRepository,
   PrismaScheduleAvailabilityReader,
   PrismaScheduleResourceRepository,
   PrismaScheduleServiceRepository,
@@ -153,6 +155,12 @@ async function main(): Promise<void> {
     knowledge: new PrismaKnowledgeRetriever(prisma),
     // Horários livres da agenda (spec 027): só leitura, fail-open.
     schedule: new PrismaScheduleAvailabilityReader(prisma),
+  });
+  // Notificações do painel (spec 030): o atendimento as grava na sua transação; aqui só leitura e resolução.
+  const notifications = new NotificationService({
+    notifications: new PrismaNotificationRepository(prisma),
+    logger,
+    metrics,
   });
   const documents = new PrismaKnowledgeDocumentRepository(prisma);
   const products = new PrismaProductRepository(prisma);
@@ -368,6 +376,7 @@ async function main(): Promise<void> {
     admin: {
       companies: new CompanyService(companyRepository),
       attendance,
+      notifications,
       knowledge,
       inventory,
       sample,

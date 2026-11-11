@@ -518,6 +518,15 @@ export class AttendanceService {
     return this.deps.conversations.listByActivity(companyId, options);
   }
 
+  /** Conversas por id, em lote (spec 030: rótulo do contato nas notificações). */
+  async getConversationsByIds(
+    companyId: CompanyId,
+    ids: readonly string[],
+  ): Promise<ReadonlyMap<string, Conversation>> {
+    const rows = await this.deps.conversations.findByIds(companyId, ids);
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
   async listMessages(
     companyId: CompanyId,
     conversationId: string,
