@@ -16,6 +16,9 @@ import type {
   Page,
 } from '../../domain/index.js';
 import {
+  AI_TAKEOVER_PAUSE_MS,
+  HUMAN_MEDIA_PLACEHOLDER,
+  isAiPaused,
   KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
   MESSAGE_CONTENT_MAX_LENGTH,
   NOTIFICATION_MAX_OPEN,
@@ -108,6 +111,10 @@ export interface AttendanceMetrics {
    * Contador sem labels.
    */
   countUnsentReply?(): void;
+  /** Um turno não respondeu porque a IA está pausada no contato (spec 039). Sem labels. */
+  countPausedTurn?(): void;
+  /** A IA foi reativada numa conversa pelo painel (spec 039). Sem labels. */
+  countAiResume?(): void;
   /** Uma recuperação da base de conhecimento terminou (spec 026). Conjunto fixo; nunca a consulta. */
   countKnowledgeRetrieval?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027, E3). Conjunto fixo. */
@@ -273,6 +280,32 @@ export interface AcceptInboundOptions {
   readonly receivedAt?: Date;
 }
 
+/** Eco de uma mensagem que a equipe enviou pelo aplicativo (spec 039). */
+export interface HumanEchoInput {
+  /** O contato a quem a equipe escreveu (o `to` do eco). */
+  readonly contactRef: string;
+  /** Id do eco no canal (idempotência). */
+  readonly externalId: string;
+  /** Texto enviado; ausente = mídia (vira o texto fixo do servidor, a mídia nunca é guardada). */
+  readonly text?: string | undefined;
+}
+
+/** `recorded`: gravado e IA pausada; `duplicate`: já gravado; `own`: eco de resposta nossa (ignorado). */
+export type HumanEchoResult =
+  | { readonly result: 'recorded'; readonly conversationId: string }
+  | { readonly result: 'duplicate' | 'own' };
+
+/**
+ * Texto gravado do eco: o da equipe, cortado no teto de uma mensagem; vazio ou ausente vira o texto fixo
+ * de mídia (spec 039).
+ */
+export function humanEchoContent(text: string | undefined): string {
+  if (text === undefined || text.trim() === '') return HUMAN_MEDIA_PLACEHOLDER;
+  return Array.from(text).length > MESSAGE_CONTENT_MAX_LENGTH
+    ? Array.from(text).slice(0, MESSAGE_CONTENT_MAX_LENGTH).join('')
+    : text;
+}
+
 /** O que `acceptInboundMessage` fez com a mensagem do contato (spec 013). */
 export interface AcceptedMessage {
   readonly conversationId: string;
@@ -295,11 +328,13 @@ export interface AcceptedMessage {
  * - `resend`: não havia o que responder, mas a última resposta gravada ainda não tem `sentAt`: o
  *   chamador a envia (sem nova chamada ao LLM).
  * - `empty`: nada pendente e nada a reenviar.
+ * - `paused`: a IA está pausada no contato (spec 039): nada foi gerado nem deve ser enviado; o que estava
+ *   pendente passou a ser da equipe.
  * - `blocked`: cota esgotada ou assinatura inativa (spec 031): o provedor NÃO foi chamado e nada deve ser
  *   enviado ao contato; as mensagens seguem pendentes.
  */
 export interface PendingResponse {
-  readonly outcome: 'answered' | 'resend' | 'empty' | 'blocked';
+  readonly outcome: 'answered' | 'resend' | 'empty' | 'blocked' | 'paused';
   readonly conversationId: string | null;
   readonly reply: AttendanceReply | null;
   /** Quantas mensagens do contato a resposta juntou (0 em `resend` e `empty`). */
@@ -474,6 +509,11 @@ export class AttendanceService {
       conversation.id,
       limits.maxMessages + 1,
     );
+    // Spec 039 (D1): a equipe respondeu pelo celular e a pausa vale: nada de LLM, resposta ou envio; o
+    // que o contato escreveu durante a pausa é da equipe (sai das pendentes).
+    if (isAiPaused(conversation.aiPausedUntil, this.now())) {
+      return this.pausedResponse(companyId, conversation.id, fetched);
+    }
     const first = fetched[0];
     if (first === undefined) {
       const unsent = await this.findUnsentTail(companyId, conversation.id);
@@ -557,6 +597,16 @@ export class AttendanceService {
       // A resposta, a marca de "atendida" de todo o lote e a notificação de atendimento humano (spec 038)
       // confirmam (ou desfazem) juntas.
       reply = await this.deps.unitOfWork.run(async (tx) => {
+        // Spec 039: a pausa é relida aqui (corrida eco x `flush`): se a equipe respondeu pelo celular
+        // durante a chamada ao modelo, esta resposta não é gravada (a transação é desfeita).
+        const current = await tx.conversations.findById(companyId, conversation.id);
+        if (
+          isAiPaused(current.aiPausedUntil, this.now()) ||
+          (current.aiIgnoreBefore !== null &&
+            first.createdAt.getTime() <= current.aiIgnoreBefore.getTime())
+        ) {
+          throw new AiPausedSignal();
+        }
         const created = await tx.messages.create(companyId, {
           conversationId: conversation.id,
           role: 'ASSISTANT',
@@ -584,6 +634,26 @@ export class AttendanceService {
         return created;
       });
     } catch (error) {
+      if (error instanceof AiPausedSignal) {
+        const fresh = await this.deps.messages.listPending(
+          companyId,
+          conversation.id,
+          limits.maxMessages + 1,
+        );
+        const latest = await this.deps.conversations.findById(companyId, conversation.id);
+        if (isAiPaused(latest.aiPausedUntil, this.now())) {
+          return this.pausedResponse(companyId, conversation.id, fresh);
+        }
+        // Reativada no meio: o que a equipe já tratou saiu das pendentes; o resto vai num turno novo.
+        this.recordPausedTurn(companyId, conversation.id, 0);
+        return {
+          outcome: 'paused',
+          conversationId: conversation.id,
+          reply: null,
+          batchSize: 0,
+          hasMorePending: fresh.length > 0,
+        };
+      }
       if (!(error instanceof ConflictError)) throw error;
       // Outra execução respondeu este lote primeiro (a mensagem só aceita uma resposta).
       const existing = await this.deps.messages.findReplyTo(companyId, last.id);
@@ -627,6 +697,101 @@ export class AttendanceService {
       batchSize: batch.length,
       hasMorePending,
     };
+  }
+
+  /**
+   * Eco de uma mensagem que a equipe enviou pelo aplicativo WhatsApp Business (spec 039, E3). Grava a
+   * mensagem `HUMAN` (idempotente por `externalId`) com `createdAt` = instante de recebimento e, na mesma
+   * transação, pausa a IA no contato (`aiPausedUntil` = recebimento + 12 h; renova, nunca encurta) e
+   * marca como tratado pela equipe tudo o que o contato escreveu até ali (`aiIgnoreBefore`). Eco de uma
+   * resposta que o próprio Soprei enviou (`channelMessageId` conhecido) é ignorado (`own`). O pedido de
+   * atendimento humano aberto (038) NÃO é resolvido aqui (D4). Empresa suspensa: `ForbiddenError`.
+   * Nada do texto nem do contato vai a log (só ids).
+   */
+  async recordHumanEcho(
+    companyId: CompanyId,
+    rawInput: HumanEchoInput,
+    options: AcceptInboundOptions = {},
+  ): Promise<HumanEchoResult> {
+    const contactRef = contactRefSchema.parse(rawInput.contactRef);
+    const externalId = rawInput.externalId;
+    const content = humanEchoContent(rawInput.text);
+    const company = await this.deps.companies.findById(companyId);
+    if (company.status === 'SUSPENDED') {
+      throw new ForbiddenError('Empresa suspensa', { context: { companyId } });
+    }
+    const own = await this.deps.messages.findByChannelMessageId(companyId, externalId);
+    if (own !== null) return { result: 'own' };
+    if ((await this.deps.messages.findByExternalId(companyId, externalId)) !== null) {
+      return { result: 'duplicate' };
+    }
+    const receivedAt = this.plausibleReceivedAt(companyId, options.receivedAt);
+    try {
+      const recorded = await this.deps.unitOfWork.run(async (tx) => {
+        const conversation = await tx.conversations.findOrCreateByContact(companyId, contactRef);
+        const message = await tx.messages.create(companyId, {
+          conversationId: conversation.id,
+          role: 'HUMAN',
+          content,
+          externalId,
+          ...(receivedAt === undefined ? {} : { createdAt: receivedAt }),
+        });
+        // A pausa conta do instante da mensagem da equipe (o gravado: o do canal ou, implausível, o do banco).
+        await tx.conversations.extendAiPause(companyId, conversation.id, {
+          pausedUntil: new Date(message.createdAt.getTime() + AI_TAKEOVER_PAUSE_MS),
+          ignoreBefore: message.createdAt,
+        });
+        return message;
+      });
+      this.deps.logger.info(
+        {
+          companyId,
+          conversationId: recorded.conversationId,
+          messageId: recorded.id,
+          contentChars: recorded.content.length,
+        },
+        'mensagem da equipe pelo aplicativo gravada; IA pausada no contato',
+      );
+      return { result: 'recorded', conversationId: recorded.conversationId };
+    } catch (error) {
+      // Corrida: outro job gravou o mesmo eco entre a checagem e a gravação.
+      if (
+        error instanceof ConflictError &&
+        (await this.deps.messages.findByExternalId(companyId, externalId)) !== null
+      ) {
+        return { result: 'duplicate' };
+      }
+      throw error;
+    }
+  }
+
+  /** Spec 039: até quando a IA está pausada nesta conversa, ou `null` se não está (ou se já passou). */
+  activePause(conversation: Pick<Conversation, 'aiPausedUntil'>): Date | null {
+    return isAiPaused(conversation.aiPausedUntil, this.now()) ? conversation.aiPausedUntil : null;
+  }
+
+  /** A IA está pausada neste contato agora? (Spec 039: segunda leitura antes do envio.) */
+  async isAiPausedFor(companyId: CompanyId, rawContactRef: string): Promise<boolean> {
+    const contactRef = contactRefSchema.parse(rawContactRef);
+    const conversation = await this.deps.conversations.findByContact(companyId, contactRef);
+    return conversation !== null && isAiPaused(conversation.aiPausedUntil, this.now());
+  }
+
+  /**
+   * Reativa a IA numa conversa (spec 039, E4): zera a pausa, mantém o `aiIgnoreBefore` (o que a equipe
+   * já tratou não é respondido depois). Idempotente. Conversa malformada, inexistente ou de outra
+   * empresa: `NotFoundError` (o mesmo 404). Sem auditoria (D5): log só com ids e métrica.
+   */
+  async resumeAi(companyId: CompanyId, conversationId: string): Promise<void> {
+    await this.deps.companies.findById(companyId);
+    await this.deps.conversations.findById(companyId, conversationId);
+    await this.deps.conversations.clearAiPause(companyId, conversationId);
+    try {
+      this.deps.metrics?.countAiResume?.();
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de reativação da IA');
+    }
+    this.deps.logger.info({ companyId, conversationId }, 'IA reativada na conversa pelo painel');
   }
 
   /** Há mensagem do contato esperando resposta? (Usado ao tratar um job que falhou sem handler.) */
@@ -803,6 +968,46 @@ export class AttendanceService {
   ): Promise<Message | null> {
     const [last] = await this.deps.messages.listRecent(companyId, conversationId, 1);
     return last?.role === 'ASSISTANT' && last.sentAt === null ? last : null;
+  }
+
+  /**
+   * Turno em pausa (spec 039): o que estava pendente (até o mais recente lido) passa a ser da equipe
+   * (`aiIgnoreBefore`), sem chamar o modelo, sem gravar resposta e sem enviar nada.
+   */
+  private async pausedResponse(
+    companyId: CompanyId,
+    conversationId: string,
+    pending: readonly Message[],
+  ): Promise<PendingResponse> {
+    const newest = pending[pending.length - 1];
+    let hasMorePending = false;
+    if (newest !== undefined) {
+      await this.deps.conversations.extendAiPause(companyId, conversationId, {
+        ignoreBefore: newest.createdAt,
+      });
+      hasMorePending =
+        (await this.deps.messages.listPending(companyId, conversationId, 1)).length > 0;
+    }
+    this.recordPausedTurn(companyId, conversationId, pending.length);
+    return {
+      outcome: 'paused',
+      conversationId,
+      reply: null,
+      batchSize: 0,
+      hasMorePending,
+    };
+  }
+
+  private recordPausedTurn(companyId: CompanyId, conversationId: string, ignored: number): void {
+    try {
+      this.deps.metrics?.countPausedTurn?.();
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de turno pausado');
+    }
+    this.deps.logger.info(
+      { companyId, conversationId, ignoredMessages: ignored },
+      'IA pausada no contato (a equipe respondeu pelo celular); nada foi respondido',
+    );
   }
 
   private emptyResponse(conversationId: string | null): PendingResponse {
@@ -1346,6 +1551,7 @@ export class AttendanceService {
       if (total > this.historyMaxChars) break;
       kept.push(candidate);
     }
+    // Spec 039: a mensagem da equipe pelo celular (`HUMAN`) é o lado da empresa: turno do assistente.
     return kept.reverse().map((candidate) => ({
       role: candidate.role === 'USER' ? 'user' : 'assistant',
       content: candidate.content,
@@ -1719,4 +1925,15 @@ function handoffFields(
 ): object {
   if (handoff === undefined) return {};
   return { handoff: true, handoffReason: handoff, notification: notification ?? null };
+}
+
+/**
+ * Sinal interno (spec 039): a IA foi pausada no contato entre a leitura das pendentes e a gravação da
+ * resposta. Lançado dentro da transação para desfazê-la; nunca sai do serviço.
+ */
+class AiPausedSignal extends Error {
+  constructor() {
+    super('IA pausada no contato durante o turno');
+    this.name = 'AiPausedSignal';
+  }
 }

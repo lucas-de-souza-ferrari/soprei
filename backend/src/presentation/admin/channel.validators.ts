@@ -15,9 +15,17 @@ export const embeddedSignupBodySchema = z
       .max(512, 'de 1 a 512 caracteres, sem espaço nem controle')
       .regex(/^[^\s\p{Cc}]+$/u, 'de 1 a 512 caracteres, sem espaço nem controle'),
     wabaId: digits,
-    phoneNumberId: digits,
+    // Spec 039: opcional só na coexistência (o servidor resolve pelo número único da WABA).
+    phoneNumberId: digits.optional(),
+    // Spec 039: `api_only` (padrão, o contrato da 015b) ou `coexistence` (aplicativo no celular).
+    mode: z.enum(['api_only', 'coexistence']).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((body, ctx) => {
+    if (body.mode !== 'coexistence' && body.phoneNumberId === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['phoneNumberId'], message: 'obrigatório' });
+    }
+  });
 
 /**
  * Corpo do `PUT .../channel` (spec 015). Estrito. As mensagens do Zod não ecoam o valor recebido:

@@ -79,7 +79,10 @@ export type ChannelSendResult = 'ok' | 'error';
 
 /** Operações de conexão do canal (spec 015) e seus resultados (conjuntos fixos). */
 export type ChannelConnectionAction =
-  'connect' | 'replace_token' | 'embedded_signup' | 'disconnect';
+  'connect' | 'replace_token' | 'embedded_signup' | 'coexistence' | 'disconnect';
+/** Destino de um eco de mensagem enviada pelo aplicativo (spec 039): conjunto fixo. */
+export type ChannelEchoResult =
+  'recorded' | 'duplicate' | 'own' | 'unknown_number' | 'invalid' | 'discarded' | 'disabled';
 export type ChannelConnectionResult =
   | 'ok'
   | 'invalid_token'
@@ -89,6 +92,7 @@ export type ChannelConnectionResult =
   | 'number_not_in_waba'
   | 'number_in_use'
   | 'registration_failed'
+  | 'ambiguous'
   | 'graph_error'
   | 'unsubscribe_failed';
 /** Mudança de persona pela própria empresa (spec 023): conjunto fixo. */
@@ -114,7 +118,7 @@ export interface ChannelSendSample {
 /** Estados de job expostos em `queue_jobs` (spec 034; conjunto fixo). */
 export const QUEUE_JOB_STATES = ['waiting', 'active', 'delayed', 'failed'] as const;
 /** Tipos de job da fila do canal (label `kind`; conjunto fixo). */
-export type QueueJobKind = 'text' | 'notice' | 'flush';
+export type QueueJobKind = 'text' | 'notice' | 'echo' | 'flush';
 /** Prazo da leitura das contagens da fila durante a coleta de `/metrics`. */
 export const QUEUE_COUNTS_TIMEOUT_MS = 1_000;
 /** De 5 ms a 60 s: cobre o aceite (banco) e o turno inteiro (modelo + envio). */
@@ -263,6 +267,12 @@ export interface Metrics {
   observeAttendanceBatch(sample: BatchSample): void;
   /** Um turno saiu com a resposta do turno anterior ainda sem `sentAt` (spec 013). Sem labels. */
   countUnsentReply(): void;
+  /** Um turno não respondeu porque a IA está pausada no contato (spec 039). Sem labels. */
+  countPausedTurn(): void;
+  /** A IA foi reativada numa conversa pelo painel (spec 039). Sem labels. */
+  countAiResume(): void;
+  /** Um eco de mensagem enviada pelo aplicativo terminou (spec 039). Conjunto fixo. */
+  countChannelEcho(result: ChannelEchoResult): void;
   /** Uma recuperação da base de conhecimento terminou (spec 026). Conjunto fixo; nunca a consulta. */
   countKnowledgeRetrieval(result: KnowledgeRetrievalResult): void;
   /** Uma operação da agenda terminou (spec 027). Conjunto fixo de labels. */
@@ -456,6 +466,23 @@ export function createMetrics(): Metrics {
   const unsentReplies = new Counter({
     name: 'attendance_unsent_replies_total',
     help: 'Turnos que responderam as pendentes com a resposta anterior gravada e ainda sem sentAt',
+    registers: [registry],
+  });
+
+  const pausedTurns = new Counter({
+    name: 'attendance_paused_turns_total',
+    help: 'Turnos do canal que não responderam porque a IA está pausada no contato (spec 039)',
+    registers: [registry],
+  });
+  const aiResumes = new Counter({
+    name: 'conversation_ai_resumes_total',
+    help: 'Reativações da IA numa conversa pelo painel (spec 039)',
+    registers: [registry],
+  });
+  const channelEchoes = new Counter({
+    name: 'channel_echo_events_total',
+    help: 'Ecos de mensagens enviadas pelo aplicativo WhatsApp Business por resultado (spec 039)',
+    labelNames: ['result'] as const,
     registers: [registry],
   });
 
@@ -856,6 +883,15 @@ export function createMetrics(): Metrics {
     },
     countUnsentReply() {
       unsentReplies.inc();
+    },
+    countPausedTurn() {
+      pausedTurns.inc();
+    },
+    countAiResume() {
+      aiResumes.inc();
+    },
+    countChannelEcho(result) {
+      channelEchoes.inc({ result });
     },
     countKnowledgeRetrieval(result) {
       knowledgeRetrievals.inc({ result });

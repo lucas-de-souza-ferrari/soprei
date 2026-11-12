@@ -46,13 +46,20 @@ export interface MessageRepository {
   /**
    * As até `limit` mensagens do **contato** da conversa que ainda esperam resposta, as mais antigas
    * primeiro (spec 013). Pendente = papel `USER`, sem `answeredById` e sem resposta por `replyToId`
-   * (esta segunda condição cobre o simulador e as linhas anteriores ao agrupamento).
+   * (esta segunda condição cobre o simulador e as linhas anteriores ao agrupamento). Spec 039: também
+   * só as com `createdAt` **depois** do `aiIgnoreBefore` da conversa (o que a equipe já tratou pelo
+   * celular nunca volta a ser respondido pela IA).
    */
   listPending(
     companyId: CompanyId,
     conversationId: string,
     limit: number,
   ): Promise<readonly Message[]>;
+  /**
+   * A resposta nossa (`ASSISTANT`) desta empresa enviada ao canal com este id (`channelMessageId`),
+   * ou `null`. Spec 039: reconhece o eco de uma mensagem que o próprio Soprei enviou (defesa).
+   */
+  findByChannelMessageId(companyId: CompanyId, channelMessageId: string): Promise<Message | null>;
   /**
    * Marca as mensagens do contato `messageIds` como atendidas pela resposta `replyId`. Só altera
    * mensagem desta empresa, do papel `USER` e ainda sem `answeredById` (idempotente: repetir não

@@ -24,6 +24,7 @@ function connectionOps(
           wabaId: data.wabaId,
           tokenCiphertext: data.tokenCiphertext,
           tokenExpiresAt: data.tokenExpiresAt ?? null,
+          mode: data.mode,
           registrationPinCiphertext: data.registrationPinCiphertext ?? null,
         },
       }),
@@ -83,6 +84,7 @@ export class PrismaChannelConnectionRepository
             wabaId: data.wabaId,
             tokenCiphertext: data.tokenCiphertext,
             tokenExpiresAt: data.tokenExpiresAt,
+            mode: data.mode,
             registrationPinCiphertext: data.registrationPinCiphertext ?? null,
           },
         });
@@ -94,6 +96,7 @@ export class PrismaChannelConnectionRepository
           wabaId: data.wabaId,
           tokenCiphertext: data.tokenCiphertext,
           tokenExpiresAt: data.tokenExpiresAt,
+          mode: data.mode,
           ...(data.registrationPinCiphertext === undefined
             ? {}
             : { registrationPinCiphertext: data.registrationPinCiphertext }),

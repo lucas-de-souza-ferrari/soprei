@@ -119,6 +119,7 @@ async function connectedCompany(
       wabaId: digits(),
       tokenCiphertext: h.stack.cipher.encrypt(company.id, new SecretString(token)),
       tokenExpiresAt: null,
+      mode: 'API_ONLY' as const,
     });
   }
   return { company, phoneNumberId };
@@ -281,6 +282,7 @@ describe('envio com o token da empresa do job (spec 015, Postgres real, Graph fa
         new SecretString(`EAAG-novo-${randomUUID()}`),
       ),
       tokenExpiresAt: null,
+      mode: 'API_ONLY' as const,
     });
     assert.equal(
       await h.stack.connections.markTokenInvalid(a.company.id, oldVersion, new Date()),

@@ -6,7 +6,18 @@ export {
 } from './entities/company.js';
 export type { Company, CompanyStatus, CompanyUpdate, NewCompany } from './entities/company.js';
 export { CONTACT_REF_MAX_LENGTH } from './entities/conversation.js';
-export type { Conversation, ConversationUpdate, NewConversation } from './entities/conversation.js';
+export type {
+  AiPauseExtension,
+  Conversation,
+  ConversationUpdate,
+  NewConversation,
+} from './entities/conversation.js';
+export {
+  AI_TAKEOVER_PAUSE_MINUTES,
+  AI_TAKEOVER_PAUSE_MS,
+  HUMAN_MEDIA_PLACEHOLDER,
+  isAiPaused,
+} from './takeover.js';
 export {
   EXTERNAL_ID_MAX_LENGTH,
   MESSAGE_CONTENT_MAX_LENGTH,
@@ -51,9 +62,14 @@ export type { AuditAction, AuditEvent, NewAuditEvent } from './entities/audit-ev
 export { canManageRole, hasPermission, PERMISSIONS, ROLE_PERMISSIONS } from './permissions.js';
 export type { Permission } from './permissions.js';
 export type { AuditRepository } from './repositories/audit.repository.js';
-export { CHANNEL_CONNECTION_STATUSES, WABA_ID_PATTERN } from './entities/channel-connection.js';
+export {
+  CHANNEL_CONNECTION_MODES,
+  CHANNEL_CONNECTION_STATUSES,
+  WABA_ID_PATTERN,
+} from './entities/channel-connection.js';
 export type {
   ChannelConnection,
+  ChannelConnectionMode,
   ChannelConnectionStatus,
   ChannelConnectionUpdate,
   NewChannelConnection,

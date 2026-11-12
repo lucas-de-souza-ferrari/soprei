@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   contentFromType,
+  type InboundChannelEcho,
   type InboundChannelMessage,
 } from '../../application/channel/channel-intake.service.js';
 
@@ -48,6 +49,38 @@ export const webhookMessageSchema = z.object({
   text: z.object({ body: z.unknown().optional() }).optional(),
 });
 
+/**
+ * Campo do eco da coexistência (spec 039, confirmado no E0): mensagem que a equipe enviou pelo
+ * aplicativo WhatsApp Business. A lista vem em `value.message_echoes[]` (não em `messages[]`).
+ */
+export const ECHO_FIELD = 'smb_message_echoes';
+
+/**
+ * Campos da coexistência que NÃO são tratados neste corte (spec 039, D6): o histórico importado e a
+ * sincronização do estado do aplicativo. São contados e ignorados, sem gravar nada.
+ */
+export const IGNORED_COEXISTENCE_FIELDS: ReadonlySet<string> = new Set([
+  'history',
+  'smb_app_state_sync',
+]);
+
+/** `value` do campo `smb_message_echoes`: o número do negócio e a lista de ecos. */
+export const webhookEchoValueSchema = z.object({
+  metadata: z.object({ phone_number_id: z.string().regex(/^[0-9]{1,32}$/) }),
+  message_echoes: z.array(z.unknown()).optional(),
+});
+
+/**
+ * Um eco: `to` é o contato (no eco, `from` é o número da empresa). `timestamp`, `from` e os campos
+ * identificadores novos de 19 caracteres não são lidos (a ordem vem do instante de recebimento, como na 034).
+ */
+export const webhookEchoSchema = z.object({
+  id: z.string().min(1),
+  to: z.unknown().optional(),
+  type: z.string().optional(),
+  text: z.object({ body: z.unknown().optional() }).optional(),
+});
+
 /** Status de entrega de uma mensagem **nossa**: só o status e o primeiro código de erro importam. */
 export const webhookStatusSchema = z.object({
   id: z.string().min(1).optional(),
@@ -68,6 +101,10 @@ export interface WebhookStatusEvent {
 export interface ParsedWebhook {
   readonly messages: InboundChannelMessage[];
   readonly statuses: WebhookStatusEvent[];
+  /** Ecos de mensagens enviadas pelo aplicativo (spec 039); só são tratados com a coexistência ligada. */
+  readonly echoes: InboundChannelEcho[];
+  /** Mudanças de campos da coexistência ignorados de propósito (`history`, `smb_app_state_sync`). */
+  readonly ignoredChanges: number;
   /** Algo do corpo não bateu com o formato esperado (e foi ignorado). */
   readonly invalid: boolean;
 }
@@ -87,19 +124,31 @@ const STATUS_NAMES: ReadonlySet<string> = new Set([
  */
 export function parseWebhookBody(body: unknown): ParsedWebhook {
   const envelope = webhookEnvelopeSchema.safeParse(body);
-  if (!envelope.success) return { messages: [], statuses: [], invalid: true };
+  if (!envelope.success) {
+    return { messages: [], statuses: [], echoes: [], ignoredChanges: 0, invalid: true };
+  }
 
   const messages: InboundChannelMessage[] = [];
   const statuses: WebhookStatusEvent[] = [];
+  const echoes: InboundChannelEcho[] = [];
+  let ignoredChanges = 0;
   let invalid = false;
 
   // Outro objeto que não o do WhatsApp (outro produto da Meta no mesmo app): não é para nós.
   if (envelope.data.object !== undefined && envelope.data.object !== 'whatsapp_business_account') {
-    return { messages, statuses, invalid };
+    return { messages, statuses, echoes, ignoredChanges, invalid };
   }
 
   for (const entry of envelope.data.entry ?? []) {
     for (const change of entry.changes ?? []) {
+      if (change.field === ECHO_FIELD) {
+        if (!collectEchoes(change.value, echoes)) invalid = true;
+        continue;
+      }
+      if (change.field !== undefined && IGNORED_COEXISTENCE_FIELDS.has(change.field)) {
+        ignoredChanges += 1;
+        continue;
+      }
       // Outros campos assinados (status de template, qualidade...) não são tratados aqui.
       if (change.field !== undefined && change.field !== 'messages') continue;
       const value = webhookValueSchema.safeParse(change.value);
@@ -142,5 +191,32 @@ export function parseWebhookBody(body: unknown): ParsedWebhook {
       }
     }
   }
-  return { messages, statuses, invalid };
+  return { messages, statuses, echoes, ignoredChanges, invalid };
+}
+
+/** Lê os ecos de um `value` de `smb_message_echoes`; devolve `false` se algo não bateu com o formato. */
+function collectEchoes(rawValue: unknown, echoes: InboundChannelEcho[]): boolean {
+  const value = webhookEchoValueSchema.safeParse(rawValue);
+  if (!value.success) return false;
+  let valid = true;
+  const phoneNumberId = value.data.metadata.phone_number_id;
+  for (const raw of value.data.message_echoes ?? []) {
+    const parsed = webhookEchoSchema.safeParse(raw);
+    if (!parsed.success) {
+      valid = false;
+      continue;
+    }
+    const echo = parsed.data;
+    const body = echo.text?.body;
+    echoes.push({
+      phoneNumberId,
+      messageId: echo.id,
+      recipient: typeof echo.to === 'string' ? echo.to : undefined,
+      content:
+        echo.type === 'text'
+          ? { kind: 'text', text: typeof body === 'string' ? body : undefined }
+          : { kind: 'media' },
+    });
+  }
+  return valid;
 }

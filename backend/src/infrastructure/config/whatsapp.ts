@@ -17,6 +17,10 @@ export interface WhatsappChannelConfig {
   readonly embeddedSignupConfigId: string | undefined;
   /** Formulário avançado do site (spec 023); nunca em produção. */
   readonly manualConnectEnabled: boolean;
+  /** Coexistência com o aplicativo WhatsApp Business (spec 039): conexão e eco. */
+  readonly coexistenceEnabled: boolean;
+  /** `config_id` da coexistência: o próprio ou, vazio, o do Embedded Signup. */
+  readonly coexistenceConfigId: string | undefined;
 }
 
 export interface QueueSettings {
@@ -77,6 +81,10 @@ export function whatsappChannelConfig(config: Config): WhatsappChannelConfig | u
     sendTimeoutMs: config.WHATSAPP_SEND_TIMEOUT_MS,
     embeddedSignupConfigId: config.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID,
     manualConnectEnabled: config.CHANNEL_MANUAL_CONNECT_ENABLED,
+    coexistenceEnabled: config.WHATSAPP_COEXISTENCE_ENABLED,
+    coexistenceConfigId: config.WHATSAPP_COEXISTENCE_ENABLED
+      ? (config.WHATSAPP_COEXISTENCE_CONFIG_ID ?? config.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID)
+      : undefined,
   };
 }
 

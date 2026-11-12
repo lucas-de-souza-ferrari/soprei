@@ -22,6 +22,8 @@ export const PERMISSIONS = [
   'onboarding:manage',
   'notification:read',
   'notification:resolve',
+  // Spec 039: reativar a IA numa conversa pausada porque a equipe respondeu pelo celular.
+  'conversation:takeover',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -43,6 +45,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'onboarding:manage',
     'notification:read',
     'notification:resolve',
+    'conversation:takeover',
   ],
   ADMIN: [
     'conversation:read',
@@ -61,6 +64,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'onboarding:manage',
     'notification:read',
     'notification:resolve',
+    'conversation:takeover',
   ],
   AGENT: [
     'conversation:read',
@@ -69,6 +73,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'schedule:manage',
     'notification:read',
     'notification:resolve',
+    'conversation:takeover',
   ],
   VIEWER: ['conversation:read', 'schedule:read', 'notification:read'],
 };

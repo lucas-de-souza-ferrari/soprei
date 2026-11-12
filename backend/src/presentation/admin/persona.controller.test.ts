@@ -254,6 +254,7 @@ describe('persona da empresa e setup do canal (spec 023)', () => {
               graphApiVersion: 'v26.0',
             },
             manualConnect: true,
+            coexistence: { available: false, configId: null },
           });
           for (const secret of [APP_SECRET, LEGACY_TOKEN, CIPHER_KEY]) {
             assert.ok(!response.body.includes(secret));
@@ -322,7 +323,11 @@ describe('persona da empresa e setup do canal (spec 023)', () => {
     };
     const without = await make({ manualConnect: false });
     assert.equal(without.statusCode, 200);
-    assert.deepEqual(JSON.parse(without.body), { embeddedSignup: null, manualConnect: false });
+    assert.deepEqual(JSON.parse(without.body), {
+      embeddedSignup: null,
+      manualConnect: false,
+      coexistence: { available: false, configId: null },
+    });
     assert.equal((await make(undefined)).statusCode, 404);
   });
 

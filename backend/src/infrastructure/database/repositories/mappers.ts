@@ -44,6 +44,8 @@ export function toConversation(row: ConversationRow): Conversation {
     contactRef: row.contactRef,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    aiPausedUntil: row.aiPausedUntil,
+    aiIgnoreBefore: row.aiIgnoreBefore,
   };
 }
 
@@ -112,6 +114,7 @@ export function toChannelConnection(row: ChannelConnectionRow): ChannelConnectio
     registrationPinCiphertext: row.registrationPinCiphertext,
     tokenVersion: row.tokenVersion,
     status: row.status,
+    mode: row.mode,
     tokenExpiresAt: row.tokenExpiresAt,
     tokenInvalidAt: row.tokenInvalidAt,
     createdAt: row.createdAt,

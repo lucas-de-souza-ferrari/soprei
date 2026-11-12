@@ -40,12 +40,18 @@ function toOpenHandoffResponse(
  * Conversa para o navegador (spec 024): o `contactRef` (o telefone do contato no WhatsApp) **nunca**
  * sai por aqui; vai só o rótulo mascarado no servidor e o canal. `updatedAt` é a última atividade.
  */
-function toConversationResponse(conversation: Conversation): {
+function toConversationResponse(
+  conversation: Conversation,
+  /** Spec 039: a pausa ainda vigente (`AttendanceService.activePause`), ou `null`. */
+  pausedUntil: Date | null,
+): {
   id: string;
   contactLabel: string;
   channel: string;
   createdAt: string;
   updatedAt: string;
+  /** Spec 039: até quando a IA está pausada (ISO); `null` se não está (ou se a pausa já passou). */
+  aiPausedUntil: string | null;
 } {
   const { contactLabel, channel } = describeContact(
     conversation.companyId,
@@ -57,6 +63,7 @@ function toConversationResponse(conversation: Conversation): {
     channel,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
+    aiPausedUntil: pausedUntil?.toISOString() ?? null,
   };
 }
 
@@ -123,7 +130,9 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
       const { companyId } = membershipAuth(request);
       const query = listQuerySchema.parse(request.query);
       const page = await attendance.listConversations(companyId, toListOptions(query));
-      const items = page.items.map(toConversationResponse);
+      const items = page.items.map((item) =>
+        toConversationResponse(item, attendance.activePause(item)),
+      );
       if (notifications === undefined) return { items, nextCursor: page.nextCursor };
       // Spec 038: selo "Humano" na lista (uma consulta em lote, sem N+1).
       const open = await notifications.openHandoffs(
@@ -150,7 +159,10 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
         toListOptions(query),
         query.order,
       );
-      const conversation = toConversationResponse(page.conversation);
+      const conversation = toConversationResponse(
+        page.conversation,
+        attendance.activePause(page.conversation),
+      );
       const open =
         notifications === undefined
           ? undefined
@@ -164,6 +176,19 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
         items: page.items.map(toMessageResponse),
         nextCursor: page.nextCursor,
       };
+    },
+  );
+
+  // Spec 039 (E4): reativa a IA numa conversa pausada porque a equipe respondeu pelo celular. 204
+  // idempotente; `:conversationId` malformado, inexistente ou de outra empresa = o mesmo 404.
+  app.post(
+    '/:companyId/conversations/:conversationId/ai/resume',
+    { config, onRequest: guard('conversation:takeover') },
+    async (request, reply) => {
+      const { conversationId } = conversationParamsSchema.parse(request.params);
+      const { companyId } = membershipAuth(request);
+      await attendance.resumeAi(companyId, conversationId);
+      return reply.status(204).send();
     },
   );
 

@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import {
   type AuditAction,
   type ChannelConnection,
+  type ChannelConnectionMode,
   type ChannelConnectionRepository,
   type Company,
   type CompanyId,
@@ -38,6 +39,9 @@ export const CHANNEL_ERRORS = {
   CHANNEL_NUMBER_IN_USE: 'Este número já está conectado a outra empresa',
   CHANNEL_CODE_INVALID: 'O código do Embedded Signup é inválido, expirou ou já foi usado',
   CHANNEL_REGISTRATION_FAILED: 'Não foi possível registrar o número na Meta',
+  // Spec 039 (D8): zero ou mais de um número na WABA e nenhum escolhido; sem tela de escolha.
+  CHANNEL_NUMBER_AMBIGUOUS:
+    'Não foi possível identificar o número. Escolha o número no aplicativo e tente de novo',
 } as const;
 export type ChannelErrorCode = keyof typeof CHANNEL_ERRORS;
 
@@ -50,6 +54,7 @@ type MetricResult =
   | 'number_in_use'
   | 'invalid_code'
   | 'registration_failed'
+  | 'ambiguous'
   | 'graph_error';
 
 const RESULT_BY_CODE: Readonly<Record<ChannelErrorCode, MetricResult>> = {
@@ -60,6 +65,7 @@ const RESULT_BY_CODE: Readonly<Record<ChannelErrorCode, MetricResult>> = {
   CHANNEL_NUMBER_IN_USE: 'number_in_use',
   CHANNEL_CODE_INVALID: 'invalid_code',
   CHANNEL_REGISTRATION_FAILED: 'registration_failed',
+  CHANNEL_NUMBER_AMBIGUOUS: 'ambiguous',
 };
 
 export type ChannelState = 'NOT_CONNECTED' | 'CONNECTED' | 'TOKEN_INVALID' | 'LEGACY';
@@ -72,6 +78,8 @@ export interface ChannelStateView {
   readonly tokenExpiresAt: Date | null;
   readonly connectedAt: Date | null;
   readonly tokenInvalidAt: Date | null;
+  /** Spec 039: como o número foi conectado; `null` sem conexão própria (inclusive `LEGACY`). */
+  readonly mode: ChannelConnectionMode | null;
 }
 
 export interface ConnectChannelInput {
@@ -84,10 +92,16 @@ export interface ConnectChannelInput {
 /** O que a prova de posse e a gravação usam: o número e a WABA (o token vem à parte). */
 export type ChannelTarget = Pick<ConnectChannelInput, 'phoneNumberId' | 'wabaId'>;
 
+/** Fluxo do Embedded Signup (spec 039): `api_only` (número novo) ou `coexistence` (aplicativo no celular). */
+export type EmbeddedSignupMode = 'api_only' | 'coexistence';
+
 export interface EmbeddedSignupInput {
   readonly code: string;
   readonly wabaId: string;
-  readonly phoneNumberId: string;
+  /** Obrigatório no fluxo atual; na coexistência pode faltar (resolvido pela lista da WABA). */
+  readonly phoneNumberId?: string | undefined;
+  /** Padrão `api_only`: o contrato da 015b não muda. */
+  readonly mode?: EmbeddedSignupMode | undefined;
 }
 
 export interface ChannelConnectionServiceDeps {
@@ -118,6 +132,7 @@ function toView(company: Company, connection: ChannelConnection | null): Channel
       tokenExpiresAt: null,
       connectedAt: null,
       tokenInvalidAt: null,
+      mode: null,
     };
   }
   return {
@@ -127,6 +142,7 @@ function toView(company: Company, connection: ChannelConnection | null): Channel
     tokenExpiresAt: connection.tokenExpiresAt,
     connectedAt: connection.createdAt,
     tokenInvalidAt: connection.tokenInvalidAt,
+    mode: connection.mode,
   };
 }
 
@@ -157,8 +173,9 @@ export class ChannelConnectionService {
     const action = existing === null ? 'connect' : 'replace_token';
     const token = new SecretString(input.accessToken);
     try {
-      const expiresAt = await this.proveOwnership(token, input);
-      const outcome = await this.persist(actor, input, token, expiresAt);
+      const { expiresAt } = await this.proveOwnership(token, input);
+      // O PUT manual é sempre o modo "só API" (spec 039: o modo é explícito em toda gravação).
+      const outcome = await this.persist(actor, input, token, expiresAt, 'API_ONLY');
       this.afterCommit(actor, [{ action: outcome.audit }]);
       this.count(action, 'ok');
       return outcome.view;
@@ -181,35 +198,53 @@ export class ChannelConnectionService {
     input: EmbeddedSignupInput,
   ): Promise<ChannelStateView> {
     this.requirePermission(actor, 'channel:manage');
+    const coexistence = input.mode === 'coexistence';
+    const action = coexistence ? 'coexistence' : 'embedded_signup';
     try {
+      if (!coexistence && input.phoneNumberId === undefined) {
+        // O validador da rota já recusa; defesa para quem chama o serviço direto.
+        throw new ValidationError('Dados inválidos');
+      }
       const exchanged = await this.deps.provisioner.exchangeCode(new SecretString(input.code));
       if (!exchanged.ok) throw this.providerFailure(exchanged.error);
       const token = exchanged.value;
-      const expiresAt = await this.proveOwnership(token, input);
-      // Número de Outra empresa: 409 antes de registrar. Sem isto, um token que enxerga a WABA
-      // compartilhada trocaria o PIN do número alheio pelo `/register`. (A corrida entre dois
+      const proven = await this.proveOwnership(token, {
+        wabaId: input.wabaId,
+        phoneNumberId: input.phoneNumberId,
+      });
+      const target: ChannelTarget = { wabaId: input.wabaId, phoneNumberId: proven.phoneNumberId };
+      // Número de Outra empresa: 409 antes de registrar (e de gravar). Sem isto, um token que enxerga a
+      // WABA compartilhada trocaria o PIN do número alheio pelo `/register`. (A corrida entre dois
       // empresas ainda é decidida pelo `@unique`, na transação.)
-      const owner = await this.deps.companies.findByWhatsappPhoneNumberId(input.phoneNumberId);
+      const owner = await this.deps.companies.findByWhatsappPhoneNumberId(target.phoneNumberId);
       if (owner !== null && owner.id !== actor.companyId) throw channelConflict();
-      const pin = await this.registrationPin(actor.companyId);
-      const registered = await this.deps.provisioner.registerNumber(
-        input.phoneNumberId,
-        token,
-        pin,
-      );
-      if (!registered.ok) throw this.providerFailure(registered.error);
-      const outcome = await this.persist(
-        actor,
-        input,
-        token,
-        expiresAt,
-        this.deps.cipher.encrypt(actor.companyId, pin),
-      );
+      let outcome: { readonly audit: AuditAction; readonly view: ChannelStateView };
+      if (coexistence) {
+        // Spec 039 (S3 confirmada no E0): o número já está registrado pelo aplicativo; sem `/register`
+        // e sem PIN nosso. Um PIN guardado de uma conexão anterior fica como está (inofensivo).
+        outcome = await this.persist(actor, target, token, proven.expiresAt, 'COEXISTENCE');
+      } else {
+        const pin = await this.registrationPin(actor.companyId);
+        const registered = await this.deps.provisioner.registerNumber(
+          target.phoneNumberId,
+          token,
+          pin,
+        );
+        if (!registered.ok) throw this.providerFailure(registered.error);
+        outcome = await this.persist(
+          actor,
+          target,
+          token,
+          proven.expiresAt,
+          'API_ONLY',
+          this.deps.cipher.encrypt(actor.companyId, pin),
+        );
+      }
       this.afterCommit(actor, [{ action: outcome.audit }]);
-      this.count('embedded_signup', 'ok');
+      this.count(action, 'ok');
       return outcome.view;
     } catch (error) {
-      this.count('embedded_signup', resultOf(error));
+      this.count(action, resultOf(error));
       throw error;
     }
   }
@@ -283,9 +318,13 @@ export class ChannelConnectionService {
 
   /**
    * Prova de posse com o token da empresa, antes de gravar qualquer coisa. Devolve a validade
-   * informada pela Meta (`null` = não expira).
+   * informada pela Meta (`null` = não expira) e o número confirmado. Sem `phoneNumberId` (só na
+   * coexistência, spec 039), o número é o **único** da WABA; zero ou vários = `CHANNEL_NUMBER_AMBIGUOUS`.
    */
-  private async proveOwnership(token: SecretString, input: ChannelTarget): Promise<Date | null> {
+  private async proveOwnership(
+    token: SecretString,
+    input: { readonly wabaId: string; readonly phoneNumberId: string | undefined },
+  ): Promise<{ readonly expiresAt: Date | null; readonly phoneNumberId: string }> {
     const inspected = await this.deps.provisioner.inspectToken(token);
     if (!inspected.ok) throw this.providerFailure(inspected.error);
     const inspection = inspected.value;
@@ -303,13 +342,19 @@ export class ChannelConnectionService {
 
     const numbers = await this.deps.provisioner.listPhoneNumberIds(input.wabaId, token);
     if (!numbers.ok) throw this.providerFailure(numbers.error);
-    if (!numbers.value.includes(input.phoneNumberId)) {
+    let phoneNumberId = input.phoneNumberId;
+    if (phoneNumberId === undefined) {
+      const [only, ...others] = numbers.value;
+      if (only === undefined || others.length > 0) throw channelError('CHANNEL_NUMBER_AMBIGUOUS');
+      phoneNumberId = only;
+    }
+    if (!numbers.value.includes(phoneNumberId)) {
       throw channelError('CHANNEL_NUMBER_NOT_IN_WABA');
     }
 
     const subscribed = await this.deps.provisioner.subscribeApp(input.wabaId, token);
     if (!subscribed.ok) throw this.providerFailure(subscribed.error);
-    return inspection.expiresAt;
+    return { expiresAt: inspection.expiresAt, phoneNumberId };
   }
 
   /** Cifra e grava, numa transação com a empresa travado: conexão, número e auditoria juntos. */
@@ -318,6 +363,7 @@ export class ChannelConnectionService {
     input: ChannelTarget,
     token: SecretString,
     expiresAt: Date | null,
+    mode: ChannelConnectionMode,
     pinCiphertext?: string,
   ): Promise<{ readonly audit: AuditAction; readonly view: ChannelStateView }> {
     const ciphertext = this.deps.cipher.encrypt(actor.companyId, token);
@@ -328,6 +374,7 @@ export class ChannelConnectionService {
           wabaId: input.wabaId,
           tokenCiphertext: ciphertext,
           tokenExpiresAt: expiresAt,
+          mode,
           ...(pinCiphertext === undefined ? {} : { registrationPinCiphertext: pinCiphertext }),
         });
         const company = await tx.companies.update(actor.companyId, {
@@ -413,7 +460,7 @@ export class ChannelConnectionService {
   }
 
   private count(
-    action: 'connect' | 'replace_token' | 'embedded_signup' | 'disconnect',
+    action: 'connect' | 'replace_token' | 'embedded_signup' | 'coexistence' | 'disconnect',
     result: MetricResult | 'unsubscribe_failed',
   ): void {
     try {

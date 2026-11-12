@@ -232,6 +232,12 @@ export const envSchema = z
     WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
     // Formulário avançado do site (spec 023): conectar com token digitado. Só desenvolvimento e demonstração.
     CHANNEL_MANUAL_CONNECT_ENABLED: z.preprocess(emptyAsUndefined, booleanLiteral(false)),
+    // Coexistência (spec 039): conectar o número que segue no aplicativo WhatsApp Business e tratar o
+    // eco das mensagens enviadas pelo celular. Desligada por padrão; exige o canal e um `config_id`.
+    WHATSAPP_COEXISTENCE_ENABLED: z.preprocess(emptyAsUndefined, booleanLiteral(false)),
+    // `config_id` próprio da coexistência (spec 039, S14): vazio = usa o do Embedded Signup (o E0 mostrou
+    // que ele serve). Só dígitos.
+    WHATSAPP_COEXISTENCE_CONFIG_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
     WHATSAPP_API_BASE_URL: z.preprocess(
       emptyAsUndefined,
       z.url().default('https://graph.facebook.com'),
@@ -524,6 +530,8 @@ function refineWhatsapp(
     readonly WHATSAPP_APP_ID?: string | undefined;
     readonly WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID?: string | undefined;
     readonly CHANNEL_MANUAL_CONNECT_ENABLED?: boolean;
+    readonly WHATSAPP_COEXISTENCE_ENABLED?: boolean;
+    readonly WHATSAPP_COEXISTENCE_CONFIG_ID?: string | undefined;
     readonly CHANNEL_CREDENTIALS_KEYS?: string | undefined;
     readonly CHANNEL_CREDENTIALS_ACTIVE_KEY_ID?: string | undefined;
     readonly WHATSAPP_API_BASE_URL: string;
@@ -575,6 +583,40 @@ function refineWhatsapp(
         code: 'custom',
         path: ['WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID'],
         message: 'exige WHATSAPP_ENABLED=true',
+      });
+    }
+  }
+  if (env.WHATSAPP_COEXISTENCE_CONFIG_ID !== undefined) {
+    if (!/^[0-9]{1,32}$/.test(env.WHATSAPP_COEXISTENCE_CONFIG_ID)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WHATSAPP_COEXISTENCE_CONFIG_ID'],
+        message: 'deve ter de 1 a 32 dígitos',
+      });
+    }
+    if (env.WHATSAPP_COEXISTENCE_ENABLED !== true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WHATSAPP_COEXISTENCE_CONFIG_ID'],
+        message: 'exige WHATSAPP_COEXISTENCE_ENABLED=true',
+      });
+    }
+  }
+  if (env.WHATSAPP_COEXISTENCE_ENABLED === true) {
+    if (!env.WHATSAPP_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WHATSAPP_COEXISTENCE_ENABLED'],
+        message: 'exige WHATSAPP_ENABLED=true',
+      });
+    } else if (
+      env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID === undefined &&
+      env.WHATSAPP_COEXISTENCE_CONFIG_ID === undefined
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WHATSAPP_COEXISTENCE_ENABLED'],
+        message: 'exige WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID ou WHATSAPP_COEXISTENCE_CONFIG_ID',
       });
     }
   }

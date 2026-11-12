@@ -55,6 +55,14 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
   const as = (companyId: string): { authorization: string } =>
     membershipHeaders.get(companyId) ?? anyMembership;
   const llm = new MockLlmProvider({ recordCalls: true });
+  let attendanceService: AttendanceService;
+  let roleToken: (
+    companyId: string,
+    role: 'OWNER' | 'ADMIN' | 'AGENT' | 'VIEWER',
+  ) => Promise<{
+    authorization: string;
+  }>;
+  let platformHeaders: () => Promise<{ authorization: string }>;
 
   before(async () => {
     const companies = new InMemoryCompanyRepository();
@@ -63,10 +71,22 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
     const authTokens = testAuth;
     createMembership = async (companyId) =>
       bearer((await authTokens.membershipToken(CompanyId.parse(companyId))).accessToken);
+    roleToken = async (companyId, role) =>
+      bearer((await authTokens.membershipToken(CompanyId.parse(companyId), { role })).accessToken);
+    platformHeaders = async () => bearer((await authTokens.platformToken()).accessToken);
     // Relógio determinístico: com o real, dois pedidos no mesmo milissegundo invertem a ordem
     // da resposta e da pergunta seguinte (falhou no CI, ora no Node 22, ora na LTS).
     const clock = steppingClock();
     store = new InMemoryAttendanceStore(clock);
+    attendanceService = new AttendanceService({
+      companies,
+      conversations: store.conversations,
+      messages: store.messages,
+      unitOfWork: store,
+      llm,
+      logger: logs.logger,
+      options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000, now: clock },
+    });
     app = buildServer({
       logger: logs.logger,
       readiness: {
@@ -76,15 +96,7 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
       auth: testAuth.service,
       admin: {
         companies: new CompanyService(companies),
-        attendance: new AttendanceService({
-          companies,
-          conversations: store.conversations,
-          messages: store.messages,
-          unitOfWork: store,
-          llm,
-          logger: logs.logger,
-          options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000, now: clock },
-        }),
+        attendance: attendanceService,
       },
     });
     await app.ready();
@@ -472,6 +484,7 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
       const [conversation] = list.json<PageBody<Record<string, unknown>>>().items;
       assert.ok(conversation);
       assert.deepEqual(Object.keys(conversation).sort(), [
+        'aiPausedUntil',
         'channel',
         'contactLabel',
         'createdAt',
@@ -600,6 +613,118 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
         mine.some((line) => line.msg === 'requisição concluída'),
         `falta o log de fim da requisição: ${diagnosis}`,
       );
+    });
+  });
+  describe('coexistência: equipe pelo celular e pausa da IA (spec 039)', () => {
+    const PHONE = '5511988887777';
+    const ECHO_WAMID = `wamid.${Buffer.from(PHONE).toString('base64')}ECO`;
+
+    async function pausedConversation(slug: string): Promise<{ companyId: string; id: string }> {
+      const companyId = await createCompany(slug);
+      await send(companyId, { contactRef: PHONE, text: 'oi', externalId: `wamid.in.${slug}` });
+      const echo = await attendanceService.recordHumanEcho(CompanyId.parse(companyId), {
+        contactRef: PHONE,
+        externalId: `${ECHO_WAMID}${slug}`,
+        text: 'resposta da equipe pelo celular',
+      });
+      assert.equal(echo.result, 'recorded');
+      const list = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${companyId}/conversations`,
+        headers: as(companyId),
+      });
+      const [item] = list.json<PageBody<{ id: string }>>().items;
+      assert.ok(item);
+      return { companyId, id: item.id };
+    }
+
+    it('role HUMAN e aiPausedUntil aparecem; telefone, wamid, contactRef e externalId não', async () => {
+      const { companyId, id } = await pausedConversation('coex-contrato');
+      const list = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${companyId}/conversations`,
+        headers: as(companyId),
+      });
+      const history = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${companyId}/conversations/${id}/messages`,
+        headers: as(companyId),
+      });
+      for (const response of [list, history]) {
+        assert.equal(response.statusCode, 200);
+        for (const sentinel of [PHONE, ECHO_WAMID, '"contactRef"', '"externalId"']) {
+          assert.equal(response.body.includes(sentinel), false, sentinel);
+        }
+      }
+      const [item] = list.json<PageBody<{ aiPausedUntil: string | null }>>().items;
+      assert.equal(typeof item?.aiPausedUntil, 'string');
+      const body = history.json<{
+        conversation: { aiPausedUntil: string | null };
+        items: MessageBody[];
+      }>();
+      assert.equal(body.conversation.aiPausedUntil, item?.aiPausedUntil);
+      const human = body.items.find((message) => message.role === 'HUMAN');
+      assert.ok(human);
+      assert.equal(human.content, 'resposta da equipe pelo celular');
+      assert.equal(human.sentAt, null);
+    });
+
+    it('POST .../ai/resume: 204 idempotente, zera a pausa; AGENT pode, VIEWER e plataforma 403', async () => {
+      const { companyId, id } = await pausedConversation('coex-resume');
+      const url = `/admin/companies/${companyId}/conversations/${id}/ai/resume`;
+      const viewer = await app.inject({
+        method: 'POST',
+        url,
+        headers: await roleToken(companyId, 'VIEWER'),
+      });
+      assert.equal(viewer.statusCode, 403);
+      const platform = await app.inject({ method: 'POST', url, headers: await platformHeaders() });
+      assert.equal(platform.statusCode, 403);
+      const anonymous = await app.inject({ method: 'POST', url });
+      assert.equal(anonymous.statusCode, 401);
+
+      const agent = await roleToken(companyId, 'AGENT');
+      const first = await app.inject({ method: 'POST', url, headers: agent });
+      const again = await app.inject({ method: 'POST', url, headers: agent });
+      assert.equal(first.statusCode, 204);
+      assert.equal(again.statusCode, 204);
+      const list = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${companyId}/conversations`,
+        headers: as(companyId),
+      });
+      const [item] = list.json<PageBody<{ aiPausedUntil: string | null }>>().items;
+      assert.equal(item?.aiPausedUntil, null);
+    });
+
+    it('POST .../ai/resume: conversa de outra empresa, inexistente ou malformada = o mesmo 404', async () => {
+      const a = await pausedConversation('coex-iso-a');
+      const b = await pausedConversation('coex-iso-b');
+      const codes: string[] = [];
+      for (const conversationId of [b.id, randomUUID(), 'nao-uuid']) {
+        const response = await app.inject({
+          method: 'POST',
+          url: `/admin/companies/${a.companyId}/conversations/${conversationId}/ai/resume`,
+          headers: as(a.companyId),
+        });
+        assert.equal(response.statusCode, 404, conversationId);
+        codes.push(response.json<ErrorBody>().error.code);
+      }
+      assert.equal(new Set(codes).size, 1);
+      // `:companyId` alheio: 404 antes da permissão (mesmo para quem não a teria).
+      const foreign = await app.inject({
+        method: 'POST',
+        url: `/admin/companies/${b.companyId}/conversations/${b.id}/ai/resume`,
+        headers: await roleToken(a.companyId, 'VIEWER'),
+      });
+      assert.equal(foreign.statusCode, 404);
+      const listB = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${b.companyId}/conversations`,
+        headers: as(b.companyId),
+      });
+      const [itemB] = listB.json<PageBody<{ aiPausedUntil: string | null }>>().items;
+      assert.equal(typeof itemB?.aiPausedUntil, 'string', 'a pausa da B continua');
     });
   });
 });

@@ -1,7 +1,11 @@
 import type { WithoutCompanyId } from '../repositories/tenant.repository.js';
 import type { CompanyId } from '../value-objects/company-id.js';
 
-export const MESSAGE_ROLES = ['USER', 'ASSISTANT'] as const;
+/**
+ * `USER`: o contato; `ASSISTANT`: a IA; `HUMAN`: a equipe, pelo aplicativo WhatsApp Business (eco da
+ * coexistência, spec 039). `HUMAN` é o lado da empresa: vai ao modelo como turno do assistente.
+ */
+export const MESSAGE_ROLES = ['USER', 'ASSISTANT', 'HUMAN'] as const;
 export type MessageRole = (typeof MESSAGE_ROLES)[number];
 
 /** Limite de caracteres do texto de uma mensagem (do contato e do assistente). */

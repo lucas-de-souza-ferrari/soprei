@@ -1,6 +1,7 @@
 import {
   type Company,
   type CompanyRepository,
+  MESSAGE_CONTENT_MAX_LENGTH,
   WHATSAPP_PHONE_NUMBER_ID_PATTERN,
 } from '../../domain/index.js';
 import { messageRef } from '../../shared/utils/index.js';
@@ -25,6 +26,8 @@ export type ChannelInboundResult =
 
 export interface ChannelIntakeMetrics {
   countChannelInbound(channel: string, result: ChannelInboundResult): void;
+  /** Spec 039: eco recusado já na entrada. */
+  countChannelEcho?(result: ChannelEchoIntakeResult): void;
 }
 
 /** Logger do canal. **Nunca** passe texto de mensagem, remetente, destinatário, nome nem segredo. */
@@ -81,6 +84,28 @@ export interface InboundChannelMessage {
   readonly receivedAt?: Date;
 }
 
+/**
+ * Eco de uma mensagem que a equipe enviou pelo aplicativo WhatsApp Business (coexistência, spec 039).
+ * O contato é o destinatário (`to`), não o remetente.
+ */
+export interface InboundChannelEcho {
+  /** Número do negócio (`phone_number_id`): o que resolve a empresa. */
+  readonly phoneNumberId: string;
+  /** Id do eco no canal: idempotência e id do job. */
+  readonly messageId: string;
+  /** O contato a quem a equipe escreveu (`to`); ausente quando o canal não o informa. */
+  readonly recipient: string | undefined;
+  readonly content:
+    | { readonly kind: 'text'; readonly text: string | undefined }
+    /** Foto, áudio, documento...: vira o texto fixo do servidor (a mídia nunca é guardada). */
+    | { readonly kind: 'media' };
+  /** Instante de recebimento pelo webhook (spec 034): ordena eco e mensagens do contato. */
+  readonly receivedAt?: Date;
+}
+
+/** Destino de um eco no webhook (label `result` de `channel_echo_events_total`; conjunto fixo). */
+export type ChannelEchoIntakeResult = 'unknown_number' | 'invalid' | 'discarded';
+
 export interface IntakeSummary {
   /** Mensagens que viraram job (texto ou aviso). */
   readonly enqueued: number;
@@ -102,6 +127,21 @@ export interface ChannelIntakeDeps {
 
 /** `wa_id` do contato: só dígitos (o canal o entrega assim). */
 const SENDER_PATTERN = /^[0-9]{1,32}$/;
+
+/**
+ * Texto do eco cortado no teto de uma mensagem (spec 039), sem partir um caractere ao meio; vazio
+ * (só espaços) vira `undefined`, que o atendimento grava como o texto fixo de mídia.
+ */
+export function truncateEchoText(text: string | undefined): string | undefined {
+  if (text === undefined || text.trim() === '') return undefined;
+  if (text.length <= MESSAGE_CONTENT_MAX_LENGTH) return text;
+  let kept = '';
+  for (const char of text) {
+    if (kept.length + char.length > MESSAGE_CONTENT_MAX_LENGTH) break;
+    kept += char;
+  }
+  return kept;
+}
 
 /**
  * Entrada do canal (spec 011): para cada mensagem, resolve a empresa **no banco** pelo número do
@@ -142,6 +182,113 @@ export class ChannelIntakeService {
       }
     }
     return { enqueued, discarded, failed };
+  }
+
+  /**
+   * Ecos da coexistência (spec 039): para cada um, resolve a empresa pelo número do negócio (a única
+   * origem do `CompanyId`, como nas mensagens) e enfileira um job `echo`. Nada é gravado aqui. Número
+   * desconhecido (ou de empresa removida), empresa suspensa e eco sem destinatário ou id utilizável são
+   * descartados com métrica; nada do conteúdo nem do contato vai a log.
+   */
+  async acceptEchoes(
+    echoes: readonly InboundChannelEcho[],
+    requestId: string,
+  ): Promise<IntakeSummary> {
+    let enqueued = 0;
+    let discarded = 0;
+    let failed = 0;
+    const companyCache = new Map<string, Promise<Company | null>>();
+    for (const echo of echoes) {
+      try {
+        const outcome = await this.acceptEcho(echo, requestId, companyCache);
+        if (outcome === 'enqueued') enqueued += 1;
+        else if (outcome === 'failed') failed += 1;
+        else discarded += 1;
+      } catch (error) {
+        failed += 1;
+        this.deps.logger.error(
+          { messageRef: messageRef(echo.messageId), ...describeError(error) },
+          'falha ao aceitar o eco do canal',
+        );
+      }
+    }
+    return { enqueued, discarded, failed };
+  }
+
+  private async acceptEcho(
+    echo: InboundChannelEcho,
+    requestId: string,
+    companyCache: Map<string, Promise<Company | null>>,
+  ): Promise<'enqueued' | 'discarded' | 'failed'> {
+    const { logger } = this.deps;
+    const ref = messageRef(echo.messageId);
+    const contactRef = echo.recipient;
+    if (
+      contactRef === undefined ||
+      !SENDER_PATTERN.test(contactRef) ||
+      !jobExternalIdSchema.safeParse(echo.messageId).success ||
+      !WHATSAPP_PHONE_NUMBER_ID_PATTERN.test(echo.phoneNumberId)
+    ) {
+      this.countEcho('invalid');
+      logger.warn(
+        { messageRef: ref },
+        'eco sem destinatário ou identificador utilizável descartado',
+      );
+      return 'discarded';
+    }
+    let lookup = companyCache.get(echo.phoneNumberId);
+    if (lookup === undefined) {
+      lookup = this.deps.companies.findByWhatsappPhoneNumberId(echo.phoneNumberId);
+      companyCache.set(echo.phoneNumberId, lookup);
+    }
+    const company = await lookup;
+    if (company === null) {
+      this.countEcho('unknown_number');
+      logger.warn(
+        { phoneNumberId: echo.phoneNumberId, messageRef: ref },
+        'eco para número sem empresa descartado',
+      );
+      return 'discarded';
+    }
+    if (company.status === 'SUSPENDED') {
+      this.countEcho('discarded');
+      logger.warn({ companyId: company.id, messageRef: ref }, 'eco de empresa suspensa descartado');
+      return 'discarded';
+    }
+    const text = echo.content.kind === 'text' ? truncateEchoText(echo.content.text) : undefined;
+    const job: InboundJob = {
+      kind: 'echo',
+      companyId: company.id,
+      phoneNumberId: echo.phoneNumberId,
+      contactRef,
+      externalId: echo.messageId,
+      requestId,
+      ...(echo.receivedAt === undefined ? {} : { receivedAt: echo.receivedAt.toISOString() }),
+      ...(text === undefined ? {} : { text }),
+    };
+    const enqueuedJob = await this.deps.queue.enqueue(job);
+    if (!enqueuedJob.ok) {
+      logger.error(
+        {
+          companyId: company.id,
+          messageRef: ref,
+          jobKind: job.kind,
+          ...describeError(enqueuedJob.error),
+        },
+        'falha ao enfileirar o eco do canal',
+      );
+      return 'failed';
+    }
+    logger.info({ companyId: company.id, messageRef: ref, jobKind: job.kind }, 'eco enfileirado');
+    return 'enqueued';
+  }
+
+  private countEcho(result: ChannelEchoIntakeResult): void {
+    try {
+      this.deps.metrics?.countChannelEcho?.(result);
+    } catch (err) {
+      this.deps.logger.warn(describeError(err), 'falha ao registrar métrica do eco');
+    }
   }
 
   private async acceptOne(

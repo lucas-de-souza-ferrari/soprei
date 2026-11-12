@@ -1,4 +1,5 @@
 import type {
+  AiPauseExtension,
   Conversation,
   ConversationUpdate,
   NewConversation,
@@ -30,4 +31,19 @@ export interface ConversationRepository extends TenantRepository<
    * empresa simplesmente não aparecem.
    */
   findByIds(companyId: CompanyId, ids: readonly string[]): Promise<Conversation[]>;
+  /**
+   * Pausa da IA (spec 039): leva `aiPausedUntil` e `aiIgnoreBefore` até os instantes informados, cada
+   * um **só para a frente** (nunca encurta a pausa nem devolve mensagem já tratada à fila). Conversa
+   * inexistente ou de outra empresa não muda nada.
+   */
+  extendAiPause(
+    companyId: CompanyId,
+    conversationId: string,
+    extension: AiPauseExtension,
+  ): Promise<void>;
+  /**
+   * Reativa a IA (spec 039, E4): `aiPausedUntil = null`, sem mexer em `aiIgnoreBefore` (o que a equipe
+   * já tratou não é respondido depois). Devolve se a conversa existe nesta empresa.
+   */
+  clearAiPause(companyId: CompanyId, conversationId: string): Promise<boolean>;
 }

@@ -30,6 +30,7 @@ function connection(status: 'CONNECTED' | 'TOKEN_INVALID', token: string): Chann
     wabaId: '1',
     tokenCiphertext: cipher.encrypt(ID, new SecretString(token)),
     registrationPinCiphertext: null,
+    mode: 'API_ONLY',
     tokenVersion: 4,
     status,
     tokenExpiresAt: null,

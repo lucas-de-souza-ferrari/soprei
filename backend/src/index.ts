@@ -394,6 +394,8 @@ async function main(): Promise<void> {
         metrics,
         channel: 'whatsapp',
       }),
+      // Spec 039: os ecos do aplicativo só são tratados com a coexistência ligada.
+      echoesEnabled: whatsapp.coexistenceEnabled,
     };
     // Qual modo do TRUST_PROXY está ativo, sem IP algum (a Meta e um atacante dividiriam a cota
     // do perfil webhook se o túnel/proxy não estivesse listado).
@@ -553,6 +555,10 @@ async function main(): Promise<void> {
               embeddedSignupConfigId: whatsapp.embeddedSignupConfigId,
               graphApiVersion: whatsapp.graphApiVersion,
               manualConnect: whatsapp.manualConnectEnabled,
+              coexistence: {
+                enabled: whatsapp.coexistenceEnabled,
+                configId: whatsapp.coexistenceConfigId,
+              },
             },
           }),
     },

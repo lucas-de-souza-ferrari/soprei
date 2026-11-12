@@ -1,4 +1,5 @@
 import type {
+  AiPauseExtension,
   CompanyId,
   Conversation,
   ConversationRepository,
@@ -69,6 +70,49 @@ export class PrismaConversationRepository
         where: { companyId, id: { in: valid } },
       });
       return rows.map(toConversation);
+    });
+  }
+
+  extendAiPause(
+    companyId: CompanyId,
+    conversationId: string,
+    extension: AiPauseExtension,
+  ): Promise<void> {
+    return this.run('extendAiPause', async () => {
+      if (!isUuid(conversationId)) return;
+      const { pausedUntil, ignoreBefore } = extension;
+      // Cada campo só avança (o equivalente a GREATEST): a condição do `where` decide, sem SQL cru.
+      if (pausedUntil !== undefined) {
+        await this.db.conversation.updateMany({
+          where: {
+            companyId,
+            id: conversationId,
+            OR: [{ aiPausedUntil: null }, { aiPausedUntil: { lt: pausedUntil } }],
+          },
+          data: { aiPausedUntil: pausedUntil },
+        });
+      }
+      if (ignoreBefore !== undefined) {
+        await this.db.conversation.updateMany({
+          where: {
+            companyId,
+            id: conversationId,
+            OR: [{ aiIgnoreBefore: null }, { aiIgnoreBefore: { lt: ignoreBefore } }],
+          },
+          data: { aiIgnoreBefore: ignoreBefore },
+        });
+      }
+    });
+  }
+
+  clearAiPause(companyId: CompanyId, conversationId: string): Promise<boolean> {
+    return this.run('clearAiPause', async () => {
+      if (!isUuid(conversationId)) return false;
+      const { count } = await this.db.conversation.updateMany({
+        where: { companyId, id: conversationId },
+        data: { aiPausedUntil: null },
+      });
+      return count > 0;
     });
   }
 
