@@ -1,6 +1,6 @@
 # 039 — Conexão do WhatsApp por coexistência (o cliente continua usando o aplicativo WhatsApp Business no celular)
 
-- **Status:** rascunho
+- **Status:** aprovada pelo dono em 2026-11-12, com D1 a D9 como recomendadas ("Aprovo todas"). **Nada de código antes do E0** (teste real do dono com um número do aplicativo WhatsApp Business).
 - **Branch:** `spec/039-conexao-por-coexistencia`
 - **Depende de:** 011, 013 e 034 (canal, agrupamento e ordem por `receivedAt`), 015 e 023 (credencial por empresa e Embedded Signup), 024 (painel de conversas e `describeContact`), 028 e 038 (ferramentas da IA e atendimento humano), 031 (Modo C: o cliente paga a Meta)
 - **Segurança:** mexe em credencial do canal, em endpoint de tenant e no webhook público. **Passa pelo `reviewer` antes do merge.**
