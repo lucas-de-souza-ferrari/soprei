@@ -1,14 +1,18 @@
 # /etc/ssh/sshd_config.d/soprei-deploy.conf (spec 037, E3): defesa em dobro do comando forçado do
 # authorized_keys. Vale só para o usuário soprei-deploy.
 #
-# Antes de recarregar, com uma SEGUNDA sessão de root aberta até testar (para não se trancar fora):
-#   sshd -t                                   # sintaxe
-#   sshd -T -C user=soprei-deploy,host=teste,addr=127.0.0.1 | grep -Ei 'forcecommand|permittty|disableforwarding|authenticationmethods'
-#   sshd -T -C user=root,host=teste,addr=127.0.0.1 | grep -Ei 'forcecommand|permittty'
-#   systemctl reload ssh
-# A primeira consulta precisa mostrar as linhas abaixo; a segunda NÃO pode mostrar o ForceCommand
-# (se mostrar, o bloco Match vazou para outros usuários: no Ubuntu os arquivos deste diretório são
-# incluídos no começo do sshd_config; confira que este bloco fica isolado, S24).
+# Instalação, com uma SEGUNDA sessão de root aberta até testar (para não se trancar fora):
+#   1. ANTES de copiar este arquivo, guarde a configuração efetiva do root:
+#        sshd -T -C user=root,host=x,addr=127.0.0.1 > /root/sshd-antes.txt
+#   2. Copie este arquivo para /etc/ssh/sshd_config.d/soprei-deploy.conf e confira a sintaxe: sshd -t
+#   3. Gere a configuração do root de novo e compare; o diff precisa sair VAZIO:
+#        sshd -T -C user=root,host=x,addr=127.0.0.1 > /root/sshd-depois.txt
+#        diff /root/sshd-antes.txt /root/sshd-depois.txt && echo IGUAL
+#      Se houver qualquer diferença, o bloco Match vazou para outros usuários (no Ubuntu os arquivos
+#      deste diretório são incluídos no começo do sshd_config, S24): NÃO recarregue; apague o arquivo.
+#   4. Confira que o bloco vale para o soprei-deploy (precisa mostrar as linhas abaixo):
+#        sshd -T -C user=soprei-deploy,host=x,addr=127.0.0.1 | grep -Ei 'forcecommand|permittty|disableforwarding|authenticationmethods'
+#   5. Só então: systemctl reload ssh
 Match User soprei-deploy
     ForceCommand /usr/local/sbin/soprei-deploy-entry
     AuthenticationMethods publickey

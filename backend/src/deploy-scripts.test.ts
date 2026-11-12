@@ -335,6 +335,21 @@ describe('exemplos do servidor para o deploy automático (spec 037, E3)', () => 
       line.trim(),
     );
     assert.equal(rules[0], 'Match User soprei-deploy');
+    // I2 da revisão: a configuração do root é guardada antes e comparada depois, com diff vazio,
+    // antes de recarregar o sshd (no exemplo e no passo do dono).
+    for (const text of [
+      read('deploy/ssh/sshd-soprei-deploy.conf.example'),
+      read('docs/ops/deploy.md'),
+    ]) {
+      const before = text.indexOf('user=root,host=x,addr=127.0.0.1 > /root/sshd-antes.txt');
+      const after = text.indexOf('/root/sshd-depois.txt');
+      const diff = text.indexOf('diff /root/sshd-antes.txt /root/sshd-depois.txt');
+      const reload = text.indexOf('systemctl reload ssh', diff);
+      assert.ok(
+        before >= 0 && after > before && diff > before && reload > diff,
+        'ordem antes, depois, diff, reload',
+      );
+    }
     for (const directive of [
       'ForceCommand /usr/local/sbin/soprei-deploy-entry',
       'AuthenticationMethods publickey',
