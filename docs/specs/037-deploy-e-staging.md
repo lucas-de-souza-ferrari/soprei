@@ -1,7 +1,7 @@
 # 037 — Deploy com rollback e staging
 
-- **Status:** aprovada pelo dono em 2026-11-11, com D1 a D12 como recomendadas (E3 adiada, D9); **E1 e E2 implementadas na branch (2026-11-11), aguardando CI, `reviewer` e os critérios [manual] do dono**
-- **Branch:** `spec/037-deploy-e-staging` (um PR por etapa: E1, E2 e, se o dono quiser, E3)
+- **Status:** **E1 e E2: aprovadas** pelo dono em 2026-11-11 (D1 a D12 como recomendadas) **e implementadas** (E1 em produção desde 2026-11-12, três deploys reais; a E2 está escrita, mas o servidor de staging ainda não existe). **E3: aprovada pelo dono em 2026-11-12 ("Aprovo todas": D9, D10 opção A, D11, D13 a D17 como recomendadas)** (D9 alterada a pedido do dono: deploy automático depois do merge na `main`; D10 e D11 reescritas; D13 a D17 novas).
+- **Branch:** `spec/037-deploy-e-staging` (E1 e E2, já mergeadas); a revisão da E3 está em `spec/037-e3-deploy-automatico` (a implementação da E3, depois de aprovada, vai num PR próprio)
 - **Depende de:** 033 (esta spec **recorta** dela a E4, deploy, e a D7, staging; o resto continua lá), 036 (`.nvmrc`, versão do Node de PRs e produção), 034 (`SHUTDOWN_TIMEOUT_MS`), 032 (nenhum dado real vai ao staging enquanto ela não existir).
 - **Observação de numeração:** conferido em `docs/specs/` em 2026-11-11: existem 001 a 034 e 036 em arquivo (a 035 está **reservada** para "eficiência do turno" e não tem arquivo); esta é a **037**.
 - **Esta spec passa pelo `reviewer`** antes do merge (acesso ao servidor, chave SSH de deploy, segredos, script que roda com privilégio, isolamento entre staging e produção).
@@ -10,7 +10,7 @@
 
 ## Objetivo
 
-A produção já existe (servidor próprio do dono, montada à mão em 2026-11-11) e hoje cada atualização é uma sequência de comandos digitados (`git pull`, `pnpm install`, `build`, `migrate`, `pm2 reload`) sem checagem, sem volta e sem ensaio: um erro de configuração já deixou o processo em laço de reinício. Esta spec entrega **(1)** um `deploy.sh` versionado, executável com **um comando**, que aplica a versão pedida, espera o sistema responder e **volta sozinho ao código anterior** se não responder; **(2)** um **staging no mesmo servidor**, isolado da produção (banco, Redis, e-mail, segredos), onde a mesma revisão é ensaiada antes de ir à produção; e **(3, opcional e adiável)** o disparo desse deploy por GitHub Actions, com aprovação do dono.
+A produção já existe (servidor próprio do dono, montada à mão em 2026-11-11) e hoje cada atualização é uma sequência de comandos digitados (`git pull`, `pnpm install`, `build`, `migrate`, `pm2 reload`) sem checagem, sem volta e sem ensaio: um erro de configuração já deixou o processo em laço de reinício. Esta spec entrega **(1)** um `deploy.sh` versionado, executável com **um comando**, que aplica a versão pedida, espera o sistema responder e **volta sozinho ao código anterior** se não responder; **(2)** um **staging no mesmo servidor**, isolado da produção (banco, Redis, e-mail, segredos), onde a mesma revisão é ensaiada antes de ir à produção; e **(3, E3, pedida pelo dono em 2026-11-12)** o disparo **automático** desse deploy na produção pelo GitHub Actions, depois do merge na `main` e com o CI verde, por uma chave SSH que só consegue pedir "implante este SHA da `main`".
 
 ## Estado atual
 
@@ -28,6 +28,11 @@ A produção já existe (servidor próprio do dono, montada à mão em 2026-11-1
 - 1 servidor Hetzner, Ubuntu 26.04 ARM, 4 GB de RAM, 38 GB de disco, usuário `root` (sem usuário dedicado), IPv4 fixo. Site e API no **mesmo hostname** (cookie `SameSite=Strict`): nginx serve `/var/www/soprei/frontend/dist` e faz proxy de `/api/` (removendo o prefixo) e de `/webhooks/` para `127.0.0.1:3001`; HTTPS pelo certbot (renovação automática); DNS na Cloudflare sem proxy; `ufw` com SSH e HTTP/HTTPS.
 - Backend: `node dist/index.js` sob **PM2** (`name soprei-api`, `cwd /var/www/soprei/backend` porque o `dotenv` lê o `.env` do diretório atual, `exec_mode fork`, 1 instância, `kill_timeout 40000`, `max_memory_restart 1G`), `pm2-root` no systemd. Clone em `/var/www/soprei` com chave de deploy **somente leitura** (`core.sshCommand`). `.env` em `/var/www/soprei/backend/.env` (modo 600). PostgreSQL 18 e Redis 8 locais e exclusivos do Soprei (Redis com senha, AOF, `noeviction`, banco `/1`). Node 24 (binário oficial em `/usr/local`), pnpm 12.3.4.
 - Rotina manual: `git pull`, `pnpm install --frozen-lockfile`, `pnpm db:generate` (**exige `DATABASE_URL` no ambiente**: extrair do `.env` com `grep`/`cut`, **nunca `source`** no `.env`, que tem valores com espaço e caracteres especiais), `pnpm build`, `pnpm db:migrate:deploy` em `backend/`, `pm2 reload soprei-api`. `GET /health` responde `{"status":"ok"}`; `GET /health/ready` checa banco e Redis. Migrations são aditivas **por convenção**; reverter o código **não** reverte migration.
+
+**Atualizado em 2026-11-12 (para a revisão da E3):**
+
+- **Relatado pelo dono:** produção em `https://www.soprei.com`, no mesmo servidor; tudo continua como `root` (PM2 `pm2-root`, código em `/var/www/soprei`). O dono roda `deploy/deploy.sh --env production --allow-unstaged` à mão; **três deploys reais bem-sucedidos** (037, 039 e 032-E1), com a cópia do banco antes da migration e o rollback automático disponível. **O servidor de staging não existe** (a E2 está só escrita): por isso a produção só passa com `--allow-unstaged` (D8). O dono faz push e merge pelo GitHub Desktop.
+- **Lido no repositório:** `.github/workflows/ci.yml` (`name: CI`) roda em `pull_request`, em `push` na `main` e por `workflow_call` (o `node-compat.yml` semanal o chama com outras versões do Node); não declara `permissions`; `backend/src/ci-workflow.test.ts` exige que os jobs sejam **exatamente** `static`, `tests` e `browser`. `deploy/deploy.sh`: `--ref` aceita `^[A-Za-z0-9._/-]{1,100}$` e é resolvido, depois do `git fetch --prune --tags origin`, nesta ordem: `refs/remotes/origin/<ref>`, `refs/tags/<ref>`, `<ref>` (um SHA de 40 hexadecimais cai no último); **não confere** se o SHA está na `main` nem se é mais novo que o em execução (aceita voltar para trás). A trava é `flock -n` em `/var/lock/soprei-deploy.lock` (segunda execução sai com 1). A varredura de migrations olha só os `migration.sql` **adicionados** entre o SHA em execução e o alvo; sem a marca `-- breaking-approved:` sai com 1; com a marca exige `--allow-breaking`. O script honra as variáveis `SOPREI_DEPLOY_LOCK_FILE`, `SOPREI_DEPLOY_STATE_DIR`, `SOPREI_DEPLOY_LOG_DIR` e `SOPREI_DEPLOY_TARGETS_DIR` (ganchos de teste): quem chama o script pelo SSH **não pode** poder defini-las. O log de cada linha leva `usuario=<id -un>`.
 
 ## O que muda em relação à 033
 
@@ -48,9 +53,9 @@ A 033 foi escrita antes de a produção existir e supunha outro desenho. Para es
 | ------ | -------------------------------------------------------------------------------------------------------------- | ----------------------- |
 | **E1** | `deploy/deploy.sh`, `deploy/ecosystem.config.cjs`, alvos, `config:check`, testes de texto e de comportamento   | CÓDIGO                  |
 | **E2** | Staging no mesmo servidor: nginx, certbot, banco, Redis separado, Mailpit, PM2, `.env`; publicação com o mesmo script | DONO + CÓDIGO (exemplos) |
-| **E3** | **(opcional, adiável)** disparo por GitHub Actions com aprovação do dono                                       | CÓDIGO + DONO           |
+| **E3** | Deploy **automático** na produção pelo GitHub Actions depois do merge na `main` com o CI verde (D9)            | CÓDIGO + DONO           |
 
-**Ordem: E1, depois E2, depois E3.** A E1 sozinha já tira o risco principal (deploy sem volta); a E2 depende dela (usa o mesmo script); a E3 só vale a pena depois de o script ter rodado bem por algumas semanas e **o dono pode adiá-la sem prejuízo** para o resto (D9).
+**Ordem:** E1 (feita e em uso) e E2 (escrita; servidor ainda não montado). A E3 **não depende** do servidor de staging se o dono aceitar a D15 como recomendada; se escolher a alternativa da D15, a E3 espera a E2 no servidor.
 
 ## Decisões para o dono (recomendação em linguagem simples)
 
@@ -100,23 +105,55 @@ O staging roda com `NODE_ENV=production` (para exercitar as mesmas regras de con
 - **Recomendação: a produção só aceita a revisão (SHA) que **já está** no staging**; um deploy de produção com outro SHA é recusado, a não ser que o dono passe `--allow-unstaged` de propósito (hotfix). O script guarda o SHA de cada ambiente num arquivo de estado. Atenção: o merge em **squash** cria um SHA novo na `main`, então o ensaio que vale é o da `main` **depois** do merge (um ensaio da branch do PR é opcional e serve para pegar problema antes do merge).
 - **Alternativa:** sem trava (só disciplina). Mais simples e mais fácil de esquecer.
 
-### D9 Fazer a E3 (GitHub Actions) agora?
+### D9 Fazer a E3 (GitHub Actions) agora? **(alterada em 2026-11-12, aguarda o dono)**
 
-- **Recomendação: adiar.** Faça E1 e E2, use o script à mão por algumas semanas e só então decida. A E3 conecta o GitHub ao servidor, o que **aumenta a superfície de ataque**, e economiza pouco (um comando SSH).
-- **Alternativa:** fazer junto. Só com o usuário dedicado (D10), nunca com `root`.
+- **Antes (aprovado em 2026-11-11):** adiar a E3 até o script rodar bem à mão por algumas semanas.
+- **Agora, a pedido do dono (2026-11-12): fazer a E3.** O script já rodou três vezes em produção sem problema, e o dono quer que o merge na `main` publique sozinho.
+- **Recomendação: fazer a E3 agora, com o desenho desta revisão:** a chave que o GitHub guarda **não abre um terminal** no servidor; ela só consegue pedir "implante na produção este SHA, que já está na `main` e é mais novo do que o que está no ar". Todo o resto (o que roda, como volta, o que bloqueia) continua sendo o `deploy.sh` que já funciona.
+- **Alternativa:** continuar adiando e seguir rodando o comando à mão (zero superfície nova; o custo é o dono entrar no servidor a cada merge).
 
-### D10 Usuário dedicado para o serviço
+### D10 Com que usuário o deploy automático roda **(reescrita em 2026-11-12, aguarda o dono)**
 
-- **Recomendação: criar o usuário `soprei` (sem shell de login interativo para terceiros), dono de `/var/www/soprei*` e do PM2, antes de qualquer E3.** Hoje tudo roda como `root`: o `pnpm install` executa scripts de dependências como `root`, e uma chave de deploy teria poder total sobre o servidor. Com o usuário dedicado, o pior caso de um deploy comprometido fica restrito ao Soprei. Para a E1 e a E2 (o dono entra por SSH e roda o script) continua valendo `root`, como hoje; o script funciona com os dois.
-- **Alternativa:** manter `root` e não fazer a E3.
+- **Antes (aprovado em 2026-11-11):** criar o usuário `soprei`, dono de `/var/www/soprei*` e do PM2, **antes** de qualquer E3; "nunca com `root`".
+- **Fato que pesa:** hoje o processo da API **já roda como `root`** e o dono implanta como `root`. Quem consegue pôr código na `main` **já** consegue, no próximo deploy, rodar código como `root` (o código da aplicação e os scripts de instalação das dependências). O que a E3 acrescenta de risco **novo** é a **chave** guardada no GitHub; esse risco se controla limitando o que a chave pode pedir, não o usuário com que o deploy roda.
+- **Recomendação (opção A): usuário de entrada `soprei-deploy` sem nenhum poder próprio, e o deploy continua como `root` pelo `sudo` restrito a um único programa.** A chave entra como `soprei-deploy`; o servidor **força** o programa de entrada (o comando que o GitHub manda é só um texto que ele confere); o programa só aceita `--env production --ref <SHA de 40 hexadecimais>` (e `--dry-run`); se o texto estiver certo, chama `sudo` para **um único programa**, que confere tudo de novo e roda o `deploy.sh` como `root`, com o ambiente limpo. **Nada muda** para o PM2 (`pm2-root`), para `/var/www/soprei`, para o `.env` nem para o deploy manual do dono. Em linguagem simples: quem rouba a chave consegue, no máximo, mandar publicar mais cedo um commit que já está na `main`.
+- **Alternativa (opção B): passar a aplicação inteira para o usuário `soprei`** (o D10 original). Muda: `chown -R soprei:soprei /var/www/soprei` (o `.env` continua 600, agora de `soprei`), a chave somente leitura do Git passa para `~soprei/.ssh`, `/var/lib/soprei-deploy`, `/var/log/soprei-deploy` e a trava passam a ser de `soprei`, o PM2 passa a ser o de `soprei` (`pm2 delete soprei-api` no do `root`, `pm2 startup systemd -u soprei --hp /home/soprei`, `pm2 start deploy/ecosystem.config.cjs --only soprei-api`, `pm2 save`; uma janela curta fora do ar na troca), o programa de cópia do banco antes da migration (`pg_dump` como `postgres`) passa a precisar de `sudo -u postgres` restrito a ele, e o deploy manual do dono passa a ser `sudo -u soprei deploy/deploy.sh ...`. Ganho real: um defeito ou ataque **na aplicação** (não só no deploy) deixa de ter `root`. Custo: uma migração de servidor com risco de indisponibilidade e vários pontos para errar. **Recomendo fazer a opção B depois, em etapa própria** (ela é exigida de qualquer forma antes de dado real no staging, pela decisão I4 de 2026-11-11), sem travar a E3.
 
-### D11 Quando a produção publica (só vale com E3)
+### D11 Quando a produção publica **(reescrita em 2026-11-12, aguarda o dono)**
 
-- **Recomendação:** produção por **tag `v*`** criada pelo dono (a tag é a decisão consciente), staging por `workflow_dispatch` ou pela mesma tag antes da produção. A E1 aceita **qualquer** ref (branch, tag ou SHA) rodada à mão.
+- **Antes (aprovado em 2026-11-11, só valia com E3):** produção por tag `v*` criada pelo dono.
+- **Recomendação: a cada push na `main` (o merge), depois de o workflow `CI` daquele mesmo commit terminar com sucesso.** É o pedido do dono: o merge passa a ser a decisão de publicar. Se o CI de um commit falha, nada é publicado e o próximo merge com CI verde publica tudo o que se acumulou (o `deploy.sh` só anda para a frente na `main`, ver E3). Merges muito próximos: só o mais recente é publicado (o anterior é "ultrapassado").
+- **Alternativa:** publicar só quando o dono cria uma tag `v*` na `main` (o desenho anterior): mais um passo a cada publicação, mas o merge e a publicação viram duas decisões separadas.
+- A E1 continua aceitando **qualquer** ref à mão (branch, tag ou SHA), como hoje.
 
 ### D12 `config:check` nesta spec
 
 - **Recomendação: sim, o mínimo** (item 7 de "O que muda em relação à 033"): pouco código, evita o erro que já aconteceu. **Alternativa:** deixar para a 033 e aceitar o laço de reinício como sinal de falha (então o rollback passa a ser a única proteção contra `.env` inválido, **com** indisponibilidade).
+
+### D13 Como o deploy espera o CI **(nova, 2026-11-12, aguarda o dono)**
+
+- **Recomendação: um workflow separado, `.github/workflows/deploy.yml`, disparado por `workflow_run` quando o workflow `CI` termina**, e que só segue se o CI terminou com sucesso, veio de um `push` na `main` **deste** repositório (não de PR, não de fork). Motivos: (1) o arquivo que guarda o acesso ao servidor fica separado do `ci.yml`, que roda em **todo PR** e é chamado pelo `node-compat.yml` semanal; (2) o GitHub usa a versão do `deploy.yml` que está na `main`, então um PR que altere o arquivo não muda o que roda antes do merge (**S26**); (3) o `ci.yml` e o teste que o trava (`ci-workflow.test.ts`) não mudam de forma. Cuidado conhecido do `workflow_run`: o filtro `branches: [main]` olha o **nome** da branch de origem, e um PR vindo de um fork cuja branch se chama `main` passaria por ele (**S27**); por isso o `if` confere também `event == 'push'` e o repositório de origem, e o servidor confere de novo que o SHA está na `main`.
+- **Alternativa: um job `deploy` dentro do próprio `ci.yml`, com `needs: [static, tests, browser]`** e `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`. Mais simples de ler (o SHA é o `github.sha` do próprio commit e não há o caso do fork), mas mistura o acesso ao servidor no arquivo que roda em todo PR, exige que o job não rode quando o `ci.yml` é chamado pelo `node-compat.yml` e muda o teste que exige exatamente três jobs.
+
+### D14 Aprovação manual no ambiente `production` do GitHub **(nova, 2026-11-12, aguarda o dono)**
+
+- **Recomendação: ambiente `production` sem aprovação manual, mas restrito à branch `main`** (só um job rodando a partir da `main` recebe os segredos dele). Motivo: o pedido é publicar sozinho depois do merge, e hoje só o dono faz merge; uma aprovação a cada merge seria um clique a mais que vira hábito. A barreira real fica no servidor (só SHA da `main`, só para a frente) e na proteção da `main` (PR obrigatório, CI obrigatório).
+- **Alternativa: exigir a aprovação do dono no ambiente `production`** (o deploy espera um "Aprovar" no Actions). Protege contra um merge feito por outra pessoa ou por uma credencial roubada do GitHub, ao custo de um clique por publicação. **Pode não estar disponível** para repositório privado no plano atual da conta (**S23**); se não estiver, a alternativa equivalente é a D11 alternativa (tag criada pelo dono, com proteção de tags).
+
+### D15 Staging (D8) enquanto o servidor de staging não existe **(nova, 2026-11-12, aguarda o dono)**
+
+- **Recomendação: o automático publica na produção com `--allow-unstaged` até o staging existir**, e quem decide isso é um **arquivo do servidor** (`/etc/soprei-deploy/entry.conf`, `ALLOW_UNSTAGED=true`), não o GitHub. Quando o staging estiver no ar, o dono troca para `false` e uma mudança pequena da E3 (fora desta revisão) passa a publicar no staging e depois na produção o mesmo SHA. **Risco declarado:** sem ensaio, um defeito que passa no CI e não derruba a saúde (`/health` e `/health/ready` respondem, mas uma tela ou um fluxo quebra) chega à produção sem ninguém olhar antes. É o mesmo risco dos três deploys manuais já feitos, só que agora sem o dono olhar o plano antes; o rollback automático cobre só o que derruba a saúde.
+- **Alternativa: o automático só passa a existir depois do staging no servidor (E2 montada)**, publicando staging e produção em sequência. Mais seguro, mas adia a E3 até o dono montar o staging (DNS, certificado, banco, Redis, Mailpit).
+
+### D16 Merge que traz migration **(nova, 2026-11-12, aguarda o dono)**
+
+- **Recomendação: segue normalmente quando a migration é aditiva** (a varredura do `deploy.sh` não acha nada; a cópia do banco antes da migration roda; o rollback do código continua seguro pela política de migration). **Migration marcada como destrutiva nunca roda pelo automático:** o programa de entrada **nunca** passa `--allow-breaking`, então o `deploy.sh` recusa com saída 1 sem mexer em nada, e o dono roda à mão. Lembrete: a varredura é alarme, não prova; o que a pega é a revisão do PR (índice único, `CHECK` novo, `NOT NULL` sem padrão).
+- **Alternativa: qualquer migration pausa o automático.** O programa de entrada passa `--no-migrations` (opção nova do `deploy.sh`), que recusa com saída 1 se alguma migration entra; o Actions fica vermelho com a mensagem "há migration: rode à mão" e o dono roda `deploy.sh` no servidor. Mais controle sobre o momento da migration, ao custo de um deploy manual em cada spec com banco (a maioria). O valor fica em `/etc/soprei-deploy/entry.conf` (`MIGRATIONS=auto` ou `manual`), então o dono pode trocar sem PR.
+
+### D17 O que o disparo manual (`workflow_dispatch`) pode fazer **(nova, 2026-11-12, aguarda o dono)**
+
+- **Recomendação: só `--dry-run`.** Serve para o primeiro teste (provar chave, `known_hosts`, usuário, `sudo` e programa de entrada sem mudar nada) e para conferir o plano de um SHA. Publicar à mão continua sendo o comando do dono no servidor, como hoje.
+- **Alternativa: o disparo manual também publica de verdade, com aprovação do dono** num segundo ambiente (`production-manual`, com revisor obrigatório, **S23**). Útil para republicar sem entrar no servidor; mais uma porta para proteger.
 
 ## E1 — `deploy.sh` com rollback [CÓDIGO]
 
@@ -285,16 +322,128 @@ Estimativas de ordem de grandeza (**S21**: conferir com `free -m` e `pm2 monit` 
 
 1. Mergear na `main`. 2. `deploy/deploy.sh --env staging --ref main` (ou uma branch do PR, para ensaiar antes do merge). 3. Conferir no staging (checklist em `docs/ops/deploy.md`: entrar, criar empresa, abrir as abas, ler o e-mail no Mailpit). 4. `deploy/deploy.sh --env production --ref <o mesmo SHA>` (D8). O script mostra, no resumo, os dois SHAs lado a lado.
 
-## E3 — Disparo por GitHub Actions [CÓDIGO + DONO] (opcional, cortável, pode ser adiada; D9)
+## E3 — Deploy automático pelo GitHub Actions [CÓDIGO + DONO] (rascunho em revisão, 2026-11-12; D9, D10, D11, D13 a D17)
 
-**Só depois de E1 e E2 estarem em uso e do usuário dedicado (D10).** Arquivo novo `.github/workflows/deploy.yml`:
+O texto abaixo segue as recomendações de D10, D11 e D13 a D17. Se o dono escolher uma alternativa, a parte correspondente muda antes da implementação.
 
-- **Gatilhos:** `workflow_dispatch` (entradas: ambiente `staging` ou `production` e a ref) e `push` de tag `v*` (D11: roda o staging e, **depois da aprovação do dono**, a produção do **mesmo** SHA).
-- **Jobs em sequência:** (1) `resolve`: resolve o SHA e **recusa** se ele não é ancestral da `main` (um commit de branch de PR não é implantável); (2) `ci-gate`: consulta a API do GitHub (`GITHUB_TOKEN` com permissões só de leitura de `checks` e `actions`, **S23**) e **exige que o workflow CI desse mesmo SHA tenha terminado com sucesso**; (3) `deploy` com `environment: staging` ou `production` (**produção com aprovação obrigatória do dono**, e restrição das refs que podem usar o ambiente a `main` e `v*`), `concurrency` por ambiente **sem** `cancel-in-progress` (um deploy em andamento nunca é cancelado).
-- **SSH:** o programa `ssh` nativo (sem ação de terceiros para SSH, para não somar uma cadeia de suprimento), chave em segredo **do ambiente** (`DEPLOY_SSH_KEY`), `known_hosts` fixado (a impressão digital do servidor guardada como variável, `StrictHostKeyChecking=yes`), chave gravada em arquivo `600` e apagada no fim. **Nenhum outro segredo** no GitHub: nenhum `.env`, nenhuma chave da Meta, da Anthropic ou do banco.
-- **O que o servidor aceita:** a chave só roda um **comando fixo**: `authorized_keys` com `command="/usr/local/sbin/soprei-deploy-entry",restrict` (**S24**), e esse programa, instalado pelo dono **fora do repositório** e de propriedade do administrador, lê `SSH_ORIGINAL_COMMAND`, valida contra uma expressão regular estrita (`--env <production|staging> --ref <[A-Za-z0-9._/-]{1,100}>`) e chama `deploy.sh` com esses dois argumentos. `from=` na chave não é prático (os endereços dos executores do GitHub são muitos e mudam, **S24**), então a mitigação é a **chave restrita ao comando**, o **usuário dedicado sem `sudo`** e o ambiente com aprovação.
-- **Risco declarado (aceito se o dono fizer a E3):** o GitHub passa a guardar uma chave que **dispara a implantação** de qualquer commit que esteja na `main` ou numa tag `v*`. Quem tem permissão de escrita no repositório e de criar tag controla o que roda no servidor (o script do repositório e os scripts de instalação das dependências executam como o usuário de deploy). Mitigações: `main` protegida e aprovação do dono nos PRs, aprovação do ambiente `production`, regra de proteção das tags `v*`, usuário dedicado, chave que só serve para isso e **troca imediata** dela (o servidor e as releases ficam; a chave não alcança segredos). Se o plano do GitHub deste repositório privado **não oferecer aprovação obrigatória de ambiente** (**S23**), a E3 **não deve ser feita** sem uma alternativa equivalente (por exemplo, restringir quem pode disparar e proteger as tags).
-- **Alternativa sem abrir o SSH ao GitHub:** o servidor consulta periodicamente por uma tag nova e a publica sozinho (puxar em vez de empurrar). Menos superfície, mais uma peça em execução e **sem** a aprovação do GitHub; não detalhada aqui.
+### Fluxo
+
+1. O dono faz o merge do PR na `main`.
+2. O workflow `CI` (`ci.yml`, inalterado) roda no `push` da `main`.
+3. Quando o `CI` termina, o GitHub dispara o `deploy.yml` (`workflow_run`, D13). O job só segue se: `conclusion == 'success'`, `event == 'push'`, `head_branch == 'main'`, `head_repository.full_name == github.repository` **e** a variável do repositório `DEPLOY_ENABLED == 'true'` (o interruptor, ver "Desligar numa emergência"). Senão o job é pulado (cinza, não vermelho).
+4. **Ultrapassado?** O job lê, pela API do GitHub, o SHA atual da ponta da `main`. Se não for o `head_sha` do CI que terminou (houve outro merge depois), o job encerra com sucesso e escreve no resumo "ultrapassado por um commit mais novo; ele será publicado quando o CI dele terminar". Isso é só para não gerar ruído; quem **garante** que nada volta para trás é o servidor (passo 6).
+5. O job entra por SSH no servidor como `soprei-deploy` e manda o texto `--env production --ref <head_sha>` (40 hexadecimais).
+6. No servidor, o programa de entrada confere o texto e chama o `deploy.sh` como `root` com `--env production --ref <sha> --auto` (mais `--allow-unstaged` se `/etc/soprei-deploy/entry.conf` disser, D15). Com `--auto`, o `deploy.sh`, **depois do `git fetch`**, exige que o SHA (a) esteja na `main` (`git merge-base --is-ancestor <sha> refs/remotes/origin/main`) e (b) seja **igual ou mais novo** que a versão em execução registrada (`git merge-base --is-ancestor <atual> <sha>`); igual = "já está nessa versão" (saída 0); fora disso, saída 1 sem mexer em nada. A partir daí é o deploy de sempre (varredura, cópia do banco, migration, troca, saúde, rollback).
+7. A saída do `deploy.sh` (já filtrada pela redação do próprio script) aparece no log do job; o código de saída volta pelo `ssh` e vira o resumo do Actions.
+
+### Arquivos novos e alterados [CÓDIGO]
+
+- **`.github/workflows/deploy.yml`** (novo).
+- **`deploy/soprei-deploy-entry.sh`** (novo): o programa de entrada, versionado como **modelo** que o dono instala em `/usr/local/sbin/soprei-deploy-entry` (dono `root`, modo 755). O que roda é a cópia instalada, **nunca** o arquivo do repositório: um merge não muda o porteiro. Fica em `deploy/*.sh`, então já passa pelo `shellcheck` do CI.
+- **`deploy/deploy.sh`** (alterado): opção `--auto` (abaixo) e, só se o dono escolher a alternativa da D16, `--no-migrations`.
+- **`deploy/sudoers/soprei-deploy.example`**, **`deploy/ssh/sshd-soprei-deploy.conf.example`** e **`deploy/entry/entry.conf.example`** (novos, sem segredo): os textos que o dono copia.
+- **`.github/workflows/ci.yml`** (alterado só no job `static`): passo `actionlint` (versão fixa, binário baixado com o SHA-256 conferido no próprio passo, **S25**). `backend/src/ci-workflow.test.ts` passa a conhecer o passo.
+- **`backend/src/deploy-workflow.test.ts`** (novo, irmão do `ci-workflow.test.ts`): trava gatilhos e permissões do `deploy.yml`.
+- **`backend/src/deploy-script.behavior.test.ts`** e **`deploy-scripts.test.ts`** (alterados): cenários de `--auto` e do programa de entrada.
+- **`docs/ops/deploy.md`** [DOC]: seção "Deploy automático" (como funciona, como ler o resumo, como desligar, o que fazer em cada código); a linha que diz que o usuário dedicado só seria preciso "se um dia a E3 for feita" é reescrita.
+
+### `deploy.sh --auto` [CÓDIGO]
+
+- Só aceito com `--ref` de **exatamente 40 hexadecimais minúsculos** (nada de branch, tag ou SHA curto).
+- **Recusado** junto com `--previous`, `--force`, `--adopt`, `--allow-breaking` e `--inject-health-failure` (saída 1 antes da trava). Aceita `--dry-run`, `--allow-unstaged` e (D16 alternativa) `--no-migrations`.
+- Depois do `git fetch`: o SHA precisa estar na `main` e não pode ser mais antigo que o registrado (passo 6 do fluxo). Isso fecha dois buracos de hoje: um SHA de branch de PR (ou de fork, que nem chega ao `fetch` da `main`) e a volta para um commit antigo da `main` (por exemplo, a repetição de uma execução antiga do Actions).
+- Com `--auto`, o log registra `modo=auto` na linha de início.
+- O deploy manual do dono (sem `--auto`) **não muda**.
+
+### O programa de entrada [CÓDIGO (modelo) + DONO (instalação)]
+
+Um só arquivo, com duas fases:
+
+1. **Fase de fora (roda como `soprei-deploy`, forçada pelo `sshd`):** lê `SSH_ORIGINAL_COMMAND`. Aceita **só** dois textos, comparados por expressão regular ancorada e sem nada além: `--env production --ref <[0-9a-f]{40}>` e `--env production --ref <[0-9a-f]{40}> --dry-run`. Qualquer outra coisa (vazio, argumento a mais, `staging`, SHA curto, maiúsculas, espaço duplo, `;`, `$(`, crase, `|`, `&`, quebra de linha, tamanho acima de 80 caracteres) sai com 64 e uma mensagem fixa, sem ecoar o texto recebido. Aceito, faz `exec sudo -n /usr/local/sbin/soprei-deploy-entry --from-ssh <sha> <deploy|dry-run>`.
+2. **Fase de dentro (roda como `root` pelo `sudo`):** confere de novo os dois argumentos (mesma regra, posicional), lê `/etc/soprei-deploy/entry.conf` como texto (sem `source`; `ENABLED`, `ALLOW_UNSTAGED`, `MIGRATIONS`, só `true`/`false`/`auto`/`manual`; dono `root`, modo 600), recusa com 1 se `ENABLED` não for `true`, e faz `exec env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root LC_ALL=C /var/www/soprei/deploy/deploy.sh --env production --ref <sha> --auto [...]`. O `env -i` garante que os ganchos de teste do `deploy.sh` (`SOPREI_DEPLOY_*`) e qualquer variável vinda do SSH **não chegam** ao script; o `HOME=/root` faz o `pm2` achar o daemon do `root` (**S28**).
+- Cada pedido aceito ou recusado vai ao `syslog` (`logger -t soprei-deploy-entry`): resultado e, se aceito, o SHA curto; nunca o texto recusado.
+- Os caminhos que o teste precisa trocar ficam em constantes no topo (`readonly SUDO=/usr/bin/sudo`, `readonly DEPLOY=/var/www/soprei/deploy/deploy.sh`, `readonly CONF=/etc/soprei-deploy/entry.conf`): o teste copia o arquivo e troca essas linhas por dublês. **Nenhuma variável de ambiente muda o comportamento** do programa instalado.
+
+### Servidor: usuário, chave e `sudo` [DONO] (D10 opção A)
+
+- **Usuário `soprei-deploy`:** `adduser --system --group --shell /bin/sh --home /home/soprei-deploy soprei-deploy` (sem senha). O shell precisa existir porque o `sshd` roda o comando forçado pelo shell do usuário (**S24**); o acesso interativo é bloqueado pelo comando forçado e pelo `restrict`, não pelo shell. Fora do grupo `sudo`.
+- **`~soprei-deploy/.ssh/authorized_keys`** com dono `root` e modo 644 (o próprio usuário não consegue trocar a linha, **S24**), uma linha só:
+  `restrict,command="/usr/local/sbin/soprei-deploy-entry" ssh-ed25519 AAAA... soprei-github-deploy`
+  O `restrict` desliga encaminhamento de porta, de agente e de X11, terminal (`pty`) e o `~/.ssh/rc` (**S24**). `from=` não é usado (os endereços dos executores do GitHub são muitos e mudam).
+- **Defesa em dobro no `sshd`** (`/etc/ssh/sshd_config.d/soprei-deploy.conf`, do exemplo): `Match User soprei-deploy` com `ForceCommand /usr/local/sbin/soprei-deploy-entry`, `AuthenticationMethods publickey`, `PasswordAuthentication no`, `DisableForwarding yes`, `PermitTTY no`. Conferir com `sshd -t` antes de recarregar e **manter uma sessão de `root` aberta** até testar.
+- **`/etc/sudoers.d/soprei-deploy`** (do exemplo, editado com `visudo -f`), modo 440: `soprei-deploy ALL=(root) NOPASSWD: /usr/local/sbin/soprei-deploy-entry --from-ssh *`. O `*` aceita qualquer argumento, por isso **a fase de dentro confere tudo de novo**; o `sudo` limpa o ambiente por padrão (`env_reset`, **S29**).
+- **`/etc/soprei-deploy/entry.conf`** (root, 600): `ENABLED=true`, `ALLOW_UNSTAGED=true` (D15), `MIGRATIONS=auto` (D16).
+- **Chave:** par `ed25519` **só para isto**, sem senha (o Actions não digita), gerado na máquina do dono; a parte pública vai para o `authorized_keys`, a privada **só** para o segredo do GitHub, e a cópia local é apagada.
+- **`known_hosts` fixado:** a linha `<host> ssh-ed25519 AAAA...` vem do **próprio servidor** (`/etc/ssh/ssh_host_ed25519_key.pub`, lida numa sessão do dono), nunca de `ssh-keyscan` feito de fora (que confiaria no primeiro que responder).
+
+### `deploy.yml` [CÓDIGO]
+
+- **Gatilhos:** `workflow_run` (`workflows: [CI]`, `types: [completed]`, `branches: [main]`) e `workflow_dispatch` (entrada `sha`, texto obrigatório; D17: sempre `--dry-run`). **Nunca** `pull_request_target`, `pull_request`, `push`, `schedule`, `issue_comment` nem `repository_dispatch`.
+- **Permissões:** `permissions: {}` no topo; no job, só `contents: read` (ler a ponta da `main`) e `actions: read`.
+- **Job único `deploy`:** `runs-on: ubuntu-latest`, `environment: production` (segredos só dele; restrito à branch `main`, D14), `timeout-minutes: 30` (maior que build + migration de 300 s + saúde de 90 s + rollback), `if:` com as condições do passo 3 do fluxo; no `workflow_dispatch`, `github.ref == 'refs/heads/main'` e `vars.DEPLOY_ENABLED == 'true'`.
+- **`concurrency`:** `group: deploy-production`, `cancel-in-progress: false` (um deploy em andamento nunca é cancelado; o GitHub guarda no máximo um pendente e um pendente novo substitui o anterior, **S30**, o que combina com o "só o mais novo"). A trava do `deploy.sh` continua valendo contra um deploy manual simultâneo (o automático sai com 1 e o dono repete depois, ou o próximo merge publica).
+- **Sem `actions/checkout` e sem nenhuma ação de terceiros** (`uses:` ausente): o job só precisa de `ssh` e `gh`, que já vêm na imagem (**S31**). Nada do repositório é executado no executor do GitHub.
+- **Valores do evento nunca dentro do script:** `head_sha` e a entrada `sha` chegam ao passo por `env:` e são conferidos com `^[0-9a-f]{40}$` antes de qualquer uso (evita injeção pelo `${{ }}`).
+- **SSH:** o `ssh` do sistema, chave gravada em `$RUNNER_TEMP` com `umask 077`, `-i <arquivo> -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<arquivo do segredo> -o ServerAliveInterval=30 -T`, usuário e host dos segredos. Um passo final com `if: always()` apaga os dois arquivos. Nada de `set -x`.
+- **Segredos (do ambiente `production`):** `DEPLOY_SSH_KEY`, `DEPLOY_SSH_KNOWN_HOSTS`, `DEPLOY_SSH_HOST`; variável do ambiente `DEPLOY_SSH_USER` (`soprei-deploy`). **Nenhum outro segredo** no GitHub: nada do `.env`, nenhuma chave da Meta, da Anthropic, da InfinitePay nem do banco. O GitHub mascara os segredos no log (**S32**); o host fica em segredo também para não aparecer no log.
+- **Resumo do Actions** (`$GITHUB_STEP_SUMMARY`): modo (automático ou dry-run), SHA curto, o código e o significado, e a linha `RESUMO:`, `DEPLOY FALHOU` ou `INTERVENÇÃO MANUAL` do `deploy.sh` quando houver:
+
+| Código | No resumo | Job |
+| :----: | --------- | --- |
+| 0 | publicado (ou "já está nessa versão", ou plano do dry-run) | verde |
+| 1 | recusado antes de mexer, nada mudou (trava ocupada, migration destrutiva, SHA fora da `main` ou mais antigo, `ENABLED=false`) | vermelho |
+| 2 | falhou e a versão anterior voltou saudável; lista as migrations não revertidas | vermelho |
+| 3 | **intervenção manual**: entrar no servidor | vermelho |
+| 64 | o programa de entrada recusou o pedido (defeito do workflow) | vermelho |
+| 255 | o SSH falhou (rede, chave, `known_hosts`); o deploy **pode não ter começado**: conferir `/var/log/soprei-deploy/production.log` | vermelho |
+| outro | inesperado: conferir o log do servidor | vermelho |
+
+- Se o job for cancelado ou o SSH cair no meio, o `deploy.sh` continua no servidor (ignora `SIGHUP`) e o resultado fica só no log do servidor; o resumo diz isso.
+- Uma falha deixa o job vermelho; o aviso por e-mail é o padrão do GitHub para quem disparou (**S33**). Alerta próprio fica na 033.
+
+### Riscos da E3 (declarados)
+
+- **Chave vazada:** quem a tem consegue só pedir o dry-run ou o deploy de um SHA que **já está na `main`** e é **mais novo** que o em execução. Não abre terminal, não encaminha porta, não escolhe outro ambiente, não passa `--force`, `--allow-breaking` nem `--previous`, não lê o `.env`. O pior caso é publicar mais cedo um commit que já foi mergeado (alguns segundos fora do ar) ou ocupar a trava. Resposta: apagar a linha do `authorized_keys` e o segredo, gerar outra chave.
+- **Quem pode fazer merge (ou push) na `main` controla o servidor como `root`** no próximo deploy (o código da aplicação e os scripts de instalação das dependências rodam como `root` na opção A). Já é assim com o deploy manual; o que muda é que **ninguém olha o plano** antes. Mitigações: proteção da `main` (PR obrigatório, CI obrigatório, sem push direto, sem `--force`), só o dono com permissão de escrita, `CODEOWNERS` em `deploy/` e `.github/` com revisão do dono, 2FA na conta do GitHub. A opção B da D10 reduz o estrago de um defeito da aplicação, não o de um merge malicioso.
+- **Fork e PR de terceiros nunca podem disparar:** o `deploy.yml` não tem gatilho de PR; o `workflow_run` de um CI vindo de PR (inclusive de fork com branch chamada `main`, **S27**) é barrado pelo `if` (`event == 'push'` e repositório de origem); o ambiente `production` só entrega segredos à `main`; e o servidor recusa SHA fora da `main`. **`pull_request_target` é proibido** (o teste trava).
+- **O executor do GitHub e o próprio GitHub** passam a fazer parte da cadeia: uma conta do GitHub tomada com permissão de administrador pode trocar o workflow e ler os segredos do ambiente; o limite continua sendo o programa de entrada. Por isso a chave não alcança segredo nenhum do servidor.
+- **Publicação sem ensaio** (D15) e **sem ninguém olhar o plano**: o rollback automático só cobre o que derruba a saúde.
+- **O log do job mostra a saída do `deploy.sh`** (já filtrada): SHAs, nomes de migrations, espaço em disco, versões, caminhos e `usuario=root`. Qualquer pessoa com leitura do repositório vê; aceito (não há segredo nem dado de empresa nessa saída).
+- **Migration aditiva incompatível que a varredura não pega** (índice único, `CHECK`, `NOT NULL` sem padrão): sem o dono olhar o plano, ela chega à produção pelo automático; a revisão do PR é a barreira (D16).
+
+### Desligar numa emergência [DONO]
+
+Qualquer um destes basta; do mais rápido ao mais definitivo:
+
+1. **No GitHub:** Settings > Secrets and variables > Actions > Variables: `DEPLOY_ENABLED` = `false` (os próximos jobs são pulados). Ou Actions > "Deploy" > "Disable workflow".
+2. **Um deploy em andamento:** **não** cancele no meio da migration; cancelar o job do Actions não para o `deploy.sh` (ele ignora `SIGHUP` e segue até o fim, com rollback se precisar). Acompanhe por `tail -f /var/log/soprei-deploy/production.log`.
+3. **No servidor:** `ENABLED=false` em `/etc/soprei-deploy/entry.conf` (todo pedido sai com 1, nada roda).
+4. **Cortar o acesso:** apagar a linha do `/home/soprei-deploy/.ssh/authorized_keys`, apagar o segredo `DEPLOY_SSH_KEY` no GitHub e, se a chave vazou, gerar outra. Para tirar tudo: remover também `/etc/sudoers.d/soprei-deploy` e o arquivo do `sshd` (recarregar com `sshd -t && systemctl reload ssh`).
+
+O deploy manual (`deploy/deploy.sh` como `root`) continua funcionando em todos esses casos.
+
+### Passos do dono da E3, em ordem
+
+1. **Aprovar** a E3 (D9, D10, D11, D13 a D17). Implementação em PR próprio, com o `reviewer`.
+2. **GitHub, antes do merge do PR da E3:** proteção da `main` (PR obrigatório, checks `static`, `tests` e as fatias de `browser` obrigatórios, sem push direto nem `--force`); conferir que só o dono tem escrita; 2FA ligado; criar o ambiente `production` (Settings > Environments) com "Deployment branches" = só `main` e, se a D14 alternativa, o dono como revisor obrigatório (**S23**); criar a variável **`DEPLOY_ENABLED` = `false`** (o workflow chega à `main` desligado).
+3. **Merge do PR da E3 e deploy manual dele** (`deploy/deploy.sh --env production --allow-unstaged`, como hoje): o `deploy.sh` instalado precisa ter o `--auto` antes do primeiro pedido automático (o script que executa é o já instalado).
+4. **Chave** (na máquina do dono): `ssh-keygen -t ed25519 -N '' -C soprei-github-deploy -f <arquivo temporário>`. A privada vai **só** para o segredo `DEPLOY_SSH_KEY` do ambiente `production`; a pública vai para o servidor no passo 5; depois, apagar os dois arquivos locais.
+5. **Servidor** (como `root`, **com uma segunda sessão de `root` aberta** até o fim, para não se trancar fora):
+   1. `adduser --system --group --shell /bin/sh --home /home/soprei-deploy soprei-deploy`.
+   2. `install -o root -g root -m 755 /var/www/soprei/deploy/soprei-deploy-entry.sh /usr/local/sbin/soprei-deploy-entry` (do arquivo **já implantado** no passo 3, nunca de uma branch).
+   3. `install -d -o root -g root -m 700 /etc/soprei-deploy` e o `entry.conf` a partir de `deploy/entry/entry.conf.example` (`ENABLED=true`, `ALLOW_UNSTAGED=true`, `MIGRATIONS=auto`), `chmod 600`.
+   4. `visudo -f /etc/sudoers.d/soprei-deploy` com a linha de `deploy/sudoers/soprei-deploy.example`; `chmod 440`; `visudo -c` sem erro.
+   5. `install -d -o root -g root -m 755 /home/soprei-deploy/.ssh` e o `authorized_keys` (dono `root`, modo 644) com a linha `restrict,command="/usr/local/sbin/soprei-deploy-entry" <chave pública>`.
+   6. `deploy/ssh/sshd-soprei-deploy.conf.example` em `/etc/ssh/sshd_config.d/soprei-deploy.conf`; `sshd -t` sem erro; `systemctl reload ssh`.
+   7. Copiar a linha de `/etc/ssh/ssh_host_ed25519_key.pub` no formato `<host> ssh-ed25519 AAAA...` para o segredo `DEPLOY_SSH_KNOWN_HOSTS`.
+6. **Conferir à mão, de outra máquina, com a chave temporária antes de apagá-la** (ou repetir depois pelo Actions): `ssh -T soprei-deploy@<host>` sem comando é recusado (64) sem abrir terminal; `ssh soprei-deploy@<host> 'ls'` e `ssh -L 9000:127.0.0.1:3001 soprei-deploy@<host> ...` são recusados; `ssh soprei-deploy@<host> '--env production --ref <SHA atual da main> --dry-run'` responde "já está nessa versão" (código 0) e o `syslog` mostra o pedido aceito.
+7. **Segredos restantes do ambiente `production`:** `DEPLOY_SSH_HOST` (o endereço do servidor) e a variável `DEPLOY_SSH_USER` = `soprei-deploy`.
+8. **Primeiro teste pelo Actions, só dry-run:** `DEPLOY_ENABLED` = `true`; Actions > "Deploy" > "Run workflow" na `main`, com o SHA atual da `main`: o resumo mostra o código 0; o log do servidor (`/var/log/soprei-deploy/production.log`) mostra `modo=auto`. **A partir daqui, o próximo merge publica sozinho.**
+9. **Primeiro automático:** um PR pequeno (só documentação) mergeado: o CI termina, o deploy roda sozinho e o resumo mostra o código 0. Registrar no "Registro da implementação" da spec (data e resultado, sem segredo nem endereço).
+
+### Alternativa não detalhada: o servidor puxa em vez de o GitHub empurrar
+
+Um temporizador no servidor consulta a `main` (pela chave somente leitura que já existe), espera o CI verde e publica sozinho. Nenhuma chave do servidor fica no GitHub (menos superfície), mas é mais uma peça rodando no servidor, ele precisa de um token de leitura da API do GitHub para saber do CI e o resumo do Actions deixa de existir. Fica registrada caso o dono prefira não abrir o SSH ao GitHub.
 
 ## Critérios de aceite
 
@@ -321,11 +470,17 @@ Os itens **[teste]** são automatizados no CI sem servidor; os **[manual]** são
 - [ ] **[manual]** `deploy/deploy.sh --env staging` e depois `--env production` com o **mesmo SHA**; o deploy de produção com outro SHA é recusado sem `--allow-unstaged`.
 - [ ] **[manual]** `free -m` e `pm2 monit` depois de uma semana de uso e de pelo menos 3 deploys, com o **pior pico** registrado e comparado com a tabela de memória (ajustar `max_memory_restart` do staging se preciso).
 
-### E3 (se feita)
+### E3 (rascunho em revisão; os critérios seguem as recomendações e mudam com as alternativas escolhidas)
 
-- [ ] **[teste]** `deploy.yml` (teste de texto): gatilhos só `workflow_dispatch` e tag `v*`; existe o job de CI-gate **antes** do deploy; `environment: production` com aprovação (declarado e documentado); `permissions` mínimas; **nenhum** segredo além de `DEPLOY_SSH_KEY`; **nenhuma** ação de terceiros para SSH; `StrictHostKeyChecking=yes`; `concurrency` por ambiente com `cancel-in-progress: false`; `actionlint` passa (**S25**).
-- [ ] **[teste]** O programa de entrada (`deploy/soprei-deploy-entry.sh`, exemplo para o dono instalar fora do repositório) rejeita, em teste de comportamento, argumento extra, ref com `;`, `$(`, espaço ou crase, ambiente desconhecido e comando vazio, e aceita `--env staging --ref main`.
-- [ ] **[manual]** Dispare pelo Actions o staging e a produção do mesmo SHA com a aprovação; tente com um SHA que não está na `main` (recusado) e com a CI vermelha (recusado); a chave **não** abre um shell interativo (`ssh` sem comando é recusado).
+- [ ] **[teste]** `backend/src/deploy-workflow.test.ts` (lê `.github/workflows/deploy.yml` como texto, no modelo de `ci-workflow.test.ts`) prova: os gatilhos são **só** `workflow_run` (com `workflows: [CI]`, `types: [completed]`, `branches: [main]`) e `workflow_dispatch`; **não** aparecem `pull_request_target`, `pull_request`, `push:`, `schedule`, `issue_comment` nem `repository_dispatch`; `permissions: {}` no topo e, no job, só `contents: read` e `actions: read` (nenhum `write`); o job declara `environment: production`; `concurrency` com `group: deploy-production` e `cancel-in-progress: false`; o `if:` do job contém `workflow_run.conclusion == 'success'`, `workflow_run.event == 'push'`, `workflow_run.head_branch == 'main'`, `workflow_run.head_repository.full_name == github.repository` e `vars.DEPLOY_ENABLED == 'true'`; **não há `uses:`** (nenhuma ação, nem `checkout`); os únicos segredos citados são `DEPLOY_SSH_KEY`, `DEPLOY_SSH_KNOWN_HOSTS` e `DEPLOY_SSH_HOST`; nenhum `run:` contém `${{` (valores do evento só por `env:`); o comando `ssh` tem `StrictHostKeyChecking=yes`, `BatchMode=yes`, `IdentitiesOnly=yes` e `UserKnownHostsFile=`; existe passo com `if: always()` que apaga a chave; não há `set -x`; `timeout-minutes` declarado; o `workflow_dispatch` manda sempre `--dry-run` (D17); e o `ci.yml` continua com `name: CI` (o nome que o `workflow_run` procura).
+- [ ] **[teste]** `ci-workflow.test.ts` passa a conhecer o passo `actionlint` no job `static` (ordem dos comandos), e o passo confere o SHA-256 do binário baixado (**S25**); o `actionlint` passa no `ci.yml`, no `node-compat.yml` e no `deploy.yml`.
+- [ ] **[teste de comportamento]** Programa de entrada (`deploy/soprei-deploy-entry.sh`, cópia com as constantes `SUDO`, `DEPLOY` e `CONF` trocadas por dublês): na fase de fora **aceita** exatamente `--env production --ref <40 hex>` e o mesmo com `--dry-run`, e chama o dublê do `sudo` com `--from-ssh <sha> deploy|dry-run`; **recusa com 64, sem chamar o `sudo` e sem ecoar o texto**: comando vazio, `--env staging ...`, SHA com 39 ou 41 caracteres, SHA em maiúsculas, `main` como ref, argumento extra (`--force`, `--allow-breaking`, `--previous`, `--adopt`), espaço duplo, `;`, `$(`, crase, `|`, `&`, quebra de linha e texto com mais de 80 caracteres. Na fase de dentro: argumentos fora da regra saem com 64; `ENABLED=false` sai com 1 sem chamar o dublê do `deploy.sh`; com `ALLOW_UNSTAGED=true` passa `--allow-unstaged`, com `false` não; o dublê do `deploy.sh` recebe `--auto` e **não** recebe nenhuma variável `SOPREI_DEPLOY_*` posta no ambiente do teste; `HOME` é `/root`; `entry.conf` com valor fora da lista ou com `$(` é recusado sem ser executado.
+- [ ] **[teste de comportamento]** `deploy.sh --auto` (no `deploy-script.behavior.test.ts`, com o repositório temporário e os dublês de sempre): `--auto` com `--ref main`, SHA curto ou maiúsculo sai com 1 antes da trava; `--auto` junto com `--force`, `--previous`, `--adopt`, `--allow-breaking` ou `--inject-health-failure` sai com 1; SHA que existe no repositório mas **não está na `main`** sai com 1 sem mexer (`HEAD` e estado intactos); SHA da `main` **mais antigo** que o registrado sai com 1 sem mexer; o SHA registrado sai com 0 ("já está nessa versão"); um SHA mais novo da `main` publica (saída 0) e o log tem `modo=auto`; migration destrutiva marcada sai com 1 (sem `--allow-breaking` no automático). Se a D16 alternativa for escolhida: `--no-migrations` com migration entrando sai com 1 sem mexer, e sem migration publica.
+- [ ] **[teste]** `deploy-scripts.test.ts` prova que `soprei-deploy-entry.sh` usa `set -euo pipefail`, não contém `source`, `eval` nem `set -x`, usa `env -i` na chamada do `deploy.sh`, e que os exemplos novos (`sudoers`, `sshd`, `entry.conf`) não têm segredo nem chave; que o exemplo do `sudoers` só permite `/usr/local/sbin/soprei-deploy-entry --from-ssh *` e o do `sshd` tem `ForceCommand`, `PermitTTY no`, `DisableForwarding yes` e `AuthenticationMethods publickey`.
+- [ ] **[manual]** Os passos 6, 8 e 9 de "Passos do dono da E3": a chave **não** abre terminal nem encaminha porta; um pedido fora do formato é recusado; o dry-run pelo Actions sai com 0; o primeiro merge publica sozinho com o resumo correto.
+- [ ] **[manual]** Recusas provadas pelo Actions (`workflow_dispatch` em dry-run): um SHA que **não** está na `main` (de uma branch de PR) sai com 1; um SHA antigo da `main` sai com 1.
+- [ ] **[manual]** Um commit na `main` com o CI **vermelho** não dispara deploy (o job aparece pulado); um PR (de branch do próprio repositório) com CI verde **não** dispara deploy.
+- [ ] **[manual]** Desligar: com `DEPLOY_ENABLED=false` o próximo merge não publica (job pulado); com `ENABLED=false` no `entry.conf` o pedido sai com 1. Religar e registrar.
 
 ## Casos de borda e erros
 
@@ -342,10 +497,17 @@ Os itens **[teste]** são automatizados no CI sem servidor; os **[manual]** são
 - **`git fetch` sem rede ou sem a chave:** código 1, nada alterado.
 - **Migration em andamento por mais tempo que o prazo:** o prazo de 300 s encerra o comando; o banco **pode** ter ficado com migration parcial (ver a política); nada é trocado.
 - **Rollback quando a migration que entrou não é compatível:** é o caso que a varredura tenta barrar antes; se passar despercebido e o código antigo falhar sobre o banco novo, o resultado é o código 3 com instruções (corrigir para a frente ou restaurar o backup).
+- **(E3) Dois merges seguidos:** o CI do primeiro termina depois do segundo merge: o job do primeiro vê que a ponta da `main` mudou e encerra como "ultrapassado"; se mesmo assim o pedido chegar ao servidor depois do segundo deploy, o `--auto` recusa por ser mais antigo (saída 1).
+- **(E3) Repetir uma execução antiga do Actions** ("Re-run"): mesmo caso; nunca volta para trás. Repetir a execução do commit em produção dá "já está nessa versão" (0).
+- **(E3) Deploy manual do dono durante um automático (ou o contrário):** a trava global recusa o segundo (saída 1); o automático fica vermelho e o próximo merge, ou o dono à mão, publica.
+- **(E3) CI vermelho na `main`:** nada é publicado; o próximo commit com CI verde publica o que se acumulou (o `--auto` aceita pular commits intermediários, só não volta).
+- **(E3) Job cancelado ou SSH caído no meio:** o `deploy.sh` segue até o fim no servidor (ignora `SIGHUP`); o resumo do Actions diz "resultado desconhecido: ver o log do servidor".
+- **(E3) O próprio merge da E3:** chega à `main` com `DEPLOY_ENABLED=false` (job pulado). Se a variável faltar, o `if` também pula (comparação com `'true'`).
+- **(E3) `deploy.sh` instalado antigo, sem `--auto`:** o pedido sai com 1 ("opção desconhecida") sem mexer; por isso o passo 3 dos passos do dono publica a E3 à mão antes de ligar o automático.
 
 ## Isolamento entre empresas
 
-Não se aplica: nenhum acesso a dados de empresa é criado ou alterado (script, configuração, exemplos e um comando de validação de ambiente). O isolamento que esta spec cuida é **entre ambientes** (staging e produção): bancos e roles separados com `CONNECT` negado ao outro, **instância de Redis separada**, segredos diferentes (inclusive `JWT_SECRET`), e-mail capturado e nenhum dado real no staging; os critérios **[manual]** da E2 provam isso. O `reviewer` confere a segurança do pipeline e do servidor (chave SSH, comando restrito, privilégio, redação de log).
+Não se aplica: nenhum acesso a dados de empresa é criado ou alterado (script, configuração, exemplos e um comando de validação de ambiente). O isolamento que esta spec cuida é **entre ambientes** (staging e produção): bancos e roles separados com `CONNECT` negado ao outro, **instância de Redis separada**, segredos diferentes (inclusive `JWT_SECRET`), e-mail capturado e nenhum dado real no staging; os critérios **[manual]** da E2 provam isso. O `reviewer` confere a segurança do pipeline e do servidor (chave SSH, comando restrito, privilégio, redação de log). **A E3 passa pelo `reviewer` antes do merge** (segredo no GitHub, acesso remoto ao servidor, `sudo` para `root`).
 
 ## Fora de escopo
 
@@ -357,8 +519,10 @@ Não se aplica: nenhum acesso a dados de empresa é criado ou alterado (script, 
 - **Migrar a produção para pastas por versão** (D1, alternativa) e **rollback por `dist.prev`** (D2, alternativa).
 - **Segundo app da Meta e canal WhatsApp no staging** (D6), **cobrança e checkout no staging** (a InfinitePay não tem sandbox) e **dump de produção ou dump sintético no staging** (D3; 032).
 - **Cloudflare com proxy ligado** (exige `real_ip` no nginx e `TRUST_PROXY` com as faixas dela; já registrado no handoff).
-- **Mover a produção para outro usuário do sistema** além do que a E3 exigir (D10) e **rotação de segredos** (033, D6).
-- **Deploy automático a cada merge** (o staging só atualiza quando o dono manda).
+- **Mover a aplicação para o usuário `soprei`** (D10 opção B; etapa própria, exigida antes de dado real no staging pela decisão I4) e **rotação de segredos** (033, D6).
+- **Deploy automático do staging** (até o servidor de staging existir; com a D15 alternativa ele entra na E3), **deploy automático por tag** (D11 alternativa), **publicar pelo `workflow_dispatch`** (D17 alternativa) e o modelo em que **o servidor puxa** (E3, alternativa não detalhada).
+- **Alerta próprio de falha de deploy** (Slack, e-mail próprio, uptime): fica na 033 (E6); na E3 só o aviso padrão do GitHub.
+- **Verificar no CI, antes do merge, se a migration é aditiva** (continua na 033).
 
 ## Riscos
 
@@ -367,7 +531,7 @@ Não se aplica: nenhum acesso a dados de empresa é criado ou alterado (script, 
 - **Rollback não reverte migration:** é a limitação central; a política, a varredura e o `--allow-breaking` sem rollback automático existem por causa dela.
 - **A varredura de migration é por texto:** alarme, não prova.
 - **Staging e produção no mesmo servidor:** uma falha do servidor derruba os dois e o staging disputa memória; aceito (o staging é descartável). O isolamento de dados e de segredos não depende do servidor ser outro.
-- **E3 amplia a superfície de ataque** (chave de deploy no GitHub); por isso é opcional, adiável e condicionada ao usuário dedicado e à aprovação do ambiente.
+- **E3 amplia a superfície de ataque** (chave de deploy no GitHub) e tira o olhar do dono sobre o plano antes de cada publicação; a lista completa e as mitigações estão em "Riscos da E3 (declarados)". A chave só pede "este SHA da `main`, para a frente"; o risco que sobra é o de quem pode fazer merge, que já existia.
 
 ## Suposições a conferir (nada abaixo foi lido na fonte)
 
@@ -393,9 +557,17 @@ Não se aplica: nenhum acesso a dados de empresa é criado ou alterado (script, 
 - **S20** O arquivo nginx da produção (não foi lido).
 - **S21** Consumo real de memória (tabela da E2) e do build.
 - **S22** Existência de swap.
-- **S23** Permissões necessárias do `GITHUB_TOKEN` para consultar o resultado do CI de um SHA, e se o plano do GitHub deste repositório privado oferece **aprovação obrigatória de ambiente** e proteção de tags.
-- **S24** Formato de `authorized_keys` com `command=` e `restrict`, uso de `SSH_ORIGINAL_COMMAND`, e a inviabilidade de `from=` com os executores do GitHub.
-- **S25** `shellcheck` vem na imagem `ubuntu-latest` e como instalar `actionlint` de forma fixa.
+- **S23** Se o plano do GitHub da conta, para este repositório **privado**, oferece ambientes com segredos próprios, **restrição de branch** do ambiente e **revisor obrigatório** (minha lembrança: revisor obrigatório em repositório privado exige plano pago; ambientes e segredos de ambiente podem ter a mesma limitação). Se o ambiente não estiver disponível, a saída é segredos do repositório + o `if` do job restrito à `main` (mais fraco: qualquer workflow do repositório os leria) e a decisão volta ao dono. `contents: read` basta para ler a ponta da `main` pela API.
+- **S24** Formato de `authorized_keys` com `command=` e `restrict` (que inclui `no-port-forwarding`, `no-agent-forwarding`, `no-X11-forwarding`, `no-pty` e `no-user-rc`), uso de `SSH_ORIGINAL_COMMAND`, o `sshd` rodar o comando forçado **pelo shell do usuário** (com `nologin` não funcionaria), `authorized_keys` com dono `root` aceito pelo `StrictModes`, `ForceCommand`/`DisableForwarding`/`PermitTTY` no `Match User` da versão do OpenSSH do Ubuntu 26.04, e a inviabilidade de `from=` com os executores do GitHub.
+- **S25** `shellcheck` vem na imagem `ubuntu-latest` (confirmado na prática pelo CI da E1); `actionlint` **não** vem: instalar por binário de versão fixa com SHA-256 conferido (versão e soma a escolher na implementação, com a fonte registrada).
+- **S26** O `workflow_run` usa a definição do workflow que está na **branch padrão** (um PR que altere `deploy.yml` não muda o que roda antes do merge) e só dispara para workflows de nome igual ao `name:` do `ci.yml` (`CI`); o `ci.yml` chamado por `workflow_call` pelo `node-compat.yml` **não** dispara o `workflow_run` com o nome `CI`.
+- **S27** No `workflow_run`, o filtro `branches:` compara o **nome** da branch de origem, e um PR de fork com branch chamada `main` passa nele; `github.event.workflow_run.event`, `head_branch`, `head_sha`, `conclusion` e `head_repository.full_name` existem com esses nomes.
+- **S28** Com `HOME=/root` e `PATH=/usr/local/bin:/usr/bin:/bin`, o `pm2` chamado pelo `sudo` encontra o daemon do `root` (`/root/.pm2`) e o `node`/`pnpm` do servidor (instalados em `/usr/local`).
+- **S29** O `sudo` do Ubuntu 26.04 limpa o ambiente por padrão (`env_reset`), não exige terminal (`requiretty` desligado) e aceita `*` como "quaisquer argumentos" no `sudoers`.
+- **S30** `concurrency` sem `cancel-in-progress` guarda **no máximo um** job pendente por grupo, e um pendente novo cancela o pendente anterior (não o que está rodando).
+- **S31** `ssh` e `gh` estão na imagem `ubuntu-latest` e o `gh` aceita o `GITHUB_TOKEN` por `GH_TOKEN`; `vars.*` pode ser usado no `if:` do job.
+- **S32** O GitHub mascara no log os valores de segredos (inclusive em várias linhas, como a chave e o `known_hosts`).
+- **S33** O GitHub avisa por e-mail quem disparou o workflow quando ele falha (no `workflow_run`, o autor do evento original).
 
 ## Passos do dono (separados do código)
 
@@ -403,11 +575,13 @@ Não se aplica: nenhum acesso a dados de empresa é criado ou alterado (script, 
 2. **Antes da E1**, no servidor: `pm2 -v`, `node -v`, `pnpm -v`, `flock --version`, `free -m` (e swap), o valor de `SHUTDOWN_TIMEOUT_MS` e se o canal está ligado, o arquivo do nginx da produção (sem segredo) e o `ecosystem.config.cjs` atual; criar `/var/log/soprei-deploy` e `/var/lib/soprei-deploy`.
 3. **E1:** depois do merge, `git pull` à mão **uma última vez**, rodar `deploy/deploy.sh --env production --dry-run`, depois `--adopt`, e registrar o resultado. Substituir o `ecosystem.config.cjs` do servidor pelo versionado (`pm2 startOrReload` e `pm2 save`).
 4. **E2:** DNS do staging; certificado; banco e role; Redis separado; Mailpit; `.env` do staging (segredos novos, guardados também no gerenciador de senhas); clone; primeiro `deploy.sh --env staging --adopt`; os testes de isolamento da E2; a medição de memória.
-5. **E3 (só se decidir fazer):** usuário dedicado, aprovação do ambiente `production`, chave de deploy, `authorized_keys` restrito e o programa de entrada.
+5. **E3:** responder D9, D10, D11 e D13 a D17; depois, a lista detalhada em "Passos do dono da E3, em ordem" (seção E3).
 
 ## Decisões e dependências novas
 
 Dependências de pacote: **nenhuma**. Ferramentas externas no CI (sem entrar no `package.json`): `shellcheck` e, na E3, `actionlint`. Ferramentas novas no **servidor** (E2): Mailpit e a segunda instância do Redis. Arquivos novos previstos: `deploy/` (script, ecosystem, alvos, exemplos de nginx, Redis, Mailpit e `.env` do staging), `backend/src/infrastructure/config/check-cli.ts` e o script `config:check`, `.gitattributes`, `docs/ops/deploy.md`, os dois testes de `backend/src/` e, na E3, `.github/workflows/deploy.yml`. Registrar em `docs/context.md`, depois da resposta do dono, o que foi decidido (D1 a D12) e, no `docs/handoff.md`, o servidor de staging (endereço, o que roda, onde estão os arquivos, sem segredo).
+
+**E3 (revisão de 2026-11-12):** dependências de pacote: **nenhuma**; nenhuma ação de terceiros no `deploy.yml`. Ferramenta nova no CI: `actionlint` (binário fixo com SHA-256). No servidor: usuário `soprei-deploy`, `/usr/local/sbin/soprei-deploy-entry`, `/etc/soprei-deploy/entry.conf`, `/etc/sudoers.d/soprei-deploy`, `/etc/ssh/sshd_config.d/soprei-deploy.conf`. No GitHub: ambiente `production` (segredos `DEPLOY_SSH_KEY`, `DEPLOY_SSH_KNOWN_HOSTS`, `DEPLOY_SSH_HOST`, variável `DEPLOY_SSH_USER`), variável de repositório `DEPLOY_ENABLED` e a proteção da `main`. Depois da resposta do dono, registrar em `docs/context.md` as decisões D9, D10, D11 e D13 a D17.
 
 ## Registro da implementação (2026-11-11, E1 e E2; a E3 não foi feita, D9)
 
