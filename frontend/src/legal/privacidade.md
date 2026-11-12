@@ -2,7 +2,7 @@
 titulo: Política de Privacidade
 versao: 1
 atualizado-em: 2026-11-12
-situacao: rascunho
+situacao: vigente
 ---
 
 # Política de Privacidade do Soprei

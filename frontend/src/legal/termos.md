@@ -2,7 +2,7 @@
 titulo: Termos de Uso
 versao: 1
 atualizado-em: 2026-11-12
-situacao: rascunho
+situacao: vigente
 ---
 
 # Termos de Uso do Soprei

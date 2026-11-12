@@ -255,7 +255,13 @@ describe('build das páginas (D2: termos só quando vigente)', () => {
   });
 
   it('termos em rascunho não geram termos.html nem link; vigentes geram os dois', () => {
-    const draft = { ...SOURCES, 'termos.md': SOURCES['termos.md'] as string };
+    const draft = {
+      ...SOURCES,
+      'termos.md': (SOURCES['termos.md'] as string).replace(
+        /^situacao: vigente$/m,
+        'situacao: rascunho',
+      ),
+    };
     assert.ok(/situacao: rascunho/.test(draft['termos.md']));
     const withoutTerms = buildLegalPages(draft, ASSETS);
     assert.equal(

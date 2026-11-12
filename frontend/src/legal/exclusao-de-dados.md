@@ -2,7 +2,7 @@
 titulo: Instruções de exclusão de dados
 versao: 1
 atualizado-em: 2026-11-12
-situacao: rascunho
+situacao: vigente
 ---
 
 # Como pedir a exclusão dos seus dados
