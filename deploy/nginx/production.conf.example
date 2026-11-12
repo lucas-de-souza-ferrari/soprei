@@ -9,10 +9,24 @@
 # Cloudflare sem proxy (somente DNS). Com o proxy ligado seria preciso real_ip no nginx e TRUST_PROXY
 # com as faixas dela (fora de escopo).
 
+# Log de acesso sem query string e sem o caminho completo do webhook de pagamento (spec 032, D13): a query
+# do handshake do WhatsApp leva o hub.verify_token e o caminho /webhooks/infinitepay/<pedido>/<token> leva um
+# token. Os nomes (soprei_prod_*) são únicos por arquivo porque produção e staging podem dividir o mesmo nginx
+# (log_format e map ficam no contexto http, que inclui este arquivo). Rotação e prazo de 30 dias (logrotate)
+# são passo do dono no servidor.
+map $request_uri $soprei_prod_log_path {
+    ~^/webhooks/infinitepay/        "/webhooks/infinitepay/[oculto]";
+    ~^(?<soprei_prod_path>[^?]*)    $soprei_prod_path;
+}
+log_format soprei_prod_sem_query '$remote_addr - $remote_user [$time_local] '
+                                 '"$request_method $soprei_prod_log_path $server_protocol" '
+                                 '$status $body_bytes_sent "$http_user_agent"';
+
 server {
     listen 80;
     listen [::]:80;
     server_name www.soprei.com;
+    access_log /var/log/nginx/access.log soprei_prod_sem_query;
     return 301 https://$host$request_uri;
 }
 
@@ -28,6 +42,7 @@ server {
     # Site estático: frontend/dist é um atalho para a release atual (deploy/deploy.sh).
     root /var/www/soprei/frontend/dist;
     index index.html;
+    access_log /var/log/nginx/access.log soprei_prod_sem_query;
 
     # API: o prefixo /api/ é removido antes de chegar ao backend (porta 3001, só em 127.0.0.1).
     location /api/ {
@@ -50,7 +65,8 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Páginas legais estáticas (spec 032, E1): /privacidade serve privacidade.html; o resto cai no SPA.
     location / {
-        try_files $uri /index.html;
+        try_files $uri $uri.html /index.html;
     }
 }
