@@ -444,6 +444,11 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       declared('/admin/companies/:companyId/inventory/products/:productId/movements'),
       ['GET:inventory:manage'],
     );
+    // Spec 039: reativar a IA numa conversa pausada (OWNER, ADMIN e AGENT).
+    assert.deepEqual(
+      declared('/admin/companies/:companyId/conversations/:conversationId/ai/resume'),
+      ['POST:conversation:takeover'],
+    );
     // Spec 038: notificações; todos leem, a resolução é de OWNER, ADMIN e AGENT.
     assert.deepEqual(declared('/admin/companies/:companyId/notifications'), [
       'GET:notification:read',

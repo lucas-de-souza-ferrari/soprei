@@ -23,6 +23,7 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
         'onboarding:manage',
         'notification:read',
         'notification:resolve',
+        'conversation:takeover',
       ],
       ADMIN: [
         'conversation:read',
@@ -41,6 +42,7 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
         'onboarding:manage',
         'notification:read',
         'notification:resolve',
+        'conversation:takeover',
       ],
       AGENT: [
         'conversation:read',
@@ -49,6 +51,7 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
         'schedule:manage',
         'notification:read',
         'notification:resolve',
+        'conversation:takeover',
       ],
       VIEWER: ['conversation:read', 'schedule:read', 'notification:read'],
     });

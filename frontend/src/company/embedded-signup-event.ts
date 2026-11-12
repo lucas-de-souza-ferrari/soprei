@@ -18,12 +18,25 @@ export const MAX_EVENT_TEXT_LENGTH = 8 * 1024;
 
 const ID_PATTERN = /^[0-9]{1,32}$/;
 
+/** Evento de fim do fluxo de coexistência (spec 039, confirmado no E0). */
+export const COEXISTENCE_FINISH_EVENT = 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
+
 export type SignupEvent =
   /** `FINISH` simples, com `phone_number_id` e `waba_id` válidos. */
   | { readonly kind: 'finish'; readonly phoneNumberId: string; readonly wabaId: string }
+  /**
+   * Spec 039: fim do fluxo de coexistência (o número segue no aplicativo WhatsApp Business). O E0
+   * confirmou que o evento traz `phone_number_id` e `waba_id` (texto de dígitos); o número é opcional
+   * aqui porque o servidor sabe resolvê-lo pela WABA. Só vale numa tentativa de coexistência.
+   */
+  | {
+      readonly kind: 'finish_coexistence';
+      readonly phoneNumberId: string | null;
+      readonly wabaId: string;
+    }
   | { readonly kind: 'cancel' }
   | { readonly kind: 'error' }
-  /** `FINISH_ONLY_WABA`, `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` e afins: fluxos que o site não suporta. */
+  /** `FINISH_ONLY_WABA` e afins: fluxos que o site não suporta. */
   | { readonly kind: 'unsupported' };
 
 const envelopeSchema = z.object({
@@ -63,6 +76,16 @@ export function parseSignupEvent(origin: string, data: unknown): SignupEvent | n
       return null;
     }
     return { kind: 'finish', phoneNumberId, wabaId };
+  }
+  if (event === COEXISTENCE_FINISH_EVENT) {
+    const phoneNumberId = payload?.['phone_number_id'];
+    const wabaId = payload?.['waba_id'];
+    if (typeof wabaId !== 'string' || !ID_PATTERN.test(wabaId)) return null;
+    if (phoneNumberId === undefined || phoneNumberId === null) {
+      return { kind: 'finish_coexistence', phoneNumberId: null, wabaId };
+    }
+    if (typeof phoneNumberId !== 'string' || !ID_PATTERN.test(phoneNumberId)) return null;
+    return { kind: 'finish_coexistence', phoneNumberId, wabaId };
   }
   if (event === 'CANCEL') return { kind: 'cancel' };
   if (event === 'ERROR') return { kind: 'error' };

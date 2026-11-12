@@ -33,6 +33,7 @@ const newConnection = (suffix: string) => ({
   wabaId: '123456',
   tokenCiphertext: `v1.teste.${suffix}.tag.corpo`,
   tokenExpiresAt: null,
+  mode: 'API_ONLY' as const,
 });
 
 describe('PrismaChannelConnectionRepository (spec 015, isolamento entre empresas)', () => {

@@ -81,11 +81,7 @@ test('parser: CANCEL, ERROR e variantes de FINISH viram estados distintos', () =
     JSON.stringify({ type: 'WA_EMBEDDED_SIGNUP', event: name, data: { current_step: 'x' } });
   assert.deepEqual(parseSignupEvent(WWW, event('CANCEL')), { kind: 'cancel' });
   assert.deepEqual(parseSignupEvent(WWW, event('ERROR')), { kind: 'error' });
-  for (const variant of [
-    'FINISH_ONLY_WABA',
-    'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
-    'FINISH_GRANT_ONLY_API_ACCESS',
-  ]) {
+  for (const variant of ['FINISH_ONLY_WABA', 'FINISH_GRANT_ONLY_API_ACCESS']) {
     assert.deepEqual(parseSignupEvent(WWW, event(variant)), { kind: 'unsupported' });
   }
 });
@@ -116,7 +112,7 @@ test('máquina: envia só com code E ids, nas duas ordens de chegada', () => {
     assert.equal(afterFirst.state.phase, 'waiting');
     const done = run([second], afterFirst.state);
     assert.deepEqual(done.effects, [
-      { type: 'submit', code: 'C1', wabaId: '222', phoneNumberId: '111' },
+      { type: 'submit', mode: 'api_only', code: 'C1', wabaId: '222', phoneNumberId: '111' },
     ]);
     assert.equal(done.state.phase, 'submitting');
     assert.equal(done.state.code, null);
@@ -247,4 +243,122 @@ test('máquina: reset (troca de empresa, desmontagem) zera code e ids', () => {
     [2, { type: 'reset' }],
   ]);
   assert.deepEqual(mid.state, INITIAL_SIGNUP_STATE);
+});
+
+// --- Spec 039: coexistência (o número segue no aplicativo WhatsApp Business) ---
+
+/** O evento como o E0 o viu: ids como texto de dígitos e listas vazias. */
+const coexistenceFinish = (extra: Record<string, unknown> = {}) => ({
+  type: 'WA_EMBEDDED_SIGNUP',
+  event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+  data: {
+    phone_number_id: '106540352242922',
+    waba_id: '102290129340398',
+    business_id: '1',
+    page_ids: [],
+    catalog_ids: [],
+    dataset_ids: [],
+    instagram_account_ids: [],
+    ...extra,
+  },
+});
+
+test('parser (039): FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING vira finish_coexistence, com e sem número', () => {
+  for (const origin of [WWW, WEB]) {
+    assert.deepEqual(parseSignupEvent(origin, JSON.stringify(coexistenceFinish())), {
+      kind: 'finish_coexistence',
+      phoneNumberId: '106540352242922',
+      wabaId: '102290129340398',
+    });
+  }
+  const withoutNumber: Record<string, unknown> = { ...coexistenceFinish().data };
+  delete withoutNumber['phone_number_id'];
+  assert.deepEqual(
+    parseSignupEvent(WWW, JSON.stringify({ ...coexistenceFinish(), data: withoutNumber })),
+    { kind: 'finish_coexistence', phoneNumberId: null, wabaId: '102290129340398' },
+  );
+  // FINISH simples continua sendo o do fluxo atual.
+  assert.equal(parseSignupEvent(WWW, JSON.stringify(finish()))?.kind, 'finish');
+});
+
+test('parser (039): id não numérico, origem estranha, texto grande e tipo errado são ignorados', () => {
+  for (const extra of [{ waba_id: 'abc' }, { waba_id: undefined }, { phone_number_id: '12a' }]) {
+    assert.equal(parseSignupEvent(WWW, JSON.stringify(coexistenceFinish(extra))), null);
+  }
+  for (const origin of ['https://evilfacebook.com', 'https://facebook.com.evil.com', 'null']) {
+    assert.equal(parseSignupEvent(origin, JSON.stringify(coexistenceFinish())), null, origin);
+  }
+  assert.equal(
+    parseSignupEvent(
+      WWW,
+      JSON.stringify(coexistenceFinish({ pad: 'x'.repeat(MAX_EVENT_TEXT_LENGTH) })),
+    ),
+    null,
+  );
+  assert.equal(
+    parseSignupEvent(WWW, JSON.stringify({ ...coexistenceFinish(), type: 'OUTRO' })),
+    null,
+  );
+});
+
+const coexistenceIds = {
+  kind: 'finish_coexistence',
+  phoneNumberId: null,
+  wabaId: '222',
+} as const;
+
+test('máquina (039): coexistência envia com code novo e waba_id, número nulo aceito; o modo vai no envio', () => {
+  for (const order of ['code-primeiro', 'ids-primeiro'] as const) {
+    const code = [1_000, { type: 'code', code: 'C1' }] as const;
+    const event = [1_500, { type: 'event', event: coexistenceIds }] as const;
+    const result = run([
+      [0, { type: 'start', mode: 'coexistence' }],
+      order === 'code-primeiro' ? code : event,
+      order === 'code-primeiro' ? event : code,
+    ]);
+    assert.deepEqual(result.effects, [
+      { type: 'submit', mode: 'coexistence', code: 'C1', wabaId: '222', phoneNumberId: null },
+    ]);
+    assert.equal(result.state.code, null, 'o code não sobrevive ao envio');
+    assert.equal(result.state.ids, null);
+  }
+});
+
+test('máquina (039): code velho, metade fora de 10 s, cancelamento e popup bloqueado não enviam', () => {
+  const start = [0, { type: 'start', mode: 'coexistence' }] as const;
+  const late = run([
+    start,
+    [1_000, { type: 'code', code: 'C1' }],
+    [1_000 + CODE_MAX_AGE_MS + 1, { type: 'event', event: coexistenceIds }],
+  ]);
+  assert.equal(late.effects.length, 0);
+  const apart = run([
+    start,
+    [1_000, { type: 'event', event: coexistenceIds }],
+    [1_000 + OTHER_HALF_TIMEOUT_MS + 1, { type: 'tick' }],
+  ]);
+  assert.equal(apart.state.failure, 'timeout');
+  for (const input of [
+    { type: 'code', code: null },
+    { type: 'event', event: { kind: 'cancel' } },
+    { type: 'popup_blocked' },
+  ] as const) {
+    const result = run([start, [10, input]]);
+    assert.equal(result.effects.length, 0);
+    assert.equal(result.state.mode, 'coexistence');
+  }
+});
+
+test('máquina (039): cada fluxo só aceita o próprio evento de fim', () => {
+  const crossed = run([
+    [0, { type: 'start', mode: 'api_only' }],
+    [1, { type: 'event', event: coexistenceIds }],
+  ]);
+  assert.equal(crossed.state.failure, 'unsupported');
+  const other = run([
+    [0, { type: 'start', mode: 'coexistence' }],
+    [1, { type: 'event', event: ids }],
+  ]);
+  assert.equal(other.state.failure, 'unsupported');
+  assert.equal(other.effects.length, 0);
 });

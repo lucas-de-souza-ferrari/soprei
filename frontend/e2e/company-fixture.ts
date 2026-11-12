@@ -41,6 +41,8 @@ export interface ChannelBody {
   tokenExpiresAt: string | null;
   connectedAt: string | null;
   tokenInvalidAt: string | null;
+  /** Spec 039. */
+  mode?: 'API_ONLY' | 'COEXISTENCE' | null;
 }
 
 export const NOT_CONNECTED: ChannelBody = {
@@ -73,11 +75,13 @@ export interface FakeConversation {
   channel: 'whatsapp' | 'simulator';
   createdAt: string;
   updatedAt: string;
+  /** Spec 039: até quando a IA está pausada; ausente ou `null` = ativa. */
+  aiPausedUntil?: string | null;
 }
 
 export interface FakeMessage {
   id: string;
-  role: 'USER' | 'ASSISTANT';
+  role: 'USER' | 'ASSISTANT' | 'HUMAN';
   content: string;
   isFallback: boolean;
   replyToId: string | null;
@@ -103,7 +107,7 @@ export function conversation(
 }
 
 export function message(
-  role: 'USER' | 'ASSISTANT',
+  role: 'USER' | 'ASSISTANT' | 'HUMAN',
   content: string,
   minutesAgo: number,
   extra: Partial<FakeMessage> = {},
@@ -135,7 +139,12 @@ export interface FakeApi {
   selected: string | null;
   channel: ChannelBody;
   /** `null` = `GET .../channel/setup` não existe (404). */
-  setup: { embeddedSignup: object | null; manualConnect: boolean } | null;
+  setup: {
+    embeddedSignup: object | null;
+    manualConnect: boolean;
+    /** Spec 039: ausente = servidor anterior (sem a escolha). */
+    coexistence?: { available: boolean; configId: string | null };
+  } | null;
   /** `null` = `GET .../channel` responde 404. */
   channelNotFound: boolean;
   persona: string | null;
@@ -266,6 +275,19 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
       return reply(204);
     }
     if (path === '/auth/logout') return reply(204);
+    // Spec 039: reativar a IA na conversa.
+    const resumeRoute = /^\/admin\/companies\/([^/]+)\/conversations\/([^/]+)\/ai\/resume$/.exec(
+      path,
+    );
+    if (resumeRoute !== null && method === 'POST') {
+      const [, companyId, conversationId] = resumeRoute;
+      if (companyId !== state.selected || current === undefined) return fail(404, 'NOT_FOUND');
+      if (!current.permissions.includes('conversation:takeover')) return fail(403, 'FORBIDDEN');
+      const found = state.conversations.find((item) => item.id === conversationId);
+      if (found === undefined) return fail(404, 'NOT_FOUND');
+      found.aiPausedUntil = null;
+      return reply(204);
+    }
     const panelRoute = /^\/admin\/companies\/([^/]+)\/conversations(?:\/([^/]+)\/messages)?$/.exec(
       path,
     );
@@ -314,7 +336,8 @@ export async function installApi(page: Page, overrides: Partial<FakeApi> = {}): 
     if (rest === 'channel/embedded-signup') {
       if (state.signup !== 'ok')
         return fail(state.signup.status, state.signup.code ?? 'VALIDATION_ERROR');
-      state.channel = CONNECTED;
+      const coexistence = (body as { mode?: string } | undefined)?.mode === 'coexistence';
+      state.channel = { ...CONNECTED, mode: coexistence ? 'COEXISTENCE' : 'API_ONLY' };
       return reply(200, state.channel);
     }
     if (rest === 'channel' && method === 'PUT') {
@@ -381,6 +404,21 @@ export async function postFromPopup(page: Page, origin: string, data: unknown): 
     [origin, typeof data === 'string' ? data : JSON.stringify(data)] as const,
   );
 }
+
+/** Spec 039: o evento do fim da coexistência, como o E0 o viu (ids em texto e listas vazias). */
+export const coexistenceFinishEvent = (): object => ({
+  type: 'WA_EMBEDDED_SIGNUP',
+  event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+  data: {
+    phone_number_id: PHONE_NUMBER_ID,
+    waba_id: WABA_ID,
+    business_id: '1',
+    page_ids: [],
+    catalog_ids: [],
+    dataset_ids: [],
+    instagram_account_ids: [],
+  },
+});
 
 export const finishEvent = (): object => ({
   type: 'WA_EMBEDDED_SIGNUP',

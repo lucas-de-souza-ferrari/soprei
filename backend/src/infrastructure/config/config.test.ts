@@ -983,6 +983,59 @@ describe('parseConfig', () => {
       assert.match(off.error.message, /WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID/);
     });
 
+    it('WHATSAPP_COEXISTENCE_ENABLED (spec 039): desligada por padrão; ligada exige canal e config_id', () => {
+      const off = parseConfig(ENABLED);
+      assert.ok(off.ok);
+      assert.equal(off.value.WHATSAPP_COEXISTENCE_ENABLED, false);
+      assert.equal(off.value.WHATSAPP_COEXISTENCE_CONFIG_ID, undefined);
+      const withEmbedded = parseConfig({
+        ...ENABLED,
+        WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: '987654321',
+        WHATSAPP_COEXISTENCE_ENABLED: 'true',
+      });
+      assert.ok(withEmbedded.ok);
+      assert.equal(withEmbedded.value.WHATSAPP_COEXISTENCE_ENABLED, true);
+      const ownConfig = parseConfig({
+        ...ENABLED,
+        WHATSAPP_COEXISTENCE_ENABLED: 'true',
+        WHATSAPP_COEXISTENCE_CONFIG_ID: '123456',
+      });
+      assert.ok(ownConfig.ok);
+      // Sem nenhum config_id não há como abrir o fluxo.
+      const noConfig = parseConfig({ ...ENABLED, WHATSAPP_COEXISTENCE_ENABLED: 'true' });
+      assert.equal(noConfig.ok, false);
+      assert.match(noConfig.error.message, /WHATSAPP_COEXISTENCE_ENABLED/);
+      // Sem o canal ligado: recusada.
+      const noChannel = parseConfig({
+        ...VALID_ENV,
+        WHATSAPP_COEXISTENCE_ENABLED: 'true',
+        WHATSAPP_COEXISTENCE_CONFIG_ID: '123456',
+      });
+      assert.equal(noChannel.ok, false);
+      for (const invalid of ['1', 'yes', 'TRUE']) {
+        assert.equal(
+          parseConfig({ ...ENABLED, WHATSAPP_COEXISTENCE_ENABLED: invalid }).ok,
+          false,
+          invalid,
+        );
+      }
+    });
+
+    it('WHATSAPP_COEXISTENCE_CONFIG_ID: só dígitos e exige a coexistência ligada', () => {
+      for (const invalid of ['abc', '1'.repeat(33)]) {
+        const result = parseConfig({
+          ...ENABLED,
+          WHATSAPP_COEXISTENCE_ENABLED: 'true',
+          WHATSAPP_COEXISTENCE_CONFIG_ID: invalid,
+        });
+        assert.equal(result.ok, false, invalid);
+        assert.match(result.error.message, /WHATSAPP_COEXISTENCE_CONFIG_ID/);
+      }
+      const alone = parseConfig({ ...ENABLED, WHATSAPP_COEXISTENCE_CONFIG_ID: '123' });
+      assert.equal(alone.ok, false);
+      assert.match(alone.error.message, /WHATSAPP_COEXISTENCE_CONFIG_ID/);
+    });
+
     it('CHANNEL_MANUAL_CONNECT_ENABLED: literais true/false; true é recusado em produção', () => {
       const on = parseConfig({ ...ENABLED, CHANNEL_MANUAL_CONNECT_ENABLED: 'true' });
       assert.ok(on.ok);

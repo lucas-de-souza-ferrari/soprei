@@ -49,6 +49,8 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     touched: { id: string; previous: Date }[];
     /** Ids das notificações criadas na transação (spec 038). */
     notifications: string[];
+    /** Pausa da IA anterior das conversas tocadas na transação (spec 039). */
+    pauses: { id: string; aiPausedUntil: Date | null; aiIgnoreBefore: Date | null }[];
   }>();
 
   constructor(private readonly now: () => Date = () => new Date()) {
@@ -99,6 +101,20 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
               (row) => row.companyId === companyId && row.contactRef === contactRef,
             ) ?? null,
         ),
+      extendAiPause: (companyId, conversationId, extension) =>
+        this.step(() => {
+          this.updatePause(companyId, conversationId, (row) => ({
+            aiPausedUntil: later(row.aiPausedUntil, extension.pausedUntil),
+            aiIgnoreBefore: later(row.aiIgnoreBefore, extension.ignoreBefore),
+          }));
+        }),
+      clearAiPause: (companyId, conversationId) =>
+        this.step(() =>
+          this.updatePause(companyId, conversationId, (row) => ({
+            aiPausedUntil: null,
+            aiIgnoreBefore: row.aiIgnoreBefore,
+          })),
+        ),
       findOrCreateByContact: (companyId, contactRef) =>
         this.step(
           () =>
@@ -137,6 +153,16 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         }),
       markSent: (companyId, messageId, mark) =>
         this.step(() => this.applyMark(companyId, messageId, mark)),
+      findByChannelMessageId: (companyId, channelMessageId) =>
+        this.step(
+          () =>
+            this.messageRows.find(
+              (row) =>
+                row.companyId === companyId &&
+                row.role === 'ASSISTANT' &&
+                row.channelMessageId === channelMessageId,
+            ) ?? null,
+        ),
       listPending: (companyId, conversationId, limit) =>
         this.step(() => this.pendingIn(companyId, conversationId).slice(0, limit)),
       markAnswered: (companyId, messageIds, replyId) =>
@@ -166,6 +192,7 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       answered: [] as string[],
       touched: [] as { id: string; previous: Date }[],
       notifications: [] as string[],
+      pauses: [] as { id: string; aiPausedUntil: Date | null; aiIgnoreBefore: Date | null }[],
     };
     this.openTransactions += 1;
     try {
@@ -186,6 +213,17 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       }
       for (const row of log.messages) this.messageRows.splice(this.messageRows.indexOf(row), 1);
       // Desfaz o toque de `updatedAt` (do mais novo para o mais antigo) e depois as conversas criadas.
+      for (const previous of log.pauses.reverse()) {
+        const index = this.conversationRows.findIndex((row) => row.id === previous.id);
+        const row = this.conversationRows[index];
+        if (row !== undefined) {
+          this.conversationRows[index] = {
+            ...row,
+            aiPausedUntil: previous.aiPausedUntil,
+            aiIgnoreBefore: previous.aiIgnoreBefore,
+          };
+        }
+      }
       for (const { id, previous } of log.touched.reverse()) {
         const index = this.conversationRows.findIndex((row) => row.id === id);
         const row = this.conversationRows[index];
@@ -234,6 +272,8 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       contactRef: data.contactRef,
       createdAt: now,
       updatedAt: now,
+      aiPausedUntil: null,
+      aiIgnoreBefore: null,
     };
     this.conversationRows.push(row);
     this.transactionLog.getStore()?.conversations.push(row);
@@ -285,6 +325,26 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     return row;
   }
 
+  /** Muda a pausa da IA de uma conversa desta empresa (spec 039); devolve se a conversa existe. */
+  private updatePause(
+    companyId: CompanyId,
+    conversationId: string,
+    next: (row: Conversation) => Pick<Conversation, 'aiPausedUntil' | 'aiIgnoreBefore'>,
+  ): boolean {
+    const index = this.conversationRows.findIndex(
+      (row) => row.companyId === companyId && row.id === conversationId,
+    );
+    const row = this.conversationRows[index];
+    if (row === undefined) return false;
+    this.transactionLog.getStore()?.pauses.push({
+      id: row.id,
+      aiPausedUntil: row.aiPausedUntil,
+      aiIgnoreBefore: row.aiIgnoreBefore,
+    });
+    this.conversationRows[index] = { ...row, ...next(row) };
+    return true;
+  }
+
   /** Última atividade (spec 024): como o banco, o `updatedAt` só avança até o instante da mensagem. */
   private touchConversation(companyId: CompanyId, conversationId: string, at: Date): void {
     const index = this.conversationRows.findIndex(
@@ -317,9 +377,14 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
 
   /** Como o `listPending` do banco: USER, sem `answeredById` e sem resposta por `replyToId`. */
   private pendingIn(companyId: CompanyId, conversationId: string): Message[] {
+    // Spec 039: o que a equipe tratou pelo celular (até `aiIgnoreBefore`) não está pendente.
+    const ignoreBefore =
+      this.conversationRows.find((row) => row.companyId === companyId && row.id === conversationId)
+        ?.aiIgnoreBefore ?? null;
     return this.inConversation(companyId, conversationId).filter(
       (row) =>
         row.role === 'USER' &&
+        (ignoreBefore === null || row.createdAt.getTime() > ignoreBefore.getTime()) &&
         row.answeredById === null &&
         !this.messageRows.some(
           (other) => other.companyId === companyId && other.replyToId === row.id,
@@ -363,6 +428,13 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
           (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
       );
   }
+}
+
+/** O mais tardio dos dois instantes (pausa da IA só avança, spec 039). */
+function later(current: Date | null, next: Date | undefined): Date | null {
+  if (next === undefined) return current;
+  if (current === null || current.getTime() < next.getTime()) return next;
+  return current;
 }
 
 /** Paginação por posição (o cursor é só o índice); `rows` já está na ordem certa. */

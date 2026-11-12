@@ -94,3 +94,55 @@ export function webhookPayload(changes: readonly FakeChange[]): Record<string, u
     ],
   };
 }
+
+export interface FakeEcho {
+  readonly id: string;
+  /** O contato a quem a equipe escreveu. */
+  readonly to?: string;
+  /** `contacts[].wa_id` do contato; ausente = igual ao `to`. */
+  readonly waId?: string;
+  readonly type?: string;
+  readonly text?: string;
+}
+
+/**
+ * Webhook de eco da coexistência (spec 039), no formato visto no E0: campo `smb_message_echoes` e a
+ * lista em `value.message_echoes[]`; `from` é o número da empresa e `to` é o contato. Traz também os
+ * campos novos de identificador de 19 caracteres, que o Soprei não lê.
+ */
+export function echoWebhookPayload(
+  phoneNumberId: string,
+  echoes: readonly FakeEcho[],
+  field = 'smb_message_echoes',
+): Record<string, unknown> {
+  return {
+    object: 'whatsapp_business_account',
+    entry: [
+      {
+        id: '102290129340398',
+        changes: [
+          {
+            field,
+            value: {
+              messaging_product: 'whatsapp',
+              metadata: { display_phone_number: '15550783881', phone_number_id: phoneNumberId },
+              contacts: echoes.map((echo) => ({
+                wa_id: echo.waId ?? echo.to,
+                user_id: '1234567890123456789',
+              })),
+              message_echoes: echoes.map((echo) => ({
+                from: '15550783881',
+                ...(echo.to === undefined ? {} : { to: echo.to }),
+                to_user_id: '1234567890123456789',
+                id: echo.id,
+                timestamp: '1762958100',
+                type: echo.type ?? 'text',
+                ...(echo.text === undefined ? {} : { text: { body: echo.text } }),
+              })),
+            },
+          },
+        ],
+      },
+    ],
+  };
+}

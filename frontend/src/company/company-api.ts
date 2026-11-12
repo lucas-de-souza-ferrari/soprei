@@ -21,6 +21,8 @@ export const channelStateSchema = z.object({
   tokenExpiresAt: z.string().nullable(),
   connectedAt: z.string().nullable(),
   tokenInvalidAt: z.string().nullable(),
+  /** Spec 039: `COEXISTENCE` quando o número segue no aplicativo WhatsApp Business. */
+  mode: z.enum(['API_ONLY', 'COEXISTENCE']).nullable().optional(),
 });
 export type ChannelState = z.infer<typeof channelStateSchema>;
 
@@ -33,6 +35,11 @@ export const channelSetupSchema = z.object({
     })
     .nullable(),
   manualConnect: z.boolean(),
+  /** Spec 039: a escolha "uso o WhatsApp Business no celular" só aparece com `available`. */
+  coexistence: z
+    .object({ available: z.boolean(), configId: idText.nullable() })
+    .optional()
+    .default({ available: false, configId: null }),
 });
 export type ChannelSetup = z.infer<typeof channelSetupSchema>;
 
@@ -70,6 +77,8 @@ export const conversationSchema = z.strictObject({
   updatedAt: isoDate,
   /** Spec 038: há pedido de atendimento humano aberto nesta conversa (selo "Humano"). */
   openHandoff: z.boolean().optional(),
+  /** Spec 039: até quando a IA está pausada (a equipe respondeu pelo celular); `null` = ativa. */
+  aiPausedUntil: isoDate.nullable().optional(),
 });
 export type ConversationItem = z.infer<typeof conversationSchema>;
 
@@ -87,7 +96,8 @@ export type ConversationsPage = z.infer<typeof conversationsPageSchema>;
 
 export const messageSchema = z.strictObject({
   id: z.uuid(),
-  role: z.enum(['USER', 'ASSISTANT']),
+  /** Spec 039: `HUMAN` = a equipe, pelo aplicativo WhatsApp Business no celular. */
+  role: z.enum(['USER', 'ASSISTANT', 'HUMAN']),
   content: z.string().max(100_000),
   isFallback: z.boolean(),
   replyToId: z.uuid().nullable(),
@@ -141,7 +151,13 @@ export const companyApi = {
   },
   embeddedSignup: async (
     companyId: string,
-    body: { code: string; wabaId: string; phoneNumberId: string },
+    body: {
+      code: string;
+      wabaId: string;
+      /** Na coexistência pode faltar (o servidor resolve pela WABA). */
+      phoneNumberId?: string;
+      mode?: 'coexistence';
+    },
   ) =>
     channelStateSchema.parse(
       await request(`${companyPath(companyId)}/channel/embedded-signup`, {
@@ -178,6 +194,13 @@ export const companyApi = {
         `${companyPath(companyId)}/conversations/${encodeURIComponent(conversationId)}/messages${queryOf({ limit: params.limit, cursor: params.cursor, order: params.order })}`,
       ),
     ),
+  /** Spec 039: reativa a IA numa conversa pausada (204). */
+  resumeAi: async (companyId: string, conversationId: string): Promise<void> => {
+    await request(
+      `${companyPath(companyId)}/conversations/${encodeURIComponent(conversationId)}/ai/resume`,
+      { method: 'POST' },
+    );
+  },
   send: async (companyId: string, text: string) =>
     attendanceResultSchema.parse(
       await request(`${companyPath(companyId)}/messages`, {
@@ -211,6 +234,10 @@ const CHANNEL_CODE_MESSAGES: Readonly<Record<string, string>> = {
   CHANNEL_CODE_INVALID: 'A autorização expirou ou já foi usada. Tente de novo.',
   CHANNEL_REGISTRATION_FAILED:
     'Não foi possível registrar o número na Meta. Tente de novo; se persistir, fale com o suporte.',
+  // Spec 039 (D8): sem tela de escolha de número.
+  CHANNEL_NUMBER_AMBIGUOUS:
+    'Não foi possível identificar o número. Escolha o número no aplicativo e tente de novo.',
+  CHANNEL_COEXISTENCE_DISABLED: 'A conexão pelo aplicativo não está disponível neste ambiente.',
 };
 
 /** Traduz uma falha da API em ação de tela. Ignora por completo o texto do corpo de erro. */

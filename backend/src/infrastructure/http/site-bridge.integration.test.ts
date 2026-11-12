@@ -378,6 +378,8 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
       '/admin/companies/:companyId/notifications',
       '/admin/companies/:companyId/notifications/summary',
       '/admin/companies/:companyId/notifications/:notificationId/resolve',
+      // Spec 039: reativar a IA na conversa.
+      '/admin/companies/:companyId/conversations/:conversationId/ai/resume',
     ]) {
       assert.ok(
         tenantRoutes.some((route) => route.url === url),
@@ -491,6 +493,8 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
     assert.deepEqual(response.json(), {
       embeddedSignup: { appId: APP_ID, configId: CONFIG_ID, graphApiVersion: 'v26.0' },
       manualConnect: false,
+      // Spec 039: sem a coexistência ligada, nada dela é público.
+      coexistence: { available: false, configId: null },
     });
     assert.ok(!response.body.includes(APP_SECRET));
   });

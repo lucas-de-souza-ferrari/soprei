@@ -38,6 +38,10 @@ export interface WebhookMetrics {
     channel: string,
     status: 'sent' | 'delivered' | 'read' | 'played' | 'failed' | 'other',
   ): void;
+  /** Spec 039: eco recebido com a coexistência desligada (não tratado). */
+  countChannelEcho?(result: 'disabled'): void;
+  /** Spec 039: mudança de um campo da coexistência ignorado de propósito (`history`, estado do app). */
+  countChannelInbound?(channel: string, result: 'ignored_type'): void;
 }
 
 export interface WhatsappWebhookControllerOptions {
@@ -46,7 +50,13 @@ export interface WhatsappWebhookControllerOptions {
   /** `WHATSAPP_VERIFY_TOKEN`: só o handshake de verificação. */
   readonly verifyToken: string;
   /** Entrada do canal: resolve a empresa pelo número do negócio e enfileira. */
-  readonly intake: Pick<ChannelIntakeService, 'accept'>;
+  readonly intake: Pick<ChannelIntakeService, 'accept'> &
+    Partial<Pick<ChannelIntakeService, 'acceptEchoes'>>;
+  /**
+   * Spec 039 (`WHATSAPP_COEXISTENCE_ENABLED`): só com isto os ecos das mensagens enviadas pelo aplicativo
+   * são tratados; desligado, são contados como `disabled` e nada é gravado.
+   */
+  readonly echoesEnabled?: boolean;
   readonly metrics?: WebhookMetrics;
   /** Relógio do carimbo de recebimento das mensagens (padrão: relógio do servidor; testes injetam). */
   readonly now?: () => Date;
@@ -89,10 +99,21 @@ const verificationQuerySchema = z.object({
  */
 export const whatsappWebhookController: FastifyPluginCallback<WhatsappWebhookControllerOptions> = (
   app,
-  { appSecret, verifyToken, intake, metrics, now = () => new Date() },
+  { appSecret, verifyToken, intake, metrics, echoesEnabled = false, now = () => new Date() },
   done,
 ) => {
   const config = rateLimitProfile('webhook');
+
+  const safeCount = (fn: () => void): void => {
+    try {
+      fn();
+    } catch (err) {
+      app.log.warn(
+        { errName: err instanceof Error ? err.name : typeof err },
+        'falha ao registrar métrica do webhook',
+      );
+    }
+  };
 
   const count = (result: WebhookRequestResult): void => {
     try {
@@ -187,19 +208,43 @@ export const whatsappWebhookController: FastifyPluginCallback<WhatsappWebhookCon
         }
       }
 
+      for (let index = 0; index < parsed.ignoredChanges; index += 1) {
+        safeCount(() => metrics?.countChannelInbound?.(CHANNEL, 'ignored_type'));
+      }
+
+      // Um só instante base para o lote: mensagens e ecos ficam na ordem do payload (spec 034 e 039).
+      const base = now();
       const summary: IntakeSummary =
         parsed.messages.length === 0
           ? { enqueued: 0, discarded: 0, failed: 0 }
-          : await intake.accept(stampReceivedAt(parsed.messages, now()), request.id);
+          : await intake.accept(stampReceivedAt(parsed.messages, base), request.id);
 
-      if (summary.failed > 0) {
+      let echoSummary: IntakeSummary = { enqueued: 0, discarded: 0, failed: 0 };
+      if (parsed.echoes.length > 0) {
+        if (echoesEnabled && intake.acceptEchoes !== undefined) {
+          const echoBase = new Date(base.getTime() + parsed.messages.length);
+          echoSummary = await intake.acceptEchoes(
+            stampReceivedAt(parsed.echoes, echoBase),
+            request.id,
+          );
+        } else {
+          for (let index = 0; index < parsed.echoes.length; index += 1) {
+            safeCount(() => metrics?.countChannelEcho?.('disabled'));
+          }
+        }
+      }
+
+      if (summary.failed > 0 || echoSummary.failed > 0) {
         count('enqueue_failed');
         // 500: a Meta reentrega (por dias) e o id determinístico do job impede duplicar o que já entrou.
         throw new BaseError({
           message: 'Falha ao enfileirar',
           code: 'ENQUEUE_FAILED',
           statusCode: 500,
-          context: { failed: summary.failed, enqueued: summary.enqueued },
+          context: {
+            failed: summary.failed + echoSummary.failed,
+            enqueued: summary.enqueued + echoSummary.enqueued,
+          },
         });
       }
       count(parsed.invalid ? 'invalid_payload' : 'ok');

@@ -12,7 +12,14 @@ export interface FacebookLoginOptions {
   readonly config_id: string;
   readonly response_type: 'code';
   readonly override_default_response_type: true;
-  readonly extras: { readonly setup: Record<string, never> };
+  readonly extras: {
+    readonly setup: Record<string, never>;
+    /**
+     * Spec 039: só no fluxo de coexistência (o número segue no aplicativo WhatsApp Business); o E0
+     * confirmou este valor. O fluxo de número novo não o envia.
+     */
+    readonly featureType?: 'whatsapp_business_app_onboarding';
+  };
 }
 
 export interface FacebookLoginResponse {

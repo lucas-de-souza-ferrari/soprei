@@ -66,6 +66,8 @@ model Company {
 enum MessageRole {
   USER
   ASSISTANT
+  /// Mensagem que a equipe enviou pelo aplicativo WhatsApp Business (eco da coexistência, spec 039).
+  HUMAN
 
   @@map("message_role")
 }
@@ -78,6 +80,10 @@ model Conversation {
   contactRef String   @map("contact_ref")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
+  /// Spec 039: a IA não responde este contato até este instante (a equipe respondeu pelo celular).
+  aiPausedUntil  DateTime? @map("ai_paused_until")
+  /// Spec 039: mensagens do contato até este instante foram tratadas pela equipe e nunca são respondidas.
+  aiIgnoreBefore DateTime? @map("ai_ignore_before")
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   messages      Message[]
@@ -129,6 +135,8 @@ model Message {
   // No máximo uma resposta por mensagem do contato (a retentativa concorrente não duplica).
   @@unique([companyId, replyToId])
   @@index([companyId, conversationId, createdAt, id])
+  // Eco de uma resposta nossa reconhecido pelo id do envio (spec 039, defesa).
+  @@index([companyId, channelMessageId])
   @@map("messages")
 }
 
@@ -311,6 +319,15 @@ enum ChannelConnectionStatus {
   @@map("channel_connection_status")
 }
 
+/// Como o número foi conectado (spec 039): só pela Cloud API ou em coexistência com o aplicativo
+/// WhatsApp Business no celular.
+enum ChannelConnectionMode {
+  API_ONLY
+  COEXISTENCE
+
+  @@map("channel_connection_mode")
+}
+
 /// Credencial do canal WhatsApp de uma empresa (TENANT, spec 015): no máximo uma por empresa. O token
 /// fica CIFRADO (AES-256-GCM, AAD ligada ao companyId); nunca em claro no banco, em log, resposta nem
 /// métrica. O número continua só em `Company.whatsappPhoneNumberId`.
@@ -324,7 +341,8 @@ model ChannelConnection {
   registrationPinCiphertext String?                 @map("registration_pin_ciphertext")
   tokenVersion              Int                     @default(1) @map("token_version")
   status                    ChannelConnectionStatus @default(CONNECTED)
-  tokenExpiresAt            DateTime?               @map("token_expires_at")
+  mode                      ChannelConnectionMode   @default(API_ONLY)
+  tokenExpiresAt           DateTime?               @map("token_expires_at")
   tokenInvalidAt            DateTime?               @map("token_invalid_at")
   createdAt                 DateTime                @default(now()) @map("created_at")
   updatedAt                 DateTime                @updatedAt @map("updated_at")

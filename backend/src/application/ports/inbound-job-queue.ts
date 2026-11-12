@@ -67,6 +67,16 @@ export const inboundJobSchema = z.discriminatedUnion('kind', [
     ...baseFields,
     reason: z.enum(INBOUND_NOTICE_REASONS),
   }),
+  /**
+   * Eco de uma mensagem que a equipe enviou pelo aplicativo WhatsApp Business (spec 039). O `contactRef`
+   * é o destinatário do eco (`to`). Sem `text`: mídia (o servidor grava um texto fixo; a mídia nunca é
+   * baixada). Grava a mensagem `HUMAN` e pausa a IA no contato; nunca envia nada.
+   */
+  z.object({
+    kind: z.literal('echo'),
+    ...baseFields,
+    text: z.string().min(1).max(MESSAGE_CONTENT_MAX_LENGTH).optional(),
+  }),
 ]);
 
 export type InboundJob = z.infer<typeof inboundJobSchema>;
@@ -83,7 +93,10 @@ export const flushJobSchema = z.object({
 
 export type FlushJob = z.infer<typeof flushJobSchema>;
 
-/** Qualquer job da fila do canal: mensagem (`text`), aviso (`notice`) ou resposta (`flush`). */
+/**
+ * Qualquer job da fila do canal: mensagem (`text`), aviso (`notice`), eco da equipe (`echo`, spec 039) ou
+ * resposta (`flush`).
+ */
 export const channelJobSchema = z.discriminatedUnion('kind', [
   ...inboundJobSchema.options,
   flushJobSchema,

@@ -161,12 +161,20 @@ export class PrismaMessageRepository
   ): Promise<readonly Message[]> {
     return this.run('listPending', async () => {
       if (!Number.isInteger(limit) || limit < 1 || !isUuid(conversationId)) return [];
+      // Spec 039: o que a equipe já tratou pelo celular (até `aiIgnoreBefore`) não está pendente.
+      const conversation = await this.db.conversation.findFirst({
+        where: { companyId, id: conversationId },
+        select: { aiIgnoreBefore: true },
+      });
+      if (conversation === null) return [];
+      const ignoreBefore = conversation.aiIgnoreBefore;
       const rows = await this.db.message.findMany({
         where: {
           companyId,
           conversationId,
           role: 'USER',
           answeredById: null,
+          ...(ignoreBefore === null ? {} : { createdAt: { gt: ignoreBefore } }),
           // Sem resposta pelo caminho de uma resposta por mensagem (simulador e dados antigos).
           replies: { none: {} },
         },
@@ -174,6 +182,15 @@ export class PrismaMessageRepository
         take: limit,
       });
       return rows.map(toMessage);
+    });
+  }
+
+  findByChannelMessageId(companyId: CompanyId, channelMessageId: string): Promise<Message | null> {
+    return this.run('findByChannelMessageId', async () => {
+      const row = await this.db.message.findFirst({
+        where: { companyId, channelMessageId, role: 'ASSISTANT' },
+      });
+      return row === null ? null : toMessage(row);
     });
   }
 

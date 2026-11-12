@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../api';
 import { Alert, AlertContent, AlertDescription, AlertIcon } from '../components/motion/alert';
+import { Smartphone } from 'lucide-react';
 import { Button } from '../components/motion/button';
 import { Input } from '../components/motion/input';
 import { Loader } from '../components/motion/loader';
@@ -27,6 +28,32 @@ const SIGNUP_FAILURES: Readonly<Record<SignupFailure, string>> = {
     'Seu navegador bloqueou a janela da Meta. Permita pop-ups para este site e tente de novo.',
 };
 const DISABLED_MESSAGE = 'O canal do WhatsApp não está habilitado neste ambiente.';
+
+/**
+ * Spec 039 (E1): pré-requisitos da coexistência, conferidos pela própria pessoa antes de abrir a janela
+ * da Meta (o site só orienta; não verifica nada). Texto revisto depois do E0: ser administrador do
+ * portfólio NÃO impediu o fluxo, então não aparece como requisito nem como causa certa de erro.
+ */
+export const COEXISTENCE_CHECKLIST: readonly string[] = [
+  'O aplicativo WhatsApp Business está atualizado e aberto no celular, com a câmera liberada (a Meta pode pedir para ler um QR code).',
+  'Este número já é usado no aplicativo WhatsApp Business há alguns dias.',
+  'Você consegue entrar no portfólio de negócios da Meta que vai escolher, ou vai criar um novo na janela da Meta.',
+  'O número não está conectado a outra plataforma de atendimento nem a outra empresa do Soprei.',
+  'Você tem uma forma de pagamento para cadastrar na Meta, se ela pedir.',
+];
+/** Spec 039 (D9): texto fixo de ajuda quando a conexão não termina; nunca afirma qual foi a causa. */
+export const COEXISTENCE_UNFINISHED = 'A conexão não terminou.';
+export const COEXISTENCE_HELP: readonly string[] = [
+  'o número já está em uso em outra plataforma de atendimento;',
+  'o aplicativo no celular está desatualizado ou fechado;',
+  'a conta usada na janela da Meta não tem acesso ao portfólio ou à conta do WhatsApp Business escolhida.',
+];
+export const PERSONAL_WHATSAPP_HINT =
+  'Usa o WhatsApp comum (não o Business)? Instale o WhatsApp Business no celular e migre o número antes de conectar.';
+export const COEXISTENCE_CONNECTED_TEXT =
+  'O número continua no aplicativo WhatsApp Business do celular. Quando alguém da equipe responde um contato pelo celular, a IA para de responder esse contato por 12 horas, ou até você reativar na conversa.';
+
+type ConnectChoice = 'coexistence' | 'api_only';
 const NOT_CONFIGURED_MESSAGE = 'A conexão pelo site ainda não está configurada.';
 
 type Notice = { tone: 'error' | 'info' | 'success'; text: string } | null;
@@ -65,6 +92,10 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
   const [phase, setPhase] = useState<SignupState['phase']>('idle');
   const [confirming, setConfirming] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  // Spec 039: a escolha do fluxo, as caixas do checklist e a ajuda vivem só em memória.
+  const [choice, setChoice] = useState<ConnectChoice | null>(null);
+  const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
+  const [help, setHelp] = useState(false);
   const generation = useRef(0);
   const machine = useRef<SignupState>(INITIAL_SIGNUP_STATE);
   const facebook = useRef<FacebookApi | null>(null);
@@ -146,7 +177,7 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
 
   const submitSignup = useCallback(
     async (
-      body: { code: string; wabaId: string; phoneNumberId: string },
+      body: { code: string; wabaId: string; phoneNumberId?: string; mode?: 'coexistence' },
       stamp: number,
     ): Promise<void> => {
       setBusy(true);
@@ -161,9 +192,14 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
         setPhase(machine.current.phase);
         setChannel(next);
         setExplaining(false);
+        setChoice(null);
+        setChecked(new Set());
         setNotice({
           tone: 'success',
-          text: 'Número conectado. O assistente já pode responder nele.',
+          text:
+            body.mode === 'coexistence'
+              ? 'Número conectado pelo aplicativo. O assistente já pode responder nele; quando a equipe responder pelo celular, a IA pausa naquele contato.'
+              : 'Número conectado. O assistente já pode responder nele.',
         });
       } catch (error) {
         if (stamp !== generation.current) return;
@@ -174,6 +210,7 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
         ).state;
         setPhase(machine.current.phase);
         report(error, stamp);
+        if (body.mode === 'coexistence') setHelp(true);
       } finally {
         if (stamp === generation.current) setBusy(false);
       }
@@ -187,14 +224,25 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
       const { state, effect } = stepSignup(previous, input, Date.now());
       machine.current = state;
       setPhase(state.phase);
+      const coexistence = state.mode === 'coexistence';
       if (previous.phase === 'waiting' && state.phase === 'cancelled') {
-        setNotice({ tone: 'info', text: 'Conexão cancelada.' });
+        setNotice({
+          tone: 'info',
+          text: coexistence ? COEXISTENCE_UNFINISHED : 'Conexão cancelada.',
+        });
+        if (coexistence) setHelp(true);
       } else if (previous.phase === 'waiting' && state.phase === 'failed' && state.failure) {
         setNotice({ tone: 'error', text: SIGNUP_FAILURES[state.failure] });
+        if (coexistence && state.failure !== 'popup_blocked') setHelp(true);
       }
       if (effect !== null) {
         void submitSignup(
-          { code: effect.code, wabaId: effect.wabaId, phoneNumberId: effect.phoneNumberId },
+          {
+            code: effect.code,
+            wabaId: effect.wabaId,
+            ...(effect.phoneNumberId === null ? {} : { phoneNumberId: effect.phoneNumberId }),
+            ...(effect.mode === 'coexistence' ? { mode: 'coexistence' as const } : {}),
+          },
           generation.current,
         );
       }
@@ -219,9 +267,13 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
     };
   }, [phase]);
 
-  // Clique 1: abre o painel explicativo e só então carrega o SDK (uma vez).
-  const openExplanation = (): void => {
+  // Clique 1: abre o painel explicativo e só então carrega o SDK (uma vez). Spec 039: com a coexistência,
+  // o clique é a escolha de um dos dois cartões.
+  const openExplanation = (picked: ConnectChoice = 'api_only'): void => {
     setNotice(null);
+    setHelp(false);
+    setChoice(picked);
+    setChecked(new Set());
     setExplaining(true);
     if (facebook.current !== null || sdk === 'loading' || setup?.embeddedSignup == null) return;
     setSdk('loading');
@@ -247,15 +299,23 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
     const fb = facebook.current;
     const embedded = setup?.embeddedSignup;
     if (fb === null || embedded == null || phase === 'waiting' || phase === 'submitting') return;
+    const coexistence = choice === 'coexistence';
+    const coexistenceConfigId = setup?.coexistence.configId ?? null;
+    if (coexistence && (coexistenceConfigId === null || !allChecked)) return;
     setNotice(null);
-    dispatch({ type: 'start' });
+    setHelp(false);
+    dispatch({ type: 'start', mode: coexistence ? 'coexistence' : 'api_only' });
     const { popupBlocked } = startFacebookLogin(
       fb,
       {
-        config_id: embedded.configId,
+        config_id:
+          coexistence && coexistenceConfigId !== null ? coexistenceConfigId : embedded.configId,
         response_type: 'code',
         override_default_response_type: true,
-        extras: { setup: {} },
+        // `featureType` só na coexistência (spec 039): o fluxo de número novo não muda.
+        extras: coexistence
+          ? { setup: {}, featureType: 'whatsapp_business_app_onboarding' }
+          : { setup: {} },
       },
       (response) => dispatchRef.current({ type: 'code', code: codeOf(response) }),
     );
@@ -266,7 +326,7 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
     setSdk('idle');
     setNotice(null);
     facebook.current = null;
-    openExplanation();
+    openExplanation(choice ?? 'api_only');
   };
 
   const disconnect = async (): Promise<void> => {
@@ -288,6 +348,7 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
               tokenExpiresAt: null,
               connectedAt: null,
               tokenInvalidAt: null,
+              mode: null,
             },
       );
       setNotice({ tone: 'success', text: 'Número desconectado.' });
@@ -350,6 +411,20 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
 
   const working = busy || phase === 'waiting' || phase === 'submitting';
   const embedded = setup?.embeddedSignup ?? null;
+  // Spec 039: a escolha só existe com a coexistência disponível no servidor (e o SDK configurado).
+  const coexistenceAvailable =
+    embedded !== null &&
+    setup?.coexistence.available === true &&
+    setup.coexistence.configId !== null;
+  const allChecked = checked.size === COEXISTENCE_CHECKLIST.length;
+  const toggleCheck = (index: number, on: boolean): void => {
+    setChecked((current) => {
+      const next = new Set(current);
+      if (on) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  };
   const state = channel?.state ?? 'NOT_CONNECTED';
 
   const alert = notice && (
@@ -430,6 +505,21 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
                 </div>
               )}
             </dl>
+            {channel.mode === 'COEXISTENCE' && (
+              <section
+                aria-labelledby="coexistencia-titulo"
+                className="grid gap-2 rounded-2xl border border-border bg-card p-4"
+              >
+                <h3
+                  id="coexistencia-titulo"
+                  className="m-0 flex items-center gap-2 text-base font-semibold"
+                >
+                  <Smartphone aria-hidden="true" className="size-4" />
+                  Conectado pelo aplicativo
+                </h3>
+                <p className="m-0 text-sm">{COEXISTENCE_CONNECTED_TEXT}</p>
+              </section>
+            )}
           </>
         )}
         {state === 'TOKEN_INVALID' && (
@@ -459,10 +549,52 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
         <p className="text-muted-foreground">{NOT_CONFIGURED_MESSAGE}</p>
       )}
 
+      {canManage && !explaining && coexistenceAvailable && (
+        <section aria-labelledby="escolha-titulo" className="grid gap-3">
+          <h3 id="escolha-titulo" className="m-0 text-lg font-semibold">
+            Como você quer conectar?
+          </h3>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid content-start gap-2 rounded-2xl border border-border bg-card p-4">
+              <p className="m-0 font-semibold">
+                Uso o WhatsApp Business no celular e quero continuar usando
+              </p>
+              <p className="m-0 text-sm">
+                Recomendado. O número continua no aplicativo do celular e você pode responder por
+                lá. Quando a equipe responde um contato pelo celular, a IA para de responder esse
+                contato por um tempo.
+              </p>
+              <p className="m-0 text-sm text-muted-foreground">{PERSONAL_WHATSAPP_HINT}</p>
+              <div>
+                <Button disabled={working} onClick={() => openExplanation('coexistence')}>
+                  Conectar pelo aplicativo
+                </Button>
+              </div>
+            </div>
+            <div className="grid content-start gap-2 rounded-2xl border border-border bg-card p-4">
+              <p className="m-0 font-semibold">Vou usar um número novo, só para o Soprei</p>
+              <p className="m-0 text-sm">
+                O número sai do aplicativo e fica só com o Soprei. A conta do WhatsApp Business é
+                criada ou escolhida na janela da Meta.
+              </p>
+              <div>
+                <Button
+                  variant="outline"
+                  disabled={working}
+                  onClick={() => openExplanation('api_only')}
+                >
+                  Conectar um número novo
+                </Button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {canManage && !explaining && (
         <div className="flex flex-wrap gap-2">
-          {embedded !== null && (
-            <Button disabled={working} onClick={openExplanation}>
+          {embedded !== null && !coexistenceAvailable && (
+            <Button disabled={working} onClick={() => openExplanation('api_only')}>
               {reconnectLabel}
             </Button>
           )}
@@ -480,15 +612,49 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
           className="grid gap-3 rounded-2xl border border-border bg-card p-5"
         >
           <h3 id="explicacao-titulo" className="m-0 text-lg font-semibold">
-            Conectar com a Meta
+            {choice === 'coexistence' ? 'Conectar pelo aplicativo' : 'Conectar com a Meta'}
           </h3>
-          <p className="m-0 text-sm">
-            Uma janela da Meta vai abrir. Nela você escolhe a conta do WhatsApp Business e o número.
-            Depois disso, o Soprei passa a responder as mensagens recebidas nesse número.
-          </p>
+          {choice === 'coexistence' ? (
+            <>
+              <p className="m-0 text-sm">
+                Uma janela da Meta vai abrir. Nela você entra, escolhe o portfólio e a conta do
+                WhatsApp Business e confirma o número do aplicativo. Antes, confira:
+              </p>
+              <fieldset className="m-0 grid gap-2 border-0 p-0">
+                <legend className="mb-1 text-sm font-semibold">Antes de abrir a janela</legend>
+                {COEXISTENCE_CHECKLIST.map((item, index) => (
+                  <label key={item} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-5 shrink-0"
+                      checked={checked.has(index)}
+                      onChange={(event) => toggleCheck(index, event.target.checked)}
+                    />
+                    <span>{item}</span>
+                  </label>
+                ))}
+              </fieldset>
+            </>
+          ) : (
+            <p className="m-0 text-sm">
+              Uma janela da Meta vai abrir. Nela você escolhe a conta do WhatsApp Business e o
+              número. Depois disso, o Soprei passa a responder as mensagens recebidas nesse número.
+            </p>
+          )}
           <p className="m-0 text-sm text-muted-foreground" id="aviso-waba">
             {WABA_WARNING}
           </p>
+          {help && choice === 'coexistence' && (
+            <div className="grid gap-1 rounded-xl border border-border p-3 text-sm" role="note">
+              <p className="m-0 font-semibold">{COEXISTENCE_UNFINISHED}</p>
+              <p className="m-0">As causas mais comuns são (o site não sabe qual foi):</p>
+              <ul className="m-0 grid gap-1 pl-5">
+                {COEXISTENCE_HELP.map((cause) => (
+                  <li key={cause}>{cause}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {sdk === 'loading' && (
             <p className="m-0 flex items-center gap-2 text-sm text-muted-foreground">
               <Loader variant="spinner" size={16} label="Carregando" />
@@ -497,7 +663,7 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
           )}
           <div className="flex flex-wrap gap-2">
             <Button
-              disabled={sdk !== 'ready' || working}
+              disabled={sdk !== 'ready' || working || (choice === 'coexistence' && !allChecked)}
               aria-describedby="aviso-waba"
               onClick={continueToMeta}
             >
@@ -517,6 +683,9 @@ export function ChannelPage({ companyId, canManage, settle, onChanged }: Channel
                 dispatch({ type: 'reset' });
                 setExplaining(false);
                 setNotice(null);
+                setHelp(false);
+                setChoice(null);
+                setChecked(new Set());
               }}
             >
               Cancelar

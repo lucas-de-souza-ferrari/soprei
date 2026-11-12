@@ -100,7 +100,10 @@ export interface WhatsappRoutesParams {
   readonly appSecret: string;
   /** `WHATSAPP_VERIFY_TOKEN`: só o handshake de verificação. */
   readonly verifyToken: string;
-  readonly intake: Pick<ChannelIntakeService, 'accept'>;
+  readonly intake: Pick<ChannelIntakeService, 'accept'> &
+    Partial<Pick<ChannelIntakeService, 'acceptEchoes'>>;
+  /** Spec 039: trata os ecos do aplicativo (`WHATSAPP_COEXISTENCE_ENABLED`). Padrão: desligado. */
+  readonly echoesEnabled?: boolean;
 }
 
 /**
@@ -404,6 +407,7 @@ export function buildServer({
       appSecret: whatsapp.appSecret,
       verifyToken: whatsapp.verifyToken,
       intake: whatsapp.intake,
+      echoesEnabled: whatsapp.echoesEnabled === true,
       ...(metrics === undefined ? {} : { metrics }),
     });
   }

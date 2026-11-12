@@ -19,6 +19,8 @@ import { describeError } from './describe-error.js';
 import type {
   AcceptInboundOptions,
   AcceptedMessage,
+  HumanEchoInput,
+  HumanEchoResult,
   PendingResponse,
   RespondToPendingOptions,
 } from '../attendance/attendance.service.js';
@@ -59,6 +61,14 @@ export interface InboundAttendance {
     options?: RespondToPendingOptions,
   ): Promise<PendingResponse>;
   hasPendingMessages(companyId: CompanyId, contactRef: string): Promise<boolean>;
+  /** Spec 039: grava o eco da equipe e pausa a IA. Opcional só para os testes antigos. */
+  recordHumanEcho?(
+    companyId: CompanyId,
+    input: HumanEchoInput,
+    options?: AcceptInboundOptions,
+  ): Promise<HumanEchoResult>;
+  /** Spec 039: a IA está pausada neste contato agora? Ausente = nunca pausada. */
+  isAiPausedFor?(companyId: CompanyId, contactRef: string): Promise<boolean>;
 }
 
 /** Janela de espera e limites do lote (spec 013); vêm da config do canal. */
@@ -84,7 +94,15 @@ export interface ChannelInboundProcessorDeps {
   readonly connections: Pick<ChannelConnectionRepository, 'markTokenInvalid'>;
   readonly metrics?:
     | (Pick<Metrics, 'countChannelStateTransition'> &
-        Partial<Pick<Metrics, 'countUsageSentMessage' | 'countUsageMeterError'>>)
+        Partial<
+          Pick<
+            Metrics,
+            | 'countUsageSentMessage'
+            | 'countUsageMeterError'
+            | 'countChannelEcho'
+            | 'countUnsentReply'
+          >
+        >)
     | undefined;
   /**
    * Medição de respostas enviadas (spec 031): conta a mensagem de saída depois do `sendText` bem-sucedido.
@@ -135,6 +153,8 @@ export class ChannelInboundProcessor {
         return this.processAccept(companyId, job, context);
       case 'flush':
         return this.processFlush(companyId, job, context);
+      case 'echo':
+        return this.processEcho(companyId, job);
     }
   }
 
@@ -151,6 +171,12 @@ export class ChannelInboundProcessor {
       const companyId = parseCompanyId(job);
       if (job.kind === 'notice') {
         this.deps.logger.warn({ companyId, ...refs }, 'aviso constante não enviado: o job falhou');
+        return;
+      }
+      if (job.kind === 'echo') {
+        // Eco da equipe (spec 039): nada a enviar ao contato; a mensagem da equipe pode ter ficado sem
+        // gravar (a reentrega do canal com o mesmo id a grava).
+        this.deps.logger.warn({ companyId, ...refs }, 'eco da equipe não gravado: o job falhou');
         return;
       }
       if (await this.alreadyHandled(companyId, job)) {
@@ -176,7 +202,7 @@ export class ChannelInboundProcessor {
   /** Já existe resposta para o que o job tratava (ou, no `flush`, não há nada pendente)? */
   private async alreadyHandled(
     companyId: CompanyId,
-    job: Exclude<ChannelJob, { kind: 'notice' }>,
+    job: Exclude<ChannelJob, { kind: 'notice' | 'echo' }>,
   ): Promise<boolean> {
     if (job.kind === 'flush') {
       return !(await this.deps.attendance.hasPendingMessages(companyId, job.contactRef));
@@ -271,6 +297,15 @@ export class ChannelInboundProcessor {
       throw await this.onAttendanceFailure(companyId, job, context, error);
     }
 
+    if (response.outcome === 'paused') {
+      // Spec 039: a equipe respondeu pelo celular; nada ao contato. Se sobrou pendente além do lido, o
+      // próximo turno também o trata.
+      if (response.hasMorePending) {
+        const scheduled = await this.deps.queue.scheduleFlush(job, { delayMs: 0, mode: 'ensure' });
+        if (!scheduled.ok) throw scheduled.error;
+      }
+      return 'done';
+    }
     if (response.outcome === 'blocked') {
       // Cota esgotada ou assinatura inativa (spec 031): nada ao contato, o provedor não foi chamado e as
       // mensagens seguem pendentes e visíveis; só o dono é avisado (painel e e-mail).
@@ -280,6 +315,25 @@ export class ChannelInboundProcessor {
     const { reply } = response;
     if (reply === null) {
       this.deps.logger.info({ companyId, ...refs }, 'nada pendente para responder');
+      return 'done';
+    }
+
+    // Spec 039: segunda leitura da pausa, logo antes do envio. Se a equipe respondeu pelo celular entre
+    // a gravação e aqui, a resposta fica gravada sem `sentAt` (como uma falha de envio) e não sai.
+    if (reply.sentAt === null && (await this.isPaused(companyId, job))) {
+      this.deps.logger.info(
+        { companyId, ...refs, replyId: reply.id },
+        'IA pausada no contato antes do envio; resposta gravada e não enviada',
+      );
+      // A resposta fica sem `sentAt`: entra em `attendance_unsent_replies_total` (E3; revisão, S1).
+      try {
+        this.deps.metrics?.countUnsentReply?.();
+      } catch (err) {
+        this.deps.logger.warn(
+          describeError(err),
+          'falha ao registrar métrica de resposta não enviada',
+        );
+      }
       return 'done';
     }
 
@@ -306,6 +360,76 @@ export class ChannelInboundProcessor {
       );
     }
     return outcome;
+  }
+
+  /** A IA está pausada no contato do `flush`? Falha na leitura vale como "não" (o envio segue). */
+  private async isPaused(companyId: CompanyId, job: FlushJob): Promise<boolean> {
+    const { attendance } = this.deps;
+    if (attendance.isAiPausedFor === undefined) return false;
+    try {
+      return await attendance.isAiPausedFor(companyId, job.contactRef);
+    } catch (error) {
+      this.deps.logger.warn(
+        { companyId, ...refFields(job), ...describeError(error) },
+        'falha ao reler a pausa da IA antes do envio; o envio segue',
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Eco de uma mensagem que a equipe enviou pelo aplicativo (spec 039): grava a mensagem `HUMAN` e pausa
+   * a IA no contato. Nunca envia nada ao contato (nem o texto padrão). Empresa suspensa: descartado.
+   * Transitório: a fila retenta (o `externalId` torna a gravação idempotente); permanente: sem retentativa.
+   */
+  private async processEcho(
+    companyId: CompanyId,
+    job: Extract<InboundJob, { kind: 'echo' }>,
+  ): Promise<InboundJobOutcome> {
+    const refs = refFields(job);
+    const { attendance } = this.deps;
+    if (attendance.recordHumanEcho === undefined) {
+      throw new NonRetryableJobError('Eco da equipe sem tratamento configurado', {
+        context: { companyId, ...refs },
+      });
+    }
+    let outcome: HumanEchoResult;
+    try {
+      outcome = await attendance.recordHumanEcho(
+        companyId,
+        { contactRef: job.contactRef, externalId: job.externalId, text: job.text },
+        job.receivedAt === undefined ? {} : { receivedAt: new Date(job.receivedAt) },
+      );
+    } catch (error) {
+      if (error instanceof ForbiddenError) {
+        this.logSuspended(companyId, job);
+        this.countEcho('discarded');
+        return 'discarded';
+      }
+      if (isPermanentAttendanceError(error)) {
+        throw new NonRetryableJobError('Eco da equipe não pôde ser gravado', {
+          cause: error,
+          context: { companyId, ...refs, ...describeError(error) },
+        });
+      }
+      throw error;
+    }
+    this.countEcho(outcome.result);
+    this.deps.logger.info(
+      { companyId, ...refs, result: outcome.result },
+      outcome.result === 'recorded'
+        ? 'eco da equipe gravado; IA pausada no contato'
+        : 'eco da equipe ignorado (repetido ou resposta nossa)',
+    );
+    return 'done';
+  }
+
+  private countEcho(result: 'recorded' | 'duplicate' | 'own' | 'discarded'): void {
+    try {
+      this.deps.metrics?.countChannelEcho?.(result);
+    } catch {
+      // Métrica é acessório.
+    }
   }
 
   /** Envia a resposta ainda não enviada; resposta com `sentAt` não é reenviada. */

@@ -5,6 +5,7 @@ import type {
   ChannelStateView,
 } from '../../application/channel/channel-connection.service.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
+import { ValidationError } from '../../shared/errors/index.js';
 import { authenticateHook, requirePermission, membershipAuth } from '../common/auth.hooks.js';
 import { subscriptionExempt } from '../common/entitlement-config.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
@@ -18,6 +19,11 @@ export interface ChannelSetupInfo {
   readonly graphApiVersion: string;
   /** `CHANNEL_MANUAL_CONNECT_ENABLED`: só decide se a seção "Avançado" aparece no site. */
   readonly manualConnect: boolean;
+  /**
+   * Spec 039: coexistência com o aplicativo WhatsApp Business. `configId` é o da coexistência (ou o do
+   * Embedded Signup); sem isto (ou desligada) a escolha não aparece e o `mode: coexistence` é recusado.
+   */
+  readonly coexistence?: { readonly enabled: boolean; readonly configId: string | undefined };
 }
 
 export interface AdminChannelControllerOptions {
@@ -38,6 +44,8 @@ interface ChannelResponse {
   tokenExpiresAt: string | null;
   connectedAt: string | null;
   tokenInvalidAt: string | null;
+  /** Spec 039: `API_ONLY`, `COEXISTENCE` ou `null` sem conexão própria. */
+  mode: string | null;
 }
 
 /** Só estado e identificadores de negócio: nunca o token, o texto cifrado nem a chave. */
@@ -49,6 +57,7 @@ function toResponse(view: ChannelStateView): ChannelResponse {
     tokenExpiresAt: view.tokenExpiresAt?.toISOString() ?? null,
     connectedAt: view.connectedAt?.toISOString() ?? null,
     tokenInvalidAt: view.tokenInvalidAt?.toISOString() ?? null,
+    mode: view.mode,
   };
 }
 
@@ -65,6 +74,9 @@ export const adminChannelController: FastifyPluginCallback<AdminChannelControlle
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
   const config = rateLimitProfile('admin');
+  const coexistenceEnabled = setup?.coexistence?.enabled === true;
+  // Spec 039: o `config_id` só é público se a coexistência está ligada (senão a escolha não aparece).
+  const coexistenceConfigId = coexistenceEnabled ? (setup.coexistence.configId ?? null) : null;
 
   app.get(
     '/:companyId/channel',
@@ -93,6 +105,8 @@ export const adminChannelController: FastifyPluginCallback<AdminChannelControlle
                 graphApiVersion: setup.graphApiVersion,
               },
         manualConnect: setup.manualConnect,
+        // Spec 039: só valores públicos.
+        coexistence: { available: coexistenceConfigId !== null, configId: coexistenceConfigId },
       }),
     );
   }
@@ -119,6 +133,10 @@ export const adminChannelController: FastifyPluginCallback<AdminChannelControlle
     },
     async (request) => {
       const body = embeddedSignupBodySchema.parse(request.body);
+      // Spec 039: sem a coexistência ligada, o modo novo não existe (400, mensagem fixa).
+      if (body.mode === 'coexistence' && !coexistenceEnabled) {
+        throw new ValidationError('Dados inválidos', { code: 'CHANNEL_COEXISTENCE_DISABLED' });
+      }
       return toResponse(await channel.embeddedSignup(membershipAuth(request), body));
     },
   );
