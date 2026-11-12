@@ -2,7 +2,7 @@
 titulo: Política de Privacidade
 versao: 1
 atualizado-em: 2026-11-12
-situacao: rascunho
+situacao: vigente
 ---
 
 # Política de Privacidade do Soprei
@@ -11,9 +11,9 @@ Esta política explica quais dados pessoais o Soprei trata, para quê, com quem 
 
 ## 1. Quem somos
 
-O Soprei é um serviço de atendimento automatizado pelo WhatsApp com inteligência artificial, oferecido por [PREENCHER: razão social], CNPJ [PREENCHER: CNPJ], com sede em [PREENCHER: endereço].
+O Soprei é um serviço de atendimento automatizado pelo WhatsApp com inteligência artificial, oferecido por 67.176.856 LUCAS DE SOUZA FERRARI, CNPJ 67.176.856/0001-93, com sede em Rua Ana Maximo Balieiro, 57, Vila Municipal I, Guaratinguetá/SP, CEP 12509-805.
 
-Encarregado pelo tratamento de dados pessoais: [PREENCHER: nome do encarregado], pelo e-mail [PREENCHER: e-mail de privacidade].
+Encarregado pelo tratamento de dados pessoais: Lucas de Souza Ferrari, pelo e-mail lucasdesouzaferrari@gmail.com.
 
 ## 2. A quem esta política se aplica
 
@@ -24,7 +24,7 @@ Encarregado pelo tratamento de dados pessoais: [PREENCHER: nome do encarregado],
 ## 3. Nosso papel
 
 - Para os dados de **usuários** e de **pagamento**, o Soprei decide como os dados são tratados (é o **controlador**).
-- Para os dados de **contatos**, quem decide é a **empresa** com quem o contato conversa (ela é a **controladora**). O Soprei trata esses dados por conta e conforme as instruções dela (é o **operador**). Se você é contato, procure primeiro a empresa com quem conversou. [CONFERIR: J1]
+- Para os dados de **contatos**, quem decide é a **empresa** com quem o contato conversa (ela é a **controladora**). O Soprei trata esses dados por conta e conforme as instruções dela (é o **operador**). Se você é contato, procure primeiro a empresa com quem conversou.
 
 ## 4. Que dados tratamos
 
@@ -38,7 +38,6 @@ Encarregado pelo tratamento de dados pessoais: [PREENCHER: nome do encarregado],
 - E-mail e senha (guardamos apenas uma versão protegida da senha, que não permite recuperá-la).
 - Códigos de confirmação de e-mail e de recuperação de senha (guardamos só uma versão protegida, válida por 15 minutos).
 - As empresas de que você participa, seu papel em cada uma e a última empresa que você abriu.
-- Quando você aceitar os Termos de Uso pelo site, a versão aceita e a data do aceite. [CONFERIR: E2]
 - Registros de ações administrativas (por exemplo, quem convidou ou mudou o papel de alguém), sem texto livre e sem e-mail.
 - Os dados que você cadastra para a sua empresa: nome, instruções da assistente (persona), documentos da base de conhecimento, produtos e estoque, serviços e horários da agenda.
 
@@ -65,7 +64,7 @@ As mensagens podem conter qualquer informação que o contato decidir escrever, 
 - Prevenir abuso, fraude e acessos indevidos (limites de tentativas e de requisições).
 - Cumprir obrigações legais, como a guarda de registros de cobrança.
 
-Bases legais: [CONFERIR: J1 — execução de contrato, legítimo interesse, cumprimento de obrigação legal; para contatos, a base é definida pela empresa controladora].
+Bases legais: para os dados de usuários, a execução do contrato (conta, assinatura e suporte), o cumprimento de obrigação legal (registros de cobrança) e o legítimo interesse (segurança e prevenção de abuso e fraude). Para os dados de contatos, a base legal é definida pela empresa controladora.
 
 O Soprei **não** vende dados pessoais, **não** usa os dados para publicidade e **não** treina modelos de inteligência artificial com as conversas.
 
@@ -73,20 +72,20 @@ O Soprei **não** vende dados pessoais, **não** usa os dados para publicidade e
 
 As respostas automáticas são geradas por um modelo de linguagem da Anthropic (Claude). Para isso, enviamos ao provedor as instruções da empresa, o trecho recente da conversa, a mensagem do contato e, quando úteis, trechos da base de conhecimento, produtos e horários livres da agenda. O número de telefone do contato **não** é enviado ao provedor (salvo se o próprio contato o escrever na mensagem).
 
-As respostas podem conter erros. A empresa pode pedir que a assistente encaminhe a conversa para uma pessoa e pode assumir a conversa pelo aplicativo WhatsApp Business. [CONFERIR: J — art. 20 da LGPD, revisão de decisões automatizadas]
+As respostas podem conter erros. A empresa pode pedir que a assistente encaminhe a conversa para uma pessoa e pode assumir a conversa pelo aplicativo WhatsApp Business. Se você entender que uma resposta automática afetou seus interesses, pode pedir à empresa que a conversa seja revista por uma pessoa.
 
 ## 7. Com quem compartilhamos
 
 Só com os fornecedores necessários para o serviço funcionar:
 
-| Fornecedor                        | Para quê                                                                | Onde                                          |
-| --------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------- |
-| Anthropic                         | gerar as respostas automáticas                                          | Estados Unidos [CONFERIR: S1]                 |
-| Meta (WhatsApp Business Platform) | receber e enviar as mensagens do WhatsApp; conectar o número da empresa | [CONFERIR: S2]                                |
-| InfinitePay                       | processar os pagamentos                                                 | Brasil [CONFERIR: S3]                         |
-| Google (Gmail)                    | enviar códigos, convites e avisos por e-mail                            | Estados Unidos e outros países [CONFERIR: S4] |
-| Hetzner                           | hospedar o servidor, o banco de dados e as cópias de segurança          | Finlândia (Helsinque) [CONFERIR: S4]          |
-| Cloudflare                        | resolver o endereço do site (DNS); não recebe o conteúdo do site        | [CONFERIR: S4]                                |
+| Fornecedor                        | Para quê                                                                | Onde                           |
+| --------------------------------- | ----------------------------------------------------------------------- | ------------------------------ |
+| Anthropic                         | gerar as respostas automáticas                                          | Estados Unidos                 |
+| Meta (WhatsApp Business Platform) | receber e enviar as mensagens do WhatsApp; conectar o número da empresa | Estados Unidos e outros países |
+| InfinitePay                       | processar os pagamentos                                                 | Brasil                         |
+| Google (Gmail)                    | enviar códigos, convites e avisos por e-mail                            | Estados Unidos e outros países |
+| Hetzner                           | hospedar o servidor, o banco de dados e as cópias de segurança          | Finlândia (Helsinque)          |
+| Cloudflare                        | resolver o endereço do site (DNS); não recebe o conteúdo do site        | Estados Unidos e outros países |
 
 As fontes de letra do site são servidas pelo próprio Soprei; seu navegador não as busca em outro serviço.
 
@@ -96,7 +95,7 @@ Também podemos compartilhar dados quando a lei ou uma ordem de autoridade compe
 
 ## 8. Transferência internacional
 
-Alguns fornecedores processam dados fora do Brasil, como indicado acima. [CONFERIR: S5 e J — mecanismo legal da transferência]
+Alguns fornecedores processam dados fora do Brasil, como indicado acima. Essas transferências se apoiam nas garantias contratuais de proteção de dados oferecidas por esses fornecedores, conforme o artigo 33 da LGPD.
 
 ## 9. Por quanto tempo guardamos
 
@@ -109,11 +108,11 @@ A exclusão automática por prazo ainda está em implantação. Enquanto ela nã
 | Mensagens em processamento      | 1 hora depois de processadas (24 horas em caso de falha); até a limpeza automática entrar no ar, a remoção pode demorar mais                                                           |
 | Conta não confirmada            | apagada 7 dias depois do último pedido de cadastro                                                                                                                                     |
 | E-mail de convite não aceito    | apagado 7 dias depois de o convite vencer                                                                                                                                              |
-| Conta excluída a pedido         | a pedido, feita manualmente pela nossa equipe; a remoção do e-mail e da senha, deixando o restante sem identificação, é o resultado pretendido [CONFERIR: E7]                          |
+| Conta excluída a pedido         | a pedido, feita manualmente pela nossa equipe; a remoção do e-mail e da senha, deixando o restante sem identificação, é o resultado pretendido                                         |
 | Empresa excluída a pedido       | sai do ar e o número do WhatsApp é desligado quando atendemos o pedido; a exclusão definitiva dos dados, 30 dias depois do pedido, está em implantação; os registros de cobrança ficam |
-| Registros de cobrança           | 5 anos [CONFERIR: S6]                                                                                                                                                                  |
-| Logs técnicos                   | 30 dias [CONFERIR: rotação dos logs no servidor]; não contêm o texto das mensagens nem telefones                                                                                       |
-| Cópias de segurança             | até 35 dias [CONFERIR: limpeza das cópias no servidor]; uma cópia restaurada pode trazer de volta dados cuja exclusão foi pedida depois dela [CONFERIR: E5 a E8]                       |
+| Registros de cobrança           | 5 anos, prazo exigido pela legislação tributária                                                                                                                                       |
+| Logs técnicos                   | até 30 dias; não contêm o texto das mensagens nem telefones                                                                                                                            |
+| Cópias de segurança             | guardadas por tempo limitado e substituídas pelas mais novas; se uma cópia for restaurada, refazemos as exclusões pedidas depois dela                                                  |
 
 ## 10. Cookies e armazenamento no navegador
 
@@ -123,21 +122,21 @@ A exclusão automática por prazo ainda está em implantação. Enquanto ela nã
 
 ## 11. Segurança
 
-Senhas e códigos são guardados apenas em forma protegida; as credenciais do WhatsApp de cada empresa são cifradas; cada empresa só acessa os próprios dados; o conteúdo das mensagens e os telefones não são gravados nos logs técnicos; o acesso ao site é feito por conexão segura (HTTPS). Nenhum sistema é totalmente imune a falhas; em caso de incidente com risco relevante, avisaremos a Autoridade Nacional de Proteção de Dados (ANPD), as empresas afetadas e os titulares, conforme a lei. [CONFERIR: S5]
+Senhas e códigos são guardados apenas em forma protegida; as credenciais do WhatsApp de cada empresa são cifradas; cada empresa só acessa os próprios dados; o conteúdo das mensagens e os telefones não são gravados nos logs técnicos; o acesso ao site é feito por conexão segura (HTTPS). Nenhum sistema é totalmente imune a falhas; em caso de incidente com risco relevante, avisaremos a Autoridade Nacional de Proteção de Dados (ANPD), as empresas afetadas e os titulares, conforme a lei.
 
 ## 12. Seus direitos
 
 A LGPD garante, entre outros, os direitos de confirmar se tratamos seus dados, acessá-los, corrigi-los, pedir a eliminação, a portabilidade e informações sobre o compartilhamento.
 
-- **Contatos:** procure a empresa com quem você conversou; ela nos encaminha o pedido e nós fazemos a exclusão manualmente. Se não conseguir falar com ela, escreva para [PREENCHER: e-mail de privacidade] e encaminharemos o pedido.
-- **Usuários:** peça a exclusão da sua conta pelo e-mail [PREENCHER: e-mail de privacidade], escrevendo a partir do e-mail da conta.
+- **Contatos:** procure a empresa com quem você conversou; ela nos encaminha o pedido e nós fazemos a exclusão manualmente. Se não conseguir falar com ela, escreva para lucasdesouzaferrari@gmail.com e encaminharemos o pedido.
+- **Usuários:** peça a exclusão da sua conta pelo e-mail lucasdesouzaferrari@gmail.com, escrevendo a partir do e-mail da conta.
 - Veja também as [instruções de exclusão de dados](/exclusao-de-dados).
 
 Você também pode apresentar reclamação à ANPD.
 
 ## 13. Menores de idade
 
-O site e as contas são destinados a maiores de 18 anos que agem em nome de empresas. [CONFERIR: J — contatos menores de idade]
+O site e as contas são destinados a maiores de 18 anos que agem em nome de empresas. O Soprei não é direcionado a crianças e adolescentes; se um contato menor de idade conversar com uma empresa, cabe a ela, como controladora, observar as regras do artigo 14 da LGPD.
 
 ## 14. Mudanças nesta política
 
