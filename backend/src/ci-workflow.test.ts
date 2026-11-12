@@ -32,9 +32,11 @@ function jobsOf(workflow: string): Map<string, string> {
   return jobs;
 }
 
-/** Comandos `run:` de uma linha de um job, na ordem. */
+/** Comandos `run:` de uma linha de um job, na ordem (blocos `run: |` ficam de fora). */
 function runsOf(job: string): string[] {
-  return [...job.matchAll(/^\s+(?:- )?run: (.+)$/gm)].map((match) => (match[1] ?? '').trim());
+  return [...job.matchAll(/^\s+(?:- )?run: (.+)$/gm)]
+    .map((match) => (match[1] ?? '').trim())
+    .filter((run) => !/^[|>][-+]?$/.test(run));
 }
 
 const jobs = jobsOf(ci);
@@ -80,6 +82,7 @@ describe('pipeline do CI (spec 036)', () => {
         'pnpm lint',
         'pnpm format:check',
         'shellcheck deploy/*.sh',
+        'actionlint',
         'pnpm build',
       ],
     );
@@ -98,6 +101,29 @@ describe('pipeline do CI (spec 036)', () => {
         run.startsWith('pnpm --filter soprei-frontend test:browser'),
       ),
       'browser não roda test:browser',
+    );
+  });
+
+  it('actionlint (spec 037, E3): versão fixa, SHA-256 conferido antes de extrair, instalado antes de rodar', () => {
+    const text = job('static');
+    const install = text.indexOf('- name: Instalar o actionlint');
+    const run = text.indexOf('- run: actionlint\n');
+    assert.ok(install >= 0, 'passo de instalação do actionlint ausente no job static');
+    assert.ok(run > install, 'o actionlint roda depois de instalado');
+    assert.ok(text.indexOf('- run: shellcheck deploy/*.sh') < install, 'depois do shellcheck');
+    const step = text.slice(install, run);
+    assert.match(step, /ACTIONLINT_VERSION: \d+\.\d+\.\d+\n/, 'versão fixa (nunca latest)');
+    assert.match(step, /ACTIONLINT_SHA256: [0-9a-f]{64}\n/);
+    assert.match(step, /releases\/download\/v\$\{ACTIONLINT_VERSION\}\//);
+    assert.doesNotMatch(step, /latest/);
+    const check = step.indexOf('sha256sum --check --strict');
+    const extract = step.indexOf('tar -xzf');
+    assert.ok(check >= 0 && extract > check, 'a soma é conferida antes de extrair');
+    assert.match(step, /set -euo pipefail/);
+    assert.match(
+      text.slice(0, install),
+      /actionlint_\d+\.\d+\.\d+_checksums\.txt.*\n.*github\.com\/rhysd\/actionlint\/releases\/tag\/v/,
+      'fonte da soma registrada no comentário do passo',
     );
   });
 

@@ -1,0 +1,172 @@
+name: Deploy
+
+# Spec 037, E3: publica na produção, sozinho, cada commit da main cujo workflow "CI" terminou verde.
+# O que roda no servidor é o deploy/deploy.sh já instalado, pelo programa de entrada
+# (/usr/local/sbin/soprei-deploy-entry), que só aceita "--env production --ref <SHA> [--dry-run]" e
+# recusa SHA fora da main ou mais antigo que o em execução. A chave guardada aqui não abre terminal.
+#
+# Regras (o teste backend/src/deploy-workflow.test.ts as trava):
+#   - gatilhos só workflow_run (do CI, push na main deste repositório) e workflow_dispatch (sempre dry-run);
+#   - nenhuma ação de terceiros e nenhum checkout: nada do repositório roda no executor;
+#   - valores do evento só entram nos scripts por env:, conferidos antes de qualquer uso;
+#   - interruptor: variável do repositório DEPLOY_ENABLED (diferente de 'true' = job pulado).
+# Passos do dono, como desligar e o que cada código quer dizer: docs/ops/deploy.md.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: SHA completo (40 hexadecimais) de um commit da main. O disparo manual só faz o dry-run.
+        required: true
+        type: string
+
+permissions: {}
+
+# Um deploy em andamento nunca é cancelado; um pendente novo substitui o pendente anterior.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    name: Publicar na produção
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' && (
+        (github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository) ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      )
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      INPUT_SHA: ${{ inputs.sha }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Conferir o pedido
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ $EVENT_NAME == workflow_dispatch ]]; then
+            sha=$INPUT_SHA
+            mode=dry-run
+          else
+            sha=$RUN_SHA
+            mode=deploy
+          fi
+          if [[ ! $sha =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'SHA fora do formato (40 hexadecimais minúsculos).' >&2
+            exit 1
+          fi
+          skip=false
+          if [[ $mode == deploy ]]; then
+            # Só para não gerar ruído: quem garante que nada volta para trás é o servidor.
+            tip=$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha || true)
+            if [[ $tip =~ ^[0-9a-f]{40}$ && $tip != "$sha" ]]; then
+              skip=true
+              {
+                echo '### Deploy: ultrapassado'
+                echo ''
+                echo "O commit ${sha:0:7} foi ultrapassado por um mais novo na main (${tip:0:7}); ele será publicado quando o CI dele terminar."
+              } >>"$GITHUB_STEP_SUMMARY"
+            elif [[ ! $tip =~ ^[0-9a-f]{40}$ ]]; then
+              echo 'Não consegui ler a ponta da main; seguindo (o servidor confere a main de novo).'
+            fi
+          fi
+          {
+            echo "sha=$sha"
+            echo "mode=$mode"
+            echo "skip=$skip"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Preparar a chave e o known_hosts
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ -z $DEPLOY_SSH_KEY || -z $DEPLOY_SSH_KNOWN_HOSTS ]]; then
+            echo 'Faltam os segredos DEPLOY_SSH_KEY e DEPLOY_SSH_KNOWN_HOSTS no ambiente production.' >&2
+            exit 1
+          fi
+          printf '%s\n' "$DEPLOY_SSH_KEY" >"$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" >"$RUNNER_TEMP/deploy_known_hosts"
+
+      - name: Pedir o deploy ao servidor
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          SHA: ${{ steps.plan.outputs.sha }}
+          MODE: ${{ steps.plan.outputs.mode }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+        run: |
+          # Sem -e: o código de saída do ssh precisa chegar ao resumo antes de o passo falhar.
+          set +e
+          set -uo pipefail
+          if [[ ! $SHA =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'SHA fora do formato.' >&2
+            exit 1
+          fi
+          if [[ ! $DEPLOY_SSH_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ || ! $DEPLOY_SSH_HOST =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]]; then
+            echo 'DEPLOY_SSH_USER (variável) ou DEPLOY_SSH_HOST (segredo) ausente ou fora do formato.' >&2
+            exit 1
+          fi
+          request="--env production --ref $SHA"
+          if [[ $MODE == dry-run ]]; then
+            request="$request --dry-run"
+          fi
+          output="$RUNNER_TEMP/deploy-output.txt"
+          ssh -F /dev/null \
+            -i "$RUNNER_TEMP/deploy_key" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/deploy_known_hosts" \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o UpdateHostKeys=no \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            -T "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" "$request" 2>&1 | tee "$output"
+          rc=${PIPESTATUS[0]}
+          case "$rc" in
+            0) meaning='concluído: publicado, "já está nessa versão" ou plano do dry-run' ;;
+            1) meaning='recusado antes de mexer; nada mudou (trava ocupada, migration destrutiva, SHA fora da main ou mais antigo, ENABLED=false)' ;;
+            2) meaning='falhou e a versão anterior voltou saudável; ver as migrations não revertidas no log' ;;
+            3) meaning='INTERVENÇÃO MANUAL: entrar no servidor e seguir docs/ops/deploy.md' ;;
+            64) meaning='o programa de entrada recusou o pedido (defeito do workflow)' ;;
+            255) meaning='o SSH falhou (rede, chave, known_hosts); o deploy pode não ter começado: conferir /var/log/soprei-deploy/production.log' ;;
+            *) meaning='inesperado (job cancelado ou conexão caída?): o deploy.sh segue no servidor; conferir /var/log/soprei-deploy/production.log' ;;
+          esac
+          {
+            echo "### Deploy ($MODE) de ${SHA:0:7}"
+            echo ''
+            echo "Código $rc: $meaning"
+            echo ''
+            echo '```'
+            grep -E 'RESUMO:|DEPLOY FALHOU|INTERVENÇÃO MANUAL|RECUSADO|já está nessa versão|DRY-RUN concluído|recusado' "$output" | tail -n 20 || true
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Apagar a chave
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/deploy_known_hosts" "$RUNNER_TEMP/deploy-output.txt"
