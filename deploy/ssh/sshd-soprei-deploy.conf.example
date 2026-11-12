@@ -1,0 +1,18 @@
+# /etc/ssh/sshd_config.d/soprei-deploy.conf (spec 037, E3): defesa em dobro do comando forçado do
+# authorized_keys. Vale só para o usuário soprei-deploy.
+#
+# Antes de recarregar, com uma SEGUNDA sessão de root aberta até testar (para não se trancar fora):
+#   sshd -t                                   # sintaxe
+#   sshd -T -C user=soprei-deploy,host=teste,addr=127.0.0.1 | grep -Ei 'forcecommand|permittty|disableforwarding|authenticationmethods'
+#   sshd -T -C user=root,host=teste,addr=127.0.0.1 | grep -Ei 'forcecommand|permittty'
+#   systemctl reload ssh
+# A primeira consulta precisa mostrar as linhas abaixo; a segunda NÃO pode mostrar o ForceCommand
+# (se mostrar, o bloco Match vazou para outros usuários: no Ubuntu os arquivos deste diretório são
+# incluídos no começo do sshd_config; confira que este bloco fica isolado, S24).
+Match User soprei-deploy
+    ForceCommand /usr/local/sbin/soprei-deploy-entry
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    DisableForwarding yes
+    PermitTTY no
+    PermitUserRC no

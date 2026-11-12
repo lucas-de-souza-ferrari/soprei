@@ -14,7 +14,7 @@ Como atualizar a produção (e o staging) com **um comando**, esperar o sistema 
 ```
 deploy/deploy.sh --env <production|staging> [--ref <branch|tag|sha>] [--previous]
                  [--dry-run] [--force] [--adopt] [--allow-breaking]
-                 [--allow-unstaged] [--inject-health-failure]
+                 [--allow-unstaged] [--inject-health-failure] [--auto]
 ```
 
 | Opção                     | O que faz                                                                                                                                                  |
@@ -28,6 +28,7 @@ deploy/deploy.sh --env <production|staging> [--ref <branch|tag|sha>] [--previous
 | `--allow-breaking`        | Autoriza migration marcada como destrutiva. **Não há rollback automático** com ele (ver "Política de migration").                                          |
 | `--allow-unstaged`        | Só produção: aceita um SHA que não está no staging (emergência).                                                                                           |
 | `--inject-health-failure` | Só staging: faz a primeira espera de saúde falhar de propósito, para provar o rollback sem estragar nada.                                                  |
+| `--auto`                  | Modo do deploy automático (E3; quem o passa é o programa de entrada, não o dono). Só com `--ref` de 40 hexadecimais; recusa `--previous`, `--force`, `--adopt`, `--allow-breaking` e `--inject-health-failure`; depois do `git fetch`, o SHA precisa estar na `main` e não pode ser mais antigo que a versão registrada (saída 1 sem mexer). O log registra `modo=auto` (o manual, `modo=manual`). |
 
 ### Códigos de saída
 
@@ -100,8 +101,71 @@ O script roda com `umask 077` (log, estado, trava e backup ficam privados). O **
 - **Nunca** restaure um `pg_dump` de produção no staging, inteiro ou parcial, enquanto a spec 032 não definir retenção e anonimização (o staging nasce vazio e é preenchido pelo próprio sistema).
 - **Nunca** faça `source` do `.env` (valores com espaço e caracteres especiais quebram o shell, e o conteúdo não pode ir para o ambiente do script). Extraia o valor que precisar com `grep`/`cut`.
 - Segredos, e-mail pessoal e o IP do servidor não entram no repositório.
-- O script funciona como `root` (como hoje) e como um usuário dedicado; o usuário dedicado `soprei` só passa a ser necessário se um dia o disparo por GitHub Actions (E3, adiada) for feito.
+- O deploy (manual ou automático) roda como `root`, como hoje (D10 opção A, aprovada em 2026-11-12): o deploy automático entra pelo usuário `soprei-deploy`, que não tem poder próprio e só consegue chamar, pelo `sudo` restrito, o programa de entrada. Passar a aplicação inteira para um usuário dedicado `soprei` (D10 opção B) é etapa própria, futura, exigida antes de qualquer dado real no staging (decisão I4).
 - `config:check` (`pnpm --filter soprei-backend config:check`, dentro de `backend/`) valida o `.env` do diretório atual com o mesmo schema do boot, sem abrir conexão: imprime `ok` ou só os nomes das variáveis inválidas.
+
+## Deploy automático pelo GitHub Actions (E3)
+
+Aprovado pelo dono em 2026-11-12 (D9, D10 opção A, D11, D13 a D17 como recomendadas). Desenho e riscos: seção E3 da [spec 037](../specs/037-deploy-e-staging.md).
+
+### Como funciona
+
+1. O merge na `main` dispara o workflow `CI` (`ci.yml`). Quando ele termina, o GitHub dispara o `Deploy` (`.github/workflows/deploy.yml`, `workflow_run`). O job só roda se o CI terminou **com sucesso**, veio de um **push na `main` deste repositório** e a variável do repositório `DEPLOY_ENABLED` é `true`; senão aparece **pulado** (cinza).
+2. Se a ponta da `main` já é outro commit (dois merges seguidos), o job termina verde com "ultrapassado": o commit mais novo é publicado quando o CI dele terminar.
+3. O job entra por SSH como `soprei-deploy` e manda só o texto `--env production --ref <SHA>`. A chave do GitHub não abre terminal: o servidor força o programa de entrada (`/usr/local/sbin/soprei-deploy-entry`), que confere o texto, chama pelo `sudo` a si mesmo como `root`, relê `/etc/soprei-deploy/entry.conf` e roda `deploy/deploy.sh --env production --ref <SHA> --auto` (mais `--allow-unstaged` enquanto o staging não existir, D15) com o ambiente limpo.
+4. Com `--auto`, o `deploy.sh` exige que o SHA esteja na `main` e não seja mais antigo que o em execução. Daí em diante é o deploy de sempre (varredura de migration, cópia do banco, migration, troca, saúde, rollback). **Migration marcada como destrutiva nunca roda pelo automático** (D16): o programa de entrada nunca passa `--allow-breaking`, então o deploy sai com 1 sem mexer e o dono roda à mão.
+5. A saída do `deploy.sh` (já filtrada pela redação) aparece no log do job e o código de saída vira o resumo do Actions. O disparo manual ("Run workflow", com o SHA) **só faz o dry-run** (D17).
+
+O programa de entrada que roda é a **cópia instalada** em `/usr/local/sbin/`, não o arquivo do repositório: um merge não troca o porteiro. Quando `deploy/soprei-deploy-entry.sh` mudar num PR, o dono reinstala à mão (passo 5.2 abaixo).
+
+### Como ler o resumo do Actions
+
+| Código | No resumo                                                                                                                       | Job      |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 0      | publicado (ou "já está nessa versão", ou o plano do dry-run)                                                                    | verde    |
+| 1      | recusado antes de mexer, nada mudou (trava ocupada, migration destrutiva, SHA fora da `main` ou mais antigo, `ENABLED=false`)    | vermelho |
+| 2      | falhou e a versão anterior voltou saudável; lista as migrations não revertidas                                                  | vermelho |
+| 3      | **intervenção manual**: entrar no servidor e seguir "Falhas e o que fazer"                                                      | vermelho |
+| 64     | o programa de entrada recusou o pedido (defeito do workflow)                                                                     | vermelho |
+| 255    | o SSH falhou (rede, chave, `known_hosts`); o deploy **pode não ter começado**: conferir `/var/log/soprei-deploy/production.log` | vermelho |
+| outro  | inesperado (job cancelado, conexão caída): o `deploy.sh` segue no servidor; conferir o log do servidor                          | vermelho |
+
+Um deploy manual do dono durante um automático (ou o contrário) é recusado pela trava global (saída 1): o próximo merge, ou o dono à mão, publica. Uma falha deixa o job vermelho e o GitHub avisa por e-mail quem disparou o evento (S33); alerta próprio fica na spec 033.
+
+### Passos do dono, em ordem (nenhum agente toca o servidor nem o GitHub)
+
+Onde a implementação depende de um comportamento do GitHub, do OpenSSH ou do `sudo` que não foi lido na fonte, o passo diz **como conferir** (S23 a S33 da spec).
+
+1. **GitHub, antes do merge do PR da E3:**
+   1. Proteção da `main` (Settings > Branches ou Rules): PR obrigatório; checks `static`, `tests` e as três fatias de `browser` obrigatórios; sem push direto nem `--force`. Conferir que só o dono tem escrita (Settings > Collaborators) e que o 2FA está ligado.
+   2. Settings > Environments > New environment `production`; em "Deployment branches and tags", **só `main`**. Sem revisor obrigatório (D14). **Conferir S23:** se o plano da conta não oferecer ambientes (ou a restrição de branch) para repositório privado, **pare** e fale com quem implementou: o desenho depende disso.
+   3. Settings > Secrets and variables > Actions > Variables (do **repositório**): `DEPLOY_ENABLED` = `false`. O workflow chega à `main` desligado.
+2. **Merge do PR da E3 e deploy manual dele**, como hoje: `deploy/deploy.sh --env production --allow-unstaged` (dry-run antes). O `deploy.sh` instalado precisa ter o `--auto` antes do primeiro pedido automático.
+3. **Chave**, na sua máquina: `ssh-keygen -t ed25519 -N '' -C soprei-github-deploy -f <arquivo temporário>`. A privada vai **só** para o segredo `DEPLOY_SSH_KEY` do ambiente `production` (passo 6); a pública vai para o servidor (passo 4.5). Depois do passo 5, apague os dois arquivos locais.
+4. **Servidor**, como `root`, **com uma segunda sessão de `root` aberta até o fim** (para não se trancar fora):
+   1. `adduser --system --group --shell /bin/sh --home /home/soprei-deploy soprei-deploy` (sem senha, fora do grupo `sudo`). O shell precisa existir: o `sshd` roda o comando forçado pelo shell do usuário (S24).
+   2. `install -o root -g root -m 755 /var/www/soprei/deploy/soprei-deploy-entry.sh /usr/local/sbin/soprei-deploy-entry` (do arquivo **já implantado** no passo 2, nunca de uma branch).
+   3. `install -d -o root -g root -m 700 /etc/soprei-deploy` e `install -o root -g root -m 600 /var/www/soprei/deploy/entry/entry.conf.example /etc/soprei-deploy/entry.conf` (`ENABLED=true`, `ALLOW_UNSTAGED=true`, `MIGRATIONS=auto`; o programa recusa outro dono ou modo).
+   4. `visudo -f /etc/sudoers.d/soprei-deploy` com o conteúdo de `deploy/sudoers/soprei-deploy.example`; `chmod 440 /etc/sudoers.d/soprei-deploy`; `visudo -c` sem erro. **Conferir S29:** `sudo -l -U soprei-deploy` lista só a linha do programa de entrada; `grep -r requiretty /etc/sudoers /etc/sudoers.d` não mostra `requiretty` ligado para todos.
+   5. `install -d -o root -g root -m 755 /home/soprei-deploy/.ssh` e o `authorized_keys` (dono `root`, modo 644) com a linha de `deploy/ssh/authorized_keys.example`, trocando o marcador pela chave pública.
+   6. `deploy/ssh/sshd-soprei-deploy.conf.example` em `/etc/ssh/sshd_config.d/soprei-deploy.conf`; `sshd -t` sem erro; **conferir S24** com as duas consultas `sshd -T -C ...` do cabeçalho do exemplo (o `ForceCommand` vale para `soprei-deploy` e **não** para `root`); `systemctl reload ssh`.
+   7. Copie a linha de `/etc/ssh/ssh_host_ed25519_key.pub` no formato `<host> ssh-ed25519 AAAA...` (o `<host>` é exatamente o que vai em `DEPLOY_SSH_HOST`) para o segredo `DEPLOY_SSH_KNOWN_HOSTS`. Nunca use `ssh-keyscan` de fora.
+   8. **Conferir S28:** `sudo -u root env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root pm2 jlist >/dev/null && echo ok` responde `ok` (o `pm2`, o `node` e o `pnpm` são achados com esse `PATH` e o daemon é o do `root`).
+5. **Conferir à mão, de outra máquina, com a chave temporária** (antes de apagá-la): `ssh -i <chave> -T soprei-deploy@<host>` sem comando é recusado (64) sem abrir terminal; `ssh -i <chave> soprei-deploy@<host> ls` e `ssh -i <chave> -N -L 9000:127.0.0.1:3001 soprei-deploy@<host>` são recusados; `ssh -i <chave> soprei-deploy@<host> '--env production --ref <SHA atual da main> --dry-run'` responde "já está nessa versão" (código 0) e `journalctl -t soprei-deploy-entry` (ou `/var/log/syslog`) mostra o pedido aceito.
+6. **Segredos e variável do ambiente `production`:** `DEPLOY_SSH_KEY` (a privada), `DEPLOY_SSH_KNOWN_HOSTS` (passo 4.7), `DEPLOY_SSH_HOST` (endereço do servidor; segredo para não aparecer no log); variável do ambiente `DEPLOY_SSH_USER` = `soprei-deploy`. **Nenhum outro segredo** no GitHub (nada do `.env`).
+7. **Primeiro teste pelo Actions, só dry-run:** `DEPLOY_ENABLED` = `true`; Actions > "Deploy" > "Run workflow" na `main`, com o SHA atual da `main`: o resumo mostra o código 0 e o log do servidor (`/var/log/soprei-deploy/production.log`) mostra `modo=auto`. Recusas a provar do mesmo jeito: um SHA de uma branch de PR sai com 1; um SHA antigo da `main` sai com 1. **A partir daqui, o próximo merge publica sozinho.**
+8. **Primeiro automático:** um PR pequeno (só documentação) mergeado: o CI termina, o deploy roda sozinho e o resumo mostra 0. Confira também que um PR (de branch do repositório) com CI verde **não** dispara deploy (o `Deploy` aparece pulado ou nem aparece). Registre data e resultado no "Registro da implementação" da spec 037 (sem segredo nem endereço).
+
+### Desligar numa emergência
+
+Qualquer um destes basta, do mais rápido ao mais definitivo:
+
+1. **No GitHub:** Settings > Secrets and variables > Actions > Variables: `DEPLOY_ENABLED` = `false` (os próximos jobs são pulados). Ou Actions > "Deploy" > "..." > "Disable workflow".
+2. **Um deploy em andamento:** **não** cancele no meio da migration. Cancelar o job do Actions não para o `deploy.sh` (ele ignora `SIGHUP` e vai até o fim, com rollback se precisar). Acompanhe com `tail -f /var/log/soprei-deploy/production.log`.
+3. **No servidor:** `ENABLED=false` em `/etc/soprei-deploy/entry.conf` (todo pedido sai com 1, nada roda).
+4. **Cortar o acesso:** apague a linha de `/home/soprei-deploy/.ssh/authorized_keys` e o segredo `DEPLOY_SSH_KEY` no GitHub; se a chave vazou, gere outra (passo 3). Para tirar tudo: remova também `/etc/sudoers.d/soprei-deploy` e `/etc/ssh/sshd_config.d/soprei-deploy.conf` (`sshd -t && systemctl reload ssh`).
+
+O deploy manual (`deploy/deploy.sh` como `root`) continua funcionando em todos esses casos.
 
 ## Medição de memória (E2)
 

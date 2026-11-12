@@ -980,6 +980,377 @@ describe('deploy.sh: falhas de troca, recuperação e alvo', { skip: BASH_SKIP }
   });
 });
 
+// ---------------------------------------------------------------------------------------------
+// E3: deploy.sh --auto
+// ---------------------------------------------------------------------------------------------
+
+/** Um commit novo numa branch que não é a main (como a de um PR), publicado no origin. */
+function commitOutsideMain(world: World): string {
+  git(world.workDir, 'checkout', '-q', '-b', 'feature');
+  write(join(world.workDir, 'backend', 'feature.txt'), 'fora da main\n');
+  git(world.workDir, 'add', '-A');
+  git(world.workDir, 'commit', '-m', 'commit de PR');
+  git(world.workDir, 'push', '-q', 'origin', 'feature');
+  const sha = git(world.workDir, 'rev-parse', 'HEAD');
+  git(world.workDir, 'checkout', '-q', 'main');
+  return sha;
+}
+
+describe('deploy.sh --auto (E3)', { skip: BASH_SKIP }, () => {
+  it('--auto com branch, SHA curto ou SHA em maiúsculas sai com 1 antes da trava', () => {
+    const world = makeWorld();
+    for (const ref of ['main', world.targetSha.slice(0, 12), world.targetSha.toUpperCase()]) {
+      const result = deploy(world, ['--env', 'staging', '--ref', ref, '--auto']);
+      assert.equal(result.status, 1, `${ref}: ${result.out}`);
+      assert.match(result.out, /--auto exige --ref com o SHA completo/);
+      assert.equal(result.log, '', 'recusado antes de abrir o log e de pegar a trava');
+      assert.equal(result.events, '');
+    }
+    const noRef = deploy(world, ['--env', 'staging', '--auto']);
+    assert.equal(noRef.status, 1, 'sem --ref o padrão é main, que o --auto recusa');
+    assert.equal(head(world), world.prevSha);
+  });
+
+  it('--auto junto com --force, --previous, --adopt, --allow-breaking ou --inject-health-failure sai com 1', () => {
+    const world = makeWorld();
+    for (const flag of [
+      '--force',
+      '--previous',
+      '--adopt',
+      '--allow-breaking',
+      '--inject-health-failure',
+    ]) {
+      const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha, '--auto', flag]);
+      assert.equal(result.status, 1, `${flag}: ${result.out}`);
+      assert.match(result.out, /--auto não aceita|só é aceito com --env staging/);
+      assert.equal(result.events, '');
+    }
+    assert.equal(head(world), world.prevSha);
+    assert.equal(stateOf(world, 'current'), world.prevSha);
+  });
+
+  it('SHA que existe mas não está na main sai com 1 sem mexer', () => {
+    const world = makeWorld();
+    const outside = commitOutsideMain(world);
+    const result = deploy(world, ['--env', 'staging', '--ref', outside, '--auto']);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, /não está na main/);
+    assert.match(result.log, /modo=auto/);
+    assert.equal(head(world), world.prevSha);
+    assert.equal(stateOf(world, 'current'), world.prevSha);
+    assert.equal(result.events, '');
+  });
+
+  it('SHA da main mais antigo que o registrado sai com 1 sem mexer', () => {
+    const world = makeWorld();
+    // A versão em execução já é a nova; o pedido antigo (repetição de uma execução velha) não volta.
+    git(world.appDir, 'fetch', '-q', 'origin');
+    git(world.appDir, 'checkout', '-q', '--detach', world.targetSha);
+    write(join(world.stateDir, 'staging', 'current'), `${world.targetSha}\n`);
+    const result = deploy(world, ['--env', 'staging', '--ref', world.prevSha, '--auto']);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, /mais antigo que a versão em execução/);
+    assert.equal(head(world), world.targetSha);
+    assert.equal(stateOf(world, 'current'), world.targetSha);
+    assert.equal(result.events, '');
+  });
+
+  it('o SHA registrado sai com 0 ("já está nessa versão")', () => {
+    const world = makeWorld();
+    const result = deploy(world, ['--env', 'staging', '--ref', world.prevSha, '--auto']);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.out, /já está nessa versão/);
+    assert.equal(result.events, '');
+  });
+
+  it('um SHA mais novo da main passa nas regras: o dry-run mostra o plano e o log tem modo=auto', () => {
+    const world = makeWorld({ env: 'production', targetMigration: ADDITIVE });
+    const result = deploy(world, [
+      '--env',
+      'production',
+      '--ref',
+      world.targetSha,
+      '--auto',
+      '--allow-unstaged',
+      '--dry-run',
+    ]);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.log, /início \(modo=auto, ref [0-9a-f]{40}/);
+    assert.match(result.out, /PLANO/);
+    assert.match(result.out, /20261111000000_nova: aditiva/);
+    assert.equal(head(world), world.prevSha);
+    assert.ok(!result.events.includes('install'));
+  });
+
+  it('o deploy manual continua registrando modo=manual', () => {
+    const world = makeWorld();
+    const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha, '--dry-run']);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.log, /início \(modo=manual,/);
+  });
+
+  it('migration destrutiva marcada sai com 1 no automático (nunca há --allow-breaking)', () => {
+    const world = makeWorld({
+      targetMigration: '-- breaking-approved: motivo\nALTER TABLE t DROP COLUMN velha;\n',
+    });
+    const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha, '--auto']);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, /exige --allow-breaking/);
+    assert.equal(head(world), world.prevSha);
+    assert.equal(result.events, '');
+  });
+
+  it('um SHA mais novo da main publica (saída 0) e grava o estado', { skip: SYMLINK_SKIP }, () => {
+    const world = makeWorld({ targetMigration: ADDITIVE });
+    const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha, '--auto']);
+    assert.equal(result.status, 0, result.out);
+    assert.match(result.out, /RESUMO: concluído/);
+    assert.match(result.log, /modo=auto/);
+    assert.equal(head(world), world.targetSha);
+    assert.equal(stateOf(world, 'current'), world.targetSha);
+    assertNoSecrets(result);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// E3: programa de entrada (deploy/soprei-deploy-entry.sh), numa cópia com as constantes trocadas
+// ---------------------------------------------------------------------------------------------
+
+const ENTRY = join(REPO_ROOT, 'deploy', 'soprei-deploy-entry.sh');
+const SHA_A = 'a'.repeat(40);
+const SHA_B = '0123456789abcdef0123456789abcdef01234567';
+
+interface EntryWorld {
+  dir: string;
+  script: string;
+  conf: string;
+  sudoArgs: string;
+  deployArgs: string;
+  deployEnv: string;
+  loggerLog: string;
+}
+
+function makeEntryWorld(conf = 'ENABLED=true\nALLOW_UNSTAGED=true\nMIGRATIONS=auto\n'): EntryWorld {
+  const dir = mkdtempSync(join(tmpdir(), 'soprei-entry-'));
+  roots.push(dir);
+  const p = (name: string): string => toPosix(join(dir, name));
+  const world: EntryWorld = {
+    dir,
+    script: join(dir, 'entry.sh'),
+    conf: join(dir, 'entry.conf'),
+    sudoArgs: join(dir, 'sudo_args'),
+    deployArgs: join(dir, 'deploy_args'),
+    deployEnv: join(dir, 'deploy_env'),
+    loggerLog: join(dir, 'logger_log'),
+  };
+  write(
+    join(dir, 'sudo'),
+    `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > '${p('sudo_args')}'\nexit 0\n`,
+    0o755,
+  );
+  write(
+    join(dir, 'deploy'),
+    `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > '${p('deploy_args')}'\nenv > '${p('deploy_env')}'\nexit 0\n`,
+    0o755,
+  );
+  write(
+    join(dir, 'logger'),
+    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${p('logger_log')}'\nexit 0\n`,
+    0o755,
+  );
+  writeFileSync(world.conf, conf);
+  const replacements: [string, string][] = [
+    ['readonly SUDO=/usr/bin/sudo', `readonly SUDO=${p('sudo')}`],
+    ['readonly DEPLOY=/var/www/soprei/deploy/deploy.sh', `readonly DEPLOY=${p('deploy')}`],
+    ['readonly CONF=/etc/soprei-deploy/entry.conf', `readonly CONF=${p('entry.conf')}`],
+    ['readonly LOGGER=/usr/bin/logger', `readonly LOGGER=${p('logger')}`],
+    ['readonly REQUIRE_ROOT=true', 'readonly REQUIRE_ROOT=false'],
+  ];
+  let text = readFileSync(ENTRY, 'utf8').replaceAll('\r\n', '\n');
+  for (const [from, to] of replacements) {
+    assert.equal(text.split(from).length - 1, 1, `constante ausente ou repetida: ${from}`);
+    text = text.replace(from, () => to);
+  }
+  write(world.script, text, 0o755);
+  return world;
+}
+
+function runEntry(
+  world: EntryWorld,
+  args: string[],
+  env: Record<string, string> = {},
+): { status: number | null; out: string } {
+  const base: NodeJS.ProcessEnv = { ...process.env, ...env };
+  delete base['NODE_TEST_CONTEXT'];
+  delete base['NODE_OPTIONS'];
+  const result = spawnSync('bash', [toPosix(world.script), ...args], {
+    env: base,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  return { status: result.status, out: `${result.stdout}${result.stderr}` };
+}
+
+const REFUSED_MESSAGE = 'soprei-deploy-entry: pedido recusado (fora do formato aceito)\n';
+
+describe('programa de entrada: fase de fora (SSH)', { skip: BASH_SKIP }, () => {
+  it('aceita exatamente o deploy e o dry-run e chama o sudo com --from-ssh', () => {
+    for (const [request, mode] of [
+      [`--env production --ref ${SHA_B}`, 'deploy'],
+      [`--env production --ref ${SHA_B} --dry-run`, 'dry-run'],
+    ] as const) {
+      const world = makeEntryWorld();
+      const result = runEntry(world, [], { SSH_ORIGINAL_COMMAND: request });
+      assert.equal(result.status, 0, result.out);
+      assert.deepEqual(readFileSync(world.sudoArgs, 'utf8').split('\n').filter(Boolean), [
+        '-n',
+        '/usr/local/sbin/soprei-deploy-entry',
+        '--from-ssh',
+        SHA_B,
+        mode,
+      ]);
+      assert.match(readIfExists(world.loggerLog), new RegExp(`aceito: sha=${SHA_B.slice(0, 7)}`));
+    }
+  });
+
+  const refused: [string, string | undefined][] = [
+    ['comando vazio', ''],
+    ['sem SSH_ORIGINAL_COMMAND', undefined],
+    ['staging', `--env staging --ref ${SHA_B}`],
+    ['SHA com 39', `--env production --ref ${SHA_B.slice(0, 39)}`],
+    ['SHA com 41', `--env production --ref ${SHA_B}0`],
+    ['SHA em maiúsculas', `--env production --ref ${SHA_B.toUpperCase()}`],
+    ['main como ref', '--env production --ref main'],
+    ['--force', `--env production --ref ${SHA_B} --force`],
+    ['--allow-breaking', `--env production --ref ${SHA_B} --allow-breaking`],
+    ['--previous', `--env production --ref ${SHA_B} --previous`],
+    ['--adopt', `--env production --ref ${SHA_B} --adopt`],
+    ['espaço duplo', `--env production  --ref ${SHA_B}`],
+    ['ponto e vírgula', `--env production --ref ${SHA_B};ECO`],
+    ['substituição', `--env production --ref ${SHA_B} $(ECO)`],
+    ['crase', `--env production --ref ${SHA_B} \`ECO\``],
+    ['barra vertical', `--env production --ref ${SHA_B}|ECO`],
+    ['e comercial', `--env production --ref ${SHA_B}&ECO`],
+    ['quebra de linha', `--env production --ref ${SHA_B}\nECO`],
+    ['quebra de linha no fim', `--env production --ref ${SHA_B}\n`],
+    ['mais de 80 caracteres', `--env production --ref ${SHA_B} --dry-run${' '.repeat(10)}ECO`],
+  ];
+  for (const [name, request] of refused) {
+    it(`recusa com 64, sem chamar o sudo e sem ecoar: ${name}`, () => {
+      const world = makeEntryWorld();
+      const env: Record<string, string> = {};
+      if (request !== undefined) env['SSH_ORIGINAL_COMMAND'] = request;
+      const base = { ...process.env };
+      delete base['SSH_ORIGINAL_COMMAND'];
+      const result = spawnSync('bash', [toPosix(world.script)], {
+        env: { ...base, ...env },
+        encoding: 'utf8',
+        timeout: 30_000,
+      });
+      assert.equal(result.status, 64, `${name}: ${result.stdout}${result.stderr}`);
+      assert.equal(result.stdout, '');
+      assert.equal(result.stderr, REFUSED_MESSAGE);
+      assert.ok(!existsSync(world.sudoArgs), 'o sudo não pode ter sido chamado');
+      assert.ok(!readIfExists(world.loggerLog).includes('ECO'), 'o syslog não recebe o texto');
+    });
+  }
+});
+
+describe('programa de entrada: fase de dentro (root pelo sudo)', { skip: BASH_SKIP }, () => {
+  const HOSTILE_ENV = {
+    SOPREI_DEPLOY_LOCK_FILE: '/tmp/trava-falsa',
+    SOPREI_DEPLOY_STATE_DIR: '/tmp/estado-falso',
+    SOPREI_DEPLOY_LOG_DIR: '/tmp/log-falso',
+    SOPREI_DEPLOY_TARGETS_DIR: '/tmp/alvos-falsos',
+    SSH_ORIGINAL_COMMAND: '--env staging',
+    BASH_ENV_DO_ATACANTE: 'valor-do-ssh',
+  };
+
+  it('chama o deploy.sh com --auto, --allow-unstaged (D15), ambiente limpo e HOME=/root', () => {
+    const world = makeEntryWorld();
+    const result = runEntry(world, ['--from-ssh', SHA_B, 'deploy'], HOSTILE_ENV);
+    assert.equal(result.status, 0, result.out);
+    assert.deepEqual(readFileSync(world.deployArgs, 'utf8').split('\n').filter(Boolean), [
+      '--env',
+      'production',
+      '--ref',
+      SHA_B,
+      '--auto',
+      '--allow-unstaged',
+    ]);
+    const env = readFileSync(world.deployEnv, 'utf8');
+    assert.doesNotMatch(env, /SOPREI_DEPLOY_|SSH_ORIGINAL_COMMAND|BASH_ENV_DO_ATACANTE/);
+    assert.match(env, /^HOME=\/root$/m);
+    assert.match(env, /^PATH=\/usr\/local\/bin:\/usr\/bin:\/bin$/m);
+    assert.match(env, /^LC_ALL=C$/m);
+  });
+
+  it('dry-run passa --dry-run; ALLOW_UNSTAGED=false não passa --allow-unstaged', () => {
+    const world = makeEntryWorld('ENABLED=true\nALLOW_UNSTAGED=false\n');
+    const result = runEntry(world, ['--from-ssh', SHA_A, 'dry-run']);
+    assert.equal(result.status, 0, result.out);
+    assert.deepEqual(readFileSync(world.deployArgs, 'utf8').split('\n').filter(Boolean), [
+      '--env',
+      'production',
+      '--ref',
+      SHA_A,
+      '--auto',
+      '--dry-run',
+    ]);
+  });
+
+  for (const [name, args] of [
+    ['SHA curto', ['--from-ssh', SHA_B.slice(0, 12), 'deploy']],
+    ['SHA em maiúsculas', ['--from-ssh', SHA_B.toUpperCase(), 'deploy']],
+    ['modo desconhecido', ['--from-ssh', SHA_B, 'publicar']],
+    ['argumento a mais', ['--from-ssh', SHA_B, 'deploy', '--force']],
+    ['sem --from-ssh', ['--outro', SHA_B, 'deploy']],
+  ] as const) {
+    it(`argumentos fora da regra saem com 64: ${name}`, () => {
+      const world = makeEntryWorld();
+      const result = runEntry(world, [...args]);
+      assert.equal(result.status, 64, result.out);
+      assert.ok(!existsSync(world.deployArgs));
+    });
+  }
+
+  it('ENABLED=false sai com 1 sem chamar o deploy.sh', () => {
+    const world = makeEntryWorld('ENABLED=false\nALLOW_UNSTAGED=true\nMIGRATIONS=auto\n');
+    const result = runEntry(world, ['--from-ssh', SHA_B, 'deploy']);
+    assert.equal(result.status, 1, result.out);
+    assert.match(result.out, /desligado/);
+    assert.ok(!existsSync(world.deployArgs));
+  });
+
+  it('entry.conf com valor fora da lista, chave desconhecida ou $( ) é recusado sem ser executado', () => {
+    const marker = join(tmpdir(), `soprei-entry-marker-${String(process.pid)}`);
+    rmSync(marker, { force: true });
+    for (const conf of [
+      `ENABLED=$(touch ${toPosix(marker)})\n`,
+      `ENABLED=true\nALLOW_UNSTAGED=\`touch ${toPosix(marker)}\`\n`,
+      'ENABLED=yes\n',
+      'ENABLED=true\nMIGRATIONS=manual\n',
+      'ENABLED=true\nOUTRA=1\n',
+      'ENABLED=true\nlinha sem igual\n',
+      'ALLOW_UNSTAGED=true\n',
+    ]) {
+      const world = makeEntryWorld(conf);
+      const result = runEntry(world, ['--from-ssh', SHA_B, 'deploy']);
+      assert.equal(result.status, 1, `${conf}: ${result.out}`);
+      assert.ok(!existsSync(world.deployArgs), conf);
+      assert.ok(!existsSync(marker), `o entry.conf foi executado: ${conf}`);
+      assert.ok(!result.out.includes('touch'), 'o valor recusado não é ecoado');
+    }
+  });
+
+  it('entry.conf com fim de linha CRLF e comentários continua valendo', () => {
+    const world = makeEntryWorld('# comentário\r\nENABLED=true\r\n\r\nALLOW_UNSTAGED=false\r\n');
+    const result = runEntry(world, ['--from-ssh', SHA_B, 'deploy']);
+    assert.equal(result.status, 0, result.out);
+    assert.ok(!readFileSync(world.deployArgs, 'utf8').includes('--allow-unstaged'));
+  });
+});
+
 describe('deploy.sh: trava global', { skip: FLOCK_SKIP }, () => {
   it('(g) uma segunda execução simultânea sai com 1', async () => {
     const world = makeWorld();

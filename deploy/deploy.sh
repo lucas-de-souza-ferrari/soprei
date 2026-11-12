@@ -3,7 +3,11 @@
 #
 #   deploy/deploy.sh --env <production|staging> [--ref <branch|tag|sha>] [--previous]
 #                    [--dry-run] [--force] [--adopt] [--allow-breaking]
-#                    [--allow-unstaged] [--inject-health-failure]
+#                    [--allow-unstaged] [--inject-health-failure] [--auto]
+#
+# --auto (E3, deploy automático pelo programa de entrada): só com --ref de 40 hexadecimais minúsculos,
+# nunca junto de --previous, --force, --adopt, --allow-breaking ou --inject-health-failure; depois do
+# git fetch, o SHA precisa estar na main e não pode ser mais antigo que a versão registrada.
 #
 # Códigos de saída: 0 concluído; 1 recusado antes de mexer (nada mudou); 2 falhou e a versão anterior
 # voltou saudável; 3 falhou e o rollback também falhou (intervenção manual).
@@ -37,6 +41,7 @@ ADOPT=false
 ALLOW_BREAKING=false
 ALLOW_UNSTAGED=false
 INJECT_HEALTH_FAILURE=false
+AUTO=false
 
 # Alvo (deploy/targets/<ambiente>.conf).
 APP_DIR=''
@@ -129,7 +134,7 @@ usage() {
   printf '%s\n' \
     'uso: deploy/deploy.sh --env <production|staging> [--ref <branch|tag|sha>] [--previous]' \
     '                      [--dry-run] [--force] [--adopt] [--allow-breaking]' \
-    '                      [--allow-unstaged] [--inject-health-failure]' \
+    '                      [--allow-unstaged] [--inject-health-failure] [--auto]' \
     '' \
     '--env é obrigatório (não existe padrão). Detalhes em docs/ops/deploy.md.'
 }
@@ -158,6 +163,7 @@ parse_args() {
       --allow-breaking) ALLOW_BREAKING=true; shift ;;
       --allow-unstaged) ALLOW_UNSTAGED=true; shift ;;
       --inject-health-failure) INJECT_HEALTH_FAILURE=true; shift ;;
+      --auto) AUTO=true; shift ;;
       -h | --help) usage; exit 0 ;;
       *) usage >&2; die_early "argumento desconhecido: $1" ;;
     esac
@@ -174,6 +180,14 @@ parse_args() {
   fi
   if [[ $ALLOW_UNSTAGED == true && $ENV_NAME != production ]]; then
     die_early '--allow-unstaged só vale com --env production'
+  fi
+  if [[ $AUTO == true ]]; then
+    # O automático só pede "este SHA, para a frente": nada de branch, tag, SHA curto nem opção que
+    # volta, reimplanta, adota, libera migration destrutiva ou injeta falha.
+    [[ $REF =~ ^[0-9a-f]{40}$ ]] || die_early '--auto exige --ref com o SHA completo (40 hexadecimais minúsculos)'
+    if [[ $USE_PREVIOUS == true || $FORCE == true || $ADOPT == true || $ALLOW_BREAKING == true || $INJECT_HEALTH_FAILURE == true ]]; then
+      die_early '--auto não aceita --previous, --force, --adopt, --allow-breaking nem --inject-health-failure'
+    fi
   fi
 }
 
@@ -457,6 +471,20 @@ resolve_ref() {
     [[ -n $TARGET_SHA ]] || die1 "não encontrei a referência $REF depois do fetch"
   fi
   git -C "$APP_DIR" cat-file -e "$TARGET_SHA^{commit}" || die1 'a versão pedida não é um commit conhecido'
+}
+
+# Só com --auto (E3): o SHA pedido precisa estar na main (depois do fetch) e não pode ser mais antigo
+# que a versão registrada. Igual à registrada segue para "já está nessa versão" (saída 0).
+check_auto_rules() {
+  [[ $AUTO == true ]] || return 0
+  git -C "$APP_DIR" rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}' >/dev/null \
+    || die1 'modo automático: origin/main não encontrada depois do fetch'
+  if ! git -C "$APP_DIR" merge-base --is-ancestor "$TARGET_SHA" refs/remotes/origin/main; then
+    die1 "modo automático: $(short "$TARGET_SHA") não está na main; nada foi alterado"
+  fi
+  if ! git -C "$APP_DIR" merge-base --is-ancestor "$PREV_SHA" "$TARGET_SHA"; then
+    die1 "modo automático: $(short "$TARGET_SHA") é mais antigo que a versão em execução ($(short "$PREV_SHA")) ou não descende dela; o automático nunca volta. Nada foi alterado"
+  fi
 }
 
 check_staged_rule() {
@@ -864,11 +892,12 @@ post_swap_failure() {
 # ---------------------------------------------------------------------------------------------
 
 run_deploy() {
-  local started=$SECONDS
+  local started=$SECONDS mode=manual
   trap '' HUP
   trap on_interrupt INT TERM
   trap on_unexpected_error ERR
-  log "início (ref $REF, previous=$USE_PREVIOUS, dry-run=$DRY_RUN, force=$FORCE, adopt=$ADOPT, allow-breaking=$ALLOW_BREAKING)"
+  if [[ $AUTO == true ]]; then mode=auto; fi
+  log "início (modo=$mode, ref $REF, previous=$USE_PREVIOUS, dry-run=$DRY_RUN, force=$FORCE, adopt=$ADOPT, allow-breaking=$ALLOW_BREAKING)"
 
   acquire_lock
   check_preconditions
@@ -878,6 +907,7 @@ run_deploy() {
   log 'buscando a versão pedida (git fetch)'
   run_cmd git -C "$APP_DIR" fetch --prune --tags origin || die1 'git fetch falhou (rede ou chave); nada foi alterado'
   resolve_ref
+  check_auto_rules
   check_staged_rule
   # Sem o app no PM2 (adoção de um ambiente novo) nada está rodando: implanta mesmo sendo o mesmo SHA.
   if [[ $TARGET_SHA == "$PREV_SHA" && $FORCE != true && -n $PM2_STATUS ]]; then

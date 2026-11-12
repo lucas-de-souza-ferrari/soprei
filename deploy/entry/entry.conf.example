@@ -1,0 +1,13 @@
+# /etc/soprei-deploy/entry.conf (spec 037, E3). Dono root, modo 600 (o programa de entrada recusa outro
+# dono ou modo). Lido como texto pelo /usr/local/sbin/soprei-deploy-entry: só estas três chaves, sem
+# aspas, sem espaço e sem nenhum outro valor. Qualquer erro aqui faz todo pedido sair com 1, sem rodar nada.
+#
+# ENABLED: true deixa o GitHub Actions pedir deploys; false recusa todo pedido (desligamento de
+# emergência no próprio servidor).
+ENABLED=true
+# ALLOW_UNSTAGED: true enquanto o servidor de staging não existir (D15); com o staging no ar, false
+# (e uma mudança pequena da E3 passa a publicar no staging antes).
+ALLOW_UNSTAGED=true
+# MIGRATIONS: só "auto" (D16): migration aditiva segue pelo automático; a destrutiva é recusada pelo
+# deploy.sh (o automático nunca passa --allow-breaking) e o dono a roda à mão.
+MIGRATIONS=auto

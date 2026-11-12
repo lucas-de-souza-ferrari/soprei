@@ -1,0 +1,7 @@
+# /home/soprei-deploy/.ssh/authorized_keys (spec 037, E3). Dono root, modo 644 (o próprio usuário não
+# consegue trocar a linha); a pasta .ssh também do root, modo 755. Uma linha só, com a parte PÚBLICA da
+# chave criada só para o deploy (a privada vai só para o segredo DEPLOY_SSH_KEY do ambiente
+# "production" no GitHub). O "restrict" desliga encaminhamento de porta, de agente e de X11, terminal
+# e o ~/.ssh/rc; o command= força o programa de entrada (o texto mandado pelo GitHub vira só
+# SSH_ORIGINAL_COMMAND, que ele confere). Sem from=: os endereços dos executores do GitHub mudam.
+restrict,command="/usr/local/sbin/soprei-deploy-entry" ssh-ed25519 <CHAVE_PUBLICA_DO_DEPLOY> soprei-github-deploy

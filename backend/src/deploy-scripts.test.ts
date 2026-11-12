@@ -186,6 +186,157 @@ describe('deploy.sh (spec 037, E1)', () => {
   });
 });
 
+describe('deploy.sh --auto (spec 037, E3)', () => {
+  it('--auto exige SHA de 40 hexadecimais e recusa as opções que voltam, reimplantam ou liberam', () => {
+    const args = functionBody('parse_args');
+    assert.match(args, /--auto\) AUTO=true/);
+    assert.match(args, /\$REF =~ \^\[0-9a-f\]\{40\}\$/);
+    for (const flag of [
+      'USE_PREVIOUS',
+      'FORCE',
+      'ADOPT',
+      'ALLOW_BREAKING',
+      'INJECT_HEALTH_FAILURE',
+    ]) {
+      assert.match(args, new RegExp(`\\$${flag} == true`), `--auto não recusa ${flag}`);
+    }
+  });
+
+  it('depois do fetch, o SHA precisa estar na main e não pode ser mais antigo', () => {
+    const rules = functionBody('check_auto_rules');
+    assert.match(rules, /merge-base --is-ancestor "\$TARGET_SHA" refs\/remotes\/origin\/main/);
+    assert.match(rules, /merge-base --is-ancestor "\$PREV_SHA" "\$TARGET_SHA"/);
+    const flow = functionBody('run_deploy');
+    const fetch = flow.indexOf('fetch --prune --tags origin');
+    const auto = flow.indexOf('check_auto_rules');
+    assert.ok(fetch >= 0 && auto > fetch, 'as regras do --auto vêm depois do fetch');
+    assert.ok(auto < flow.indexOf('scan_migrations'), 'e antes de qualquer outra etapa');
+    assert.match(flow, /modo=\$mode/);
+  });
+});
+
+const entry = read('deploy/soprei-deploy-entry.sh');
+const entryLines = entry.split('\n');
+const entryCode = entryLines.filter((line) => line.trim() !== '' && !/^\s*#/.test(line)).join('\n');
+
+describe('programa de entrada do deploy automático (spec 037, E3)', () => {
+  it('usa set -euo pipefail, nunca source, eval nem set -x, e termina em main "$@"', () => {
+    assert.match(entryCode, /^set -euo pipefail$/m);
+    assert.match(entryCode, /^umask 077$/m);
+    assert.doesNotMatch(entryCode, /^\s*(source|\.)\s+\S/m);
+    assert.doesNotMatch(entryCode, /\beval\b/);
+    assert.doesNotMatch(entryCode, /\bset\s+-[A-Za-z]*x/);
+    assert.equal(entryLines.filter((line) => line.trim() !== '').at(-1), 'main "$@"');
+  });
+
+  it('caminhos em constantes no topo (as únicas linhas que o teste troca por dublês)', () => {
+    for (const constant of [
+      'readonly SUDO=/usr/bin/sudo',
+      'readonly SELF=/usr/local/sbin/soprei-deploy-entry',
+      'readonly DEPLOY=/var/www/soprei/deploy/deploy.sh',
+      'readonly CONF=/etc/soprei-deploy/entry.conf',
+      'readonly REQUIRE_ROOT=true',
+    ]) {
+      assert.equal(entryLines.filter((line) => line === constant).length, 1, constant);
+    }
+    // Nenhuma variável de ambiente muda o comportamento: só SSH_ORIGINAL_COMMAND é lida.
+    const envReads = [...entryCode.matchAll(/\$\{?([A-Z][A-Z0-9_]*)/g)]
+      .map((match) => match[1] ?? '')
+      .filter(
+        (name) =>
+          ![
+            'SUDO',
+            'SELF',
+            'DEPLOY',
+            'CONF',
+            'LOGGER',
+            'REQUIRE_ROOT',
+            'REQUEST_RE',
+            'SHA_RE',
+            'MAX_REQUEST_LENGTH',
+            'ENABLED',
+            'ALLOW_UNSTAGED',
+            'MIGRATIONS',
+            'BASH_REMATCH',
+            'EUID',
+          ].includes(name),
+      );
+    assert.deepEqual([...new Set(envReads)], ['SSH_ORIGINAL_COMMAND']);
+  });
+
+  it('aceita só o formato ancorado e chama o deploy.sh com --auto pelo env -i', () => {
+    assert.ok(
+      entry.includes("readonly REQUEST_RE='^--env production --ref ([0-9a-f]{40})( --dry-run)?$'"),
+    );
+    assert.match(entryCode, /exec "\$SUDO" -n "\$SELF" --from-ssh "\$sha" "\$mode"/);
+    assert.match(
+      entryCode,
+      /exec \/usr\/bin\/env -i PATH=\/usr\/local\/bin:\/usr\/bin:\/bin HOME=\/root LC_ALL=C "\$DEPLOY" "\$\{args\[@\]\}"/,
+    );
+    assert.match(entryCode, /args=\(--env production --ref "\$sha" --auto\)/);
+    assert.doesNotMatch(entryCode, /--allow-breaking|--force|--previous|--adopt/);
+  });
+
+  it('o arquivo tem o bit executável no Git', () => {
+    let listing: string;
+    try {
+      listing = execFileSync('git', ['ls-files', '-s', '--', 'deploy/soprei-deploy-entry.sh'], {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      return;
+    }
+    if (listing === '') return;
+    assert.match(listing, /^100755 /);
+  });
+});
+
+describe('exemplos do servidor para o deploy automático (spec 037, E3)', () => {
+  const nonComment = (text: string): string[] =>
+    text.split('\n').filter((line) => line.trim() !== '' && !line.trimStart().startsWith('#'));
+
+  it('sudoers: só a fase de dentro do programa de entrada, como root, sem senha', () => {
+    const rules = nonComment(read('deploy/sudoers/soprei-deploy.example'));
+    const grants = rules.filter((line) => !line.startsWith('Defaults'));
+    assert.deepEqual(grants, [
+      'soprei-deploy ALL=(root) NOPASSWD: /usr/local/sbin/soprei-deploy-entry --from-ssh *',
+    ]);
+    for (const line of rules.filter((item) => item.startsWith('Defaults'))) {
+      assert.match(line, /^Defaults:soprei-deploy (env_reset|!requiretty)$/);
+    }
+  });
+
+  it('sshd: ForceCommand, só chave pública, sem encaminhamento, terminal nem rc', () => {
+    const rules = nonComment(read('deploy/ssh/sshd-soprei-deploy.conf.example')).map((line) =>
+      line.trim(),
+    );
+    assert.equal(rules[0], 'Match User soprei-deploy');
+    for (const directive of [
+      'ForceCommand /usr/local/sbin/soprei-deploy-entry',
+      'AuthenticationMethods publickey',
+      'PasswordAuthentication no',
+      'DisableForwarding yes',
+      'PermitTTY no',
+    ]) {
+      assert.ok(rules.includes(directive), `sshd sem ${directive}`);
+    }
+  });
+
+  it('authorized_keys: restrict e command= com marcador no lugar da chave', () => {
+    const keys = nonComment(read('deploy/ssh/authorized_keys.example'));
+    assert.deepEqual(keys, [
+      'restrict,command="/usr/local/sbin/soprei-deploy-entry" ssh-ed25519 <CHAVE_PUBLICA_DO_DEPLOY> soprei-github-deploy',
+    ]);
+  });
+
+  it('entry.conf: só as três chaves, com os valores das decisões D15 e D16', () => {
+    const pairs = nonComment(read('deploy/entry/entry.conf.example'));
+    assert.deepEqual(pairs, ['ENABLED=true', 'ALLOW_UNSTAGED=true', 'MIGRATIONS=auto']);
+  });
+});
+
 function listFiles(dir: string): string[] {
   const files: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -501,5 +652,23 @@ describe('documentação operacional (spec 037)', () => {
     for (const code of ['| 0 ', '| 1 ', '| 2 ', '| 3 ']) {
       assert.ok(doc.includes(code), `docs/ops/deploy.md sem a linha de código de saída ${code}`);
     }
+  });
+
+  it('docs/ops/deploy.md descreve o deploy automático, os passos do dono e como desligar (E3)', () => {
+    const doc = read('docs/ops/deploy.md');
+    for (const text of [
+      '## Deploy automático pelo GitHub Actions (E3)',
+      '### Passos do dono, em ordem',
+      '### Desligar numa emergência',
+      '--auto',
+      'DEPLOY_ENABLED',
+      'ENABLED=false',
+      'soprei-deploy-entry',
+      '| 64 ',
+      '| 255 ',
+    ]) {
+      assert.ok(doc.includes(text), `docs/ops/deploy.md sem ${text}`);
+    }
+    assert.ok(!doc.includes('E3, adiada'), 'a linha antiga sobre a E3 adiada precisa sair');
   });
 });

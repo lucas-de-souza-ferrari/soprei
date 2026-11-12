@@ -1,0 +1,12 @@
+# /etc/sudoers.d/soprei-deploy (spec 037, E3). Instalar SEMPRE com `visudo -f /etc/sudoers.d/soprei-deploy`
+# (confere a sintaxe antes de gravar), depois `chmod 440 /etc/sudoers.d/soprei-deploy` e `visudo -c`.
+#
+# O usuário soprei-deploy (sem senha, fora do grupo sudo) só pode rodar como root UM programa: a fase
+# de dentro do programa de entrada. O "*" aceita qualquer argumento; por isso a fase de dentro confere
+# tudo de novo (SHA de 40 hexadecimais e deploy|dry-run) e recusa o resto com 64.
+#
+# Conferir depois de instalar (S29): `sudo -l -U soprei-deploy` deve listar só a linha abaixo, e
+# `sudo -n -u soprei-deploy sudo -n /bin/true` deve ser NEGADO.
+Defaults:soprei-deploy env_reset
+Defaults:soprei-deploy !requiretty
+soprei-deploy ALL=(root) NOPASSWD: /usr/local/sbin/soprei-deploy-entry --from-ssh *
