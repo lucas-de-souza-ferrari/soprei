@@ -10,8 +10,10 @@
 # Log de acesso sem query string e sem o caminho completo do webhook de pagamento (spec 032, D13): a query
 # do handshake do WhatsApp leva o hub.verify_token e o caminho /webhooks/infinitepay/<pedido>/<token> leva um
 # token. Os nomes (soprei_staging_*) são únicos por arquivo porque produção e staging podem dividir o mesmo nginx
-# (log_format e map ficam no contexto http, que inclui este arquivo). Rotação e prazo de 30 dias (logrotate)
-# são passo do dono no servidor.
+# (log_format e map ficam no contexto http, que inclui este arquivo).
+# ATENÇÃO: o error.log não usa este formato e ainda pode guardar o caminho do webhook com o token e a query do
+# handshake do WhatsApp (hub.verify_token) quando uma requisição dá erro. Rotação com prazo de 30 dias
+# (logrotate) do access.log E do error.log, e dos logs do PM2, é passo do dono no servidor.
 map $request_uri $soprei_staging_log_path {
     ~^/webhooks/infinitepay/           "/webhooks/infinitepay/[oculto]";
     ~^(?<soprei_staging_path>[^?]*)    $soprei_staging_path;
