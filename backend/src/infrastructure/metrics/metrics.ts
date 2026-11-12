@@ -1,6 +1,9 @@
 import type {
   AuditAction,
   BillingNoticeKind,
+  HandoffReason,
+  NotificationCreateResult,
+  NotificationKind,
   Permission,
   QuotaBlockReason,
 } from '../../domain/index.js';
@@ -290,6 +293,12 @@ export interface Metrics {
   countScheduleToolTurn(result: ScheduleToolTurnResult): void;
   /** Rodadas de ferramenta de um turno com ferramentas oferecidas (spec 028). */
   observeScheduleToolRounds(rounds: number): void;
+  /** O modelo pediu atendimento humano (spec 038), antes da deduplicação. Motivo de lista fixa. */
+  countHandoff(reason: HandoffReason): void;
+  /** Resultado da gravação de uma notificação (spec 038). Sem id, contato nem texto em label. */
+  countNotificationCreated(result: NotificationCreateResult): void;
+  /** Uma notificação foi marcada como resolvida (spec 038). */
+  countNotificationResolved(kind: NotificationKind): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
   /** O destino de uma mensagem de entrada do canal. */
@@ -471,6 +480,24 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const handoffs = new Counter({
+    name: 'attendance_handoffs_total',
+    help: 'Pedidos de atendimento humano feitos pelo modelo, por motivo (spec 038, conjunto fixo)',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  });
+  const notificationsCreated = new Counter({
+    name: 'notifications_created_total',
+    help: 'Notificações por tipo e resultado da gravação (spec 038: created, deduplicated, capped)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const notificationsResolved = new Counter({
+    name: 'notifications_resolved_total',
+    help: 'Notificações marcadas como resolvidas, por tipo (spec 038)',
+    labelNames: ['kind'] as const,
+    registers: [registry],
+  });
   const quotaBlocks = new Counter({
     name: 'quota_blocks_total',
     help: 'Vezes em que a IA deixou de responder por cota ou assinatura inativa (spec 031, motivo fixo)',
@@ -838,6 +865,15 @@ export function createMetrics(): Metrics {
     },
     countScheduleContext(result) {
       scheduleContext.inc({ result });
+    },
+    countHandoff(reason) {
+      handoffs.inc({ reason });
+    },
+    countNotificationCreated(result) {
+      notificationsCreated.inc({ kind: 'HUMAN_HANDOFF', result });
+    },
+    countNotificationResolved(kind) {
+      notificationsResolved.inc({ kind });
     },
     countQuotaBlock(reason) {
       quotaBlocks.inc({ reason });

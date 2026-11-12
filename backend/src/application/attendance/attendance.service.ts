@@ -1,4 +1,5 @@
 import type {
+  AttendanceTransaction,
   AttendanceUnitOfWork,
   Company,
   CompanyEntitlements,
@@ -10,11 +11,14 @@ import type {
   Message,
   MessageOrder,
   MessageRepository,
+  HandoffReason,
+  NotificationCreateResult,
   Page,
 } from '../../domain/index.js';
 import {
   KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
   MESSAGE_CONTENT_MAX_LENGTH,
+  NOTIFICATION_MAX_OPEN,
   SCHEDULE_AI_MAX_MY_APPOINTMENTS,
   SCHEDULE_AI_TURN_TIMEOUT_MS,
   type QuotaBlockReason,
@@ -54,6 +58,7 @@ import {
   type ScheduleToolLabel,
   type ScheduleToolResult,
 } from './schedule-tools.js';
+import { composeToolSet, createHandoffRecorder, type HandoffRecorder } from './handoff-tool.js';
 import {
   buildSchedulePrompt,
   buildScheduleUnavailablePrompt,
@@ -107,6 +112,10 @@ export interface AttendanceMetrics {
   countKnowledgeRetrieval?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027, E3). Conjunto fixo. */
   countScheduleContext?(result: 'hit' | 'empty' | 'skipped' | 'error' | 'timeout'): void;
+  /** O modelo pediu atendimento humano (spec 038), antes da deduplicação. Conjunto fixo de motivos. */
+  countHandoff?(reason: HandoffReason): void;
+  /** O que aconteceu com a notificação do pedido (spec 038): `created`, `deduplicated` ou `capped`. */
+  countNotificationCreated?(result: NotificationCreateResult): void;
   /** Uma chamada de ferramenta da agenda terminou (spec 028). Conjuntos fixos; nunca argumento nem resultado. */
   countScheduleToolCall?(tool: ScheduleToolLabel, result: ScheduleToolResult): void;
   /** Um turno com ferramentas terminou (spec 028). Conjunto fixo. */
@@ -163,6 +172,13 @@ export interface AttendanceOptions {
    * Desligada, o pedido ao provedor é idêntico ao da spec 027.
    */
   readonly scheduleAiEnabled?: boolean;
+  /**
+   * Spec 038: oferece ao modelo a ferramenta de pedir atendimento humano em todo turno. Desligado por padrão
+   * (o pedido ao provedor fica o de antes); o `index.ts` liga.
+   */
+  readonly handoffEnabled?: boolean;
+  /** Teto de notificações abertas por empresa (spec 038); padrão `NOTIFICATION_MAX_OPEN`. */
+  readonly notificationMaxOpen?: number;
   /** Prazo total do laço de ferramentas (spec 028); padrão `SCHEDULE_AI_TURN_TIMEOUT_MS`. */
   readonly scheduleAiTurnTimeoutMs?: number;
 }
@@ -515,6 +531,7 @@ export class AttendanceService {
       { contactRef, origin: 'channel' },
       entitlements,
     );
+    const recorder = this.handoffRecorder();
     const outcome = await this.callProvider(
       companyId,
       { conversationId: conversation.id, messageId: last.id, inputChars: userMessage.length },
@@ -526,14 +543,19 @@ export class AttendanceService {
         userMessage,
       },
       prompt.tools,
+      recorder,
     );
     const final = this.finalizeReply(outcome, prompt.tools);
     const replyText = final.text;
     if (final.isFallback) this.recordFallback();
+    // Spec 038: o pedido de humano só vale com resposta do modelo (fallback nunca notifica).
+    const handoff = outcome.ok ? recorder?.requested() : undefined;
 
     let reply: Message;
+    let notification: NotificationCreateResult | undefined;
     try {
-      // A resposta e a marca de "atendida" de todo o lote confirmam (ou desfazem) juntas.
+      // A resposta, a marca de "atendida" de todo o lote e a notificação de atendimento humano (spec 038)
+      // confirmam (ou desfazem) juntas.
       reply = await this.deps.unitOfWork.run(async (tx) => {
         const created = await tx.messages.create(companyId, {
           conversationId: conversation.id,
@@ -558,6 +580,7 @@ export class AttendanceService {
             context: { companyId },
           });
         }
+        notification = await this.createHandoff(tx, companyId, handoff, created);
         return created;
       });
     } catch (error) {
@@ -576,6 +599,7 @@ export class AttendanceService {
     }
 
     this.recordBatch(batch.length, hasMorePending);
+    this.recordHandoff(companyId, handoff, notification);
     this.deps.logger.info(
       {
         companyId,
@@ -591,6 +615,7 @@ export class AttendanceService {
         ...prompt.stats,
         ...usageFields(outcome),
         ...toolFields(outcome),
+        ...handoffFields(handoff, notification),
         durationMs: Math.round(performance.now() - startedAt),
       },
       'lote de mensagens atendido',
@@ -620,6 +645,15 @@ export class AttendanceService {
     await this.deps.companies.findById(companyId);
     // Última atividade primeiro (spec 024).
     return this.deps.conversations.listByActivity(companyId, options);
+  }
+
+  /** Conversas por id, em lote (spec 038: rótulo do contato nas notificações). */
+  async getConversationsByIds(
+    companyId: CompanyId,
+    ids: readonly string[],
+  ): Promise<ReadonlyMap<string, Conversation>> {
+    const rows = await this.deps.conversations.findByIds(companyId, ids);
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   async listMessages(
@@ -909,6 +943,7 @@ export class AttendanceService {
       history,
       userMessage: message.content,
     };
+    const recorder = this.handoffRecorder();
     const outcome = await this.callProvider(
       companyId,
       {
@@ -918,22 +953,30 @@ export class AttendanceService {
       },
       input,
       prompt.tools,
+      recorder,
     );
 
     const final = this.finalizeReply(outcome, prompt.tools);
     const replyText = final.text;
     if (final.isFallback) this.recordFallback();
+    const handoff = outcome.ok ? recorder?.requested() : undefined;
 
     let reply: Message;
+    let notification: NotificationCreateResult | undefined;
     try {
-      reply = await this.deps.messages.create(companyId, {
-        conversationId: message.conversationId,
-        role: 'ASSISTANT',
-        content: replyText,
-        isFallback: final.isFallback,
-        replyToId: message.id,
-        // A resposta nunca fica antes da pergunta, mesmo no mesmo milissegundo.
-        createdAt: new Date(Math.max(this.now().getTime(), message.createdAt.getTime() + 1)),
+      // Resposta e notificação de atendimento humano (spec 038) confirmam (ou desfazem) juntas.
+      reply = await this.deps.unitOfWork.run(async (tx) => {
+        const created = await tx.messages.create(companyId, {
+          conversationId: message.conversationId,
+          role: 'ASSISTANT',
+          content: replyText,
+          isFallback: final.isFallback,
+          replyToId: message.id,
+          // A resposta nunca fica antes da pergunta, mesmo no mesmo milissegundo.
+          createdAt: new Date(Math.max(this.now().getTime(), message.createdAt.getTime() + 1)),
+        });
+        notification = await this.createHandoff(tx, companyId, handoff, created);
+        return created;
       });
     } catch (error) {
       if (!(error instanceof ConflictError)) throw error;
@@ -956,11 +999,62 @@ export class AttendanceService {
         ...prompt.stats,
         ...usageFields(outcome),
         ...toolFields(outcome),
+        ...handoffFields(handoff, notification),
         durationMs: Math.round(performance.now() - startedAt),
       },
       'mensagem atendida',
     );
+    this.recordHandoff(companyId, handoff, notification);
     return toResult(message, reply, false, prompt.sources);
+  }
+
+  /** Um registrador por turno quando a ferramenta de humano está ligada (spec 038). */
+  private handoffRecorder(): HandoffRecorder | undefined {
+    return this.deps.options.handoffEnabled === true ? createHandoffRecorder() : undefined;
+  }
+
+  /**
+   * Grava a notificação de atendimento humano (spec 038) dentro da transação da resposta: se a
+   * transação desfaz, não sobra notificação. Sem pedido do modelo, nada é feito.
+   */
+  private async createHandoff(
+    tx: AttendanceTransaction,
+    companyId: CompanyId,
+    handoff: HandoffReason | undefined,
+    reply: Message,
+  ): Promise<NotificationCreateResult | undefined> {
+    if (handoff === undefined) return undefined;
+    return tx.notifications.createHandoff(
+      companyId,
+      {
+        reason: handoff,
+        conversationId: reply.conversationId,
+        messageId: reply.id,
+        createdAt: reply.createdAt,
+      },
+      this.deps.options.notificationMaxOpen ?? NOTIFICATION_MAX_OPEN,
+    );
+  }
+
+  /** Métricas do pedido de humano, depois do commit. Falha de métrica nunca derruba o atendimento. */
+  private recordHandoff(
+    companyId: CompanyId,
+    handoff: HandoffReason | undefined,
+    notification: NotificationCreateResult | undefined,
+  ): void {
+    if (handoff === undefined) return;
+    try {
+      this.deps.metrics?.countHandoff?.(handoff);
+      if (notification !== undefined) this.deps.metrics?.countNotificationCreated?.(notification);
+    } catch (err) {
+      this.deps.logger.warn({ err }, 'falha ao registrar métrica de atendimento humano');
+    }
+    if (notification === 'capped') {
+      this.deps.logger.warn(
+        { companyId, reason: 'notification_cap' },
+        'teto de notificações abertas da empresa atingido; pedido de atendimento humano não gravado',
+      );
+    }
   }
 
   /**
@@ -1268,7 +1362,10 @@ export class AttendanceService {
     subject: LlmSubject,
     input: LlmGenerateInput,
     tools?: ScheduleToolSet,
+    handoff?: HandoffRecorder,
   ): Promise<LlmOutcome> {
+    // Spec 038: a ferramenta de humano entra no mesmo conjunto das da agenda (028).
+    const toolSet = handoff === undefined ? tools?.toolSet : composeToolSet(handoff, tools);
     const provider = this.deps.llm.name;
     const startedAt = performance.now();
     let result: LlmRequestResult = 'error';
@@ -1285,12 +1382,15 @@ export class AttendanceService {
       const outcome = await withTimeout(
         this.deps.llm.generate(input, {
           signal: controller.signal,
-          ...(tools === undefined ? {} : { tools: tools.toolSet }),
+          ...(toolSet === undefined ? {} : { tools: toolSet }),
         }),
-        // Com ferramentas, o prazo é o do laço inteiro; cada chamada ao modelo segue com o seu.
-        tools === undefined
-          ? this.deps.options.llmTimeoutMs
-          : (this.deps.options.scheduleAiTurnTimeoutMs ?? SCHEDULE_AI_TURN_TIMEOUT_MS),
+        // Com ferramentas da agenda, o prazo é o do laço inteiro; cada chamada ao modelo segue com o seu. Só
+        // com a de humano (spec 038) são no máximo duas chamadas: o dobro do prazo de uma.
+        tools !== undefined
+          ? (this.deps.options.scheduleAiTurnTimeoutMs ?? SCHEDULE_AI_TURN_TIMEOUT_MS)
+          : toolSet === undefined
+            ? this.deps.options.llmTimeoutMs
+            : this.deps.options.llmTimeoutMs * 2,
         'llm',
       );
       if (!outcome.ok) {
@@ -1610,4 +1710,13 @@ function selectBatch(pending: readonly Message[], limits: BatchLimits): Message[
     chars += added;
   }
   return batch;
+}
+
+/** Campos de log do pedido de humano (spec 038): só o motivo (enum) e o resultado, nunca texto. */
+function handoffFields(
+  handoff: HandoffReason | undefined,
+  notification: NotificationCreateResult | undefined,
+): object {
+  if (handoff === undefined) return {};
+  return { handoff: true, handoffReason: handoff, notification: notification ?? null };
 }

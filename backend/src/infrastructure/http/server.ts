@@ -37,6 +37,8 @@ import { adminKnowledgeController } from '../../presentation/admin/knowledge.con
 import { adminOnboardingController } from '../../presentation/admin/onboarding.controller.js';
 import { adminPersonaController } from '../../presentation/admin/persona.controller.js';
 import { adminInventoryController } from '../../presentation/admin/inventory.controller.js';
+import { adminNotificationsController } from '../../presentation/admin/notifications.controller.js';
+import type { NotificationService } from '../../application/notifications/notification.service.js';
 import {
   adminScheduleController,
   type AdminScheduleControllerOptions,
@@ -80,6 +82,14 @@ export interface AdminRoutesParams {
   readonly schedule?: AdminScheduleControllerOptions['schedule'];
   /** Exemplo da agenda (spec 027, E4); sem isto as rotas `.../schedule/sample` não existem. */
   readonly scheduleSample?: AdminScheduleControllerOptions['sample'];
+  /**
+   * Notificações do painel (spec 038); sem isto (ou sem `attendance`) as rotas `.../notifications/*` não
+   * existem e as conversas não trazem `openHandoff`.
+   */
+  readonly notifications?: Pick<
+    NotificationService,
+    'list' | 'countOpen' | 'resolve' | 'openHandoffs'
+  >;
   /** Valores públicos do Embedded Signup para o site (spec 023); sem isto `.../channel/setup` não existe. */
   readonly channelSetup?: ChannelSetupInfo;
 }
@@ -375,7 +385,17 @@ export function buildServer({
         auth,
         metrics,
         attendance: admin.attendance,
+        notifications: admin.notifications,
       });
+      if (admin.notifications !== undefined) {
+        void app.register(adminNotificationsController, {
+          prefix: '/admin/companies',
+          auth,
+          metrics,
+          notifications: admin.notifications,
+          attendance: admin.attendance,
+        });
+      }
     }
   }
 

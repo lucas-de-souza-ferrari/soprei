@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ApiError, request } from '../api';
+import { openHandoffSchema } from './notifications-api';
 
 /**
  * Contratos e mensagens da área da empresa (spec 023). Toda mensagem mostrada na tela é escolhida aqui
@@ -67,8 +68,16 @@ export const conversationSchema = z.strictObject({
   channel: z.enum(['whatsapp', 'simulator']),
   createdAt: isoDate,
   updatedAt: isoDate,
+  /** Spec 038: há pedido de atendimento humano aberto nesta conversa (selo "Humano"). */
+  openHandoff: z.boolean().optional(),
 });
 export type ConversationItem = z.infer<typeof conversationSchema>;
+
+/** A conversa no histórico (spec 038): traz o pedido aberto com o id da notificação, ou `null`. */
+export const conversationDetailSchema = conversationSchema.extend({
+  openHandoff: openHandoffSchema.nullable().optional(),
+});
+export type ConversationDetail = z.infer<typeof conversationDetailSchema>;
 
 export const conversationsPageSchema = z.strictObject({
   items: z.array(conversationSchema).max(200),
@@ -88,7 +97,7 @@ export const messageSchema = z.strictObject({
 export type MessageItem = z.infer<typeof messageSchema>;
 
 export const messagesPageSchema = z.strictObject({
-  conversation: conversationSchema,
+  conversation: conversationDetailSchema,
   items: z.array(messageSchema).max(200),
   nextCursor: cursorText.nullable(),
 });

@@ -11,6 +11,7 @@ import {
   type LlmToolSet,
 } from '../../../application/ports/llm-provider.js';
 import { ATTENDANCE_STYLE_INSTRUCTION } from '../../../application/attendance/attendance.service.js';
+import { HANDOFF_TOOL_NAME } from '../../../application/attendance/handoff-tool.js';
 import {
   KNOWLEDGE_BLOCK_CLOSE,
   KNOWLEDGE_BLOCK_OPEN,
@@ -32,6 +33,14 @@ export const MOCK_HANG_MARKER = '[[mock:hang]]';
 export const MOCK_EMPTY_MARKER = '[[mock:empty]]';
 /** Texto do contato com este marcador faz o mock responder com texto grande demais. */
 export const MOCK_HUGE_MARKER = '[[mock:huge]]';
+
+/**
+ * Spec 038: com a ferramenta de humano oferecida, o mock a chama quando o texto do contato (minúsculas, sem
+ * acento) contém um destes trechos. Determinístico, para testes e demonstração.
+ */
+export const MOCK_HANDOFF_TRIGGERS = ['atendente', 'humano', 'falar com uma pessoa'] as const;
+/** Sufixo da resposta do mock quando ele pediu atendimento humano. */
+export const MOCK_HANDOFF_SUFFIX = ' (atendimento humano solicitado)';
 
 /** Quanto do texto do contato o mock devolve no eco (para a resposta caber no limite). */
 const ECHO_MAX_CHARS = 500;
@@ -115,6 +124,16 @@ export class MockLlmProvider implements LlmProvider {
 
     const text = input.userMessage;
     if (text.includes(MOCK_HANG_MARKER)) return waitForAbort(options.signal);
+    // Spec 038: com a ferramenta de humano oferecida e um pedido de pessoa no texto, o mock a chama uma vez
+    // (motivo fixo) e responde com o sufixo, como um turno de verdade com ferramenta.
+    const offered = options.tools;
+    const askedHuman =
+      offered !== undefined &&
+      offered.definitions.some((definition) => definition.name === HANDOFF_TOOL_NAME) &&
+      asksForHuman(text);
+    if (askedHuman) {
+      await offered.execute({ name: HANDOFF_TOOL_NAME, input: { motivo: 'CONTACT_REQUESTED' } });
+    }
     if (text.includes(MOCK_FAIL_MARKER)) {
       // Nunca ecoa o texto do contato no erro (contrato do LlmProvider).
       return Result.err(new ExternalServiceError('Falha simulada do provedor mock'));
@@ -131,7 +150,8 @@ export class MockLlmProvider implements LlmProvider {
     const persona = personaText.slice(0, PERSONA_PREVIEW_CHARS);
     const echo = text.slice(0, ECHO_MAX_CHARS);
     return Result.ok({
-      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}`,
+      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}${askedHuman ? MOCK_HANDOFF_SUFFIX : ''}`,
+      ...(askedHuman ? { toolRounds: 1, toolCalls: 1 } : {}),
     });
   }
 }
@@ -191,6 +211,11 @@ function aborted(): Result<never, ExternalServiceError> {
       context: { provider: 'mock', errorType: LLM_ERROR_TYPE.timeout, retryable: false },
     }),
   );
+}
+
+function asksForHuman(text: string): boolean {
+  const normalized = text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  return MOCK_HANDOFF_TRIGGERS.some((trigger) => normalized.includes(trigger));
 }
 
 /**
