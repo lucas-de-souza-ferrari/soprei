@@ -442,8 +442,15 @@ export async function openMenu(page: Page): Promise<Locator> {
   const button = page.getByRole('button', { name: 'Abrir menu' });
   const nav = page.getByRole('navigation', { name: 'Menu da empresa' });
   await expect(nav.or(button).first()).toBeVisible();
-  if (!(await nav.isVisible())) await button.click();
-  await expect(nav).toBeVisible();
+  // Trocar de empresa remonta o shell (key por empresa): a gaveta antiga pode estar sumindo (ainda
+  // visível na animação de saída) ou o clique pode cair no botão que está sendo trocado. Tenta de novo
+  // até a navegação ficar visível e estável, em vez de confiar num clique só.
+  await expect(async () => {
+    if (!(await nav.isVisible())) await button.click({ timeout: 1_000 });
+    await expect(nav).toBeVisible({ timeout: 1_000 });
+    await page.waitForTimeout(100);
+    await expect(nav).toBeVisible({ timeout: 100 });
+  }).toPass({ timeout: 10_000 });
   return nav;
 }
 
