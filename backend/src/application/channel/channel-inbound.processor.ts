@@ -95,7 +95,13 @@ export interface ChannelInboundProcessorDeps {
   readonly metrics?:
     | (Pick<Metrics, 'countChannelStateTransition'> &
         Partial<
-          Pick<Metrics, 'countUsageSentMessage' | 'countUsageMeterError' | 'countChannelEcho'>
+          Pick<
+            Metrics,
+            | 'countUsageSentMessage'
+            | 'countUsageMeterError'
+            | 'countChannelEcho'
+            | 'countUnsentReply'
+          >
         >)
     | undefined;
   /**
@@ -319,6 +325,15 @@ export class ChannelInboundProcessor {
         { companyId, ...refs, replyId: reply.id },
         'IA pausada no contato antes do envio; resposta gravada e não enviada',
       );
+      // A resposta fica sem `sentAt`: entra em `attendance_unsent_replies_total` (E3; revisão, S1).
+      try {
+        this.deps.metrics?.countUnsentReply?.();
+      } catch (err) {
+        this.deps.logger.warn(
+          describeError(err),
+          'falha ao registrar métrica de resposta não enviada',
+        );
+      }
       return 'done';
     }
 

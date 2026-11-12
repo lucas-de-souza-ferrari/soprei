@@ -99,6 +99,8 @@ export interface FakeEcho {
   readonly id: string;
   /** O contato a quem a equipe escreveu. */
   readonly to?: string;
+  /** `contacts[].wa_id` do contato; ausente = igual ao `to`. */
+  readonly waId?: string;
   readonly type?: string;
   readonly text?: string;
 }
@@ -124,7 +126,10 @@ export function echoWebhookPayload(
             value: {
               messaging_product: 'whatsapp',
               metadata: { display_phone_number: '15550783881', phone_number_id: phoneNumberId },
-              contacts: echoes.map((echo) => ({ wa_id: echo.to, user_id: '1234567890123456789' })),
+              contacts: echoes.map((echo) => ({
+                wa_id: echo.waId ?? echo.to,
+                user_id: '1234567890123456789',
+              })),
               message_echoes: echoes.map((echo) => ({
                 from: '15550783881',
                 ...(echo.to === undefined ? {} : { to: echo.to }),

@@ -82,7 +82,14 @@ export type ChannelConnectionAction =
   'connect' | 'replace_token' | 'embedded_signup' | 'coexistence' | 'disconnect';
 /** Destino de um eco de mensagem enviada pelo aplicativo (spec 039): conjunto fixo. */
 export type ChannelEchoResult =
-  'recorded' | 'duplicate' | 'own' | 'unknown_number' | 'invalid' | 'discarded' | 'disabled';
+  | 'recorded'
+  | 'duplicate'
+  | 'own'
+  | 'unknown_number'
+  | 'invalid'
+  | 'discarded'
+  | 'disabled'
+  | 'ignored_type';
 export type ChannelConnectionResult =
   | 'ok'
   | 'invalid_token'

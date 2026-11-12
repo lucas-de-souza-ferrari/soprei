@@ -51,7 +51,7 @@ export const COEXISTENCE_HELP: readonly string[] = [
 export const PERSONAL_WHATSAPP_HINT =
   'Usa o WhatsApp comum (não o Business)? Instale o WhatsApp Business no celular e migre o número antes de conectar.';
 export const COEXISTENCE_CONNECTED_TEXT =
-  'O número continua no aplicativo WhatsApp Business do celular. Quando alguém da equipe responde um contato pelo celular, a IA para de responder esse contato por 12 horas, ou até você reativar na conversa. Abra o aplicativo no celular de vez em quando: a Meta pode desconectar o número se ele ficar muito tempo sem uso.';
+  'O número continua no aplicativo WhatsApp Business do celular. Quando alguém da equipe responde um contato pelo celular, a IA para de responder esse contato por 12 horas, ou até você reativar na conversa.';
 
 type ConnectChoice = 'coexistence' | 'api_only';
 const NOT_CONFIGURED_MESSAGE = 'A conexão pelo site ainda não está configurada.';

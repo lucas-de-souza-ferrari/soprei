@@ -97,14 +97,19 @@ export interface InboundChannelEcho {
   readonly recipient: string | undefined;
   readonly content:
     | { readonly kind: 'text'; readonly text: string | undefined }
-    /** Foto, áudio, documento...: vira o texto fixo do servidor (a mídia nunca é guardada). */
-    | { readonly kind: 'media' };
+    /** Foto, áudio, vídeo, documento, figurinha: vira o texto fixo do servidor (a mídia nunca é guardada). */
+    | { readonly kind: 'media' }
+    /**
+     * Reação, mensagem do sistema, `unsupported`, tipo desconhecido ou ausente (decisão do dono, revisão
+     * da 039): não grava nada nem pausa a IA (métrica `ignored_type`), como no canal de entrada.
+     */
+    | { readonly kind: 'ignored' };
   /** Instante de recebimento pelo webhook (spec 034): ordena eco e mensagens do contato. */
   readonly receivedAt?: Date;
 }
 
 /** Destino de um eco no webhook (label `result` de `channel_echo_events_total`; conjunto fixo). */
-export type ChannelEchoIntakeResult = 'unknown_number' | 'invalid' | 'discarded';
+export type ChannelEchoIntakeResult = 'unknown_number' | 'invalid' | 'discarded' | 'ignored_type';
 
 export interface IntakeSummary {
   /** Mensagens que viraram job (texto ou aviso). */
@@ -223,6 +228,11 @@ export class ChannelIntakeService {
     const { logger } = this.deps;
     const ref = messageRef(echo.messageId);
     const contactRef = echo.recipient;
+    if (echo.content.kind === 'ignored') {
+      this.countEcho('ignored_type');
+      logger.info({ messageRef: ref }, 'eco de tipo não tratado ignorado');
+      return 'discarded';
+    }
     if (
       contactRef === undefined ||
       !SENDER_PATTERN.test(contactRef) ||

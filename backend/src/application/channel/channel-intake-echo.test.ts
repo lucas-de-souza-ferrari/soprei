@@ -154,6 +154,20 @@ describe('ChannelIntakeService.acceptEchoes (spec 039)', () => {
     assert.equal(truncateEchoText('😀😀'), '😀😀');
   });
 
+  it('eco de tipo não tratado (reação, sistema...): sem job, métrica ignored_type, sem texto em log (I-2)', async () => {
+    const h = setup();
+    await newCompany(h, 'alfa', '111');
+    const summary = await h.intake.acceptEchoes(
+      [echo('111', { content: { kind: 'ignored' } })],
+      'req',
+    );
+    assert.deepEqual(summary, { enqueued: 0, discarded: 1, failed: 0 });
+    assert.equal(h.queue.jobs.size, 0);
+    assert.deepEqual(h.results, ['ignored_type']);
+    assert.equal(logContains(h.logs.raw(), CONTACT), false);
+    assert.equal(logContains(h.logs.raw(), ECHO_ID), false);
+  });
+
   it('o mesmo eco reentregue não duplica o job (id determinístico)', async () => {
     const h = setup();
     await newCompany(h, 'alfa', '111');

@@ -73,6 +73,7 @@ function setup(attendanceOverride?: (service: AttendanceService) => InboundAtten
   const llm = new MockLlmProvider({ recordCalls: true });
   const logs = captureLogs();
   const echoes: string[] = [];
+  const unsent = { count: 0 };
   const service = new AttendanceService({
     companies,
     conversations: store.conversations,
@@ -97,13 +98,28 @@ function setup(attendanceOverride?: (service: AttendanceService) => InboundAtten
       countChannelEcho: (result) => {
         echoes.push(result);
       },
+      countUnsentReply: () => {
+        unsent.count += 1;
+      },
     },
     queue: scheduler,
     batch: { windowMs: 0, maxWaitMs: 0, maxMessages: 10, maxChars: 8_000 },
     logger: logs.logger,
     now,
   });
-  return { companies, store, llm, logs, service, sender, scheduler, processor, echoes, now };
+  return {
+    companies,
+    store,
+    llm,
+    logs,
+    service,
+    sender,
+    scheduler,
+    processor,
+    echoes,
+    unsent,
+    now,
+  };
 }
 
 type Harness = ReturnType<typeof setup>;
@@ -287,6 +303,7 @@ describe('ChannelInboundProcessor: flush com a IA pausada (spec 039)', () => {
     const replies = h.store.allMessages().filter((m) => m.role === 'ASSISTANT');
     assert.equal(replies.length, 1);
     assert.equal(replies[0]?.sentAt, null);
+    assert.equal(h.unsent.count, 1, 'entra em attendance_unsent_replies_total (S1)');
   });
 
   it('nada de texto, telefone ou wamid nos logs do fluxo eco/pausa', async () => {

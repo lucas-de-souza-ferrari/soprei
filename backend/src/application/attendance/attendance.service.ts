@@ -299,7 +299,11 @@ export type HumanEchoResult =
  * Texto gravado do eco: o da equipe, cortado no teto de uma mensagem; vazio ou ausente vira o texto fixo
  * de mídia (spec 039).
  */
-export function humanEchoContent(text: string | undefined): string {
+export function humanEchoContent(rawText: string | undefined): string {
+  // NUL e os outros caracteres de controle (exceto tabulação e quebra de linha) saem: o Postgres recusa
+  // NUL em texto e o eco se perderia nas retentativas (revisão da 039, S2).
+  // eslint-disable-next-line no-control-regex -- remover caracteres de controle é o objetivo
+  const text = rawText?.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '');
   if (text === undefined || text.trim() === '') return HUMAN_MEDIA_PLACEHOLDER;
   return Array.from(text).length > MESSAGE_CONTENT_MAX_LENGTH
     ? Array.from(text).slice(0, MESSAGE_CONTENT_MAX_LENGTH).join('')
@@ -504,7 +508,7 @@ export class AttendanceService {
     if (conversation === null) return this.emptyResponse(null);
 
     // Um a mais que o limite: é assim que se sabe que sobrou excedente.
-    const fetched = await this.deps.messages.listPending(
+    let fetched = await this.deps.messages.listPending(
       companyId,
       conversation.id,
       limits.maxMessages + 1,
@@ -514,6 +518,14 @@ export class AttendanceService {
     if (isAiPaused(conversation.aiPausedUntil, this.now())) {
       return this.pausedResponse(companyId, conversation.id, fetched);
     }
+    // A pausa já venceu, mas o que o contato escreveu ANTES do fim dela (e cujo `flush` só rodou
+    // depois) também é da equipe (revisão da 039, S3): sai das pendentes antes de montar o lote.
+    fetched = await this.dropWrittenDuringPause(
+      companyId,
+      conversation,
+      fetched,
+      limits.maxMessages + 1,
+    );
     const first = fetched[0];
     if (first === undefined) {
       const unsent = await this.findUnsentTail(companyId, conversation.id);
@@ -996,6 +1008,41 @@ export class AttendanceService {
       batchSize: 0,
       hasMorePending,
     };
+  }
+
+  /**
+   * Pendentes gravadas antes do fim de uma pausa já vencida (`createdAt < aiPausedUntil`) passam a ser da
+   * equipe: `aiIgnoreBefore` avança até a última delas (só para a frente) e a lista é relida. Reativar a
+   * IA zera `aiPausedUntil`, então depois de "Reativar a IA" nada disso se aplica. Laço limitado: cada
+   * volta tira ao menos uma mensagem.
+   */
+  private async dropWrittenDuringPause(
+    companyId: CompanyId,
+    conversation: Pick<Conversation, 'id' | 'aiPausedUntil'>,
+    pending: readonly Message[],
+    limit: number,
+  ): Promise<readonly Message[]> {
+    const pausedUntil = conversation.aiPausedUntil;
+    if (pausedUntil === null) return pending;
+    let current = pending;
+    let ignored = 0;
+    for (let round = 0; round < 50; round += 1) {
+      const during = current.filter((message) => message.createdAt < pausedUntil);
+      const newest = during[during.length - 1];
+      if (newest === undefined) break;
+      ignored += during.length;
+      await this.deps.conversations.extendAiPause(companyId, conversation.id, {
+        ignoreBefore: newest.createdAt,
+      });
+      current = await this.deps.messages.listPending(companyId, conversation.id, limit);
+    }
+    if (ignored > 0) {
+      this.deps.logger.info(
+        { companyId, conversationId: conversation.id, ignoredMessages: ignored },
+        'mensagens escritas durante a pausa da IA ficaram com a equipe',
+      );
+    }
+    return current;
   }
 
   private recordPausedTurn(companyId: CompanyId, conversationId: string, ignored: number): void {

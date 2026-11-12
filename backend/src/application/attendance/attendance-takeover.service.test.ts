@@ -211,6 +211,17 @@ describe('AttendanceService.recordHumanEcho (spec 039, E3)', () => {
     assert.equal(humanEchoContent('ok'), 'ok');
   });
 
+  it('NUL e caracteres de controle saem do texto do eco; só controle vira o texto de mídia (S2)', async () => {
+    assert.equal(humanEchoContent('a\u0000b\u0007c'), 'abc');
+    assert.equal(humanEchoContent('linha 1\nlinha\t2'), 'linha 1\nlinha\t2');
+    assert.equal(humanEchoContent('\u0000\u0001'), HUMAN_MEDIA_PLACEHOLDER);
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    const result = await teamSays(h, company, `oi\u0000${SECRET_HUMAN_TEXT}`);
+    assert.equal(result.result, 'recorded');
+    assert.equal(h.store.allMessages()[0]?.content, `oi${SECRET_HUMAN_TEXT}`);
+  });
+
   it('instante de recebimento fora da faixa: vale o relógio, com warn só do companyId', async () => {
     const h = setup();
     const company = await newCompany(h, 'alfa');
@@ -312,6 +323,29 @@ describe('Pausa da IA no respondToPending (spec 039, E3)', () => {
         ['assistant', SECRET_HUMAN_TEXT],
       ],
     );
+  });
+
+  it('mensagem escrita perto do fim da pausa, com o flush depois do fim, fica com a equipe (S3)', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await teamSays(h, company, SECRET_HUMAN_TEXT);
+    h.clock.advance(AI_TAKEOVER_PAUSE_MS - 2_000);
+    await contactSays(h, company, 'escrita-durante-a-pausa');
+    h.clock.advance(5_000);
+    assert.equal(await h.service.isAiPausedFor(company.id, CONTACT), false, 'a pausa venceu');
+
+    const late = await h.service.respondToPending(company.id, CONTACT, LIMITS);
+
+    assert.equal(late.outcome, 'empty');
+    assert.equal(h.llm.calls.length, 0);
+    assert.equal(await h.service.hasPendingMessages(company.id, CONTACT), false);
+
+    // O que chega depois do fim da pausa volta a ser respondido, sozinho.
+    await contactSays(h, company, SECRET_CONTACT_TEXT);
+    const next = await h.service.respondToPending(company.id, CONTACT, LIMITS);
+    assert.equal(next.outcome, 'answered');
+    assert.equal(next.batchSize, 1);
+    assert.equal(h.llm.calls[0]?.userMessage, SECRET_CONTACT_TEXT);
   });
 
   it('corrida: eco durante a chamada ao modelo desfaz a resposta (nada gravado da IA)', async () => {

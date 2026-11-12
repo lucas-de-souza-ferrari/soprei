@@ -125,6 +125,64 @@ describe('parseWebhookBody: eco da coexistência (spec 039, formato do E0)', () 
     ]);
   });
 
+  it('contato do eco: com um único contacts[].wa_id válido vale o wa_id; senão, o "to" (I-1)', () => {
+    // Celular brasileiro: o wa_id vem sem o 9 (12 dígitos) e o "to" com ele (13).
+    const single = parseWebhookBody(
+      echoWebhookPayload(NUMBER, [
+        { id: 'wamid.eco.wa', to: '5511987654321', waId: '551187654321', text: 'oi' },
+      ]),
+    );
+    assert.equal(single.echoes[0]?.recipient, '551187654321');
+
+    const payload = echoWebhookPayload(NUMBER, [{ id: 'wamid.eco.bad', to: CONTACT, text: 'oi' }]);
+    const value = (payload['entry'] as { changes: { value: { contacts: unknown[] } }[] }[])[0]
+      ?.changes[0]?.value;
+    assert.ok(value);
+    value.contacts = [{ wa_id: 'não é número' }];
+    assert.equal(parseWebhookBody(payload).echoes[0]?.recipient, CONTACT, 'wa_id inválido');
+    value.contacts = [{ wa_id: '551111111111' }, { wa_id: '551122222222' }];
+    assert.equal(parseWebhookBody(payload).echoes[0]?.recipient, CONTACT, 'dois contatos');
+    value.contacts = [];
+    assert.equal(parseWebhookBody(payload).echoes[0]?.recipient, CONTACT, 'sem contatos');
+
+    // Dois ecos no mesmo value: o contacts[] não diz qual é de qual; vale o "to" de cada um.
+    const two = parseWebhookBody(
+      echoWebhookPayload(NUMBER, [
+        { id: 'wamid.a', to: '5511987654321', waId: '551187654321', text: 'a' },
+        { id: 'wamid.b', to: '5511987654321', waId: '551187654321', text: 'b' },
+      ]),
+    );
+    assert.deepEqual(
+      two.echoes.map((echo) => echo.recipient),
+      ['5511987654321', '5511987654321'],
+    );
+  });
+
+  it('tipos: image, audio, video, document e sticker são mídia; o resto é ignorado (I-2)', () => {
+    const media = ['image', 'audio', 'video', 'document', 'sticker'];
+    const ignored = ['reaction', 'system', 'unsupported', 'location', 'tipo_novo'];
+    for (const type of media) {
+      const parsed = parseWebhookBody(
+        echoWebhookPayload(NUMBER, [{ id: `wamid.${type}`, to: CONTACT, type }]),
+      );
+      assert.deepEqual(parsed.echoes[0]?.content, { kind: 'media' }, type);
+    }
+    for (const type of ignored) {
+      const parsed = parseWebhookBody(
+        echoWebhookPayload(NUMBER, [{ id: `wamid.${type}`, to: CONTACT, type }]),
+      );
+      assert.deepEqual(parsed.echoes[0]?.content, { kind: 'ignored' }, type);
+      assert.equal(parsed.invalid, false, type);
+    }
+    const payload = echoWebhookPayload(NUMBER, [{ id: 'wamid.semtipo', to: CONTACT }]);
+    const echo = (
+      payload['entry'] as { changes: { value: { message_echoes: Record<string, unknown>[] } }[] }[]
+    )[0]?.changes[0]?.value.message_echoes[0];
+    assert.ok(echo);
+    delete echo['type'];
+    assert.deepEqual(parseWebhookBody(payload).echoes[0]?.content, { kind: 'ignored' }, 'sem type');
+  });
+
   it('history e smb_app_state_sync são contados como ignorados e não geram nada (D6)', () => {
     for (const field of ['history', 'smb_app_state_sync']) {
       const parsed = parseWebhookBody(

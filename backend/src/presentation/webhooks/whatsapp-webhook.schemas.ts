@@ -64,11 +64,38 @@ export const IGNORED_COEXISTENCE_FIELDS: ReadonlySet<string> = new Set([
   'smb_app_state_sync',
 ]);
 
-/** `value` do campo `smb_message_echoes`: o número do negócio e a lista de ecos. */
+/**
+ * `value` do campo `smb_message_echoes`: o número do negócio, a lista de ecos e, quando vier, a lista
+ * `contacts[]` (só o `wa_id` é lido; o nome de perfil nunca).
+ */
 export const webhookEchoValueSchema = z.object({
   metadata: z.object({ phone_number_id: z.string().regex(/^[0-9]{1,32}$/) }),
   message_echoes: z.array(z.unknown()).optional(),
+  contacts: z.array(z.unknown()).optional(),
 });
+
+/** Tipos de eco que viram o texto fixo de mídia e pausam a IA (decisão do dono, revisão da 039). */
+export const ECHO_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  'image',
+  'audio',
+  'video',
+  'document',
+  'sticker',
+]);
+
+const WA_ID_PATTERN = /^[0-9]{1,32}$/;
+
+/**
+ * O `wa_id` do contato quando o `value` traz **exatamente um** contato com `wa_id` válido; senão
+ * `undefined` (o chamador usa o `to`). No Brasil o `wa_id` pode vir sem o 9 do celular (12 dígitos)
+ * enquanto o `to` de um chat aberto pelo número digitado vem com 13: o `wa_id` é o que a mensagem do
+ * contato traz no `from`, então é ele que leva o eco à mesma conversa (revisão da 039, I-1).
+ */
+function singleContactWaId(contacts: readonly unknown[] | undefined): string | undefined {
+  if (contacts?.length !== 1) return undefined;
+  const parsed = z.object({ wa_id: z.string().regex(WA_ID_PATTERN) }).safeParse(contacts[0]);
+  return parsed.success ? parsed.data.wa_id : undefined;
+}
 
 /**
  * Um eco: `to` é o contato (no eco, `from` é o número da empresa). `timestamp`, `from` e os campos
@@ -200,7 +227,10 @@ function collectEchoes(rawValue: unknown, echoes: InboundChannelEcho[]): boolean
   if (!value.success) return false;
   let valid = true;
   const phoneNumberId = value.data.metadata.phone_number_id;
-  for (const raw of value.data.message_echoes ?? []) {
+  const echoList = value.data.message_echoes ?? [];
+  // O `contacts[]` do `value` só identifica o contato sem ambiguidade quando há um único eco.
+  const waId = echoList.length === 1 ? singleContactWaId(value.data.contacts) : undefined;
+  for (const raw of echoList) {
     const parsed = webhookEchoSchema.safeParse(raw);
     if (!parsed.success) {
       valid = false;
@@ -211,12 +241,15 @@ function collectEchoes(rawValue: unknown, echoes: InboundChannelEcho[]): boolean
     echoes.push({
       phoneNumberId,
       messageId: echo.id,
-      recipient: typeof echo.to === 'string' ? echo.to : undefined,
-      content:
-        echo.type === 'text'
-          ? { kind: 'text', text: typeof body === 'string' ? body : undefined }
-          : { kind: 'media' },
+      recipient: waId ?? (typeof echo.to === 'string' ? echo.to : undefined),
+      content: echoContent(echo.type, body),
     });
   }
   return valid;
+}
+
+function echoContent(type: string | undefined, body: unknown): InboundChannelEcho['content'] {
+  if (type === 'text') return { kind: 'text', text: typeof body === 'string' ? body : undefined };
+  if (type !== undefined && ECHO_MEDIA_TYPES.has(type)) return { kind: 'media' };
+  return { kind: 'ignored' };
 }
