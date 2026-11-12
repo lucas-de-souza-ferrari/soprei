@@ -62,14 +62,19 @@ export class PrismaNotificationRepository implements NotificationRepository {
   ): Promise<NotificationCreateResult> {
     return this.run('createHandoff', async () => {
       const kind = 'HUMAN_HANDOFF' as const;
-      const existing = await this.db.notification.count({
-        where: { companyId, conversationId: data.conversationId, kind, status: 'OPEN' },
-      });
-      if (existing > 0) return 'deduplicated';
+      // Teto por empresa: contagem antes do INSERT, então é APROXIMADO sob concorrência (pedidos
+      // simultâneos em conversas diferentes podem passar juntos; o excesso é limitado ao paralelismo).
       const open = await this.db.notification.count({ where: { companyId, status: 'OPEN' } });
-      if (open >= maxOpen) return 'capped';
-      // `skipDuplicates` vira INSERT ... ON CONFLICT DO NOTHING: o índice único parcial (uma aberta por
-      // conversa e tipo) decide a corrida sem abortar a transação do atendimento.
+      if (open >= maxOpen) {
+        const existing = await this.db.notification.count({
+          where: { companyId, conversationId: data.conversationId, kind, status: 'OPEN' },
+        });
+        return existing > 0 ? 'deduplicated' : 'capped';
+      }
+      // Sem contagem prévia de duplicata: o índice único parcial decide sozinho. `skipDuplicates` vira
+      // INSERT ... ON CONFLICT DO NOTHING, que espera um UPDATE concorrente (alguém resolvendo a aberta)
+      // e insere se a linha antiga saiu do predicado: o pedido novo não se perde nessa corrida, e a
+      // transação do atendimento não aborta.
       const { count } = await this.db.notification.createMany({
         data: [
           {

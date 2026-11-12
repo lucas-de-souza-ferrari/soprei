@@ -471,7 +471,7 @@ export class AttendanceService {
     }
 
     this.recordBatch(batch.length, hasMorePending);
-    this.recordHandoff(handoff, notification);
+    this.recordHandoff(companyId, handoff, notification);
     this.deps.logger.info(
       {
         companyId,
@@ -827,7 +827,7 @@ export class AttendanceService {
       },
       'mensagem atendida',
     );
-    this.recordHandoff(handoff, notification);
+    this.recordHandoff(companyId, handoff, notification);
     return toResult(message, reply, false, prompt.sources);
   }
 
@@ -856,6 +856,7 @@ export class AttendanceService {
 
   /** Métricas do pedido de humano, depois do commit. Falha de métrica nunca derruba o atendimento. */
   private recordHandoff(
+    companyId: CompanyId,
     handoff: LlmHandoff | undefined,
     notification: NotificationCreateResult | undefined,
   ): void {
@@ -868,7 +869,7 @@ export class AttendanceService {
     }
     if (notification === 'capped') {
       this.deps.logger.warn(
-        { reason: 'notification_cap' },
+        { companyId, reason: 'notification_cap' },
         'teto de notificações abertas da empresa atingido; pedido de atendimento humano não gravado',
       );
     }
