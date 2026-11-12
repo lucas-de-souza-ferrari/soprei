@@ -461,6 +461,11 @@ resolve_ref() {
   if [[ $USE_PREVIOUS == true ]]; then
     [[ -n $PREVIOUS_SHA ]] || die1 'não há versão anterior registrada para --previous'
     TARGET_SHA=$PREVIOUS_SHA
+  elif [[ $AUTO == true ]]; then
+    # No automático o --ref é o próprio SHA: nunca uma branch ou tag que por acaso tenha esse nome.
+    TARGET_SHA=$(git -C "$APP_DIR" rev-parse --verify --quiet "$REF^{commit}") || TARGET_SHA=''
+    [[ -n $TARGET_SHA ]] || die1 "não encontrei o commit $REF depois do fetch"
+    [[ $TARGET_SHA == "$REF" ]] || die1 'modo automático: o --ref não resolveu para o próprio SHA pedido; nada foi alterado'
   else
     for candidate in "refs/remotes/origin/$REF" "refs/tags/$REF" "$REF"; do
       if sha=$(git -C "$APP_DIR" rev-parse --verify --quiet "$candidate^{commit}"); then
@@ -893,7 +898,7 @@ post_swap_failure() {
 
 run_deploy() {
   local started=$SECONDS mode=manual
-  trap '' HUP
+  trap '' HUP PIPE
   trap on_interrupt INT TERM
   trap on_unexpected_error ERR
   if [[ $AUTO == true ]]; then mode=auto; fi
@@ -1000,10 +1005,14 @@ main() {
 
   # Toda a saída passa pelo filtro de redação e vai também ao log. O pipeline roda o deploy num
   # subshell; o código de saída é o dele (PIPESTATUS), não o do filtro.
+  # Queda da conexão (deploy pelo SSH sem terminal, job cancelado, rede): quem lê a saída fecha o
+  # pipe. Nada aqui pode morrer por SIGPIPE: o filtro e o tee ignoram o sinal, e o tee, com
+  # warn-nopipe, para de escrever na saída fechada e SEGUE gravando o log; assim o sed nunca vê o
+  # pipe fechado e o deploy vai até o fim (com rollback se precisar).
   set +o pipefail
   run_deploy 2>&1 | (
-    trap '' INT TERM HUP
-    redact | tee -a "$LOG_FILE"
+    trap '' INT TERM HUP PIPE
+    redact | tee --output-error=warn-nopipe -a "$LOG_FILE"
   )
   rc=${PIPESTATUS[0]}
   exit "$rc"

@@ -145,7 +145,12 @@ describe('deploy.sh (spec 037, E1)', () => {
     assert.match(redact, /JWT_SECRET/);
     assert.match(redact, /KEY\|SECRET\|TOKEN\|PSWD\|PASSWORD/);
     // Toda a saída passa pelo filtro e vai ao log.
-    assert.match(functionBody('main'), /redact \| tee -a "\$LOG_FILE"/);
+    assert.match(functionBody('main'), /redact \| tee --output-error=warn-nopipe -a "\$LOG_FILE"/);
+  });
+
+  it('a queda da conexão (pipe fechado) não mata o deploy: SIGPIPE ignorado no deploy e no filtro', () => {
+    assert.match(functionBody('run_deploy'), /trap '' HUP PIPE/);
+    assert.match(functionBody('main'), /trap '' INT TERM HUP PIPE/);
   });
 
   it('a varredura de migrations cobre as palavras do alarme e a marca de aprovação', () => {
@@ -212,6 +217,15 @@ describe('deploy.sh --auto (spec 037, E3)', () => {
     assert.ok(fetch >= 0 && auto > fetch, 'as regras do --auto vêm depois do fetch');
     assert.ok(auto < flow.indexOf('scan_migrations'), 'e antes de qualquer outra etapa');
     assert.match(flow, /modo=\$mode/);
+  });
+
+  it('no --auto o --ref só resolve como o próprio SHA (nunca branch ou tag com esse nome)', () => {
+    const resolve = functionBody('resolve_ref');
+    const auto = resolve.indexOf('AUTO == true');
+    const candidates = resolve.indexOf('refs/remotes/origin/$REF');
+    assert.ok(auto >= 0 && auto < candidates, 'o ramo do --auto vem antes dos candidatos');
+    assert.match(resolve, /rev-parse --verify --quiet "\$REF\^\{commit\}"/);
+    assert.match(resolve, /\$TARGET_SHA == "\$REF"/);
   });
 });
 

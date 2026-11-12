@@ -996,7 +996,79 @@ function commitOutsideMain(world: World): string {
   return sha;
 }
 
+/**
+ * Roda o deploy com a saída num pipe que fecha logo na primeira linha (`| head -n1`), como uma
+ * conexão SSH sem terminal que cai ou um job cancelado (B1 da revisão da E3).
+ */
+function deployIntoClosedPipe(world: World, args: string[]): RunResult {
+  const result = spawnSync('bash', ['-c', 'bash "$0" "$@" | head -n1', toPosix(SCRIPT), ...args], {
+    cwd: world.appDir,
+    env: scriptEnv(world),
+    encoding: 'utf8',
+    timeout: 90_000,
+  });
+  return finish(world, result.status, `${result.stdout}${result.stderr}`);
+}
+
+describe('deploy.sh: saída num pipe que fecha (queda do SSH)', { skip: BASH_SKIP }, () => {
+  it('o dry-run segue até o fim e o log recebe tudo mesmo com o pipe fechado', () => {
+    const world = makeWorld({ targetMigration: ADDITIVE });
+    const result = deployIntoClosedPipe(world, [
+      '--env',
+      'staging',
+      '--ref',
+      world.targetSha,
+      '--auto',
+      '--dry-run',
+    ]);
+    assert.equal(result.out.trim().split('\n').length, 1, 'o leitor só pegou a primeira linha');
+    assert.match(result.log, /DRY-RUN concluído/);
+    assertNoSecrets(result);
+  });
+
+  it(
+    '(B1) o deploy --auto vai até o fim com o pipe fechado: estado novo e RESUMO no log',
+    { skip: SYMLINK_SKIP },
+    () => {
+      const world = makeWorld({ targetMigration: ADDITIVE });
+      const result = deployIntoClosedPipe(world, [
+        '--env',
+        'staging',
+        '--ref',
+        world.targetSha,
+        '--auto',
+      ]);
+      assert.match(result.log, /RESUMO: concluído/, result.log);
+      assert.equal(stateOf(world, 'current'), world.targetSha);
+      assert.equal(head(world), world.targetSha);
+      assert.ok(result.events.includes('pm2 save'), 'o deploy chegou ao fim');
+      assertNoSecrets(result);
+    },
+  );
+});
+
 describe('deploy.sh --auto (E3)', { skip: BASH_SKIP }, () => {
+  it('(I1) uma branch no origin com o nome do SHA não troca o commit publicado', () => {
+    const world = makeWorld();
+    const outside = commitOutsideMain(world);
+    // Branch chamada exatamente como o SHA pedido, apontando para outro commit.
+    git(world.workDir, 'push', '-q', 'origin', `${outside}:refs/heads/${world.targetSha}`);
+    const result = deploy(world, [
+      '--env',
+      'staging',
+      '--ref',
+      world.targetSha,
+      '--auto',
+      '--dry-run',
+    ]);
+    assert.equal(result.status, 0, result.out);
+    assert.match(
+      result.out,
+      new RegExp(`PLANO: ${world.prevSha.slice(0, 7)} -> ${world.targetSha.slice(0, 7)}`),
+    );
+    assert.equal(head(world), world.prevSha);
+  });
+
   it('--auto com branch, SHA curto ou SHA em maiúsculas sai com 1 antes da trava', () => {
     const world = makeWorld();
     for (const ref of ['main', world.targetSha.slice(0, 12), world.targetSha.toUpperCase()]) {
