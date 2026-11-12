@@ -553,6 +553,8 @@ generate_client() {
   read_env_value DATABASE_URL
   [[ -n $ENV_VALUE ]] || { log 'o arquivo de ambiente não define a URL do banco'; return 1; }
   (
+    # A URL do banco existe só dentro deste subshell, de propósito (nunca vaza para o resto do script).
+    # shellcheck disable=SC2030,SC2031
     export DATABASE_URL=$ENV_VALUE
     cd "$APP_DIR" && run_cmd pnpm db:generate
   )
@@ -642,6 +644,8 @@ abort_before_swap() {
   exit "$code"
 }
 
+# Chamada pelo `trap on_unexpected_error ERR` em run_deploy (o shellcheck não vê a chamada pelo trap).
+# shellcheck disable=SC2329
 on_unexpected_error() {
   local line=${BASH_LINENO[0]:-desconhecida}
   trap - ERR
@@ -652,6 +656,8 @@ on_unexpected_error() {
   abort_before_swap 'erro inesperado no script'
 }
 
+# Chamada pelo `trap on_interrupt INT TERM` em run_deploy (o shellcheck não vê a chamada pelo trap).
+# shellcheck disable=SC2329
 on_interrupt() {
   abort_before_swap 'execução interrompida (sinal)' 1
 }
@@ -667,6 +673,8 @@ run_migrations() {
   read_env_value DATABASE_URL
   [[ -n $ENV_VALUE ]] || { log 'o arquivo de ambiente não define a URL do banco'; return 1; }
   (
+    # A URL do banco existe só dentro deste subshell, de propósito (nunca vaza para o resto do script).
+    # shellcheck disable=SC2030,SC2031
     export DATABASE_URL=$ENV_VALUE
     cd "$APP_DIR/backend" && run_cmd timeout "$MIGRATE_TIMEOUT_SECONDS" pnpm db:migrate:deploy
   )
