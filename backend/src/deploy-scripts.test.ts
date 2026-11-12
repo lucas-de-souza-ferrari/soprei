@@ -250,6 +250,8 @@ describe('programa de entrada do deploy automático (spec 037, E3)', () => {
       'readonly DEPLOY=/var/www/soprei/deploy/deploy.sh',
       'readonly CONF=/etc/soprei-deploy/entry.conf',
       'readonly REQUIRE_ROOT=true',
+      'readonly TRUSTED_UID=0',
+      'readonly CHECK_OWNERSHIP=true',
     ]) {
       assert.equal(entryLines.filter((line) => line === constant).length, 1, constant);
     }
@@ -265,6 +267,8 @@ describe('programa de entrada do deploy automático (spec 037, E3)', () => {
             'CONF',
             'LOGGER',
             'REQUIRE_ROOT',
+            'TRUSTED_UID',
+            'CHECK_OWNERSHIP',
             'REQUEST_RE',
             'SHA_RE',
             'MAX_REQUEST_LENGTH',
@@ -289,6 +293,10 @@ describe('programa de entrada do deploy automático (spec 037, E3)', () => {
     );
     assert.match(entryCode, /args=\(--env production --ref "\$sha" --auto\)/);
     assert.doesNotMatch(entryCode, /--allow-breaking|--force|--previous|--adopt/);
+    // O deploy.sh e a pasta deploy/ são conferidos (dono e escrita) antes do exec.
+    const inner = entryCode.slice(entryCode.indexOf('inner_phase() {'));
+    assert.ok(inner.indexOf('check_deploy_owner') < inner.indexOf('exec /usr/bin/env -i'));
+    assert.match(entryCode, /8#022/);
   });
 
   it('o arquivo tem o bit executável no Git', () => {

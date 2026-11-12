@@ -8,6 +8,8 @@ ENABLED=true
 # ALLOW_UNSTAGED: true enquanto o servidor de staging não existir (D15); com o staging no ar, false
 # (e uma mudança pequena da E3 passa a publicar no staging antes).
 ALLOW_UNSTAGED=true
-# MIGRATIONS: só "auto" (D16): migration aditiva segue pelo automático; a destrutiva é recusada pelo
-# deploy.sh (o automático nunca passa --allow-breaking) e o dono a roda à mão.
+# MIGRATIONS: chave RESERVADA, que só aceita "auto" (qualquer outro valor, inclusive "manual", faz todo
+# pedido sair com 1). Com "auto" (D16), migration aditiva segue pelo automático; a destrutiva é recusada
+# pelo deploy.sh (o automático nunca passa --allow-breaking) e o dono a roda à mão. O "manual" (pausar o
+# automático em qualquer migration, D16 alternativa) não existe nesta versão.
 MIGRATIONS=auto

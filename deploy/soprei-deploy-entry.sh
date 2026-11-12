@@ -29,6 +29,9 @@ readonly DEPLOY=/var/www/soprei/deploy/deploy.sh
 readonly CONF=/etc/soprei-deploy/entry.conf
 readonly LOGGER=/usr/bin/logger
 readonly REQUIRE_ROOT=true
+# Dono exigido do entry.conf, do deploy.sh e da pasta deploy/ (root), e se a conferência vale.
+readonly TRUSTED_UID=0
+readonly CHECK_OWNERSHIP=true
 
 readonly REQUEST_RE='^--env production --ref ([0-9a-f]{40})( --dry-run)?$'
 readonly SHA_RE='^[0-9a-f]{40}$'
@@ -74,9 +77,9 @@ outer_phase() {
 read_conf() {
   local line key value owner_mode
   [[ -f $CONF && -r $CONF ]] || refuse_config 'entry.conf ausente ou ilegível'
-  if [[ $REQUIRE_ROOT == true ]]; then
+  if [[ $CHECK_OWNERSHIP == true ]]; then
     owner_mode=$(stat -c '%u %a' -- "$CONF") || refuse_config 'não consegui conferir o dono do entry.conf'
-    [[ $owner_mode == '0 600' ]] || refuse_config 'entry.conf precisa ser do root com modo 600'
+    [[ $owner_mode == "$TRUSTED_UID 600" ]] || refuse_config 'entry.conf precisa ser do root com modo 600'
   fi
   while IFS= read -r line || [[ -n $line ]]; do
     line=${line%$'\r'}
@@ -106,6 +109,18 @@ read_conf() {
   [[ -n $ENABLED ]] || refuse_config 'entry.conf sem ENABLED'
 }
 
+# O deploy.sh que roda como root e a pasta deploy/ que o contém precisam ser do root e sem escrita para
+# grupo e outros: senão quem escreve neles escolhe o que o root executa.
+check_deploy_owner() {
+  [[ $CHECK_OWNERSHIP == true ]] || return 0
+  local path owner mode
+  for path in "$DEPLOY" "${DEPLOY%/*}"; do
+    read -r owner mode < <(stat -L -c '%u %a' -- "$path" 2>/dev/null) || refuse_config 'não consegui conferir o dono do deploy.sh'
+    [[ $owner == "$TRUSTED_UID" && $mode =~ ^[0-7]{3,4}$ ]] || refuse_config 'o deploy.sh e a pasta deploy/ precisam ser do root'
+    (( (8#$mode & 8#022) == 0 )) || refuse_config 'o deploy.sh e a pasta deploy/ não podem ter escrita para grupo e outros'
+  done
+}
+
 inner_phase() {
   (($# == 3)) || refuse_request
   [[ $1 == --from-ssh ]] || refuse_request
@@ -126,6 +141,7 @@ inner_phase() {
   if [[ $ALLOW_UNSTAGED == true ]]; then
     args+=(--allow-unstaged)
   fi
+  check_deploy_owner
   note "deploy iniciado: sha=${sha:0:7} modo=$mode migrations=$MIGRATIONS"
   cd /
   exec /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root LC_ALL=C "$DEPLOY" "${args[@]}"

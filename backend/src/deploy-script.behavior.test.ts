@@ -1202,7 +1202,10 @@ interface EntryWorld {
   loggerLog: string;
 }
 
-function makeEntryWorld(conf = 'ENABLED=true\nALLOW_UNSTAGED=true\nMIGRATIONS=auto\n'): EntryWorld {
+function makeEntryWorld(
+  conf = 'ENABLED=true\nALLOW_UNSTAGED=true\nMIGRATIONS=auto\n',
+  ownership?: { uid: string },
+): EntryWorld {
   const dir = mkdtempSync(join(tmpdir(), 'soprei-entry-'));
   roots.push(dir);
   const p = (name: string): string => toPosix(join(dir, name));
@@ -1237,6 +1240,11 @@ function makeEntryWorld(conf = 'ENABLED=true\nALLOW_UNSTAGED=true\nMIGRATIONS=au
     ['readonly CONF=/etc/soprei-deploy/entry.conf', `readonly CONF=${p('entry.conf')}`],
     ['readonly LOGGER=/usr/bin/logger', `readonly LOGGER=${p('logger')}`],
     ['readonly REQUIRE_ROOT=true', 'readonly REQUIRE_ROOT=false'],
+    ['readonly TRUSTED_UID=0', `readonly TRUSTED_UID=${ownership?.uid ?? '0'}`],
+    [
+      'readonly CHECK_OWNERSHIP=true',
+      `readonly CHECK_OWNERSHIP=${ownership === undefined ? 'false' : 'true'}`,
+    ],
   ];
   let text = readFileSync(ENTRY, 'utf8').replaceAll('\r\n', '\n');
   for (const [from, to] of replacements) {
@@ -1414,6 +1422,58 @@ describe('programa de entrada: fase de dentro (root pelo sudo)', { skip: BASH_SK
       assert.ok(!result.out.includes('touch'), 'o valor recusado não é ecoado');
     }
   });
+
+  it(
+    'com a conferência de dono ligada, deploy.sh, pasta deploy/ ou entry.conf com escrita alheia recusam',
+    { skip: process.platform === 'win32' ? 'modo de arquivo não é fiel no Windows' : false },
+    () => {
+      const uid = String(process.getuid?.() ?? 0);
+      const prepareGood = (world: EntryWorld): void => {
+        chmodSync(world.conf, 0o600);
+        chmodSync(world.dir, 0o755);
+        chmodSync(join(world.dir, 'deploy'), 0o755);
+      };
+      const ok = makeEntryWorld(undefined, { uid });
+      prepareGood(ok);
+      const good = runEntry(ok, ['--from-ssh', SHA_B, 'deploy']);
+      assert.equal(good.status, 0, good.out);
+
+      const cases: [string, (world: EntryWorld) => void][] = [
+        [
+          'deploy.sh com escrita do grupo',
+          (world) => {
+            chmodSync(join(world.dir, 'deploy'), 0o775);
+          },
+        ],
+        [
+          'pasta deploy/ com escrita de outros',
+          (world) => {
+            chmodSync(world.dir, 0o757);
+          },
+        ],
+        [
+          'entry.conf com modo 644',
+          (world) => {
+            chmodSync(world.conf, 0o644);
+          },
+        ],
+      ];
+      for (const [label, spoil] of cases) {
+        const world = makeEntryWorld(undefined, { uid });
+        prepareGood(world);
+        spoil(world);
+        const result = runEntry(world, ['--from-ssh', SHA_B, 'deploy']);
+        assert.equal(result.status, 1, `${label}: ${result.out}`);
+        assert.ok(!existsSync(world.deployArgs), label);
+      }
+
+      const otherOwner = makeEntryWorld(undefined, { uid: String(Number(uid) + 4242) });
+      prepareGood(otherOwner);
+      const wrong = runEntry(otherOwner, ['--from-ssh', SHA_B, 'deploy']);
+      assert.equal(wrong.status, 1, wrong.out);
+      assert.ok(!existsSync(otherOwner.deployArgs));
+    },
+  );
 
   it('entry.conf com fim de linha CRLF e comentários continua valendo', () => {
     const world = makeEntryWorld('# comentário\r\nENABLED=true\r\n\r\nALLOW_UNSTAGED=false\r\n');
