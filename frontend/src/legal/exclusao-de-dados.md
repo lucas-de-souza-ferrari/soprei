@@ -13,7 +13,7 @@ A empresa com quem você conversou é a responsável pelos seus dados.
 
 1. Peça a exclusão diretamente à empresa (pelo próprio WhatsApp ou pelos canais dela).
 2. A empresa nos encaminha o pedido e nós fazemos a exclusão manualmente. O objetivo é apagar as suas mensagens e retirar seu nome e telefone dos agendamentos. [CONFERIR: E6]
-3. Se não conseguir falar com a empresa, escreva para [PREENCHER: e-mail de privacidade] com o nome da empresa e o número de telefone usado. Encaminharemos o pedido à empresa.
+3. Se não conseguir falar com a empresa, escreva para lucasdesouzaferrari@gmail.com com o nome da empresa e o número de telefone usado. Encaminharemos o pedido à empresa.
 
 Observações:
 
@@ -24,8 +24,8 @@ Observações:
 
 ## Se você tem uma conta no site do Soprei
 
-- **Excluir a conta:** escreva para [PREENCHER: e-mail de privacidade] a partir do e-mail da conta. A exclusão é feita manualmente pela nossa equipe; o objetivo é remover seu e-mail e sua senha e deixar o restante sem identificação. [CONFERIR: E7]
-- **Excluir uma empresa:** o dono da empresa pede a exclusão pelo e-mail [PREENCHER: e-mail de privacidade], a partir do e-mail da conta dona da empresa. Quando atendemos o pedido, a empresa sai do ar e o número do WhatsApp é desligado; a exclusão definitiva dos dados está em implantação. [CONFERIR: E8]
+- **Excluir a conta:** escreva para lucasdesouzaferrari@gmail.com a partir do e-mail da conta. A exclusão é feita manualmente pela nossa equipe; o objetivo é remover seu e-mail e sua senha e deixar o restante sem identificação. [CONFERIR: E7]
+- **Excluir uma empresa:** o dono da empresa pede a exclusão pelo e-mail lucasdesouzaferrari@gmail.com, a partir do e-mail da conta dona da empresa. Quando atendemos o pedido, a empresa sai do ar e o número do WhatsApp é desligado; a exclusão definitiva dos dados está em implantação. [CONFERIR: E8]
 - Se você for o único dono de uma empresa com outras pessoas, transfira a empresa ou exclua-a antes de excluir a conta.
 
 ## Prazos
@@ -36,4 +36,4 @@ Registros de cobrança são mantidos pelo prazo exigido por lei (5 anos) [CONFER
 
 ## Contato
 
-Encarregado de dados: [PREENCHER: nome], [PREENCHER: e-mail de privacidade]. Veja também a [Política de Privacidade](/privacidade).
+Encarregado de dados: Lucas de Souza Ferrari, lucasdesouzaferrari@gmail.com. Veja também a [Política de Privacidade](/privacidade).

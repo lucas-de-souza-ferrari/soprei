@@ -11,7 +11,7 @@ Ao criar uma conta ou usar o Soprei, você aceita estes Termos de Uso e declara 
 
 ## 1. Quem oferece o serviço
 
-O Soprei é oferecido por [PREENCHER: razão social], CNPJ [PREENCHER: CNPJ], com sede em [PREENCHER: endereço]. Contato: [PREENCHER: e-mail de contato].
+O Soprei é oferecido por 67.176.856 LUCAS DE SOUZA FERRARI, CNPJ 67.176.856/0001-93, com sede em Rua Ana Maximo Balieiro, 57, Vila Municipal I, Guaratinguetá/SP, CEP 12509-805. Contato: lucasdesouzaferrari@gmail.com.
 
 ## 2. O que é o Soprei
 
@@ -56,7 +56,7 @@ Não é permitido usar o Soprei para enviar spam, conteúdo ilegal, discriminat�
 
 ## 9. Suspensão e encerramento
 
-Podemos suspender ou encerrar o acesso em caso de violação destes termos, de risco à segurança ou de ordem legal, avisando sempre que possível. Você pode pedir a exclusão da sua conta e da sua empresa pelo e-mail [PREENCHER: e-mail de privacidade]; o que acontece com os dados está na Política de Privacidade.
+Podemos suspender ou encerrar o acesso em caso de violação destes termos, de risco à segurança ou de ordem legal, avisando sempre que possível. Você pode pedir a exclusão da sua conta e da sua empresa pelo e-mail lucasdesouzaferrari@gmail.com; o que acontece com os dados está na Política de Privacidade.
 
 ## 10. Disponibilidade
 
@@ -68,7 +68,7 @@ O Soprei trata os dados dos contatos da empresa como operador, conforme a [Polí
 
 ## 12. Propriedade intelectual
 
-O software, a marca e o site do Soprei pertencem a [PREENCHER: razão social]. Os dados e o conteúdo cadastrados pela empresa continuam sendo dela.
+O software, a marca e o site do Soprei pertencem a 67.176.856 LUCAS DE SOUZA FERRARI. Os dados e o conteúdo cadastrados pela empresa continuam sendo dela.
 
 ## 13. Limitação de responsabilidade
 
@@ -80,4 +80,4 @@ Quando estes termos mudarem de forma relevante, a versão sobe e pediremos um no
 
 ## 15. Lei e foro
 
-Estes termos seguem a lei brasileira. Fica eleito o foro de [PREENCHER: foro]. [CONFERIR: J — Código de Defesa do Consumidor]
+Estes termos seguem a lei brasileira. Fica eleito o foro de Guaratinguetá/SP. [CONFERIR: J — Código de Defesa do Consumidor]

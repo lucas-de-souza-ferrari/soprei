@@ -11,9 +11,9 @@ Esta política explica quais dados pessoais o Soprei trata, para quê, com quem 
 
 ## 1. Quem somos
 
-O Soprei é um serviço de atendimento automatizado pelo WhatsApp com inteligência artificial, oferecido por [PREENCHER: razão social], CNPJ [PREENCHER: CNPJ], com sede em [PREENCHER: endereço].
+O Soprei é um serviço de atendimento automatizado pelo WhatsApp com inteligência artificial, oferecido por 67.176.856 LUCAS DE SOUZA FERRARI, CNPJ 67.176.856/0001-93, com sede em Rua Ana Maximo Balieiro, 57, Vila Municipal I, Guaratinguetá/SP, CEP 12509-805.
 
-Encarregado pelo tratamento de dados pessoais: [PREENCHER: nome do encarregado], pelo e-mail [PREENCHER: e-mail de privacidade].
+Encarregado pelo tratamento de dados pessoais: Lucas de Souza Ferrari, pelo e-mail lucasdesouzaferrari@gmail.com.
 
 ## 2. A quem esta política se aplica
 
@@ -129,8 +129,8 @@ Senhas e códigos são guardados apenas em forma protegida; as credenciais do Wh
 
 A LGPD garante, entre outros, os direitos de confirmar se tratamos seus dados, acessá-los, corrigi-los, pedir a eliminação, a portabilidade e informações sobre o compartilhamento.
 
-- **Contatos:** procure a empresa com quem você conversou; ela nos encaminha o pedido e nós fazemos a exclusão manualmente. Se não conseguir falar com ela, escreva para [PREENCHER: e-mail de privacidade] e encaminharemos o pedido.
-- **Usuários:** peça a exclusão da sua conta pelo e-mail [PREENCHER: e-mail de privacidade], escrevendo a partir do e-mail da conta.
+- **Contatos:** procure a empresa com quem você conversou; ela nos encaminha o pedido e nós fazemos a exclusão manualmente. Se não conseguir falar com ela, escreva para lucasdesouzaferrari@gmail.com e encaminharemos o pedido.
+- **Usuários:** peça a exclusão da sua conta pelo e-mail lucasdesouzaferrari@gmail.com, escrevendo a partir do e-mail da conta.
 - Veja também as [instruções de exclusão de dados](/exclusao-de-dados).
 
 Você também pode apresentar reclamação à ANPD.
