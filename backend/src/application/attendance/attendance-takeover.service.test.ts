@@ -399,6 +399,20 @@ describe('AttendanceService.resumeAi (spec 039, E4)', () => {
     assert.equal(response.batchSize, 1);
   });
 
+  it('activePause: a pausa vigente sai como instante; vencida ou ausente sai null (contrato 024)', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await teamSays(h, company, 'equipe');
+    const conversation = conversationOf(h, company);
+    assert.equal(
+      h.service.activePause(conversation)?.getTime(),
+      conversation.aiPausedUntil?.getTime(),
+    );
+    h.clock.advance(AI_TAKEOVER_PAUSE_MS + 1);
+    assert.equal(h.service.activePause(conversation), null);
+    assert.equal(h.service.activePause({ aiPausedUntil: null }), null);
+  });
+
   it('conversa de outra empresa, inexistente ou malformada: o mesmo NotFoundError', async () => {
     const h = setup();
     const a = await newCompany(h, 'alfa');
