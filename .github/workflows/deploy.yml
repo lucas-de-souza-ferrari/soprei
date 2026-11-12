@@ -131,6 +131,8 @@ jobs:
             echo 'DEPLOY_SSH_USER (variável) ou DEPLOY_SSH_HOST (segredo) ausente ou fora do formato.' >&2
             exit 1
           fi
+          # O pedido começa com "-": o "--" antes do destino impede o programa ssh de reler o pedido como
+          # opção ("unknown option -- -", saída 255), porque ele aceita opções também depois do destino.
           request="--env production --ref $SHA"
           if [[ $MODE == dry-run ]]; then
             request="$request --dry-run"
@@ -146,7 +148,7 @@ jobs:
             -o UpdateHostKeys=no \
             -o ConnectTimeout=20 \
             -o ServerAliveInterval=30 \
-            -T "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" "$request" 2>&1 | tee "$output"
+            -T -- "$DEPLOY_SSH_USER@$DEPLOY_SSH_HOST" "$request" 2>&1 | tee "$output"
           rc=${PIPESTATUS[0]}
           case "$rc" in
             0) meaning='concluído: publicado, "já está nessa versão" ou plano do dry-run' ;;

@@ -163,6 +163,9 @@ describe('deploy.yml (spec 037, E3)', () => {
     // O pedido é exatamente o formato que o programa de entrada aceita.
     assert.match(ssh, /request="--env production --ref \$SHA"/);
     assert.match(ssh, /request="\$request --dry-run"/);
+    // O pedido começa com "-": sem "--" antes do destino o programa ssh o relê como opção e sai com 255
+    // ("unknown option -- -"), sem chegar ao servidor (achado na configuração do servidor, 2026-11-12).
+    assert.match(ssh, /-T -- "\$DEPLOY_SSH_USER@\$DEPLOY_SSH_HOST" "\$request"/);
     assert.doesNotMatch(ssh, /--force|--allow-breaking|--previous|--adopt|--auto/);
   });
 
