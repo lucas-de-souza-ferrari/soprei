@@ -1,6 +1,6 @@
 # 039 — Conexão do WhatsApp por coexistência (o cliente continua usando o aplicativo WhatsApp Business no celular)
 
-- **Status:** aprovada pelo dono em 2026-11-12, com D1 a D9 como recomendadas ("Aprovo todas"). **Nada de código antes do E0** (teste real do dono com um número do aplicativo WhatsApp Business).
+- **Status:** aprovada pelo dono em 2026-11-12, com D1 a D9 como recomendadas ("Aprovo todas"). **E0 feito em 2026-11-12** (ver "Registro do E0"; critério para seguir atendido). Antes era: **nada de código antes do E0** (teste real do dono com um número do aplicativo WhatsApp Business).
 - **Branch:** `spec/039-conexao-por-coexistencia`
 - **Depende de:** 011, 013 e 034 (canal, agrupamento e ordem por `receivedAt`), 015 e 023 (credencial por empresa e Embedded Signup), 024 (painel de conversas e `describeContact`), 028 e 038 (ferramentas da IA e atendimento humano), 031 (Modo C: o cliente paga a Meta)
 - **Segurança:** mexe em credencial do canal, em endpoint de tenant e no webhook público. **Passa pelo `reviewer` antes do merge.**
@@ -199,4 +199,60 @@ Toca em dados de tenant (`ChannelConnection`, `Conversation`, `Message`). O `Com
 
 ## Registro do E0
 
-_(a preencher pelo dono: data, versão do aplicativo, país, resultado de cada item de 1 a 10 e o estado final de S1 a S17; sem dados pessoais.)_
+Feito pelo dono em **2026-11-12**, das 14:35 às 14:50 (horário do servidor). As ferramentas temporárias ficaram na branch `lab/e0-coexistencia`, que nunca vai para a `main`. Nada foi gravado no banco do Soprei. No fim foram rodados `node lab.mjs limpar` (desassinou o app da WABA e apagou o token) e a remoção da página e de `/root/soprei-lab*`. Sem telefone, token, `code`, ids nem nomes neste registro.
+
+**Ambiente:** app da Meta em desenvolvimento (o dono é administrador); Graph `v26.0`; o mesmo `config_id` do Embedded Signup atual, lido de `GET .../channel/setup`; número de teste do dono no aplicativo WhatsApp Business, com o número exibido no formato brasileiro (13 dígitos com o 55). Não foram anotados a versão do aplicativo nem há quantos dias o número estava em uso.
+
+### Itens do roteiro
+
+1. **Abre no Brasil:** sim, o fluxo abriu e terminou com o número brasileiro. A versão do aplicativo e os dias de uso não foram anotados.
+2. **Portfólio:** o dono repetiu o fluxo escolhendo um portfólio em que **não** é administrador e o fluxo **terminou normalmente**, sem a tela "sem permissão". Os eventos dessa tentativa não foram registrados (nem `CANCEL`/`ERROR`, nem `current_step`), e o `code` dela não foi usado.
+3. **Evento e `FB.login`:** chegou um único `message` do popup, `type: "WA_EMBEDDED_SIGNUP"`, `event: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"`, com `data` = `{ phone_number_id, waba_id, business_id, page_ids: [], catalog_ids: [], dataset_ids: [], instagram_account_ids: [] }` (os ids vêm como **string**). Cerca de 1 s **depois** chegou a resposta do `FB.login`: `status: "connected"`, `authResponse` com `userID`, `expiresIn` e `code`. A ordem é a mesma do fluxo atual: primeiro o evento, depois o callback.
+4. **`phone_number_id`:** **veio** no evento. `GET /{waba}/phone_numbers` com o token trocado devolveu um número, o mesmo do evento, com `status: CONNECTED`, `platform_type: CLOUD_API`, `code_verification_status: NOT_VERIFIED`, `quality_rating: UNKNOWN` e nome verificado presente; `GET /{número}?fields=is_on_biz_app` = `true`.
+5. **`/register`:** **não foi chamado.** Ele é desnecessário: o número já estava `CONNECTED` na Cloud API sem ele, e o envio do item 7 funcionou.
+6. **Webhooks:** no painel do app, os campos `smb_message_echoes`, `smb_app_state_sync` e `history` **apareceram e precisaram ser assinados** (além de `messages`). Formato do eco, campo **`smb_message_echoes`**, com `value` = `{ messaging_product: "whatsapp", metadata: { display_phone_number, phone_number_id }, contacts: [{ wa_id, user_id }], message_echoes: [{ from, to, to_user_id, id, timestamp, type: "text", text: { body } }] }`. Detalhes:
+   - `from` é o número da empresa e `to` é o contato, cujo `wa_id` é o mesmo que o contato tem no webhook `messages`;
+   - `timestamp` vem em segundos, como texto de 10 dígitos.
+
+   Durante o teste **não** chegaram `smb_app_state_sync` nem `history`.
+
+7. **Eco:**
+   - **Pelo celular:** a mensagem enviada gerou um `smb_message_echoes`.
+   - **Pela Cloud API:** a mensagem enviada gerou **só** `statuses` no campo `messages` (`sent` e depois `delivered`, este **duas vezes** com o mesmo id) e **nenhum** eco.
+   - `pricing.type` da resposta dentro da janela: `free_customer_service`.
+   - Todos os webhooks (entrada, eco e status) trazem campos novos de 19 caracteres: `user_id`, `from_user_id`, `to_user_id` e `recipient_user_id`.
+8. **Restrições no aplicativo:** não anotadas.
+9. **Desconectar:** feito pelo laboratório (`DELETE /{waba}/subscribed_apps` = 200 e apagar o token), **não** pelo `DELETE .../channel` do Soprei, porque a conexão nunca foi gravada nele. O estado do número e do aplicativo depois disso não foi consultado.
+10. **Pagamento:** o fluxo não pediu forma de pagamento.
+
+### Estado das suposições
+
+| S#  | Estado                       | Resultado                                                                                                                                                                                                                                                                                |
+| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | **confirmada**               | `extras.featureType = 'whatsapp_business_app_onboarding'` abre a coexistência e o mesmo número fica no aplicativo e na Cloud API (`is_on_biz_app: true`, `platform_type: CLOUD_API`).                                                                                                    |
+| S2  | **corrigida**                | O evento é o previsto e **traz `phone_number_id`**, além de `business_id` e listas vazias. Os ids vêm como texto de dígitos (o parser previsto aceita). A listagem da WABA continua útil como prova de posse e como alternativa.                                                         |
+| S3  | **confirmada**               | O número já estava `CONNECTED` sem `/register`; enviou e recebeu sem PIN nosso.                                                                                                                                                                                                          |
+| S4  | em aberto                    | Só foi testado com o aplicativo Business. O QR code e o caso do WhatsApp pessoal não foram anotados.                                                                                                                                                                                     |
+| S5  | em aberto                    | A versão do aplicativo e os dias de uso não foram anotados.                                                                                                                                                                                                                              |
+| S6  | **confirmada**               | Funcionou com número brasileiro.                                                                                                                                                                                                                                                         |
+| S7  | **corrigida**                | O eco existe, no campo **`smb_message_echoes`**, com a lista em **`message_echoes[]`** (não em `messages[]`) e `from`/`to`/`id`/`timestamp`/`type`/`text.body`. O campo **precisa ser assinado** no app. `smb_app_state_sync` e `history` existem no painel, mas nada chegou sem pedido. |
+| S8  | **confirmada**               | O envio pela Cloud API gerou só `statuses`, sem eco. O resultado `own` da E3 fica como defesa, não como caminho normal.                                                                                                                                                                  |
+| S9  | não observada                | Nenhum `history` chegou. O histórico segue fora deste corte (E4, D6).                                                                                                                                                                                                                    |
+| S10 | em aberto                    | As restrições no aplicativo e a regra de abrir o aplicativo periodicamente não foram anotadas.                                                                                                                                                                                           |
+| S11 | em aberto                    | Não testada.                                                                                                                                                                                                                                                                             |
+| S12 | **confirmada**               | Troca do `code` ok (token `SYSTEM_USER`, sem prazo informado). `debug_token` válido, com o app conferindo, escopos `whatsapp_business_management` e `whatsapp_business_messaging` (um alvo cada) e a WABA em `target_ids`. `phone_numbers` com 1 número; `subscribed_apps` = 200.        |
+| S13 | em aberto                    | Não houve falha para observar.                                                                                                                                                                                                                                                           |
+| S14 | **confirmada**               | O `config_id` atual serve. `WHATSAPP_COEXISTENCE_CONFIG_ID` não é necessário por ora.                                                                                                                                                                                                    |
+| S15 | **descartada** (neste teste) | Com um portfólio em que o dono não é administrador, o fluxo terminou. O "sem permissão" visto antes deve ter outra causa (número em uso em outra plataforma, por exemplo). A lista de pré-requisitos da E1 deve rever o item (c).                                                        |
+| S16 | **corrigida** (parcial)      | O fluxo de coexistência não pediu pagamento. A resposta dentro da janela veio como `free_customer_service`.                                                                                                                                                                              |
+| S17 | em aberto                    | Só foi desassinado o app. O `DELETE .../channel` do Soprei não foi testado (a conexão não existia nele).                                                                                                                                                                                 |
+
+**Critério para seguir:** S1, S2, S3, S7 e S8 confirmadas ou corrigidas e S6 confirmada: **atendido**. Os itens em aberto (S4, S5, S10, S11, S13, S17) não bloqueiam a implementação. Eles ficam para o teste manual da seção "Passos do dono" e para a redação final dos textos da E1 e da E4.
+
+**Consequências para a implementação** (ajustes desta spec, sem decisão nova):
+
+- **E2 (webhook):** o eco é lido em `value.message_echoes[]`, só do campo `smb_message_echoes`. O contato do eco é o `to` (no `messages` é o `from`).
+- **E2 (status):** o mesmo status (`delivered`) pode chegar repetido; o tratamento de `statuses[]` precisa ser idempotente (conferir o atual).
+- **E2 (serviço):** com `phoneNumberId` vindo do evento, o caminho `CHANNEL_NUMBER_AMBIGUOUS` vira exceção, mas continua (o evento não é confiável por si e a listagem da WABA é a prova de posse).
+- **Passos do dono:** assinar `smb_message_echoes` (e não `history`). O `smb_app_state_sync` só se a E2 passar a ler esse campo.
+- **Fora deste corte:** os campos `user_id` e afins são novos e podem afetar o `contactRef` no futuro. Ficam anotados e não são usados agora.
