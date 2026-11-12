@@ -15,7 +15,7 @@ export interface NotificationBellProps {
 const ANNOUNCE_MS = 6_000;
 
 /**
- * Sino do cabeçalho (spec 030): lê só o número de abertas (`.../notifications/summary`) ao montar, a cada
+ * Sino do cabeçalho (spec 038): lê só o número de abertas (`.../notifications/summary`) ao montar, a cada
  * 30 s com a aba visível e ao voltar para a aba. Remontado a cada empresa (`key`), e o `stop()` descarta
  * resposta tardia. Quando a contagem sobe, um aviso discreto (`aria-live="polite"`); sem som. Nada vai
  * para `localStorage`, título da aba nem URL.

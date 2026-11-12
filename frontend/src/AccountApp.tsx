@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { z } from 'zod';
 import { api, ApiError } from './api';
@@ -11,14 +11,19 @@ import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
 import { ThemeToggle } from './components/motion/theme-toggle';
 import { AppShell } from './company/AppShell';
+import { loadEntitlements, type Entitlements } from './company/billing-api';
+import { hasModule, moduleOfPage, type CheckoutReturn } from './company/billing-rules';
 import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
 import { NotificationBell } from './company/NotificationBell';
 import { InvitePage } from './invite/InvitePage';
+import { wizardPath, wizardStepForPath, type WizardStepId } from './company/onboarding-steps';
 import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
 import {
   allowedPages,
   AREA_LABELS,
+  BILLING_PERMISSION,
+  canOpen,
   type ConversasRoute,
   conversasPath,
   conversasRouteForPath,
@@ -97,13 +102,25 @@ function bootLanding(initial: Page): Page | 'auto' {
 export interface AccountAppProps {
   /** Token do convite lido do fragmento pelo `main.tsx` (spec 025); só vive em memória. */
   readonly initialInviteToken?: string | null;
+  /** Volta do checkout lida da query pelo `main.tsx` (spec 031, E4); só vive em memória. */
+  readonly initialCheckoutReturn?: CheckoutReturn | null;
 }
 
-export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) {
+export function AccountApp({
+  initialInviteToken = null,
+  initialCheckoutReturn = null,
+}: AccountAppProps = {}) {
   const [page, setPage] = useState<Page>(pageForPath(location.pathname));
   // O convite aberto fica só em memória: atravessa o login (`/entrar`) e volta, nunca vai a armazenamento.
   const [inviteToken, setInviteToken] = useState<string | null>(initialInviteToken);
   const [session, setSession] = useState<Session | null>(null);
+  // Assinatura (spec 031, E4): o acesso da empresa selecionada (faixa e módulos) e se a conta é a titular.
+  const [entitlements, setEntitlements] = useState<Entitlements | null>(null);
+  const [checkoutReturn, setCheckoutReturn] = useState<CheckoutReturn | null>(
+    initialCheckoutReturn,
+  );
+  const checkoutReturnRef = useRef<CheckoutReturn | null>(initialCheckoutReturn);
+  checkoutReturnRef.current = checkoutReturn;
   const [companies, setCompanies] = useState<Company[]>([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -114,7 +131,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(true);
   const [booting, setBooting] = useState(true);
-  /** Spec 030: muda quando uma notificação é resolvida, para o sino reler a contagem. */
+  /** Spec 038: muda quando uma notificação é resolvida, para o sino reler a contagem. */
   const [bellRefresh, setBellRefresh] = useState(0);
   const [notice, setNotice] = useState<Notice>(null);
   const [invalid, setInvalid] = useState<{
@@ -123,6 +140,9 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   } | null>(null);
   const [route, setRoute] = useState<ConversasRoute>(
     conversasRouteForPath(location.pathname) ?? { kind: 'list' },
+  );
+  const [wizardStep, setWizardStep] = useState<WizardStepId | null>(
+    wizardStepForPath(location.pathname),
   );
   const generation = useRef(0);
   // Página em que o site abriu: um endereço da área da empresa só vale com sessão e empresa selecionada.
@@ -146,15 +166,33 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
    */
   const load = async (
     stamp: number,
-    requested: Page | 'auto' = 'companies',
+    requested: Page | 'auto' | 'afterCreate' = 'companies',
     requestedReplace = false,
   ) => {
     let landing = requested;
     let replaceUrl = requestedReplace;
+    // Leituras auxiliares da Assinatura (spec 031): feitas uma vez por empresa, antes de decidir a tela e
+    // reaproveitadas depois. Qualquer falha vira "sem cobrança" (nada é escondido).
+    let probed: { companyId: string | null; access: Entitlements | null } | null = null;
+    const probe = async (companyId: string | null) => {
+      if (probed !== null && probed.companyId === companyId) return probed;
+      const access = companyId === null ? null : await loadEntitlements(companyId);
+      probed = { companyId, access };
+      return probed;
+    };
     let current = sessionSchema.parse(await api('/auth/session'));
     const list = companiesSchema.parse(await api('/account/companies'));
     if (generation.current !== stamp) return;
     const hasSelected = list.items.some((item) => item.companyId === current.selectedCompanyId);
+    if (landing === 'afterCreate') {
+      // Empresa recém-criada (spec 030): abre o assistente de primeiros passos se a pessoa pode usá-lo.
+      const created = list.items.find((item) => item.companyId === current.selectedCompanyId);
+      landing =
+        created !== undefined && canOpen('primeirosPassos', created.permissions)
+          ? 'primeirosPassos'
+          : 'auto';
+      replaceUrl = true;
+    }
     if (landing === 'auto' || (isAreaPage(landing) && !hasSelected)) {
       const choice = pickCompanyToOpen(list.items, current.selectedCompanyId);
       if (choice.kind === 'select') {
@@ -170,9 +208,28 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       const opened = list.items.find((item) => item.companyId === current.selectedCompanyId);
       landing =
         opened === undefined ? 'companies' : (allowedPages(opened.permissions)[0] ?? 'conversas');
+      // Voltando do checkout depois de um login: abre a Assinatura para confirmar o pagamento.
+      if (opened !== undefined && checkoutReturnRef.current !== null) landing = 'assinatura';
+      // Titular com a assinatura encerrada: o login abre a Assinatura (como voltar a usar), não as Conversas.
+      else if (opened !== undefined) {
+        const info = await probe(opened.companyId);
+        if (generation.current !== stamp) return;
+        if (info.access?.holder === true && info.access.access === 'blocked')
+          landing = 'assinatura';
+      }
       replaceUrl = true;
       setRoute({ kind: 'list' });
+      setWizardStep(null);
     }
+    // Assinatura (spec 031): leituras auxiliares; qualquer falha vira "sem cobrança" (nada é escondido).
+    const selectedId = current.selectedCompanyId;
+    const info = await probe(
+      selectedId !== null && list.items.some((item) => item.companyId === selectedId)
+        ? selectedId
+        : null,
+    );
+    if (generation.current !== stamp) return;
+    setEntitlements(info.access);
     setSession(current);
     setCompanies(list.items);
     const target =
@@ -360,6 +417,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
   const openArea = (next: Page) => {
     setPage(next);
     setRoute({ kind: 'list' });
+    setWizardStep(null);
     setNotice(null);
     history.replaceState(null, '', pathForPage(next));
   };
@@ -371,6 +429,15 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
     setNotice(null);
     history.pushState(null, '', conversasPath(next));
   };
+  // Assistente de primeiros passos (spec 030): cada passo é um endereço; trocar entra no histórico (o voltar
+  // do navegador funciona) e normalizar o endereço só o substitui.
+  const goWizard = useCallback((step: WizardStepId, replace: boolean) => {
+    setPage('primeirosPassos');
+    setWizardStep(step);
+    setNotice(null);
+    if (replace) history.replaceState(null, '', wizardPath(step));
+    else history.pushState(null, '', wizardPath(step));
+  }, []);
   // Convite (spec 025). Aceito: o painel da empresa nova abre em Conversas. Conta criada: login com aviso.
   const inviteAccepted = () => {
     setInviteToken(null);
@@ -427,6 +494,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       if (!isAreaPage(next)) return;
       setPage(next);
       setRoute(conversasRouteForPath(location.pathname) ?? { kind: 'list' });
+      setWizardStep(wizardStepForPath(location.pathname));
       setNotice(null);
     };
     window.addEventListener('popstate', onPop);
@@ -557,7 +625,30 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
       </AlertContent>
     </Alert>
   );
-  const areaCompany = isAreaPage(page) && !booting && session ? selectedCompany : undefined;
+  const baseAreaCompany = isAreaPage(page) && !booting && session ? selectedCompany : undefined;
+  // A conta titular ganha a permissão de CONTA que abre a Assinatura (conveniência de tela; o servidor barra).
+  const areaCompany =
+    baseAreaCompany === undefined
+      ? undefined
+      : entitlements?.holder === true
+        ? { ...baseAreaCompany, permissions: [...baseAreaCompany.permissions, BILLING_PERMISSION] }
+        : baseAreaCompany;
+  // Abas de módulo (Agenda, Estoque) somem sem o módulo contratado; sem leitura do acesso nada some.
+  const menuPages = (permissions: readonly string[]) =>
+    allowedPages(permissions).filter((item) => {
+      const needed = moduleOfPage(item);
+      return needed === null || hasModule(entitlements, needed);
+    });
+  // Relê o acesso e o titular depois de uma mudança na assinatura (o menu e a faixa acompanham).
+  const refreshAccess = () => {
+    const stamp = generation.current;
+    const selectedId = session?.selectedCompanyId ?? null;
+    if (selectedId === null) return;
+    void loadEntitlements(selectedId).then((access) => {
+      if (generation.current !== stamp) return;
+      setEntitlements(access);
+    });
+  };
   const switcherItem = (item: Company) => ({
     companyId: item.companyId,
     name: item.name,
@@ -587,7 +678,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
         }
         current={switcherItem(areaCompany)}
         companies={companies.map(switcherItem)}
-        pages={allowedPages(areaCompany.permissions)}
+        pages={menuPages(areaCompany.permissions)}
         page={isAreaPage(page) ? page : 'conversas'}
         email={session.email}
         busy={busy}
@@ -601,9 +692,16 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
           company={areaCompany}
           page={isAreaPage(page) ? page : 'conversas'}
           route={route}
+          wizardStep={wizardStep}
+          onWizardStep={goWizard}
           onOpenConversation={(id) => goConversations({ kind: 'detail', id })}
           onBackToConversations={() => goConversations({ kind: 'list' })}
           onNavigate={openArea}
+          entitlements={entitlements}
+          checkoutReturn={checkoutReturn}
+          onReturnConsumed={() => setCheckoutReturn(null)}
+          onBillingChanged={refreshAccess}
+          onOpenCompanies={() => openArea('companies')}
           onSession={sessionLost}
           onChanged={companyChanged}
           onNotificationsChanged={() => setBellRefresh((value) => value + 1)}
@@ -743,7 +841,7 @@ export function AccountApp({ initialInviteToken = null }: AccountAppProps = {}) 
                       if (generation.current === stamp) setName('');
                       // Criar seleciona e abre a empresa nova, sem o clique extra (spec 029).
                       await api(`/account/companies/${created.companyId}/select`, {});
-                      await load(stamp, 'auto');
+                      await load(stamp, 'afterCreate');
                     });
                   }}
                 >

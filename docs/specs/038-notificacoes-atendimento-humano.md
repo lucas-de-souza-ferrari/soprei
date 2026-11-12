@@ -1,9 +1,11 @@
-# 030 — Notificações no painel: a IA pede atendimento humano
+# 038 — Notificações no painel: a IA pede atendimento humano
 
 - **Status:** aprovada (2026-11-11, dono: "Aprovo tudo", D1 a D10 como recomendadas)
 - **Branch:** `spec/030-notificacoes`
 - **Depende de:** 010 e 013 (atendimento e lote), 014 (provedor Anthropic), 023 e 029 (área da empresa e Dashboard Shell), 024 (painel de conversas e `describeContact`), 008 (permissões)
-- **Observação de numeração:** a 028 segue **reservada** ao tool use da agenda (marcar pelo WhatsApp). Esta spec é a primeira a usar uma ferramenta (`tool use`) do provedor, mas só como **sinal**: a IA não executa nada, não grava nada visível ao contato e o servidor não faz laço de ferramentas. A 028 pode reaproveitar a mudança de porta daqui.
+- **Numeração:** escrita como 030; renumerada para **038** ao integrar com a `main` (lá a 030 é o assistente de primeiros passos, a 035 está reservada e a 036 e a 037 estão em uso). A branch continua `spec/030-notificacoes`.
+
+> **Revisão de 2026-11-11 (integração com a `main`, decisão do dono):** a `main` ganhou a spec 028, com um mecanismo genérico de ferramentas no `LlmProvider` (`LlmToolSet` com laço no provedor). Por decisão do dono, o sinal de atendimento humano **passou a ser uma ferramenta desse mecanismo** em vez da porta própria (`allowHandoff`/`LlmReply.handoff`) descrita na E1 abaixo, que **foi descartada**. Como fica: `application/attendance/handoff-tool.ts` define `solicitar_atendimento_humano` (mesmo enum fechado de motivos; a instrução de uso vai na descrição da ferramenta e o `systemPrompt` não muda) e um registrador por turno que só anota o motivo; `composeToolSet` junta a ferramenta às da agenda (028) quando houver. O resultado devolvido ao modelo é texto fixo do servidor e **o modelo é chamado mais uma vez** para escrever a resposta (antes: sem segunda chamada; aceito pelo dono). A opção `handoffEnabled` do atendimento (ligada no `index.ts`, desligada por padrão nos testes antigos) controla a oferta; só com ela o prazo do turno é o dobro de `LLM_TIMEOUT_MS`; com as ferramentas da agenda vale o prazo do laço da 028. O mock chama a ferramenta quando ela é oferecida e o texto pede uma pessoa. O provedor Anthropic e a porta ficaram **iguais aos da `main`**. Gravação (E2) e painel (E3) não mudaram.
 
 ## Objetivo
 

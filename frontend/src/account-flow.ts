@@ -14,6 +14,7 @@ const PATHS: Record<AccountPage, string> = {
   invite: '/convite',
   companies: '/painel/empresas',
   conversas: areaPath('conversas'),
+  primeirosPassos: areaPath('primeirosPassos'),
   agenda: areaPath('agenda'),
   agendaConfig: areaPath('agendaConfig'),
   canal: areaPath('canal'),
@@ -22,6 +23,7 @@ const PATHS: Record<AccountPage, string> = {
   estoque: areaPath('estoque'),
   equipe: areaPath('equipe'),
   testar: areaPath('testar'),
+  assinatura: areaPath('assinatura'),
   notificacoes: areaPath('notificacoes'),
 };
 

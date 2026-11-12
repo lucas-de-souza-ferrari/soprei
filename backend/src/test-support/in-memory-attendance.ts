@@ -31,7 +31,7 @@ import { InMemoryNotificationRepository } from './in-memory-notifications.js';
 export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
   readonly conversations: ConversationRepository;
   readonly messages: MessageRepository;
-  /** Notificações (spec 030), dentro da mesma "transação" das mensagens. */
+  /** Notificações (spec 038), dentro da mesma "transação" das mensagens. */
   readonly notifications: InMemoryNotificationRepository;
 
   private readonly conversationRows: Conversation[] = [];
@@ -47,7 +47,7 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     answered: string[];
     /** `updatedAt` anterior das conversas tocadas por uma mensagem gravada na transação. */
     touched: { id: string; previous: Date }[];
-    /** Ids das notificações criadas na transação (spec 030). */
+    /** Ids das notificações criadas na transação (spec 038). */
     notifications: string[];
   }>();
 

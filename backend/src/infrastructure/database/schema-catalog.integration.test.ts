@@ -102,3 +102,22 @@ test('a restrição de exclusão da 027 (que o Prisma não representa) existe no
     await client.end();
   }
 });
+
+// Spec 028: os índices parciais de `appointments` (o Prisma não representa índice parcial) existem no banco migrado.
+test('os índices parciais da 028 (que o Prisma não representa) existem no banco migrado', async () => {
+  const client = new pg.Client({ connectionString: config.DATABASE_URL });
+  await client.connect();
+  try {
+    const found = await client.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+        WHERE schemaname = 'public' AND tablename = 'appointments' AND indexname LIKE 'appointments_contact_%'
+        ORDER BY indexname`,
+    );
+    assert.deepEqual(
+      found.rows.map((row) => row.indexname),
+      ['appointments_contact_active_idx', 'appointments_contact_created_idx'],
+    );
+  } finally {
+    await client.end();
+  }
+});

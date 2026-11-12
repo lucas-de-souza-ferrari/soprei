@@ -11,8 +11,14 @@ import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance
 import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import { AttendanceService } from './attendance.service.js';
+import {
+  composeToolSet,
+  createHandoffRecorder,
+  HANDOFF_TOOL_NAME,
+  HANDOFF_TOOL_OUTPUT,
+} from './handoff-tool.js';
 
-// Spec 030: o pedido de atendimento humano vira notificação na mesma transação da resposta.
+// Spec 038: o pedido de atendimento humano vira notificação na mesma transação da resposta.
 
 const SECRET = 'zebrafantasma-atendente';
 const LIMITS = { maxMessages: 10, maxChars: 8_000 };
@@ -30,7 +36,7 @@ class FakeMetrics {
   }
 }
 
-async function setup(options: { notificationMaxOpen?: number } = {}) {
+async function setup(options: { notificationMaxOpen?: number; handoffEnabled?: boolean } = {}) {
   const companies = new InMemoryCompanyRepository();
   const store = new InMemoryAttendanceStore();
   const llm = new MockLlmProvider({ recordCalls: true });
@@ -47,6 +53,7 @@ async function setup(options: { notificationMaxOpen?: number } = {}) {
     options: {
       llmTimeoutMs: 1_000,
       inFlightTimeoutMs: 60_000,
+      handoffEnabled: options.handoffEnabled ?? true,
       ...(options.notificationMaxOpen === undefined
         ? {}
         : { notificationMaxOpen: options.notificationMaxOpen }),
@@ -57,14 +64,14 @@ async function setup(options: { notificationMaxOpen?: number } = {}) {
   return { service, store, llm, logs, metrics, company, other };
 }
 
-describe('AttendanceService: pedido de atendimento humano (spec 030)', () => {
+describe('AttendanceService: pedido de atendimento humano (spec 038)', () => {
   it('simulador: oferece o sinal ao provedor e grava uma notificação aberta ligada à conversa e à resposta', async () => {
     const h = await setup();
     const result = await h.service.handleInboundMessage(h.company.id, {
       contactRef: 'c1',
       text: `quero falar com um atendente ${SECRET}`,
     });
-    assert.equal(h.llm.calls[0]?.allowHandoff, true);
+    assert.deepEqual(h.llm.toolsOffered[0], [HANDOFF_TOOL_NAME]);
     assert.ok(result.reply.text.endsWith(MOCK_HANDOFF_SUFFIX));
     const rows = h.store.notifications.all();
     assert.equal(rows.length, 1);
@@ -83,7 +90,14 @@ describe('AttendanceService: pedido de atendimento humano (spec 030)', () => {
     assert.ok(h.logs.lines().some((line) => line['handoffReason'] === 'CONTACT_REQUESTED'));
   });
 
-  it('pedido comum não cria notificação', async () => {
+  it('desligado (padrão): o pedido ao provedor não leva ferramenta e nada é notificado', async () => {
+    const h = await setup({ handoffEnabled: false });
+    await h.service.handleInboundMessage(h.company.id, { contactRef: 'c1', text: 'atendente' });
+    assert.deepEqual(h.llm.toolsOffered, [undefined]);
+    assert.equal(h.store.notifications.all().length, 0);
+  });
+
+  it('pedido comum: a ferramenta é oferecida, não é chamada e nada é notificado', async () => {
     const h = await setup();
     await h.service.handleInboundMessage(h.company.id, {
       contactRef: 'c1',
@@ -153,7 +167,7 @@ describe('AttendanceService: pedido de atendimento humano (spec 030)', () => {
     });
     const response = await h.service.respondToPending(h.company.id, 'c1', LIMITS);
     assert.equal(response.outcome, 'answered');
-    assert.equal(h.llm.calls[0]?.allowHandoff, true);
+    assert.deepEqual(h.llm.toolsOffered[0], [HANDOFF_TOOL_NAME]);
     const [row] = h.store.notifications.all();
     assert.ok(row);
     assert.equal(row.messageId, response.reply?.id);
@@ -176,5 +190,55 @@ describe('AttendanceService: pedido de atendimento humano (spec 030)', () => {
       0,
       'a resposta também foi desfeita',
     );
+  });
+});
+
+describe('ferramenta de atendimento humano (spec 038)', () => {
+  it('registra o primeiro motivo válido; ausente ou fora da lista vira OTHER; o resultado é fixo', () => {
+    const recorder = createHandoffRecorder();
+    assert.equal(recorder.requested(), undefined);
+    assert.deepEqual(
+      recorder.execute({ name: HANDOFF_TOOL_NAME, input: { motivo: 'COMPLAINT' } }),
+      HANDOFF_TOOL_OUTPUT,
+    );
+    recorder.execute({ name: HANDOFF_TOOL_NAME, input: { motivo: 'SENSITIVE' } });
+    assert.equal(recorder.requested(), 'COMPLAINT');
+    for (const input of [{}, { motivo: 'URGENTE' }, { motivo: 7 }, null, 'texto']) {
+      const other = createHandoffRecorder();
+      other.execute({ name: HANDOFF_TOOL_NAME, input });
+      assert.equal(other.requested(), 'OTHER');
+    }
+  });
+
+  it('a definição é estrita: um campo, enum fechado, sem campos extras', () => {
+    const { definition } = createHandoffRecorder();
+    const schema = definition.inputSchema as {
+      properties: Record<string, { enum: string[] }>;
+      required: string[];
+      additionalProperties: boolean;
+    };
+    assert.deepEqual(Object.keys(schema.properties), ['motivo']);
+    assert.deepEqual(schema.properties['motivo']?.enum, [
+      'CONTACT_REQUESTED',
+      'CANNOT_HELP',
+      'COMPLAINT',
+      'SENSITIVE',
+      'OTHER',
+    ]);
+    assert.deepEqual(schema.required, ['motivo']);
+    assert.equal(schema.additionalProperties, false);
+  });
+
+  it('sozinha: tetos de uma chamada e a resposta; nome desconhecido não executa nada', async () => {
+    const recorder = createHandoffRecorder();
+    const set = composeToolSet(recorder, undefined);
+    assert.deepEqual(
+      set.definitions.map((definition) => definition.name),
+      [HANDOFF_TOOL_NAME],
+    );
+    assert.deepEqual(set.limits, { maxModelCalls: 2, maxToolCalls: 2 });
+    const unknown = await set.execute({ name: 'apagar_tudo', input: {} });
+    assert.equal(unknown.isError, true);
+    assert.equal(recorder.requested(), undefined);
   });
 });

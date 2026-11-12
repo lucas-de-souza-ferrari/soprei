@@ -68,12 +68,12 @@ export const conversationSchema = z.strictObject({
   channel: z.enum(['whatsapp', 'simulator']),
   createdAt: isoDate,
   updatedAt: isoDate,
-  /** Spec 030: há pedido de atendimento humano aberto nesta conversa (selo "Humano"). */
+  /** Spec 038: há pedido de atendimento humano aberto nesta conversa (selo "Humano"). */
   openHandoff: z.boolean().optional(),
 });
 export type ConversationItem = z.infer<typeof conversationSchema>;
 
-/** A conversa no histórico (spec 030): traz o pedido aberto com o id da notificação, ou `null`. */
+/** A conversa no histórico (spec 038): traz o pedido aberto com o id da notificação, ou `null`. */
 export const conversationDetailSchema = conversationSchema.extend({
   openHandoff: openHandoffSchema.nullable().optional(),
 });

@@ -1,0 +1,25 @@
+name: Compatibilidade do Node
+
+# Spec 036. Os PRs rodam só na versão do `.nvmrc`. Uma vez por semana (e sob demanda, pelo botão
+# "Run workflow") a mesma suíte roda no piso de `engines.node` e na LTS mais recente.
+# Falha aqui não bloqueia PR: vira uma correção em PR normal.
+on:
+  schedule:
+    # Segunda-feira, 06:00 UTC (03:00 em Brasília).
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: '22'
+            suffix: -node22
+          - node: lts/*
+            suffix: -lts
+    uses: ./.github/workflows/ci.yml
+    with:
+      node-version: ${{ matrix.node }}
+      artifact-suffix: ${{ matrix.suffix }}

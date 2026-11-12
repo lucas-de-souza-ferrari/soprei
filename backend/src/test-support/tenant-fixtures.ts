@@ -42,7 +42,7 @@ export class TestTenants {
     for (const id of this.created) {
       // Auditoria antes dos usuários: as chaves estrangeiras compostas apontam para eles (Restrict).
       await this.db.channelConnection.deleteMany({ where: { companyId: id } });
-      // Notificações (spec 030) antes de vínculos, mensagens e conversas (chaves estrangeiras compostas).
+      // Notificações (spec 038) antes de vínculos, mensagens e conversas (chaves estrangeiras compostas).
       await this.db.notification.deleteMany({ where: { companyId: id } });
       await this.db.auditEvent.deleteMany({ where: { companyId: id } });
       // Convites antes dos vínculos (as chaves estrangeiras compostas apontam para eles) e depois da auditoria.

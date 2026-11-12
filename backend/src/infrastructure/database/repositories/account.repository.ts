@@ -5,6 +5,8 @@ import {
   MembershipId,
   type AccountRepository,
   type AccountMembership,
+  type CompanyBillingPolicy,
+  resolveAccess,
   type ResetFailureOutcome,
   type VerifyOutcome,
   RESET_DAILY_FAILURE_CAP,
@@ -16,6 +18,7 @@ import {
 } from '../../../domain/index.js';
 import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction } from '../transaction.js';
+import { ensureTrialSubscription } from './billing.repository.js';
 import { withRepositoryErrors } from './repository-errors.js';
 import { ForbiddenError, ConflictError } from '../../../shared/errors/index.js';
 
@@ -358,7 +361,11 @@ export class PrismaAccountRepository implements AccountRepository {
       this.db.account.updateMany({ where: { id: accountId }, data: { lastCompanyId: companyId } }),
     );
   }
-  async createCompany(accountId: string, name: string): Promise<AccountMembership> {
+  async createCompany(
+    accountId: string,
+    name: string,
+    billing?: CompanyBillingPolicy,
+  ): Promise<AccountMembership> {
     return withRepositoryErrors('Account.createCompany', () =>
       runInTransaction(this.db, async (tx) => {
         await tx.$queryRaw`SELECT id FROM accounts WHERE id = ${accountId}::uuid FOR NO KEY UPDATE`;
@@ -367,8 +374,41 @@ export class PrismaAccountRepository implements AccountRepository {
           throw new ForbiddenError('Conta indisponível');
         const count = await tx.company.count({ where: { memberships: { some: { accountId } } } });
         if (count >= 20) throw new ConflictError('Limite de 20 empresas por conta atingido');
+        // Cobrança ligada (spec 031): na mesma transação que trava a conta, garante a assinatura (teste
+        // gratuito na primeira vez), confere o acesso e o limite de empresas do plano e liga a empresa a ela.
+        let subscriptionId: string | undefined;
+        if (billing !== undefined) {
+          const subscription = await ensureTrialSubscription(tx, accountId, billing.now, billing);
+          const { access } = resolveAccess(subscription, billing.now, billing.graceDays);
+          if (access === 'blocked') {
+            throw new ForbiddenError('Assinatura inativa', { code: 'SUBSCRIPTION_INACTIVE' });
+          }
+          // Empresas antigas da conta (OWNER ativo, ainda sem assinatura) são adotadas antes de contar:
+          // senão o limite do plano seria burlado por quem já tinha empresas.
+          await tx.company.updateMany({
+            where: {
+              subscriptionId: null,
+              deletedAt: null,
+              memberships: { some: { accountId, role: 'OWNER', status: 'ACTIVE' } },
+            },
+            data: { subscriptionId: subscription.id },
+          });
+          const owned = await tx.company.count({
+            where: { subscriptionId: subscription.id, deletedAt: null },
+          });
+          if (owned >= subscription.plan.maxCompanies) {
+            throw new ForbiddenError('Limite de empresas do plano atingido', {
+              code: 'PLAN_COMPANY_LIMIT',
+            });
+          }
+          subscriptionId = subscription.id;
+        }
         const company = await tx.company.create({
-          data: { name, slug: `empresa-${randomUUID()}` },
+          data: {
+            name,
+            slug: `empresa-${randomUUID()}`,
+            ...(subscriptionId === undefined ? {} : { subscriptionId }),
+          },
         });
         const companyId = CompanyId.parse(company.id);
         const membership = await tx.membership.create({

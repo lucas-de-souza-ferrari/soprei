@@ -2,7 +2,7 @@ import type { ListOptions, Page } from './pagination.js';
 import type { CompanyId } from './value-objects/company-id.js';
 
 /**
- * Notificações do painel (spec 030). Hoje há um tipo só, `HUMAN_HANDOFF`: a IA reconheceu, no
+ * Notificações do painel (spec 038). Hoje há um tipo só, `HUMAN_HANDOFF`: a IA reconheceu, no
  * atendimento, que a conversa precisa de uma pessoa da equipe. O estado é **da empresa** (não por
  * pessoa): aberta até alguém da equipe marcar como resolvida. Nunca guarda texto de mensagem.
  */

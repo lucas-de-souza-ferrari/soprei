@@ -49,7 +49,12 @@ let clock = NOW;
 const email = (label: string): string => `${label}-${randomBytes(5).toString('hex')}@exemplo.test`;
 
 before(async () => {
-  database = createDatabase(config, createLogger(config));
+  // Pool maior que as 20 reservas simultâneas do teste de concorrência: com o pool padrão (10) e o prazo de 5 s, uma CI lenta
+  // faria algumas esperarem conexão e falharem por prazo, não por SLOT_TAKEN.
+  database = createDatabase(
+    { ...config, DB_POOL_MAX: 30, DB_POOL_CONNECTION_TIMEOUT_MS: 30_000 },
+    createLogger(config),
+  );
   tenants = new TestTenants(database.prisma);
   appointments = new PrismaAppointmentRepository(database.prisma);
   resources = new PrismaScheduleResourceRepository(database.prisma);
@@ -143,7 +148,12 @@ describe('dupla reserva: a restrição do banco (spec 027, E1)', () => {
     const refused = results.filter((result) => result.status === 'rejected');
     assert.equal(ok.length, 1);
     assert.equal(refused.length, 19);
-    for (const result of refused) assert.ok(isSlotTaken(result.reason));
+    for (const result of refused) {
+      assert.ok(
+        isSlotTaken(result.reason),
+        `recusa inesperada: ${result.reason instanceof Error ? `${result.reason.name} ${result.reason.message.slice(0, 200)}` : String(result.reason)}`,
+      );
+    }
     assert.equal(await activeCount(w.resourceId), 1);
     const total = await sql.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM appointments WHERE resource_id = $1',

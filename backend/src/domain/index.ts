@@ -153,6 +153,32 @@ export type {
   NewKnowledgeDocument,
 } from './knowledge.js';
 export * from './schedule.js';
+export * from './schedule-ai.js';
+export * from './billing.js';
+export * from './billing-notices.js';
+export type {
+  BillingNoticeRepository,
+  NoticeCandidate,
+  NoticeRecipient,
+  PendingReceipt,
+  NoticeTarget,
+} from './repositories/billing-notice.repository.js';
+export type {
+  BillingRepository,
+  CatalogEntry,
+  CompanyBillingPolicy,
+  OrderSummary,
+  TrialSettings,
+  UsageWindow,
+} from './repositories/billing.repository.js';
+export type {
+  CheckoutRepository,
+  GrantResult,
+  NewOrderInput,
+  OrderCap,
+  PaidFacts,
+  PaymentOrderRecord,
+} from './repositories/checkout.repository.js';
 export {
   HANDOFF_REASONS,
   isHandoffReason,

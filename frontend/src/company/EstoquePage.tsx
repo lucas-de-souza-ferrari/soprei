@@ -29,6 +29,7 @@ import { formatMoney, moneyInputValue, parseMoney } from './money';
 import { formatDateTime } from './team-rules';
 import { ImportCsv } from './ImportCsv';
 import { Modal } from './Modal';
+import type { StepBridge } from './onboarding-steps';
 import type { PageProps } from './PersonaPage';
 import { SampleControls } from './SampleControls';
 
@@ -255,7 +256,8 @@ export function EstoquePage({
   companyId,
   settle,
   canSample,
-}: PageProps & { readonly canSample: boolean }) {
+  onProgress,
+}: PageProps & Pick<StepBridge, 'onProgress'> & { readonly canSample: boolean }) {
   const [items, setItems] = useState<Product[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -320,6 +322,8 @@ export function EstoquePage({
     setDialogProblem(null);
     try {
       await work();
+      // Spec 030: o assistente relê o progresso depois de qualquer escrita (o resto da tela não muda).
+      if (stamp === generation.current) onProgress?.();
     } catch (error) {
       if (stamp !== generation.current) return;
       if (error instanceof ApiError && error.status === 404) {
@@ -466,7 +470,10 @@ export function EstoquePage({
           isEmpty={items.length === 0 && applied === ''}
           hasSample={items.some((item) => item.isSample)}
           settle={settle}
-          onChanged={() => setAttempt((value) => value + 1)}
+          onChanged={() => {
+            setAttempt((value) => value + 1);
+            onProgress?.();
+          }}
         />
       )}
       <div className="flex flex-wrap items-end gap-3">
@@ -661,7 +668,10 @@ export function EstoquePage({
         <ImportCsv
           companyId={companyId}
           settle={settle}
-          onImported={() => setAttempt((value) => value + 1)}
+          onImported={() => {
+            setAttempt((value) => value + 1);
+            onProgress?.();
+          }}
         />
       </Modal>
       <Modal

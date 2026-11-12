@@ -1,0 +1,604 @@
+import { expect, test, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { company, goTo, menuItems, switchTo } from './company-fixture';
+import {
+  noHorizontalScroll,
+  ONBOARDING_PERMISSIONS,
+  openWizard,
+  writes,
+} from './onboarding-fixture';
+
+// Spec 030: assistente de primeiros passos. API falsa (nada sai para a internet).
+
+const step = (page: Page) => page.getByTestId('passo-atual');
+const heading = (page: Page, name: string) =>
+  page.getByRole('heading', { name, level: 2, exact: true });
+
+test('conta nova sem empresa: criar abre o passo 2 (persona) com o passo 1 feito', async ({
+  page,
+}) => {
+  const { api } = await openWizard(page, {
+    path: '/entrar',
+    api: { companies: [], selected: null },
+  });
+  await expect(page.getByLabel('Nome da empresa')).toBeVisible();
+  await page.getByLabel('Nome da empresa').fill('Minha Loja');
+  await page.getByRole('button', { name: 'Criar empresa' }).click();
+  await expect(page).toHaveURL(/\/painel\/primeiros-passos\/persona$/);
+  await expect(step(page)).toHaveText('Passo 2 de 6');
+  await expect(heading(page, 'Persona do atendente')).toBeFocused();
+  const progress = page.getByRole('progressbar');
+  await expect(progress).toHaveAttribute('aria-valuenow', '2');
+  await expect(progress).toHaveAttribute('aria-valuemax', '6');
+  if (await page.getByRole('button', { name: 'Ver passos' }).isVisible()) {
+    await page.getByRole('button', { name: 'Ver passos' }).click();
+  }
+  const list = page.getByRole('navigation', { name: 'Passos' });
+  await expect(list.getByRole('listitem').first()).toContainText('Empresa');
+  await expect(list.getByRole('listitem').first()).toContainText('Feito');
+  expect(
+    api.calls.filter((call) => call.method === 'POST' && call.path === '/account/companies'),
+  ).toHaveLength(1);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`persona: usar modelo só preenche; salvar chama a rota existente e o passo fica feito (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { api, onb } = await openWizard(page, { theme });
+    await expect(page).toHaveURL(/\/painel\/primeiros-passos\/persona$/);
+    await expect(step(page)).toHaveText('Passo 2 de 6');
+    await page.getByRole('button', { name: 'Usar modelo' }).click();
+    // Nada foi salvo só por preencher.
+    expect(writes(api, onb)).toHaveLength(0);
+    await expect(page.getByLabel('Persona do assistente')).toHaveValue(/\[nome da empresa\]/);
+    await expect(page.getByRole('button', { name: 'Salvar e continuar' })).toBeVisible();
+    await page.getByLabel('Persona do assistente').fill('Atendente simpático da Loja X.');
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await expect(page.getByText('Persona salva.')).toBeVisible();
+    expect(api.persona).toBe('Atendente simpático da Loja X.');
+    // O progresso é relido do servidor: Persona passa a feita e o botão volta a "Continuar".
+    await expect(page.getByRole('button', { name: 'Continuar' })).toBeVisible();
+    if (await page.getByRole('button', { name: 'Ver passos' }).isVisible()) {
+      await page.getByRole('button', { name: 'Ver passos' }).click();
+    }
+    await expect(
+      page.getByRole('navigation', { name: 'Passos' }).getByRole('listitem').nth(1),
+    ).toContainText('Feito');
+  });
+}
+
+test('"Salvar e continuar" grava o rascunho e avança; o foco vai ao título do novo passo', async ({
+  page,
+}) => {
+  const { api } = await openWizard(page);
+  await page.getByLabel('Persona do assistente').fill('Persona de teste');
+  await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+  await expect(page).toHaveURL(/\/painel\/primeiros-passos\/documentos$/);
+  await expect(step(page)).toHaveText('Passo 3 de 6');
+  await expect(heading(page, 'Documentos')).toBeFocused();
+  expect(api.persona).toBe('Persona de teste');
+});
+
+test('rascunho não salvo: sair pede confirmação; cancelar mantém; confirmar descarta; nada no navegador', async ({
+  page,
+}) => {
+  const { api, onb } = await openWizard(page);
+  const secret = 'rascunho-secreto-da-persona';
+  await page.getByLabel('Persona do assistente').fill(secret);
+  await page.getByRole('button', { name: 'Pular' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Você tem texto não salvo. Sair e descartar?');
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page).toHaveURL(/\/persona$/);
+  await expect(page.getByLabel('Persona do assistente')).toHaveValue(secret);
+  const stored = await page.evaluate(() => ({
+    local: Object.keys(localStorage),
+    session: Object.keys(sessionStorage),
+    href: location.href,
+    title: document.title,
+  }));
+  expect(stored.local.filter((key) => key !== 'soprei-theme')).toEqual([]);
+  expect(stored.session).toEqual([]);
+  expect(stored.href).not.toContain(secret);
+  expect(stored.title).not.toContain(secret);
+  await page.getByRole('button', { name: 'Pular' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Sair e descartar' }).click();
+  await expect(page).toHaveURL(/\/documentos$/);
+  expect(api.persona).toBeNull();
+  expect(writes(api, onb)).toHaveLength(0);
+});
+
+test('pular os passos de persona e documentos não grava nada; Voltar do navegador volta ao passo anterior', async ({
+  page,
+}) => {
+  const { api, onb } = await openWizard(page);
+  await page.getByRole('button', { name: 'Pular' }).click();
+  await expect(page).toHaveURL(/\/documentos$/);
+  await expect(step(page)).toHaveText('Passo 3 de 6');
+  await page.getByRole('button', { name: 'Pular' }).click();
+  await expect(page).toHaveURL(/\/servicos$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/documentos$/);
+  await expect(heading(page, 'Documentos')).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/persona$/);
+  expect(writes(api, onb)).toHaveLength(0);
+});
+
+test('documentos: colar e salvar usa a rota existente e o passo fica feito', async ({ page }) => {
+  const { onb } = await openWizard(page, { path: '/painel/primeiros-passos/documentos' });
+  await expect(step(page)).toHaveText('Passo 3 de 6');
+  await page.getByLabel('Título do documento').fill('Política de trocas');
+  await page.getByLabel('Texto do documento').fill('Aceitamos trocas em até 7 dias.');
+  await expect(page.getByRole('button', { name: 'Salvar e continuar' })).toBeVisible();
+  await page.getByRole('button', { name: 'Adicionar', exact: true }).click();
+  await expect(page.getByText('Documento adicionado.')).toBeVisible();
+  expect(onb.docs).toHaveLength(1);
+  await expect(page.getByRole('button', { name: 'Continuar' })).toBeVisible();
+});
+
+test('exemplo de documentos: avisa que cria produtos, marca Documentos e Estoque como feitos e some o botão', async ({
+  page,
+}) => {
+  const { onb } = await openWizard(page, { path: '/painel/primeiros-passos/documentos' });
+  await expect(page.getByText('também cria produtos de mentira')).toBeVisible();
+  await page.getByRole('button', { name: 'Carregar exemplo' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Carregar', exact: true }).click();
+  await expect(page.getByText('Exemplo carregado.')).toBeVisible();
+  expect(onb.calls.some((c) => c.method === 'POST' && c.path.endsWith('/knowledge/sample'))).toBe(
+    true,
+  );
+  expect(onb.docs).toHaveLength(2);
+  expect(onb.products).toHaveLength(8);
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toHaveCount(0);
+  if (await page.getByRole('button', { name: 'Ver passos' }).isVisible()) {
+    await page.getByRole('button', { name: 'Ver passos' }).click();
+  }
+  const items = page.getByRole('navigation', { name: 'Passos' }).getByRole('listitem');
+  await expect(items.nth(2)).toContainText('Feito');
+  await expect(items.nth(4)).toContainText('Feito');
+});
+
+test('com documento já cadastrado o botão de exemplo não aparece', async ({ page }) => {
+  await openWizard(page, {
+    path: '/painel/primeiros-passos/documentos',
+    seed: (_api, onb) => onb.docs.push({ id: randomUUID(), title: 'Meu doc', isSample: false }),
+  });
+  await expect(page.getByText('Meu doc')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toHaveCount(0);
+});
+
+test('retomar: persona feita, recarregar e abrir pelo menu cai no primeiro passo pendente', async ({
+  page,
+}) => {
+  await openWizard(page, {
+    path: '/painel/conversas',
+    api: { persona: 'Já definida' },
+  });
+  await goTo(page, 'Primeiros passos');
+  await expect(page).toHaveURL(/\/painel\/primeiros-passos\/documentos$/);
+  await page.reload();
+  await expect(page).toHaveURL(/\/painel\/primeiros-passos\/documentos$/);
+  await expect(step(page)).toHaveText('Passo 3 de 6');
+});
+
+test('endereço com passo inexistente cai no primeiro pendente, sem chamar API de passo inexistente', async ({
+  page,
+}) => {
+  const { onb } = await openWizard(page, { path: '/painel/primeiros-passos/inexistente' });
+  await expect(page).toHaveURL(/\/painel\/primeiros-passos\/persona$/);
+  expect(onb.calls.filter((c) => c.path.includes('inexistente'))).toHaveLength(0);
+});
+
+for (const role of ['AGENT', 'VIEWER'] as const) {
+  test(`${role} não vê o assistente: sem item de menu e sem chamada a /onboarding; o endereço mostra "sem permissão"`, async ({
+    page,
+  }) => {
+    const { onb } = await openWizard(page, { role, path: '/painel/conversas' });
+    expect(await menuItems(page)).not.toContain('Primeiros passos');
+    await page.goto('/painel/primeiros-passos');
+    await expect(page.getByText('Você não tem permissão para ver esta tela.')).toBeVisible();
+    expect(onb.calls.filter((c) => c.path.endsWith('/onboarding'))).toHaveLength(0);
+  });
+}
+
+test('ADMIN (entrou por convite) vê o item de menu, mas o assistente não abre sozinho', async ({
+  page,
+}) => {
+  await openWizard(page, { role: 'ADMIN', path: '/entrar' });
+  await expect(page).toHaveURL(/\/painel\/conversas$/);
+  expect(await menuItems(page)).toContain('Primeiros passos');
+});
+
+test('falha ao ler o estado: aviso com "Tentar de novo", sem texto do servidor', async ({
+  page,
+}) => {
+  const { onb } = await openWizard(page, { seed: (_api, state) => (state.failState = true) });
+  await expect(page.getByRole('button', { name: 'Tentar de novo' })).toBeVisible();
+  await expect(page.getByText('TEXTO-DO-SERVIDOR-QUE-NAO-PODE-APARECER')).toHaveCount(0);
+  onb.failState = false;
+  await page.getByRole('button', { name: 'Tentar de novo' }).click();
+  await expect(step(page)).toHaveText('Passo 2 de 6');
+});
+
+test('celular: sem rolagem horizontal e lista de passos utilizável', async ({ page }) => {
+  await openWizard(page);
+  await expect(step(page)).toBeVisible();
+  await noHorizontalScroll(page);
+  const toggle = page.getByRole('button', { name: /(Ver|Ocultar) passos/ });
+  if (await toggle.isVisible()) {
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page
+      .getByRole('navigation', { name: 'Passos' })
+      .getByRole('button', { name: /Documentos/ })
+      .click();
+    await expect(page).toHaveURL(/\/documentos$/);
+    await noHorizontalScroll(page);
+  }
+});
+
+// ---- E2: serviços e estoque ----
+
+const SERVICES = '/painel/primeiros-passos/servicos';
+const STOCK = '/painel/primeiros-passos/estoque';
+
+async function stepItems(page: Page) {
+  const toggle = page.getByRole('button', { name: 'Ver passos' });
+  if (await toggle.isVisible()) await toggle.click();
+  return page.getByRole('navigation', { name: 'Passos' }).getByRole('listitem');
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`serviços: criar um serviço usa a rota existente, o passo fica feito e o aviso de horários aparece (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { onb } = await openWizard(page, { path: SERVICES, theme });
+    await expect(step(page)).toHaveText('Passo 4 de 6');
+    await expect(page.getByText('o atendente não tem o que oferecer')).toBeVisible();
+    await page.getByLabel('Nome do serviço').fill('Corte masculino');
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await expect(page.getByText('Serviço salvo.')).toBeVisible();
+    expect(onb.services).toHaveLength(1);
+    expect(
+      onb.calls.some((c) => c.method === 'POST' && c.path.endsWith('/schedule/services')),
+    ).toBe(true);
+    const items = await stepItems(page);
+    await expect(items.nth(3)).toContainText('Feito');
+    await expect(items.nth(3)).toContainText('opcional');
+    // Com serviço próprio o exemplo não aparece mais.
+    await expect(page.getByRole('button', { name: 'Usar exemplo' })).toHaveCount(0);
+  });
+}
+
+test('serviços: "Usar exemplo" chama a rota do exemplo da agenda e o botão some', async ({
+  page,
+}) => {
+  const { onb } = await openWizard(page, { path: SERVICES });
+  await page.getByRole('button', { name: 'Usar exemplo' }).click();
+  await expect(page.getByText('Exemplo carregado:')).toBeVisible();
+  expect(onb.calls.some((c) => c.method === 'POST' && c.path.endsWith('/schedule/sample'))).toBe(
+    true,
+  );
+  await expect(page.getByRole('button', { name: 'Usar exemplo' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Configurar agenda' })).toBeVisible();
+});
+
+test('serviços: com serviço próprio já cadastrado o exemplo não é oferecido', async ({ page }) => {
+  await openWizard(page, {
+    path: SERVICES,
+    seed: (_api, onb) =>
+      onb.services.push({ id: randomUUID(), name: 'Meu serviço', isSample: false, active: true }),
+  });
+  await expect(page.getByText('Meu serviço')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Usar exemplo' })).toHaveCount(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`estoque: novo produto e importar CSV usam o fluxo existente (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { onb } = await openWizard(page, { path: STOCK, theme });
+    await expect(step(page)).toHaveText('Passo 5 de 6');
+    await page.getByRole('button', { name: 'Novo produto' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('SKU').fill('cam-001');
+    await dialog.getByLabel('Nome', { exact: true }).fill('Camiseta azul');
+    await dialog.getByLabel('Preço (R$)').fill('59,90');
+    await dialog.getByLabel('Quantidade inicial').fill('12');
+    await dialog.getByRole('button', { name: 'Criar produto' }).click();
+    await expect(page.getByText('Produto criado.')).toBeVisible();
+    expect(onb.products).toHaveLength(1);
+    await expect((await stepItems(page)).nth(4)).toContainText('Feito');
+    await page.getByRole('button', { name: 'Importar CSV' }).click();
+    await page.getByLabel('Arquivo CSV').setInputFiles({
+      name: 'produtos.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        'sku;nome;descricao;preco;quantidade\nA-1;Item A;;10,50;3\nA-2;Item B;;5,00;1\n',
+      ),
+    });
+    await page.getByRole('button', { name: 'Importar', exact: true }).click();
+    await expect(page.getByText('produtos criados;')).toBeVisible();
+    expect(
+      onb.calls.some((c) => c.method === 'POST' && c.path.endsWith('/inventory/products/import')),
+    ).toBe(true);
+    expect(onb.products).toHaveLength(3);
+  });
+}
+
+test('estoque: sem documento e sem produto o exemplo é oferecido', async ({ page }) => {
+  await openWizard(page, { path: STOCK });
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toBeVisible();
+});
+
+test('estoque: com um documento cadastrado, o botão de exemplo não aparece', async ({ page }) => {
+  await openWizard(page, {
+    path: STOCK,
+    seed: (_api, onb) => onb.docs.push({ id: randomUUID(), title: 'Doc', isSample: false }),
+  });
+  await expect(page.getByRole('button', { name: 'Novo produto' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toHaveCount(0);
+});
+
+test('exemplo recusado (409) mostra a mensagem fixa e relê o estado', async ({ page }) => {
+  const { onb } = await openWizard(page, { path: '/painel/primeiros-passos/documentos' });
+  await expect(page.getByRole('button', { name: 'Carregar exemplo' })).toBeVisible();
+  // Outra aba cadastrou um documento depois de a tela carregar.
+  onb.docs.push({ id: randomUUID(), title: 'Escrito em outra aba', isSample: false });
+  await page.getByRole('button', { name: 'Carregar exemplo' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Carregar', exact: true }).click();
+  await expect(page.getByText('O exemplo só carrega em uma empresa vazia')).toBeVisible();
+  await expect(page.getByText('TEXTO-DO-SERVIDOR-QUE-NAO-PODE-APARECER')).toHaveCount(0);
+  await expect(page.getByText('Escrito em outra aba')).toBeVisible();
+});
+
+test('pular serviços e estoque não grava nada e leva ao teste final', async ({ page }) => {
+  const { api, onb } = await openWizard(page, { path: SERVICES });
+  await page.getByRole('button', { name: 'Pular' }).click();
+  await expect(page).toHaveURL(/\/estoque$/);
+  await page.getByRole('button', { name: 'Pular' }).click();
+  await expect(page).toHaveURL(/\/testar$/);
+  expect(writes(api, onb)).toHaveLength(0);
+});
+
+// ---- E3: teste final, cartão "Configuração", dispensar e reabrir ----
+
+const TEST_STEP = '/painel/primeiros-passos/testar';
+
+test('pular tudo: nada é gravado e o cartão em Conversas mostra "Configuração: 0 de 4 itens"', async ({
+  page,
+}) => {
+  const { api, onb } = await openWizard(page);
+  for (const next of [/documentos$/, /servicos$/, /estoque$/, /testar$/]) {
+    await page.getByRole('button', { name: 'Pular' }).click();
+    await expect(page).toHaveURL(next);
+  }
+  await expect(step(page)).toHaveText('Passo 6 de 6');
+  await expect(page.getByRole('button', { name: 'Pular' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Ir para as conversas' }).click();
+  await expect(page).toHaveURL(/\/painel\/conversas$/);
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+  expect(writes(api, onb)).toHaveLength(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`teste final: envia a mensagem, mostra resposta e "Fontes usadas"; o WhatsApp só leva a /painel/canal (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { onb } = await openWizard(page, { path: TEST_STEP, theme });
+    onb.sources.push({ kind: 'document', label: 'Política de trocas' });
+    await expect(step(page)).toHaveText('Passo 6 de 6');
+    await expect(page.getByText('a resposta é de mentira')).toBeVisible();
+    await page.getByLabel('Mensagem de teste').fill('Vocês trocam produtos?');
+    await page.getByRole('button', { name: 'Enviar', exact: true }).click();
+    await expect(page.getByText('Olá! Como posso ajudar?')).toBeVisible();
+    await expect(page.getByText('Fontes usadas: Política de trocas (documento)')).toBeVisible();
+    await page.getByRole('button', { name: 'Conectar o WhatsApp' }).click();
+    await expect(page).toHaveURL(/\/painel\/canal$/);
+  });
+}
+
+test('teste final: sem channel:read não há sugestão do WhatsApp', async ({ page }) => {
+  await openWizard(page, {
+    path: TEST_STEP,
+    permissions: ['conversation:read', 'conversation:simulate', 'onboarding:manage'],
+  });
+  await expect(step(page)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Conectar o WhatsApp' })).toHaveCount(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`cartão "Configuração": itens com texto e ícone, link para o passo certo e some quando tudo está feito (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { api, onb } = await openWizard(page, {
+      path: '/painel/conversas',
+      theme,
+      api: { persona: 'Já definida' },
+    });
+    await expect(page.getByRole('heading', { name: 'Configuração: 1 de 4 itens' })).toBeVisible();
+    const card = page.getByRole('region', { name: /Configuração:/ });
+    await expect(card).toContainText('Persona do atendente — feito');
+    await expect(card).toContainText('Serviços — pendente (opcional)');
+    await card.getByRole('link', { name: /Documentos/ }).click();
+    await expect(page).toHaveURL(/\/painel\/primeiros-passos\/documentos$/);
+    await expect(step(page)).toHaveText('Passo 3 de 6');
+    // Tudo feito: o cartão não aparece mais.
+    onb.docs.push({ id: randomUUID(), title: 'D', isSample: false });
+    onb.products.push({ id: randomUUID(), sku: 'A', name: 'A', isSample: false, active: true });
+    onb.services.push({ id: randomUUID(), name: 'S', isSample: false, active: true });
+    await goTo(page, 'Conversas');
+    await expect(
+      page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+    ).toBeVisible();
+    await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+    expect(api.persona).toBe('Já definida');
+  });
+}
+
+test('dispensar pede confirmação, grava dismissed:true, some (inclusive ao recarregar) e o menu reabre', async ({
+  page,
+}) => {
+  const { onb } = await openWizard(page, { path: '/painel/conversas' });
+  await page.getByRole('button', { name: 'Dispensar' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Dispensar a lista de configuração?');
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  expect(onb.dismissed).toBe(false);
+  await page.getByRole('button', { name: 'Dispensar' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Dispensar' }).click();
+  await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+  expect(onb.dismissed).toBe(true);
+  expect(
+    onb.calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/onboarding')),
+  ).toHaveLength(1);
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+  // O menu "Primeiros passos" continua e reabre.
+  await goTo(page, 'Primeiros passos');
+  await expect(step(page)).toBeVisible();
+  await expect.poll(() => onb.dismissed).toBe(false);
+  await goTo(page, 'Conversas');
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+});
+
+test('falha ao dispensar: mensagem de tela, o cartão continua', async ({ page }) => {
+  const { onb } = await openWizard(page, { path: '/painel/conversas' });
+  onb.dismissStatus = 500;
+  await page.getByRole('button', { name: 'Dispensar' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Dispensar' }).click();
+  await expect(page.getByText('Não foi possível dispensar agora.')).toBeVisible();
+  await expect(page.getByText('TEXTO-DO-SERVIDOR-QUE-NAO-PODE-APARECER')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+});
+
+test('falha ao ler o estado não bloqueia Conversas: o cartão simplesmente não aparece', async ({
+  page,
+}) => {
+  await openWizard(page, {
+    path: '/painel/conversas',
+    seed: (_api, onb) => (onb.failState = true),
+  });
+  await expect(
+    page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+for (const role of ['AGENT', 'VIEWER'] as const) {
+  test(`${role}: Conversas não mostra o cartão nem chama /onboarding`, async ({ page }) => {
+    const { onb } = await openWizard(page, { role, path: '/painel/conversas' });
+    await expect(
+      page.getByRole('heading', { name: 'Conversas', exact: true, level: 2 }),
+    ).toBeVisible();
+    await expect(page.getByRole('region', { name: /Configuração:/ })).toHaveCount(0);
+    expect(onb.calls.filter((c) => c.path.endsWith('/onboarding'))).toHaveLength(0);
+  });
+}
+
+test('trocar de empresa: o rascunho e o estado de uma não aparecem na outra', async ({ page }) => {
+  const second = company('Empresa B');
+  const { api, onb } = await openWizard(page, {
+    api: { companies: [company('Empresa A'), second] },
+  });
+  for (const item of api.companies) item.permissions = ONBOARDING_PERMISSIONS.OWNER;
+  api.selected = api.companies[0]?.companyId ?? null;
+  await page.goto('/painel/primeiros-passos');
+  await page.getByLabel('Persona do assistente').fill('rascunho da empresa A');
+  await switchTo(page, 'Empresa B');
+  // Trocar de empresa abre Conversas da nova (como sempre); o assistente reabre pelo menu, sem o rascunho.
+  await expect(page).toHaveURL(/\/painel\/conversas$/);
+  await goTo(page, 'Primeiros passos');
+  await expect(step(page)).toHaveText('Passo 2 de 6');
+  await expect(page.getByLabel('Persona do assistente')).toHaveValue('');
+  expect(api.selected).toBe(second.companyId);
+  const reads = onb.calls.filter((c) => c.method === 'GET' && c.path.endsWith('/onboarding'));
+  expect(reads.at(-1)?.path).toContain(second.companyId);
+  expect(writes(api, onb)).toHaveLength(0);
+});
+
+test('teclado: do título do passo até "Continuar" só com Tab e Enter; o foco chega ao título do próximo passo', async ({
+  page,
+}) => {
+  await openWizard(page);
+  await expect(heading(page, 'Persona do atendente')).toBeFocused();
+  const focusedName = () =>
+    page.evaluate(() => (document.activeElement as HTMLElement | null)?.textContent?.trim() ?? '');
+  for (let index = 0; index < 25 && (await focusedName()) !== 'Continuar'; index += 1) {
+    await page.keyboard.press('Tab');
+  }
+  expect(await focusedName()).toBe('Continuar');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/documentos$/);
+  await expect(heading(page, 'Documentos')).toBeFocused();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
+});
+
+test('celular 360 px: assistente e cartão sem rolagem horizontal', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await openWizard(page, { path: '/painel/conversas' });
+  await expect(page.getByRole('heading', { name: 'Configuração: 0 de 4 itens' })).toBeVisible();
+  await noHorizontalScroll(page);
+  await page.getByRole('link', { name: /Persona do atendente/ }).click();
+  await expect(step(page)).toBeVisible();
+  await noHorizontalScroll(page);
+});
+
+// ---- Revisão da 030: colchetes do modelo e console ----
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`colchetes do modelo: aviso fixo e confirmação antes de "Salvar e continuar" (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { api, onb } = await openWizard(page, { theme });
+    await page.getByRole('button', { name: 'Usar modelo' }).click();
+    await expect(page.getByText('O texto ainda tem trechos entre colchetes')).toBeVisible();
+    await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Salvar com colchetes?');
+    await dialog.getByRole('button', { name: 'Cancelar' }).click();
+    expect(writes(api, onb)).toHaveLength(0);
+    await expect(page).toHaveURL(/\/persona$/);
+    await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Salvar assim mesmo' }).click();
+    await expect(page).toHaveURL(/\/documentos$/);
+    expect(api.persona).toContain('[nome da empresa]');
+  });
+}
+
+test('sem colchetes do modelo não há aviso nem confirmação', async ({ page }) => {
+  const { api } = await openWizard(page);
+  await page.getByRole('button', { name: 'Usar modelo' }).click();
+  await page.getByLabel('Persona do assistente').fill('Atendente da Loja X, simpático e direto.');
+  await expect(page.getByText('O texto ainda tem trechos entre colchetes')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+  await expect(page).toHaveURL(/\/documentos$/);
+  expect(api.persona).toBe('Atendente da Loja X, simpático e direto.');
+});
+
+test('console: textos de persona e documento nunca aparecem no console', async ({ page }) => {
+  const logged: string[] = [];
+  page.on('console', (message) => logged.push(message.text()));
+  page.on('pageerror', (error) => logged.push(error.message));
+  const personaSecret = 'persona-sentinela-8f3a';
+  const docSecret = 'documento-sentinela-2b9c';
+  await openWizard(page);
+  await page.getByLabel('Persona do assistente').fill(personaSecret);
+  await page.getByRole('button', { name: 'Salvar e continuar' }).click();
+  await expect(page).toHaveURL(/\/documentos$/);
+  await page.getByLabel('Título do documento').fill(docSecret);
+  await page.getByLabel('Texto do documento').fill(docSecret);
+  await page.getByRole('button', { name: 'Adicionar', exact: true }).click();
+  await expect(page.getByText('Documento adicionado.')).toBeVisible();
+  for (const line of logged) {
+    expect(line).not.toContain(personaSecret);
+    expect(line).not.toContain(docSecret);
+  }
+});

@@ -1,4 +1,4 @@
--- Spec 030: notificações do painel; a primeira é "atendimento humano solicitado".
+-- Spec 038: notificações do painel; a primeira é "atendimento humano solicitado".
 -- Migration ADITIVA: três enums e uma tabela novos, nada é apagado nem reescrito. A notificação nunca
 -- guarda texto de mensagem. Todas as chaves estrangeiras são COMPOSTAS com company_id (ligar dado de
 -- empresas diferentes é impossível no próprio banco).

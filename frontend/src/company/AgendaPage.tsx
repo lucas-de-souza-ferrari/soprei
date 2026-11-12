@@ -1,5 +1,6 @@
 import {
   Ban,
+  Bot,
   CheckCheck,
   CheckCircle2,
   Clock,
@@ -26,11 +27,19 @@ import {
 } from './agenda-api';
 import {
   addDays,
+  awaitingCount,
+  awaitingText,
+  BY_AI_LABEL,
   dayHeading,
+  filterBySource,
   groupByDay,
   hasStarted,
+  isByAi,
   type ItemAction,
+  SOURCE_FILTER_LABELS,
+  type SourceFilter,
   STATUS_LABELS,
+  statusLabelOf,
   weekAnnouncement,
   weekDates,
   weekLabel,
@@ -94,7 +103,17 @@ function StatusBadge({ item }: { item: Appointment }) {
       className={`inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium ${color}`}
     >
       <Icon aria-hidden="true" className="size-4" />
-      {block ? 'Bloqueado' : STATUS_LABELS[item.status]}
+      {block ? 'Bloqueado' : statusLabelOf(item)}
+    </span>
+  );
+}
+
+/** Selo do que a IA criou pelo WhatsApp: texto e ícone, nunca só cor. */
+export function ByAiBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-primary">
+      <Bot aria-hidden="true" className="size-4" />
+      {BY_AI_LABEL}
     </span>
   );
 }
@@ -161,6 +180,8 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
   const [serviceFilter, setServiceFilter] = useState('');
   const [resourceFilter, setResourceFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<AppointmentStatus | ''>('');
+  // Origem (spec 028): filtro só no navegador, sobre os itens já lidos.
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [announcement, setAnnouncement] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -392,7 +413,9 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
     );
   }
 
-  const days = groupByDay(items, weekDates(start));
+  const visibleItems = filterBySource(items, sourceFilter);
+  const awaiting = awaitingCount(visibleItems);
+  const days = groupByDay(visibleItems, weekDates(start));
   const step = (direction: 1 | -1): void =>
     setCursor(view === 'month' ? addMonths(month, direction) : addDays(start, 7 * direction));
   const openDay = (date: string, target: 'week' | 'list'): void => {
@@ -485,7 +508,13 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
         {announcement}
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      {awaiting > 0 && (
+        <p className="m-0 text-sm font-medium text-foreground" data-testid="aguardando">
+          {awaitingText(awaiting)}
+        </p>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field id="filtro-servico" label="Serviço">
           <select
             id="filtro-servico"
@@ -533,6 +562,20 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
             ))}
           </select>
         </Field>
+        <Field id="filtro-origem" label="Origem">
+          <select
+            id="filtro-origem"
+            className={FIELD_CLASS}
+            value={sourceFilter}
+            onChange={(event) => setSourceFilter(event.target.value as SourceFilter)}
+          >
+            {(Object.keys(SOURCE_FILTER_LABELS) as SourceFilter[]).map((option) => (
+              <option key={option} value={option}>
+                {SOURCE_FILTER_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        </Field>
       </div>
 
       {view !== 'list' && tooLarge && (
@@ -550,7 +593,7 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
           view={view}
           cursor={cursor}
           today={today}
-          items={items}
+          items={visibleItems}
           canManage={canManage}
           narrow={narrow}
           onOpenItem={openItem}
@@ -591,7 +634,10 @@ export function AgendaPage({ companyId, settle, permissions, onConfigure }: Agen
                           <span>{` · ${who(item) ?? ''}`}</span>
                         ) : null}
                       </span>
-                      <StatusBadge item={item} />
+                      <span className="flex flex-wrap items-center gap-2">
+                        {isByAi(item) && <ByAiBadge />}
+                        <StatusBadge item={item} />
+                      </span>
                     </button>
                   </li>
                 ))}

@@ -32,6 +32,8 @@ model Company {
   deletedAt             DateTime?     @map("deleted_at")
   /// Persona do assistente (até 4000 caracteres; nulo = persona padrão). Nunca vai para log.
   persona               String?
+  /// Quando a empresa dispensou o assistente de primeiros passos (spec 030); nulo = nao dispensado.
+  onboardingDismissedAt DateTime?     @map("onboarding_dismissed_at") @db.Timestamptz(6)
   /// phone_number_id do número do WhatsApp (Cloud API da Meta) desta empresa: 1 a 32 dígitos, único.
   /// Único ponto do sistema que leva de um identificador externo à empresa (spec 011).
   whatsappPhoneNumberId String?       @unique @map("whatsapp_phone_number_id")
@@ -53,7 +55,11 @@ model Company {
   appointments       Appointment[]
   lastUsedByAccounts Account[]           @relation("AccountLastCompany")
   notifications      Notification[]
+  /// Assinatura da conta dona da empresa (spec 031); gravada na criacao com a cobranca ligada.
+  subscriptionId     String?             @map("subscription_id") @db.Uuid
+  subscription       Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
 
+  @@index([subscriptionId])
   @@map("companies")
 }
 
@@ -176,29 +182,30 @@ model Membership {
 
 /// Identidade global da pessoa. O Membership representa a participação dela numa empresa (tenant).
 model Account {
-  id                        String       @id @default(uuid(7)) @db.Uuid
-  email                     String       @unique
-  passwordHash              String       @map("password_hash")
-  status                    AccessStatus @default(ACTIVE)
-  emailVerifiedAt           DateTime?    @map("email_verified_at") @db.Timestamptz(6)
-  verificationHash          String?      @map("verification_hash")
-  verificationExpiresAt     DateTime?    @map("verification_expires_at") @db.Timestamptz(6)
-  verificationAttempts      Int          @default(0) @map("verification_attempts") @db.SmallInt
-  verificationFailuresDay   Int          @default(0) @map("verification_failures_day") @db.SmallInt
-  verificationFailuresSince DateTime?    @map("verification_failures_since") @db.Timestamptz(6)
+  id                        String        @id @default(uuid(7)) @db.Uuid
+  email                     String        @unique
+  passwordHash              String        @map("password_hash")
+  status                    AccessStatus  @default(ACTIVE)
+  emailVerifiedAt           DateTime?     @map("email_verified_at") @db.Timestamptz(6)
+  verificationHash          String?       @map("verification_hash")
+  verificationExpiresAt     DateTime?     @map("verification_expires_at") @db.Timestamptz(6)
+  verificationAttempts      Int           @default(0) @map("verification_attempts") @db.SmallInt
+  verificationFailuresDay   Int           @default(0) @map("verification_failures_day") @db.SmallInt
+  verificationFailuresSince DateTime?     @map("verification_failures_since") @db.Timestamptz(6)
   /// Código de recuperação de senha (HMAC, spec 021); nunca em log, resposta nem métrica.
-  resetHash                 String?      @map("reset_hash")
-  resetExpiresAt            DateTime?    @map("reset_expires_at") @db.Timestamptz(6)
-  resetAttempts             Int          @default(0) @map("reset_attempts") @db.SmallInt
-  resetFailuresDay          Int          @default(0) @map("reset_failures_day") @db.SmallInt
-  resetFailuresSince        DateTime?    @map("reset_failures_since") @db.Timestamptz(6)
+  resetHash                 String?       @map("reset_hash")
+  resetExpiresAt            DateTime?     @map("reset_expires_at") @db.Timestamptz(6)
+  resetAttempts             Int           @default(0) @map("reset_attempts") @db.SmallInt
+  resetFailuresDay          Int           @default(0) @map("reset_failures_day") @db.SmallInt
+  resetFailuresSince        DateTime?     @map("reset_failures_since") @db.Timestamptz(6)
   /// Última empresa que a conta selecionou (spec 029): só uma dica de conveniência para abrir a empresa
   /// certa depois do login; nunca é autoridade (o `select` e o login revalidam o vínculo ativo).
-  lastCompanyId             String?      @map("last_company_id") @db.Uuid
-  createdAt                 DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastCompanyId             String?       @map("last_company_id") @db.Uuid
+  createdAt                 DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   memberships               Membership[]
-  lastCompany               Company?     @relation("AccountLastCompany", fields: [lastCompanyId], references: [id], onDelete: SetNull)
+  subscription              Subscription?
+  lastCompany               Company?      @relation("AccountLastCompany", fields: [lastCompanyId], references: [id], onDelete: SetNull)
 
   @@index([lastCompanyId])
   @@map("accounts")
@@ -466,6 +473,9 @@ model ScheduleSettings {
   slotStepMinutes  Int      @default(30) @map("slot_step_minutes")
   minNoticeMinutes Int      @default(120) @map("min_notice_minutes")
   maxAdvanceDays   Int      @default(60) @map("max_advance_days")
+  /// Spec 028: a IA pode solicitar, cancelar e remarcar horarios (padrao desligado; CHECK: auto-confirmar implica ligado).
+  aiBookingEnabled Boolean  @default(false) @map("ai_booking_enabled")
+  aiAutoConfirm    Boolean  @default(false) @map("ai_auto_confirm")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -564,6 +574,215 @@ model Appointment {
   @@map("appointments")
 }
 
+enum PlanCode {
+  ESSENTIAL
+  PROFESSIONAL
+  SCALE
+
+  @@map("plan_code")
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+
+  @@map("billing_cycle")
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+
+  @@map("subscription_status")
+}
+
+enum WhatsappBillingMode {
+  CUSTOMER_PAYS_META
+  SOPREI_PAYS_META
+
+  @@map("whatsapp_billing_mode")
+}
+
+enum PaymentOrderKind {
+  NEW
+  RENEWAL
+  UPGRADE
+  EXTRA_PACK
+
+  @@map("payment_order_kind")
+}
+
+enum PaymentOrderStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+
+  @@map("payment_order_status")
+}
+
+enum PaymentNoticeKind {
+  QUOTA_REPLIES_80
+  QUOTA_REPLIES_100
+  QUOTA_TOKENS_80
+  QUOTA_TOKENS_100
+  PERIOD_ENDING_7D
+  PERIOD_ENDING_1D
+  PERIOD_ENDED
+  PRICE_CHANGE
+  PERIOD_GRACE_ENDED
+  PAYMENT_RECEIVED
+  PLAN_CHANGE_APPLIED
+  DOWNGRADE_BLOCKED
+  TRIAL_ENDING
+  TRIAL_ENDED
+
+  @@map("payment_notice_kind")
+}
+
+/// Plano do catalogo (GLOBAL, spec 031). Versionado e append-only: mudar cota ou limite e linha nova.
+model Plan {
+  id                     String   @id @default(uuid(7)) @db.Uuid
+  code                   PlanCode
+  name                   String
+  maxCompanies           Int      @map("max_companies")
+  monthlyTokens          BigInt   @map("monthly_tokens")
+  monthlyReplies         Int      @map("monthly_replies")
+  /// Estimativa do custo da Meta por mensagem enviada, em milesimos de centavo (so exibicao, S9).
+  metaEstimateMilliCents Int      @map("meta_estimate_milli_cents")
+  version                Int      @default(1)
+  active                 Boolean  @default(true)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  prices        PlanPrice[]
+  subscriptions Subscription[]
+
+  @@unique([code, version])
+  @@map("plans")
+}
+
+/// Preco versionado de um plano (GLOBAL, spec 031), em centavos de BRL. Append-only: preco novo e linha nova.
+model PlanPrice {
+  id                     String              @id @default(uuid(7)) @db.Uuid
+  planId                 String              @map("plan_id") @db.Uuid
+  cycle                  BillingCycle
+  baseCents              Int                 @map("base_cents")
+  agendaCents            Int                 @map("agenda_cents")
+  stockCents             Int                 @map("stock_cents")
+  whatsappBillingMode    WhatsappBillingMode @default(CUSTOMER_PAYS_META) @map("whatsapp_billing_mode")
+  metaPerReplyMilliCents Int                 @map("meta_per_reply_milli_cents")
+  extraPackCents         Int                 @map("extra_pack_cents")
+  extraPackReplies       Int                 @map("extra_pack_replies")
+  version                Int                 @default(1)
+  validFrom              DateTime            @map("valid_from") @db.Timestamptz(6)
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  plan          Plan           @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscriptions Subscription[]
+
+  @@unique([planId, cycle, whatsappBillingMode, version])
+  @@map("plan_prices")
+}
+
+/// Assinatura de uma CONTA (GLOBAL, spec 031; no maximo uma por conta). Acesso sempre por AccountId ou
+/// SubscriptionId (repositorios de cobranca); nenhuma rota recebe o id da conta do navegador.
+model Subscription {
+  id                 String             @id @default(uuid(7)) @db.Uuid
+  accountId          String             @unique @map("account_id") @db.Uuid
+  planId             String             @map("plan_id") @db.Uuid
+  priceId            String             @map("price_id") @db.Uuid
+  cycle              BillingCycle
+  agendaEnabled      Boolean            @default(false) @map("agenda_enabled")
+  stockEnabled       Boolean            @default(false) @map("stock_enabled")
+  status             SubscriptionStatus
+  currentPeriodStart DateTime           @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd   DateTime           @map("current_period_end") @db.Timestamptz(6)
+  trialEndsAt        DateTime?          @map("trial_ends_at") @db.Timestamptz(6)
+  cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
+  /// Plano, ciclo e modulos do proximo ciclo (so ids e flags); nulo = nenhuma mudanca agendada.
+  pendingChange      Json?              @map("pending_change")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account   Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  plan      Plan            @relation(fields: [planId], references: [id], onDelete: Restrict)
+  price     PlanPrice       @relation(fields: [priceId], references: [id], onDelete: Restrict)
+  companies Company[]
+  orders    PaymentOrder[]
+  usage     UsageCounter[]
+  notices   PaymentNotice[]
+
+  @@index([planId])
+  @@index([priceId])
+  @@map("subscriptions")
+}
+
+/// Pedido de pagamento (GLOBAL, spec 031; usado a partir do E3). Guarda so ids, valores, datas e estado:
+/// nunca cartao nem corpo cru de webhook.
+model PaymentOrder {
+  id                     String             @id @default(uuid(7)) @db.Uuid
+  subscriptionId         String             @map("subscription_id") @db.Uuid
+  kind                   PaymentOrderKind
+  amountCents            Int                @map("amount_cents")
+  /// Plano, ciclo, modulos e versao de preco copiados no momento do pedido.
+  breakdown              Json
+  status                 PaymentOrderStatus @default(PENDING)
+  checkoutUrl            String?            @map("checkout_url")
+  providerTransactionRef String?            @map("provider_transaction_ref")
+  /// Identificador da fatura na InfinitePay (invoice_slug), so para a consulta de status (spec 031, E3).
+  providerSlug           String?            @map("provider_slug")
+  /// Forma de pagamento informada pela consulta (pix ou credit_card); so numeros e texto curto fixo.
+  captureMethod          String?            @map("capture_method")
+  /// Ultima consulta de status feita pela reconciliacao (marca de reivindicacao entre instancias).
+  lastCheckedAt          DateTime?          @map("last_checked_at") @db.Timestamptz(6)
+  paidAt                 DateTime?          @map("paid_at") @db.Timestamptz(6)
+  periodStart            DateTime?          @map("period_start") @db.Timestamptz(6)
+  periodEnd              DateTime?          @map("period_end") @db.Timestamptz(6)
+  expiresAt              DateTime           @map("expires_at") @db.Timestamptz(6)
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId, createdAt])
+  @@index([status, createdAt])
+  @@map("payment_orders")
+}
+
+/// Uso medido por janela mensal de uma assinatura (GLOBAL, spec 031): so numeros, nunca texto nem contato.
+model UsageCounter {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  subscriptionId String   @map("subscription_id") @db.Uuid
+  windowStart    DateTime @map("window_start") @db.Timestamptz(6)
+  tokens         BigInt   @default(0)
+  sentMessages   BigInt   @default(0) @map("sent_messages")
+  extraReplies   Int      @default(0) @map("extra_replies")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@unique([subscriptionId, windowStart])
+  @@map("usage_counters")
+}
+
+/// Marca de aviso ja enviado ao dono (GLOBAL, spec 031): o e-mail nao se repete na mesma janela.
+model PaymentNotice {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  subscriptionId String            @map("subscription_id") @db.Uuid
+  kind           PaymentNoticeKind
+  windowStart    DateTime          @map("window_start") @db.Timestamptz(6)
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@unique([subscriptionId, kind, windowStart])
+  @@map("payment_notices")
+}
+
 enum NotificationKind {
   HUMAN_HANDOFF
 
@@ -587,7 +806,7 @@ enum HandoffReason {
   @@map("handoff_reason")
 }
 
-/// Notificação do painel (spec 030). (TENANT)
+/// Notificação do painel (spec 038). (TENANT)
 /// Hoje só `HUMAN_HANDOFF`: a IA pediu atendimento humano numa conversa. Estado da EMPRESA (não por
 /// pessoa). Nunca guarda texto de mensagem. FKs COMPOSTAS com `companyId`. Uma aberta por conversa e
 /// tipo: índice único PARCIAL só na migration (o Prisma não o representa). CHECKs na migration.

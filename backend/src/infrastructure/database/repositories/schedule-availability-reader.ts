@@ -1,11 +1,18 @@
 import type {
   AvailableSlot,
+  ContactAppointmentView,
   ScheduleAvailability,
   ScheduleAvailabilityReader,
   ServiceAvailability,
 } from '../../../application/ports/schedule-availability-reader.js';
 import { computeSlots, type Slot } from '../../../application/schedule/availability.js';
-import { addDays, localPartsOf, zonedToInstant } from '../../../application/schedule/zoned-time.js';
+import {
+  addDays,
+  daysBetween,
+  formatLocalTime,
+  localPartsOf,
+  zonedToInstant,
+} from '../../../application/schedule/zoned-time.js';
 import {
   ACTIVE_APPOINTMENT_STATUSES,
   type AppointmentStatus,
@@ -40,16 +47,73 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
     private readonly statementTimeoutMs: number = SCHEDULE_RETRIEVAL_TIMEOUT_MS,
   ) {}
 
-  read(companyId: CompanyId): Promise<ScheduleAvailability> {
+  read(
+    companyId: CompanyId,
+    range?: { readonly fromDate?: string; readonly toDate?: string },
+  ): Promise<ScheduleAvailability> {
     return withRepositoryErrors('ScheduleAvailability.read', () =>
       // Transação curta com `statement_timeout` local: estourado o prazo, o banco cancela a consulta.
       withStatementTimeout(this.prisma, this.statementTimeoutMs, (db) =>
-        this.readIn(db, companyId),
+        this.readIn(db, companyId, range),
       ),
     );
   }
 
-  private async readIn(db: TenantScopedDb, companyId: CompanyId): Promise<ScheduleAvailability> {
+  /** Só leitura, sempre com `companyId` **e** `contactRef` no `where` (spec 028). */
+  readContactAppointments(
+    companyId: CompanyId,
+    contactRef: string,
+    limit: number,
+  ): Promise<readonly ContactAppointmentView[]> {
+    return withRepositoryErrors('ScheduleAvailability.readContactAppointments', () =>
+      withStatementTimeout(this.prisma, this.statementTimeoutMs, async (db) => {
+        const now = this.now();
+        const settings = await db.scheduleSettings.findFirst({ where: { companyId } });
+        const timezone = settings?.timezone ?? SCHEDULE_DEFAULT_TIMEZONE;
+        const rows = await db.appointment.findMany({
+          where: {
+            companyId,
+            contactRef,
+            kind: 'BOOKING',
+            status: { in: ACTIVE },
+            startsAt: { gte: now },
+          },
+          orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+          take: limit,
+          select: { id: true, serviceId: true, startsAt: true, status: true },
+        });
+        const serviceIds = [
+          ...new Set(rows.flatMap((row) => (row.serviceId === null ? [] : [row.serviceId]))),
+        ];
+        const services =
+          serviceIds.length === 0
+            ? []
+            : await db.scheduleService.findMany({
+                where: { companyId, id: { in: serviceIds } },
+                select: { id: true, name: true },
+              });
+        const names = new Map(services.map((service) => [service.id, service.name] as const));
+        return rows.flatMap((row): ContactAppointmentView[] => {
+          if (row.status !== 'PENDING' && row.status !== 'CONFIRMED') return [];
+          return [
+            {
+              id: row.id,
+              serviceName: row.serviceId === null ? '' : (names.get(row.serviceId) ?? ''),
+              localDate: localPartsOf(row.startsAt, timezone).date,
+              localStart: formatLocalTime(row.startsAt, timezone),
+              status: row.status,
+            },
+          ];
+        });
+      }),
+    );
+  }
+
+  private async readIn(
+    db: TenantScopedDb,
+    companyId: CompanyId,
+    range?: { readonly fromDate?: string; readonly toDate?: string },
+  ): Promise<ScheduleAvailability> {
     {
       const now = this.now();
       const settings = await db.scheduleSettings.findFirst({ where: { companyId } });
@@ -61,6 +125,10 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
         today,
         services: [],
         hasSchedule: false,
+        ai: {
+          bookingEnabled: settings?.aiBookingEnabled ?? false,
+          autoConfirm: settings?.aiAutoConfirm ?? false,
+        },
       };
       const services = await db.scheduleService.findMany({
         where: { companyId, active: true },
@@ -82,10 +150,15 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
               where: { companyId, resourceId: { in: ids } },
               take: 1_000,
             });
-      const toDate = addDays(today, SCHEDULE_PROMPT_WINDOW_DAYS - 1);
+      // Nunca antes de hoje; no máximo `SCHEDULE_PROMPT_WINDOW_DAYS` dias a partir do início.
+      const requestedFrom = range?.fromDate;
+      const fromDate = requestedFrom === undefined || requestedFrom < today ? today : requestedFrom;
+      const lastAllowed = addDays(fromDate, SCHEDULE_PROMPT_WINDOW_DAYS - 1);
+      const toDate = range?.toDate === undefined ? lastAllowed : minDate(range.toDate, lastAllowed);
+      const spanDays = toDate < fromDate ? 0 : daysBetween(fromDate, toDate) + 1;
       const base = (
-        zonedToInstant(today, 0, timezone) ??
-        zonedToInstant(today, 60, timezone) ??
+        zonedToInstant(fromDate, 0, timezone) ??
+        zonedToInstant(fromDate, 60, timezone) ??
         now
       ).getTime();
       const busy =
@@ -96,7 +169,7 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
                 companyId,
                 resourceId: { in: ids },
                 status: { in: ACTIVE },
-                startsAt: { lt: new Date(base + (SCHEDULE_PROMPT_WINDOW_DAYS + 2) * DAY_MS) },
+                startsAt: { lt: new Date(base + (spanDays + 2) * DAY_MS) },
                 blockedUntil: { gt: new Date(base - DAY_MS) },
               },
               select: { resourceId: true, startsAt: true, blockedUntil: true },
@@ -104,21 +177,24 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
             });
 
       const computed = services.map((service) => {
-        const slots = computeSlots({
-          timezone,
-          slotStepMinutes: settings?.slotStepMinutes ?? SCHEDULE_DEFAULT_SLOT_STEP_MINUTES,
-          minNoticeMinutes: settings?.minNoticeMinutes ?? SCHEDULE_DEFAULT_MIN_NOTICE_MINUTES,
-          maxAdvanceDays: settings?.maxAdvanceDays ?? SCHEDULE_DEFAULT_MAX_ADVANCE_DAYS,
-          service,
-          resources: resources.map((resource) => ({
-            id: resource.id,
-            windows: rules.filter((rule) => rule.resourceId === resource.id),
-          })),
-          busy,
-          now,
-          fromDate: today,
-          toDate,
-        });
+        const slots =
+          spanDays === 0
+            ? []
+            : computeSlots({
+                timezone,
+                slotStepMinutes: settings?.slotStepMinutes ?? SCHEDULE_DEFAULT_SLOT_STEP_MINUTES,
+                minNoticeMinutes: settings?.minNoticeMinutes ?? SCHEDULE_DEFAULT_MIN_NOTICE_MINUTES,
+                maxAdvanceDays: settings?.maxAdvanceDays ?? SCHEDULE_DEFAULT_MAX_ADVANCE_DAYS,
+                service,
+                resources: resources.map((resource) => ({
+                  id: resource.id,
+                  windows: rules.filter((rule) => rule.resourceId === resource.id),
+                })),
+                busy,
+                now,
+                fromDate,
+                toDate,
+              });
         return { service, slots };
       });
       // Os serviços com horário mais próximo primeiro; sem horário, por último (e por nome).
@@ -139,6 +215,10 @@ export class PrismaScheduleAvailabilityReader implements ScheduleAvailabilityRea
       };
     }
   }
+}
+
+function minDate(left: string, right: string): string {
+  return left < right ? left : right;
 }
 
 /** Vários recursos livres no mesmo horário contam uma vez só. */

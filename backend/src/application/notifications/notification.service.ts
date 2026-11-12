@@ -10,7 +10,7 @@ import type {
   Page,
 } from '../../domain/index.js';
 
-/** Métricas das notificações (spec 030): conjunto fixo de labels, nunca id nem texto. */
+/** Métricas das notificações (spec 038): conjunto fixo de labels, nunca id nem texto. */
 export interface NotificationMetrics {
   countNotificationResolved(kind: NotificationKind): void;
 }
@@ -29,7 +29,7 @@ export interface NotificationDeps {
 }
 
 /**
- * Notificações do painel (spec 030). O `CompanyId` vem sempre da identidade autenticada; o
+ * Notificações do painel (spec 038). O `CompanyId` vem sempre da identidade autenticada; o
  * repositório o exige em toda consulta. O log leva só ids e o resultado.
  */
 export class NotificationService {

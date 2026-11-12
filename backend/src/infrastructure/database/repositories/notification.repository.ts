@@ -43,7 +43,7 @@ const STATUS_WHERE = {
 } as const satisfies Record<NotificationStatusFilter, object>;
 
 /**
- * Notificações de uma empresa (spec 030, model de tenant). Mesmas garantias da base de tenant: `companyId`
+ * Notificações de uma empresa (spec 038, model de tenant). Mesmas garantias da base de tenant: `companyId`
  * em **todo** `where` e em todo `create`, só `findFirst`, `findMany`, `createMany`, `updateMany` e `count`
  * (a `tenant-scope` recusa o resto), e id de outra empresa se comporta como inexistente. Sem SQL cru.
  * Não há `delete`: a notificação só avança de `OPEN` para `RESOLVED`.

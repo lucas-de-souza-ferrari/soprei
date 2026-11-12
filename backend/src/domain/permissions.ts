@@ -19,6 +19,7 @@ export const PERMISSIONS = [
   'schedule:read',
   'schedule:manage',
   'schedule:configure',
+  'onboarding:manage',
   'notification:read',
   'notification:resolve',
 ] as const;
@@ -39,6 +40,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'schedule:read',
     'schedule:manage',
     'schedule:configure',
+    'onboarding:manage',
     'notification:read',
     'notification:resolve',
   ],
@@ -56,6 +58,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'schedule:read',
     'schedule:manage',
     'schedule:configure',
+    'onboarding:manage',
     'notification:read',
     'notification:resolve',
   ],

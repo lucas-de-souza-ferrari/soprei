@@ -17,7 +17,7 @@ import { NotFoundError, ValidationError } from '../shared/errors/index.js';
 import { isUuid } from '../shared/utils/index.js';
 
 /**
- * Notificações em memória (spec 030), com as regras do banco: tudo filtrado pelo `CompanyId`, uma
+ * Notificações em memória (spec 038), com as regras do banco: tudo filtrado pelo `CompanyId`, uma
  * aberta por conversa e tipo, id de outra empresa = inexistente. `onCreate` avisa a "transação" do
  * `InMemoryAttendanceStore`, que remove a linha no rollback.
  */

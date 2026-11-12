@@ -15,7 +15,7 @@ import { InMemoryAttendanceStore } from '../../test-support/in-memory-attendance
 import { InMemoryCompanyRepository } from '../../test-support/in-memory-company.repository.js';
 import { captureLogs, logContains, type LogCapture } from '../../test-support/log-capture.js';
 
-// Spec 030: rotas de notificações (matriz de papéis, isolamento e privacidade), com o atendimento real
+// Spec 038: rotas de notificações (matriz de papéis, isolamento e privacidade), com o atendimento real
 // em memória e o LLM `mock` gerando o pedido de humano.
 
 const SECRET_TEXT = `quero um atendente ${randomUUID()}`;
@@ -37,7 +37,7 @@ interface NotificationItem {
   resolvedByMe: boolean;
 }
 
-describe('API de notificações (spec 030)', () => {
+describe('API de notificações (spec 038)', () => {
   let app: FastifyInstance;
   let testAuth: TestAuth;
   let logs: LogCapture;
@@ -89,7 +89,7 @@ describe('API de notificações (spec 030)', () => {
       llm: new MockLlmProvider(),
       logger: logs.logger,
       metrics,
-      options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000 },
+      options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000, handoffEnabled: true },
     });
     const notifications = new NotificationService({
       notifications: store.notifications,

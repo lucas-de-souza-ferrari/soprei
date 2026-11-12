@@ -14,6 +14,12 @@ import {
 import {
   addDays,
   allowedActions,
+  awaitingCount,
+  awaitingText,
+  BY_AI_LABEL,
+  filterBySource,
+  isByAi,
+  statusLabelOf,
   customerLabelProblem,
   dayHeading,
   groupByDay,
@@ -50,6 +56,7 @@ const item = (over: Partial<Appointment> = {}): Appointment => ({
   localEnd: '10:30',
   weekday: 2,
   customerLabel: 'João',
+  cancelledBy: null,
   contactLabel: null,
   createdAt: '2026-11-09T11:00:00.000Z',
   ...over,
@@ -240,4 +247,49 @@ test('o navegador não calcula fuso: nada de getTimezoneOffset, timeZone do nave
       file,
     );
   }
+});
+
+test('origem e estado da IA (spec 028): "Pela IA", "Aguardando confirmação" e "Cancelado pelo contato"', () => {
+  const ai = item({
+    source: 'CHANNEL',
+    status: 'PENDING',
+    customerLabel: null,
+    contactLabel: 'Contato final 4321',
+  });
+  const panel = item({ source: 'PANEL', status: 'PENDING' });
+  const block = item({ kind: 'BLOCK', source: 'PANEL', status: 'CONFIRMED', serviceId: null });
+  assert.equal(isByAi(ai), true);
+  assert.equal(isByAi(panel), false);
+  assert.equal(isByAi(block), false);
+  // PENDING da IA = aguardando; PENDING do painel segue "Pendente".
+  assert.equal(statusLabelOf(ai), 'Aguardando confirmação');
+  assert.equal(statusLabelOf(panel), STATUS_LABELS.PENDING);
+  assert.equal(
+    statusLabelOf(item({ source: 'CHANNEL', status: 'CANCELLED', cancelledBy: 'CONTACT' })),
+    'Cancelado pelo contato',
+  );
+  assert.equal(
+    statusLabelOf(item({ status: 'CANCELLED', cancelledBy: 'PANEL' })),
+    STATUS_LABELS.CANCELLED,
+  );
+  assert.ok(itemSummary(ai).includes(BY_AI_LABEL));
+  assert.ok(!itemSummary(panel).includes(BY_AI_LABEL));
+  // Filtro de origem e contagem.
+  const all = [ai, panel, block, item({ source: 'CHANNEL', status: 'CONFIRMED' })];
+  assert.equal(filterBySource(all, 'all').length, 4);
+  assert.deepEqual(filterBySource(all, 'ai').map(isByAi), [true, true]);
+  assert.equal(filterBySource(all, 'panel').length, 2);
+  assert.equal(awaitingCount(all), 2);
+  assert.equal(awaitingCount([block]), 0);
+  assert.equal(awaitingText(3), '3 aguardando confirmação');
+});
+
+test('o contrato da agenda aceita cancelledBy e continua recusando contactRef', () => {
+  const ok = appointmentSchema.safeParse({ ...item(), cancelledBy: 'CONTACT' });
+  assert.equal(ok.success, true);
+  assert.equal(
+    appointmentSchema.safeParse({ ...item(), contactRef: '5511999990000' }).success,
+    false,
+  );
+  assert.equal(appointmentSchema.safeParse({ ...item(), cancelledBy: 'OUTRO' }).success, false);
 });

@@ -5,6 +5,7 @@ import type { Config } from './env.schema.js';
 import { parseConfig } from './parse-config.js';
 
 export type { Config } from './env.schema.js';
+export { workerCloseTimeoutMs } from './env.schema.js';
 export { ConfigError, parseConfig } from './parse-config.js';
 export { batchSettings, queueSettings, trustProxyMode, whatsappChannelConfig } from './whatsapp.js';
 export type { BatchSettings, QueueSettings, WhatsappChannelConfig } from './whatsapp.js';

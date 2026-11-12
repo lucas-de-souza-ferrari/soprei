@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { DB_POOL_QUEUE_HEADROOM, workerCloseTimeoutMs } from './env.schema.js';
 import { parseConfig } from './parse-config.js';
 
 const JWT_SECRET = 'j'.repeat(32);
@@ -8,6 +9,14 @@ const VALID_ENV = {
   DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
   REDIS_URL: 'redis://localhost:6379/0',
   JWT_SECRET,
+};
+
+const ACCOUNTS_ON = {
+  ACCOUNTS_ENABLED: 'true',
+  APP_ORIGIN: 'http://127.0.0.1:5173',
+  EMAIL_PROVIDER_HOST: '127.0.0.1',
+  EMAIL_PROVIDER_PORT: '1025',
+  EMAIL_PROVIDER_FROM: 'noreply@example.test',
 };
 
 describe('parseConfig', () => {
@@ -63,7 +72,7 @@ describe('parseConfig', () => {
     it('aplica os defaults', () => {
       const result = parseConfig(VALID_ENV);
       assert.ok(result.ok);
-      assert.equal(result.value.DB_POOL_MAX, 10);
+      assert.equal(result.value.DB_POOL_MAX, 20);
       assert.equal(result.value.DB_POOL_IDLE_TIMEOUT_MS, 30_000);
       assert.equal(result.value.DB_POOL_CONNECTION_TIMEOUT_MS, 5_000);
       assert.equal(result.value.DB_STATEMENT_TIMEOUT_MS, 30_000);
@@ -267,6 +276,211 @@ describe('parseConfig', () => {
       );
       // Mudar só o LLM_TIMEOUT_MS para além do padrão de 60000 também é pego.
       assert.equal(parseConfig({ ...VALID_ENV, LLM_TIMEOUT_MS: '60000' }).ok, false);
+    });
+
+    it('SCHEDULE_AI_ENABLED vem desligada por padrão e só aceita true/false literais', () => {
+      const off = parseConfig(VALID_ENV);
+      assert.ok(off.ok);
+      assert.equal(off.value.SCHEDULE_AI_ENABLED, false);
+      const on = parseConfig({ ...VALID_ENV, SCHEDULE_AI_ENABLED: 'true' });
+      assert.ok(on.ok);
+      assert.equal(on.value.SCHEDULE_AI_ENABLED, true);
+      for (const value of ['1', 'yes', 'TRUE', 'sim']) {
+        assert.equal(parseConfig({ ...VALID_ENV, SCHEDULE_AI_ENABLED: value }).ok, false, value);
+      }
+    });
+
+    it('planos e assinaturas (spec 031): tudo desligado por padrão, literais true/false e valores padrão', () => {
+      const off = parseConfig(VALID_ENV);
+      assert.ok(off.ok);
+      assert.equal(off.value.BILLING_ENABLED, false);
+      assert.equal(off.value.SOPREI_PAYS_META_ENABLED, false);
+      assert.equal(off.value.BILLING_GRACE_DAYS, 5);
+      assert.equal(off.value.BILLING_TRIAL_DAYS, 7);
+      assert.equal(off.value.BILLING_TRIAL_TOKENS, 300_000);
+      const on = parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, BILLING_ENABLED: 'true' });
+      assert.ok(on.ok);
+      assert.equal(on.value.BILLING_ENABLED, true);
+      for (const value of ['1', 'yes', 'TRUE']) {
+        assert.equal(parseConfig({ ...VALID_ENV, BILLING_ENABLED: value }).ok, false, value);
+        assert.equal(
+          parseConfig({ ...VALID_ENV, SOPREI_PAYS_META_ENABLED: value }).ok,
+          false,
+          value,
+        );
+      }
+      assert.equal(parseConfig({ ...VALID_ENV, BILLING_TRIAL_DAYS: '0' }).ok, false);
+      assert.equal(parseConfig({ ...VALID_ENV, BILLING_GRACE_DAYS: '-1' }).ok, false);
+    });
+
+    it('BILLING_ENABLED exige ACCOUNTS_ENABLED=true (a cobrança vive na sessão da conta)', () => {
+      const alone = parseConfig({ ...VALID_ENV, BILLING_ENABLED: 'true' });
+      assert.equal(alone.ok, false);
+      assert.match(alone.error.message, /BILLING_ENABLED: exige ACCOUNTS_ENABLED=true/);
+      assert.ok(parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, BILLING_ENABLED: 'true' }).ok);
+    });
+
+    it('gate do modo S (spec 031): SOPREI_PAYS_META_ENABLED exige BILLING_ENABLED=true', () => {
+      const alone = parseConfig({ ...VALID_ENV, SOPREI_PAYS_META_ENABLED: 'true' });
+      assert.equal(alone.ok, false);
+      assert.match(alone.error.message, /SOPREI_PAYS_META_ENABLED: exige BILLING_ENABLED=true/);
+      const both = parseConfig({
+        ...VALID_ENV,
+        ...ACCOUNTS_ON,
+        BILLING_ENABLED: 'true',
+        SOPREI_PAYS_META_ENABLED: 'true',
+      });
+      assert.ok(both.ok);
+      assert.equal(both.value.SOPREI_PAYS_META_ENABLED, true);
+    });
+
+    it('checkout da InfinitePay (spec 031, E3): desligado por padrão, nada INFINITEPAY_* é exigido e a base padrão é a da API', () => {
+      const off = parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, BILLING_ENABLED: 'true' });
+      assert.ok(off.ok);
+      assert.equal(off.value.CHECKOUT_ENABLED, false);
+      assert.equal(off.value.INFINITEPAY_API_BASE_URL, 'https://api.checkout.infinitepay.io');
+      assert.equal(off.value.INFINITEPAY_API_KEY, undefined);
+      assert.equal(off.value.BILLING_HTTP_TIMEOUT_MS, 8_000);
+      for (const value of ['1', 'yes', 'TRUE']) {
+        assert.equal(parseConfig({ ...VALID_ENV, CHECKOUT_ENABLED: value }).ok, false, value);
+      }
+    });
+
+    describe('com CHECKOUT_ENABLED=true', () => {
+      const CHECKOUT_ON = {
+        ...VALID_ENV,
+        ...ACCOUNTS_ON,
+        BILLING_ENABLED: 'true',
+        CHECKOUT_ENABLED: 'true',
+        INFINITEPAY_API_KEY: 'inchk_chave_de_teste_0123',
+        INFINITEPAY_HANDLE: 'loja-teste',
+        INFINITEPAY_WEBHOOK_BASE_URL: 'https://api.exemplo.test',
+        TRUST_PROXY: 'false',
+      };
+
+      it('aceita a configuração completa', () => {
+        const result = parseConfig(CHECKOUT_ON);
+        assert.ok(result.ok);
+        assert.equal(result.value.INFINITEPAY_HANDLE, 'loja-teste');
+      });
+
+      it('I2: exige TRUST_PROXY definido explicitamente (mesmo false); a variável opcional de e-mail e o host do link têm padrão', () => {
+        const withoutProxy = { ...CHECKOUT_ON, TRUST_PROXY: undefined };
+        const missing = parseConfig(withoutProxy);
+        assert.equal(missing.ok, false);
+        assert.match(missing.error.message, /TRUST_PROXY: precisa ser definida explicitamente/);
+        assert.equal(parseConfig({ ...CHECKOUT_ON, TRUST_PROXY: '' }).ok, false);
+        const ok = parseConfig({ ...CHECKOUT_ON, TRUST_PROXY: '127.0.0.1,::1' });
+        assert.ok(ok.ok);
+        assert.equal(ok.value.CHECKOUT_SEND_CUSTOMER_EMAIL, false);
+        assert.equal(ok.value.INFINITEPAY_CHECKOUT_HOST, 'checkout.infinitepay.com.br');
+        assert.equal(ok.value.BILLING_RECONCILE_INTERVAL_MINUTES, 10);
+        assert.equal(ok.value.BILLING_NOTICE_INTERVAL_MINUTES, 60);
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, BILLING_NOTICE_INTERVAL_MINUTES: '0' }).ok,
+          true,
+        );
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, BILLING_NOTICE_INTERVAL_MINUTES: '-1' }).ok,
+          false,
+        );
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, BILLING_RECONCILE_INTERVAL_MINUTES: '0' }).ok,
+          true,
+        );
+        assert.equal(
+          parseConfig({ ...CHECKOUT_ON, CHECKOUT_SEND_CUSTOMER_EMAIL: 'sim' }).ok,
+          false,
+        );
+      });
+
+      it('exige BILLING_ENABLED e as três variáveis', () => {
+        const noBilling = parseConfig({ ...CHECKOUT_ON, BILLING_ENABLED: 'false' });
+        assert.equal(noBilling.ok, false);
+        assert.match(noBilling.error.message, /CHECKOUT_ENABLED: exige BILLING_ENABLED=true/);
+        for (const name of [
+          'INFINITEPAY_API_KEY',
+          'INFINITEPAY_HANDLE',
+          'INFINITEPAY_WEBHOOK_BASE_URL',
+        ]) {
+          const result = parseConfig({ ...CHECKOUT_ON, [name]: '' });
+          assert.equal(result.ok, false, name);
+          assert.match(
+            result.error.message,
+            new RegExp(name + ': obrigatória com CHECKOUT_ENABLED=true'),
+          );
+        }
+      });
+
+      it('valida a chave curta, o handle (sem cifrão) e a origem do webhook (sem caminho nem barra final)', () => {
+        assert.equal(parseConfig({ ...CHECKOUT_ON, INFINITEPAY_API_KEY: 'curta' }).ok, false);
+        assert.equal(parseConfig({ ...CHECKOUT_ON, INFINITEPAY_HANDLE: '$loja' }).ok, false);
+        for (const url of [
+          'https://api.exemplo.test/',
+          'https://api.exemplo.test/webhooks',
+          'ftp://api.exemplo.test',
+          'https://u:p@api.exemplo.test',
+          'não é url',
+        ]) {
+          assert.equal(
+            parseConfig({ ...CHECKOUT_ON, INFINITEPAY_WEBHOOK_BASE_URL: url }).ok,
+            false,
+            url,
+          );
+        }
+        assert.ok(
+          parseConfig({ ...CHECKOUT_ON, INFINITEPAY_WEBHOOK_BASE_URL: 'http://localhost:3000' }).ok,
+        );
+      });
+
+      it('em produção as duas bases precisam ser https; fora dela http é aceito (servidor falso)', () => {
+        const production = { ...CHECKOUT_ON, NODE_ENV: 'production', TRUST_PROXY: 'false' };
+        const webhookHttp = parseConfig({
+          ...production,
+          INFINITEPAY_WEBHOOK_BASE_URL: 'http://api.exemplo.test',
+        });
+        assert.equal(webhookHttp.ok, false);
+        assert.match(webhookHttp.error.message, /INFINITEPAY_WEBHOOK_BASE_URL: precisa ser https/);
+        const apiHttp = parseConfig({
+          ...production,
+          INFINITEPAY_API_BASE_URL: 'http://127.0.0.1:9999',
+        });
+        assert.equal(apiHttp.ok, false);
+        assert.match(apiHttp.error.message, /INFINITEPAY_API_BASE_URL: precisa ser https/);
+        assert.ok(
+          parseConfig({ ...CHECKOUT_ON, INFINITEPAY_API_BASE_URL: 'http://127.0.0.1:9999' }).ok,
+        );
+      });
+    });
+
+    it('com SCHEDULE_AI_ENABLED, "em andamento" precisa passar do prazo de 30 s do laço', () => {
+      const result = parseConfig({
+        ...VALID_ENV,
+        SCHEDULE_AI_ENABLED: 'true',
+        ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '30000',
+        LLM_TIMEOUT_MS: '10000',
+      });
+      assert.equal(result.ok, false);
+      assert.match(
+        result.error.message,
+        /ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: precisa ser maior que o prazo do turno/,
+      );
+      assert.ok(
+        parseConfig({
+          ...VALID_ENV,
+          SCHEDULE_AI_ENABLED: 'true',
+          ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '30001',
+          LLM_TIMEOUT_MS: '10000',
+        }).ok,
+      );
+      // Desligada, o prazo curto continua valendo como antes.
+      assert.ok(
+        parseConfig({
+          ...VALID_ENV,
+          ATTENDANCE_IN_FLIGHT_TIMEOUT_MS: '30000',
+          LLM_TIMEOUT_MS: '10000',
+        }).ok,
+      );
     });
 
     const invalid: readonly (readonly [string, string])[] = [
@@ -877,5 +1091,94 @@ describe('parseConfig', () => {
         }).ok,
       );
     });
+  });
+});
+
+describe('parseConfig: capacidade do canal (spec 034)', () => {
+  const CHANNEL_ON = {
+    ...VALID_ENV,
+    WHATSAPP_APP_SECRET: 'segredo-do-app-meta',
+    WHATSAPP_VERIFY_TOKEN: 'token-de-verificacao-16+',
+    WHATSAPP_APP_ID: '123456789012345',
+    CHANNEL_CREDENTIALS_KEYS: `k1:${'A'.repeat(43)}`,
+    CHANNEL_CREDENTIALS_ACTIVE_KEY_ID: 'k1',
+    WHATSAPP_ENABLED: 'true',
+    TRUST_PROXY: 'false',
+  };
+
+  it('defaults: QUEUE_CONCURRENCY 10, DB_POOL_MAX 20, SHUTDOWN_TIMEOUT_MS 60000', () => {
+    const result = parseConfig(CHANNEL_ON);
+    assert.ok(result.ok);
+    assert.equal(result.value.QUEUE_CONCURRENCY, 10);
+    assert.equal(result.value.DB_POOL_MAX, 20);
+    assert.equal(result.value.SHUTDOWN_TIMEOUT_MS, 60_000);
+  });
+
+  it('QUEUE_CONCURRENCY aceita de 1 a 100 e recusa o resto', () => {
+    for (const value of ['1', '100']) {
+      const result = parseConfig({ ...CHANNEL_ON, QUEUE_CONCURRENCY: value, DB_POOL_MAX: '200' });
+      assert.ok(result.ok, value);
+      assert.equal(result.value.QUEUE_CONCURRENCY, Number(value));
+    }
+    for (const value of ['0', '101', '-1', '2.5', 'muitos']) {
+      const result = parseConfig({ ...VALID_ENV, QUEUE_CONCURRENCY: value });
+      assert.equal(result.ok, false, value);
+      assert.match(result.error.message, /QUEUE_CONCURRENCY/);
+    }
+  });
+
+  it('com o canal ligado, DB_POOL_MAX menor que QUEUE_CONCURRENCY + folga falha citando as duas variáveis', () => {
+    const exact = parseConfig({
+      ...CHANNEL_ON,
+      QUEUE_CONCURRENCY: '10',
+      DB_POOL_MAX: String(10 + DB_POOL_QUEUE_HEADROOM),
+    });
+    assert.ok(exact.ok);
+    const short = parseConfig({
+      ...CHANNEL_ON,
+      QUEUE_CONCURRENCY: '10',
+      DB_POOL_MAX: String(10 + DB_POOL_QUEUE_HEADROOM - 1),
+    });
+    assert.equal(short.ok, false);
+    assert.match(short.error.message, /DB_POOL_MAX/);
+    assert.match(short.error.message, /QUEUE_CONCURRENCY/);
+    // Subir só a concorrência além do pool padrão também é pego.
+    assert.equal(parseConfig({ ...CHANNEL_ON, QUEUE_CONCURRENCY: '16' }).ok, false);
+    // Sem o canal não existe worker: a regra não se aplica.
+    assert.ok(parseConfig({ ...VALID_ENV, QUEUE_CONCURRENCY: '50', DB_POOL_MAX: '5' }).ok);
+  });
+
+  it('SHUTDOWN_TIMEOUT_MS aceita de 5000 a 300000', () => {
+    for (const value of ['4999', '300001', 'abc']) {
+      const result = parseConfig({ ...VALID_ENV, SHUTDOWN_TIMEOUT_MS: value });
+      assert.equal(result.ok, false, value);
+      assert.match(result.error.message, /SHUTDOWN_TIMEOUT_MS/);
+    }
+    assert.ok(parseConfig({ ...VALID_ENV, SHUTDOWN_TIMEOUT_MS: '5000' }).ok);
+  });
+
+  it('a espera do worker é o prazo do turno + envio + folga, e cresce com as ferramentas da agenda', () => {
+    const base = {
+      LLM_TIMEOUT_MS: 15_000,
+      WHATSAPP_SEND_TIMEOUT_MS: 10_000,
+      SCHEDULE_AI_ENABLED: false,
+    };
+    assert.equal(workerCloseTimeoutMs(base), 30_000);
+    assert.equal(workerCloseTimeoutMs({ ...base, SCHEDULE_AI_ENABLED: true }), 45_000);
+    // Prazo do modelo maior que o do turno com ferramentas: vale o maior.
+    assert.equal(
+      workerCloseTimeoutMs({ ...base, LLM_TIMEOUT_MS: 40_000, SCHEDULE_AI_ENABLED: true }),
+      55_000,
+    );
+  });
+
+  it('com o canal ligado, SHUTDOWN_TIMEOUT_MS precisa ser maior que a espera do worker', () => {
+    // Padrões: espera de 30 000 ms.
+    const equal = parseConfig({ ...CHANNEL_ON, SHUTDOWN_TIMEOUT_MS: '30000' });
+    assert.equal(equal.ok, false);
+    assert.match(equal.error.message, /SHUTDOWN_TIMEOUT_MS/);
+    assert.ok(parseConfig({ ...CHANNEL_ON, SHUTDOWN_TIMEOUT_MS: '30001' }).ok);
+    // Sem o canal não há worker para esperar.
+    assert.ok(parseConfig({ ...VALID_ENV, SHUTDOWN_TIMEOUT_MS: '5000' }).ok);
   });
 });

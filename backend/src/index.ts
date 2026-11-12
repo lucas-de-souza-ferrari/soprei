@@ -1,5 +1,16 @@
 import { AttendanceService } from './application/attendance/attendance.service.js';
+import { BillingNoticeService } from './application/billing/billing-notice.service.js';
+import { BillingService } from './application/billing/billing.service.js';
+import { CheckoutService } from './application/billing/checkout.service.js';
+import { PaymentReconciler } from './application/billing/payment-reconciler.js';
+import { deriveWebhookSecret } from './application/billing/webhook-token.js';
+import { PaymentVerifier } from './application/billing/payment-verifier.js';
+import { PendingReplyResumer } from './application/billing/pending-reply-resumer.js';
+import { InfinitepayClient } from './infrastructure/external-apis/infinitepay/infinitepay.client.js';
+import { SecretString } from './shared/types/index.js';
+import { OnboardingService } from './application/onboarding/onboarding.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
+import { ContactSchedulingService } from './application/schedule/contact-scheduling.service.js';
 import { NotificationService } from './application/notifications/notification.service.js';
 import { ScheduleSampleService } from './application/schedule/sample.service.js';
 import { ScheduleService } from './application/schedule/schedule.service.js';
@@ -18,6 +29,7 @@ import {
   batchSettings,
   loadConfig,
   queueSettings,
+  workerCloseTimeoutMs,
   trustProxyMode,
   whatsappChannelConfig,
 } from './infrastructure/config/index.js';
@@ -30,6 +42,7 @@ import {
   PrismaAppointmentRepository,
   PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
+  PrismaContactScheduleUnitOfWork,
   PrismaNotificationRepository,
   PrismaScheduleAvailabilityReader,
   PrismaScheduleResourceRepository,
@@ -40,7 +53,14 @@ import {
   PrismaConversationRepository,
   PrismaMessageRepository,
   PrismaProductRepository,
+  PrismaOnboardingStore,
   PrismaStockMovementRepository,
+  PrismaBillingNoticeRepository,
+  PrismaBillingRepository,
+  PrismaCheckoutRepository,
+  PrismaPendingReplyReader,
+  PrismaEntitlementReader,
+  PrismaUsageMeter,
 } from './infrastructure/database/index.js';
 import { createLlmProvider } from './infrastructure/external-apis/llm/create-llm-provider.js';
 import { WhatsappGraphAdminClient } from './infrastructure/external-apis/whatsapp/whatsapp-graph-admin.client.js';
@@ -59,7 +79,8 @@ import {
   AesGcmCredentialCipher,
   parseCredentialKeys,
 } from './infrastructure/security/aes-gcm-credential-cipher.js';
-import { createInboundQueue } from './infrastructure/queue/inbound-queue.js';
+import { createInboundQueue, INBOUND_QUEUE_NAME } from './infrastructure/queue/inbound-queue.js';
+import { installProcessGuard } from './infrastructure/process-guard.js';
 
 /** Espera da conexão Redis do rate limit no boot; passou disso, segue em fail-open com `warn`. */
 const RATE_LIMIT_READY_TIMEOUT_MS = 2_000;
@@ -81,7 +102,13 @@ async function main(): Promise<void> {
           settings: queueSettings(config),
           logger,
           metrics,
+          // Espera dos jobs ativos no encerramento: o turno mais longo possível (spec 034).
+          workerCloseTimeoutMs: workerCloseTimeoutMs(config),
         });
+  if (inboundQueue !== undefined) {
+    // Profundidade da fila em `/metrics` (spec 034), lida só na coleta.
+    metrics.bindQueue(INBOUND_QUEUE_NAME, () => inboundQueue.jobCounts());
+  }
 
   // Conexão própria das sessões (spec 007): fail-closed, sem fila offline e com prazo curto.
   const authRedis = createAuthRedis(config, logger);
@@ -139,6 +166,100 @@ async function main(): Promise<void> {
     metrics,
   });
   await warmUpAuth(auth);
+  // Um só mailer SMTP para contas (confirmação, recuperação) e convites e avisos de cobrança; só com contas globais ligadas.
+  const accountMailer = config.ACCOUNTS_ENABLED
+    ? new SmtpVerificationMailer(smtpMailerOptions(config))
+    : undefined;
+  // Planos e assinaturas (spec 031): só com BILLING_ENABLED. Desligada, nada abaixo é criado e o atendimento e
+  // as rotas têm exatamente o comportamento e o custo de antes.
+  const billing = config.BILLING_ENABLED
+    ? {
+        settings: {
+          graceDays: config.BILLING_GRACE_DAYS,
+          trialDays: config.BILLING_TRIAL_DAYS,
+          trialTokens: config.BILLING_TRIAL_TOKENS,
+        },
+        entitlements: new PrismaEntitlementReader(prisma, {
+          graceDays: config.BILLING_GRACE_DAYS,
+          trialDays: config.BILLING_TRIAL_DAYS,
+          trialTokens: config.BILLING_TRIAL_TOKENS,
+        }),
+        usage: new PrismaUsageMeter(prisma),
+      }
+    : undefined;
+  // Checkout da InfinitePay (spec 031, E3): só com BILLING_ENABLED e CHECKOUT_ENABLED; a config já exigiu as
+  // variáveis INFINITEPAY_*. Sem a fila do canal não há o que reativar (o canal ligado é que cria a fila).
+  const checkout =
+    billing !== undefined &&
+    config.CHECKOUT_ENABLED &&
+    config.INFINITEPAY_API_KEY !== undefined &&
+    config.INFINITEPAY_HANDLE !== undefined &&
+    config.INFINITEPAY_WEBHOOK_BASE_URL !== undefined &&
+    config.APP_ORIGIN !== undefined
+      ? (() => {
+          const repository = new PrismaCheckoutRepository(prisma);
+          const provider = new InfinitepayClient({
+            baseUrl: config.INFINITEPAY_API_BASE_URL,
+            apiKey: new SecretString(config.INFINITEPAY_API_KEY),
+            handle: config.INFINITEPAY_HANDLE,
+            timeoutMs: config.BILLING_HTTP_TIMEOUT_MS,
+            checkoutHost: config.INFINITEPAY_CHECKOUT_HOST,
+          });
+          // Avisos de cobrança por e-mail (E5): só com o mailer das contas (BILLING_ENABLED exige ACCOUNTS_ENABLED).
+          const notices =
+            accountMailer === undefined
+              ? undefined
+              : new BillingNoticeService({
+                  repository: new PrismaBillingNoticeRepository(prisma),
+                  mailer: accountMailer,
+                  logger,
+                  metrics,
+                  settings: {
+                    graceDays: config.BILLING_GRACE_DAYS,
+                    trialTokens: config.BILLING_TRIAL_TOKENS,
+                    appOrigin: config.APP_ORIGIN,
+                  },
+                });
+          const verifier = new PaymentVerifier({
+            ...(notices === undefined ? {} : { notifier: notices }),
+            checkout: repository,
+            provider,
+            graceDays: config.BILLING_GRACE_DAYS,
+            logger,
+            metrics,
+            ...(inboundQueue === undefined
+              ? {}
+              : {
+                  resumer: new PendingReplyResumer({
+                    reader: new PrismaPendingReplyReader(prisma),
+                    queue: inboundQueue.queue,
+                    logger,
+                  }),
+                }),
+          });
+          return {
+            verifier,
+            notices,
+            reconciler: new PaymentReconciler({ checkout: repository, verifier, logger }),
+            service: new CheckoutService({
+              billing: new PrismaBillingRepository(prisma),
+              checkout: repository,
+              provider,
+              verifier,
+              settings: {
+                graceDays: config.BILLING_GRACE_DAYS,
+                appOrigin: config.APP_ORIGIN,
+                webhookBaseUrl: config.INFINITEPAY_WEBHOOK_BASE_URL,
+                allowSopreiPaysMeta: config.SOPREI_PAYS_META_ENABLED,
+                webhookSecret: deriveWebhookSecret(config.JWT_SECRET),
+                sendCustomerEmail: config.CHECKOUT_SEND_CUSTOMER_EMAIL,
+              },
+              logger,
+              metrics,
+            }),
+          };
+        })()
+      : undefined;
   const attendance = new AttendanceService({
     companies: companyRepository,
     conversations: new PrismaConversationRepository(prisma),
@@ -150,13 +271,31 @@ async function main(): Promise<void> {
     options: {
       llmTimeoutMs: config.LLM_TIMEOUT_MS,
       inFlightTimeoutMs: config.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS,
+      scheduleAiEnabled: config.SCHEDULE_AI_ENABLED,
+      // Spec 038: a IA pode pedir atendimento humano em todo turno (vira notificação no painel).
+      handoffEnabled: true,
     },
+    ...(billing === undefined ? {} : { entitlements: billing.entitlements, usage: billing.usage }),
     // Base de conhecimento da empresa (spec 026): recuperação por busca textual, fail-open.
     knowledge: new PrismaKnowledgeRetriever(prisma),
     // Horários livres da agenda (spec 027): só leitura, fail-open.
     schedule: new PrismaScheduleAvailabilityReader(prisma),
+    // Escritas da IA na agenda (spec 028, E2/E3): só com a chave global e a opção da empresa; cotas no Redis.
+    ...(config.SCHEDULE_AI_ENABLED
+      ? {
+          scheduling: new ContactSchedulingService({
+            unitOfWork: new PrismaContactScheduleUnitOfWork(prisma),
+            quota: new RedisScheduleAiQuotaStore(
+              authRedis.client,
+              versionedAuthPrefix(config.AUTH_REDIS_PREFIX, config.ACCOUNTS_ENABLED),
+            ),
+            quotaSecret: deriveLoginLockSecret(config.JWT_SECRET),
+            logger,
+          }),
+        }
+      : {}),
   });
-  // Notificações do painel (spec 030): o atendimento as grava na sua transação; aqui só leitura e resolução.
+  // Notificações do painel (spec 038): o atendimento as grava na sua transação; aqui só leitura e resolução.
   const notifications = new NotificationService({
     notifications: new PrismaNotificationRepository(prisma),
     logger,
@@ -236,6 +375,7 @@ async function main(): Promise<void> {
       }),
       connections,
       metrics,
+      ...(billing === undefined ? {} : { usage: billing.usage }),
       queue: inboundQueue.queue,
       batch: batchSettings(config),
       logger: channelLogger,
@@ -267,10 +407,6 @@ async function main(): Promise<void> {
     );
   }
 
-  // Um só mailer SMTP para contas (confirmação, recuperação) e convites; só com contas globais ligadas.
-  const accountMailer = config.ACCOUNTS_ENABLED
-    ? new SmtpVerificationMailer(smtpMailerOptions(config))
-    : undefined;
   const app = buildServer({
     ...(config.ACCOUNTS_ENABLED && accountMailer !== undefined
       ? {
@@ -284,6 +420,14 @@ async function main(): Promise<void> {
               ),
               loginLocks: auth.sessions,
               loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
+              ...(billing === undefined
+                ? {}
+                : {
+                    billing: {
+                      trialDays: billing.settings.trialDays,
+                      graceDays: billing.settings.graceDays,
+                    },
+                  }),
               // Só id e resultado: nunca e-mail, código nem credenciais SMTP.
               onVerificationMail: (result, accountId) => {
                 metrics.countVerificationEmail(result);
@@ -369,12 +513,30 @@ async function main(): Promise<void> {
           },
         }),
     ...(whatsappRoutes === undefined ? {} : { whatsapp: whatsappRoutes }),
+    ...(billing === undefined
+      ? {}
+      : {
+          billing: {
+            service: new BillingService({
+              billing: new PrismaBillingRepository(prisma),
+              settings: {
+                ...billing.settings,
+                allowSopreiPaysMeta: config.SOPREI_PAYS_META_ENABLED,
+              },
+            }),
+            entitlements: billing.entitlements,
+            ...(checkout === undefined
+              ? {}
+              : { checkout: checkout.service, checkoutHost: config.INFINITEPAY_CHECKOUT_HOST }),
+          },
+        }),
     readiness: {
       database: () => infrastructure.database.check(),
       redis: () => infrastructure.redis.check(),
     },
     admin: {
       companies: new CompanyService(companyRepository),
+      onboarding: new OnboardingService(new PrismaOnboardingStore(prisma)),
       attendance,
       notifications,
       knowledge,
@@ -432,22 +594,45 @@ async function main(): Promise<void> {
     },
     intervalMinutes: config.ACCOUNT_PURGE_INTERVAL_MINUTES,
   });
-
-  const stop = (signal: string): void => {
-    app.log.info({ signal }, 'encerrando servidor');
-    shutdown(app, infrastructure, app.log).then(
-      () => process.exit(0),
-      (err: unknown) => {
-        app.log.error({ err }, 'falha ao encerrar servidor');
-        process.exit(1);
+  if (checkout !== undefined) {
+    // Reconciliação de pagamentos (spec 031, E3): o webhook pode não chegar. Timer PRÓPRIO (padrão 10 min;
+    // 0 desliga só ela) e independente do expurgo de contas; parado no closeInfrastructure junto com o dele.
+    const reconcileTimer = startPurgeTimer({
+      enabled: true,
+      run: () => checkout.reconciler.runOnce(),
+      intervalMinutes: config.BILLING_RECONCILE_INTERVAL_MINUTES,
+    });
+    // Avisos de cobrança por e-mail (E5): timer PRÓPRIO (padrão 60 min; 0 desliga só ele), sem sobreposição.
+    const noticeTimer = startPurgeTimer({
+      enabled: checkout.notices !== undefined,
+      run: () => checkout.notices?.runOnce() ?? Promise.resolve(),
+      intervalMinutes: config.BILLING_NOTICE_INTERVAL_MINUTES,
+    });
+    const purgeTimer = infrastructure.accountPurge;
+    infrastructure.accountPurge = {
+      async stop() {
+        // allSettled: se um dos timers falhar ao parar, os outros e o drain ainda rodam.
+        const results = await Promise.allSettled([
+          purgeTimer?.stop(),
+          reconcileTimer?.stop(),
+          noticeTimer?.stop(),
+        ]);
+        // O desligamento também espera as confirmações em segundo plano (webhook já respondido).
+        await checkout.verifier.drain();
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
       },
-    );
-  };
-  process.once('SIGINT', () => {
-    stop('SIGINT');
-  });
-  process.once('SIGTERM', () => {
-    stop('SIGTERM');
+    };
+  }
+
+  // Sinais e erros fatais não tratados (spec 034): um único desligamento gracioso, com prazo global.
+  installProcessGuard({
+    target: process,
+    logger: app.log,
+    shutdown: () => shutdown(app, infrastructure, app.log),
+    timeoutMs: config.SHUTDOWN_TIMEOUT_MS,
+    exit: (code) => process.exit(code),
+    metrics,
   });
 
   try {
@@ -476,6 +661,7 @@ import { RedisInvitationQuotaStore } from './infrastructure/auth/redis-invitatio
 import { startPurgeTimer } from './application/auth/purge-timer.js';
 import { UnverifiedAccountPurger } from './application/auth/unverified-account-purger.js';
 import { versionedAuthPrefix } from './infrastructure/auth/auth-version.js';
+import { RedisScheduleAiQuotaStore } from './infrastructure/auth/redis-schedule-ai-quota.js';
 import { RedisAccountSessionStore } from './infrastructure/auth/redis-account-session-store.js';
 import { smtpMailerOptions } from './infrastructure/config/email.js';
 import { SmtpVerificationMailer } from './infrastructure/external-apis/email/smtp-verification-mailer.js';

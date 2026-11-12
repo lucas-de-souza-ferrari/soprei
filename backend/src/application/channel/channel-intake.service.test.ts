@@ -462,3 +462,37 @@ describe('ChannelIntakeService: tipos que não são mensagem do contato', () => 
     }
   });
 });
+
+describe('ChannelIntakeService: instante de recebimento (spec 034)', () => {
+  it('o receivedAt da mensagem vai ao job em ISO UTC, em text e em notice', async () => {
+    const h = setup();
+    await newCompany(h, 'recebida', '1001');
+    const first = new Date(Date.UTC(2026, 10, 11, 12, 0, 0, 500));
+    const second = new Date(first.getTime() + 1);
+
+    await h.intake.accept(
+      [
+        { ...text('1001', 'wamid.rec1'), receivedAt: first },
+        { ...unsupported('1001', 'wamid.rec2'), receivedAt: second },
+      ],
+      'req-12345678',
+    );
+
+    assert.deepEqual(
+      h.queue.all().map((job) => [job.kind, job.receivedAt]),
+      [
+        ['text', first.toISOString()],
+        ['notice', second.toISOString()],
+      ],
+    );
+  });
+
+  it('sem receivedAt o job não ganha o campo', async () => {
+    const h = setup();
+    await newCompany(h, 'sem-carimbo', '1001');
+    await h.intake.accept([text('1001', 'wamid.rec3')], 'req-12345678');
+    const [job] = h.queue.all();
+    assert.ok(job !== undefined);
+    assert.equal('receivedAt' in job, false);
+  });
+});

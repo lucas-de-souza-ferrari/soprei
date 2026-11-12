@@ -34,7 +34,7 @@ interface NotificationResponse {
 }
 
 /**
- * Notificações do painel (spec 030), só para `Membership`. Registre com `prefix: '/admin/companies'`.
+ * Notificações do painel (spec 038), só para `Membership`. Registre com `prefix: '/admin/companies'`.
  * O `:companyId` do caminho é conferido contra a identidade (divergência = 404) e descartado; o service
  * sempre recebe o `companyId` autenticado. A resposta **nunca** traz `contactRef`, `externalId`, texto
  * de mensagem nem o id de quem resolveu.

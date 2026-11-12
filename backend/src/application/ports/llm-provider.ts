@@ -1,4 +1,3 @@
-import type { HandoffReason } from '../../domain/index.js';
 import type { ExternalServiceError } from '../../shared/errors/index.js';
 import type { Result } from '../../shared/types/index.js';
 
@@ -15,11 +14,6 @@ export interface LlmGenerateInput {
   readonly history: readonly LlmTurn[];
   /** A mensagem nova do contato; sempre um turno `user`, nunca misturada ao `systemPrompt`. */
   readonly userMessage: string;
-  /**
-   * Spec 030: oferece ao modelo o sinal "precisa de atendimento humano". Padrão `false`; sem ele o
-   * pedido ao provedor fica idêntico ao de antes. O provedor que não sabe sinalizar pode ignorar.
-   */
-  readonly allowHandoff?: boolean;
 }
 
 /** Tokens gastos numa chamada (só números; nunca texto). */
@@ -30,24 +24,68 @@ export interface LlmUsage {
   readonly cacheReadTokens?: number;
 }
 
-/** O modelo pediu atendimento humano (spec 030): só o motivo, de uma lista fixa; nunca texto livre. */
-export interface LlmHandoff {
-  readonly reason: HandoffReason;
-}
-
 export interface LlmReply {
   readonly text: string;
+  /** Soma das chamadas do turno (com ferramentas, o laço faz várias). */
   readonly usage?: LlmUsage;
-  /** Presente só quando `allowHandoff` foi pedido e o modelo sinalizou. */
-  readonly handoff?: LlmHandoff;
+  /** Rodadas de ferramenta do turno (spec 028); ausente sem ferramentas. */
+  readonly toolRounds?: number;
+  /** Chamadas de ferramenta executadas (ou recusadas por limite) no turno (spec 028). */
+  readonly toolCalls?: number;
+}
+
+/** Definição neutra de fornecedor de uma ferramenta (spec 028). */
+export interface LlmToolDefinition {
+  /** Nome fixo, só letras minúsculas, dígitos e `_`. */
+  readonly name: string;
+  readonly description: string;
+  /** JSON Schema do objeto de argumentos. */
+  readonly inputSchema: Readonly<Record<string, unknown>>;
+}
+
+/** O que o modelo pediu: o nome e os argumentos (nunca o id do fornecedor; ele fica no adaptador). */
+export interface LlmToolCall {
+  readonly name: string;
+  /** Argumentos como o modelo os emitiu: dado **não confiável**, quem executa valida. */
+  readonly input: unknown;
+}
+
+/** Resultado de uma ferramenta: texto do **servidor**, de formato fixo; nunca do contato. */
+export interface LlmToolOutput {
+  readonly content: string;
+  readonly isError: boolean;
 }
 
 /**
- * Texto ao contato quando o modelo só sinaliza o pedido de humano, sem escrever resposta (spec 030).
- * Constante: nunca promete prazo nem diz que alguém já está na conversa.
+ * Resultado fixo quando o teto de chamadas de ferramenta do turno foi passado (o adaptador o devolve
+ * sem executar nada) e quando o executor falha de forma inesperada.
  */
-export const HANDOFF_DEFAULT_REPLY =
-  'Vou chamar alguém da nossa equipe para continuar o seu atendimento. Assim que possível, uma pessoa vai falar com você.';
+export const LLM_TOOL_RESULT_TURN_LIMIT: LlmToolOutput = {
+  content:
+    'limite_turno: o limite de consultas deste atendimento foi atingido; responda ao contato com o que já sabe.',
+  isError: true,
+};
+export const LLM_TOOL_RESULT_UNAVAILABLE: LlmToolOutput = {
+  content:
+    'indisponivel: nao foi possivel executar agora; diga ao contato que a equipe confirmara.',
+  isError: true,
+};
+
+/**
+ * Ferramentas oferecidas ao modelo num turno (spec 028). `execute` é **código nosso** e nunca deve
+ * lançar; o modelo só produz argumentos. O provedor conduz o laço e guarda consigo os ids e os blocos
+ * de pensamento do fornecedor.
+ */
+export interface LlmToolSet {
+  readonly definitions: readonly LlmToolDefinition[];
+  execute(call: LlmToolCall): Promise<LlmToolOutput>;
+  readonly limits: {
+    /** Pedidos ao modelo por turno (o seguinte ao teto não é feito). */
+    readonly maxModelCalls: number;
+    /** Chamadas de ferramenta por turno; as seguintes recebem `LLM_TOOL_RESULT_TURN_LIMIT`. */
+    readonly maxToolCalls: number;
+  };
+}
 
 export interface LlmGenerateOptions {
   /**
@@ -55,6 +93,8 @@ export interface LlmGenerateOptions {
    * cancelamento encerra a requisição (e a conexão); quem não suporta pode ignorar.
    */
   readonly signal?: AbortSignal;
+  /** Ferramentas do turno (spec 028). Sem elas, o pedido é idêntico ao de antes. */
+  readonly tools?: LlmToolSet;
 }
 
 /**
@@ -66,6 +106,8 @@ export const LLM_ERROR_TYPE = {
   timeout: 'timeout',
   refusal: 'refusal',
   maxTokens: 'max_tokens',
+  /** O laço de ferramentas passou do teto de pedidos ao modelo (spec 028). */
+  toolRoundCap: 'tool_round_cap',
 } as const;
 
 /**

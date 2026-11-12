@@ -26,6 +26,14 @@ export function parseConfig(env: NodeJS.ProcessEnv): Result<Config, ConfigError>
         ]),
       );
     }
+    // A rota pública do webhook de pagamento também divide a cota do perfil `webhook` por IP.
+    if (parsed.data.CHECKOUT_ENABLED && (env.TRUST_PROXY ?? '').trim() === '') {
+      return Result.err(
+        new ConfigError([
+          'TRUST_PROXY: precisa ser definida explicitamente com CHECKOUT_ENABLED=true (mesmo que "false"); atrás de túnel ou proxy liste os IPs/CIDRs dele, ex.: 127.0.0.1,::1',
+        ]),
+      );
+    }
     return Result.ok(parsed.data);
   }
   const issues = parsed.error.issues.map((issue) => {

@@ -12,6 +12,7 @@ import type { AuthService } from '../../application/auth/auth.service.js';
 import type { Product, StockMovement } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, membershipAuth, requirePermission } from '../common/auth.hooks.js';
+import { requireModule } from '../common/entitlement-config.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { listQuerySchema } from './attendance.validators.js';
 import { companyIdSchema } from './company.validators.js';
@@ -90,7 +91,8 @@ export const adminInventoryController: FastifyPluginCallback<AdminInventoryContr
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
-  const config = rateLimitProfile('admin');
+  // Escrita exige o módulo Estoque contratado (spec 031); leitura segue.
+  const config = { ...rateLimitProfile('admin'), ...requireModule('inventory') };
   const onRequest = requirePermission('inventory:manage', { companyParam: 'companyId', metrics });
 
   app.get('/:companyId/inventory/products', { config, onRequest }, async (request) => {

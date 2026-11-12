@@ -73,6 +73,12 @@ export interface InboundChannelMessage {
     | { readonly kind: 'unsupported' }
     /** Evento que não é mensagem do contato (reação, sistema...): descartado sem aviso. */
     | { readonly kind: 'ignored' };
+  /**
+   * Instante em que o webhook recebeu a mensagem (spec 034), carimbado por quem lê o lote: dentro
+   * do mesmo lote os valores são estritamente crescentes, na ordem do payload. Ordena as mensagens
+   * do contato sem depender da ordem de processamento da fila.
+   */
+  readonly receivedAt?: Date;
 }
 
 export interface IntakeSummary {
@@ -119,7 +125,8 @@ export class ChannelIntakeService {
     // Uma resolução por número dentro do lote (um lote costuma ter um número só).
     const companyCache = new Map<string, Promise<Company | null>>();
 
-    // Em sequência: a ordem de chegada do lote é a ordem dos jobs (fila de concorrência 1).
+    // Em sequência: mantém a ordem do lote ao enfileirar. A ordem das mensagens do contato não
+    // depende disso (vem do `receivedAt` de cada uma; a fila processa vários jobs ao mesmo tempo).
     for (const message of messages) {
       try {
         const outcome = await this.acceptOne(message, requestId, companyCache);
@@ -227,6 +234,7 @@ export class ChannelIntakeService {
       contactRef,
       externalId: message.messageId,
       requestId,
+      ...(message.receivedAt === undefined ? {} : { receivedAt: message.receivedAt.toISOString() }),
     };
     if (message.content.kind !== 'text') {
       return {

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { companyIdSchema } from './company.validators.js';
 
-/** Itens por página da lista de notificações (spec 030). */
+/** Itens por página da lista de notificações (spec 038). */
 export const NOTIFICATIONS_DEFAULT_LIMIT = 30;
 export const NOTIFICATIONS_MAX_LIMIT = 50;
 

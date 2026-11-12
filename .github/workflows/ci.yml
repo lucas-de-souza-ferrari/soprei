@@ -1,18 +1,66 @@
 name: CI
 
+# Spec 036. Nos PRs e na main a suíte roda numa só versão do Node, a do `.nvmrc` (a de produção).
+# O workflow "Compatibilidade do Node" (node-compat.yml) chama este mesmo arquivo uma vez por semana
+# com outras versões, pela entrada `node-version`.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
+    inputs:
+      node-version:
+        description: Versão do Node. Vazio usa a do .nvmrc.
+        type: string
+        default: ''
+      artifact-suffix:
+        description: Sufixo do nome dos artefatos (evita colisão quando o chamador usa matriz).
+        type: string
+        default: ''
+
+# Push novo no mesmo PR cancela a execução anterior. Na main (e na execução semanal) nada é cancelado:
+# cada commit termina a sua execução.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.node-version }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  verify:
-    name: Node ${{ matrix.node }}
+  static:
+    name: Checagens estáticas e build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['22', 'lts/*']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Núcleos do runner (2 em repositório privado, 4 em público): referência para as medições.
+      - run: nproc
+
+      - run: pnpm install --frozen-lockfile
+
+      # O Prisma Client (src/generated, ignorado pelo git) precisa existir antes do typecheck.
+      # O `prisma generate` só lê a URL (não conecta); este job não tem banco.
+      - run: pnpm db:generate
+        env:
+          DATABASE_URL: postgresql://soprei:soprei@localhost:5432/soprei_test?schema=public
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm format:check
+
+      - run: pnpm build
+
+  tests:
+    name: Testes unitários e de integração
+    runs-on: ubuntu-latest
 
     # Serviços só do CI (no desenvolvimento local, Postgres e Redis rodam nativos, sem Docker).
     # Postgres na mesma major do ambiente local do dono (18); Redis 8, idem.
@@ -52,21 +100,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ inputs.node-version }}
+          node-version-file: .nvmrc
           cache: pnpm
+
+      - run: nproc
 
       - run: pnpm install --frozen-lockfile
 
-      # O Prisma Client (src/generated, ignorado pelo git) precisa existir antes do typecheck.
       - run: pnpm db:generate
-
-      - run: pnpm typecheck
-
-      - run: pnpm lint
-
-      - run: pnpm format:check
-
-      - run: pnpm build
 
       - run: pnpm db:migrate:deploy
 
@@ -76,22 +118,63 @@ jobs:
         env:
           NODE_OPTIONS: --test-reporter=dot
 
+      # Um arquivo por vez (`--test-concurrency=1` no script): há testes que agem no banco inteiro.
       - run: pnpm test:integration
         env:
           NODE_OPTIONS: --test-reporter=dot
 
-      - run: pnpm --filter soprei-frontend exec playwright install --with-deps chromium
+  browser:
+    name: Navegador (fatia ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Cada fatia roda num job próprio, com 1 worker (recomendação do Playwright para CI).
+        # O total de fatias é o tamanho desta lista (`strategy.job-total`).
+        shard: [1, 2, 3]
 
-      - run: pnpm --filter soprei-frontend test:browser
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: nproc
+
+      - run: pnpm install --frozen-lockfile
+
+      # Versão do Playwright instalada (a do lockfile): é a chave do cache do navegador.
+      - id: playwright
+        run: echo "version=$(pnpm --filter soprei-frontend exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      # Sem restore-keys: nunca se reaproveita o navegador de outra versão do Playwright.
+      - id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: pnpm --filter soprei-frontend exec playwright install chromium
+
+      # Sem instalar bibliotecas do sistema pelo apt: a imagem do runner já traz todas as que o Chromium
+      # usa (o apt só acrescentava fontes extras, que os testes não usam) e o apt já derrubou as três
+      # fatias por falha de DNS. Se uma imagem futura perder uma biblioteca, o navegador não abre e
+      # o erro é explícito; aí se volta a instalar só o que faltar.
+
+      - run: pnpm --filter soprei-frontend test:browser --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       # Rastreamento (linha do tempo, DOM e rede) das tentativas que falharam, mesmo as que passaram na
       # retentativa. Baixe em "Artifacts" na página da execução e abra com: npx playwright show-trace <zip>.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          # O valor da matriz do LTS é "lts/*" (barra e asterisco não são aceitos em nome de artefato):
-          # 0 = Node 22, 1 = LTS.
-          name: playwright-traces-${{ strategy.job-index }}
+          name: playwright-traces-${{ matrix.shard }}${{ inputs.artifact-suffix }}
           path: frontend/test-results
           if-no-files-found: ignore
           retention-days: 7

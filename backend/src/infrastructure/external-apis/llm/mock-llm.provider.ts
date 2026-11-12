@@ -1,11 +1,17 @@
 import {
   LLM_ERROR_TYPE,
+  LLM_TOOL_RESULT_TURN_LIMIT,
+  LLM_TOOL_RESULT_UNAVAILABLE,
   type LlmGenerateInput,
   type LlmGenerateOptions,
   type LlmProvider,
   type LlmReply,
+  type LlmToolCall,
+  type LlmToolOutput,
+  type LlmToolSet,
 } from '../../../application/ports/llm-provider.js';
 import { ATTENDANCE_STYLE_INSTRUCTION } from '../../../application/attendance/attendance.service.js';
+import { HANDOFF_TOOL_NAME } from '../../../application/attendance/handoff-tool.js';
 import {
   KNOWLEDGE_BLOCK_CLOSE,
   KNOWLEDGE_BLOCK_OPEN,
@@ -29,17 +35,29 @@ export const MOCK_EMPTY_MARKER = '[[mock:empty]]';
 export const MOCK_HUGE_MARKER = '[[mock:huge]]';
 
 /**
- * Spec 030: com `allowHandoff`, o mock pede atendimento humano quando o texto do contato (minúsculas,
- * sem acento) contém um destes trechos. Determinístico, para testes e demonstração.
+ * Spec 038: com a ferramenta de humano oferecida, o mock a chama quando o texto do contato (minúsculas, sem
+ * acento) contém um destes trechos. Determinístico, para testes e demonstração.
  */
 export const MOCK_HANDOFF_TRIGGERS = ['atendente', 'humano', 'falar com uma pessoa'] as const;
-/** Sufixo da resposta do mock quando ele pede atendimento humano. */
+/** Sufixo da resposta do mock quando ele pediu atendimento humano. */
 export const MOCK_HANDOFF_SUFFIX = ' (atendimento humano solicitado)';
 
 /** Quanto do texto do contato o mock devolve no eco (para a resposta caber no limite). */
 const ECHO_MAX_CHARS = 500;
 /** Quanto da persona o mock cita na resposta. */
 const PERSONA_PREVIEW_CHARS = 60;
+
+/**
+ * Roteiro de um turno com ferramentas (spec 028): `rounds` são as chamadas que o "modelo" pede em cada
+ * rodada (várias na mesma rodada = chamadas paralelas, executadas em sequência) e `finalText` é a
+ * resposta depois das ferramentas (pode usar os resultados). Só vale quando o turno oferece `tools`.
+ */
+export interface MockToolScript {
+  readonly rounds: readonly (readonly LlmToolCall[])[];
+  readonly finalText: string | ((outputs: readonly LlmToolOutput[]) => string);
+  /** Depois das rodadas, o provedor falha (erro genérico): prova o que o servidor faz se o laço cai depois de gravar. */
+  readonly failAfterRounds?: boolean;
+}
 
 export interface MockLlmProviderOptions {
   /**
@@ -61,12 +79,20 @@ export class MockLlmProvider implements LlmProvider {
   readonly name = 'mock';
   /** Entradas recebidas, na ordem (só se `recordCalls`). Somente para testes. */
   readonly calls: LlmGenerateInput[] = [];
+  /** Nomes das ferramentas oferecidas em cada chamada (só se `recordCalls`); `undefined` = sem ferramentas. */
+  readonly toolsOffered: (readonly string[] | undefined)[] = [];
+  private readonly toolScripts: MockToolScript[] = [];
 
   private readonly recordCalls: boolean;
   private gate: Promise<void> | undefined;
 
   constructor(options: MockLlmProviderOptions = {}) {
     this.recordCalls = options.recordCalls ?? false;
+  }
+
+  /** Enfileira o roteiro do próximo turno com ferramentas (spec 028). Só para testes. */
+  scriptTools(...scripts: MockToolScript[]): void {
+    this.toolScripts.push(...scripts);
   }
 
   /** Segura toda chamada nova até a função devolvida ser chamada. Só para testes. */
@@ -85,11 +111,29 @@ export class MockLlmProvider implements LlmProvider {
     input: LlmGenerateInput,
     options: LlmGenerateOptions = {},
   ): Promise<Result<LlmReply, ExternalServiceError>> {
-    if (this.recordCalls) this.calls.push(input);
+    if (this.recordCalls) {
+      this.calls.push(input);
+      this.toolsOffered.push(options.tools?.definitions.map((definition) => definition.name));
+    }
     if (this.gate !== undefined) await this.gate;
+
+    if (options.tools !== undefined && this.toolScripts.length > 0) {
+      const script = this.toolScripts.shift();
+      if (script !== undefined) return runToolScript(script, options.tools, options.signal);
+    }
 
     const text = input.userMessage;
     if (text.includes(MOCK_HANG_MARKER)) return waitForAbort(options.signal);
+    // Spec 038: com a ferramenta de humano oferecida e um pedido de pessoa no texto, o mock a chama uma vez
+    // (motivo fixo) e responde com o sufixo, como um turno de verdade com ferramenta.
+    const offered = options.tools;
+    const askedHuman =
+      offered !== undefined &&
+      offered.definitions.some((definition) => definition.name === HANDOFF_TOOL_NAME) &&
+      asksForHuman(text);
+    if (askedHuman) {
+      await offered.execute({ name: HANDOFF_TOOL_NAME, input: { motivo: 'CONTACT_REQUESTED' } });
+    }
     if (text.includes(MOCK_FAIL_MARKER)) {
       // Nunca ecoa o texto do contato no erro (contrato do LlmProvider).
       return Result.err(new ExternalServiceError('Falha simulada do provedor mock'));
@@ -105,12 +149,68 @@ export class MockLlmProvider implements LlmProvider {
     const personaText = styleAt === -1 ? input.systemPrompt : input.systemPrompt.slice(0, styleAt);
     const persona = personaText.slice(0, PERSONA_PREVIEW_CHARS);
     const echo = text.slice(0, ECHO_MAX_CHARS);
-    const handoff = input.allowHandoff === true && asksForHuman(text);
     return Result.ok({
-      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}${handoff ? MOCK_HANDOFF_SUFFIX : ''}`,
-      ...(handoff ? { handoff: { reason: 'CONTACT_REQUESTED' as const } } : {}),
+      text: `[mock] Recebi: ${echo} (persona: "${persona}"; histórico: ${String(input.history.length)})${knowledgeSummary(input.systemPrompt)}${scheduleSummary(input.systemPrompt)}${askedHuman ? MOCK_HANDOFF_SUFFIX : ''}`,
+      ...(askedHuman ? { toolRounds: 1, toolCalls: 1 } : {}),
     });
   }
+}
+
+/**
+ * Executa um roteiro com as mesmas regras do laço do provedor real: o pedido ao modelo seguinte ao teto
+ * não é feito, a chamada acima do teto recebe `limite_turno` sem executar e o prazo do turno (a `signal`)
+ * para o laço.
+ */
+async function runToolScript(
+  script: MockToolScript,
+  tools: LlmToolSet,
+  signal: AbortSignal | undefined,
+): Promise<Result<LlmReply, ExternalServiceError>> {
+  const outputs: LlmToolOutput[] = [];
+  let modelCalls = 1;
+  let toolCalls = 0;
+  for (const round of script.rounds) {
+    if (isAborted(signal)) return aborted();
+    if (modelCalls >= tools.limits.maxModelCalls) {
+      return Result.err(
+        new ExternalServiceError('O mock passou do limite de rodadas de ferramenta', {
+          context: { provider: 'mock', errorType: LLM_ERROR_TYPE.toolRoundCap, retryable: false },
+        }),
+      );
+    }
+    modelCalls += 1;
+    for (const call of round) {
+      if (isAborted(signal)) return aborted();
+      toolCalls += 1;
+      if (toolCalls > tools.limits.maxToolCalls) {
+        outputs.push(LLM_TOOL_RESULT_TURN_LIMIT);
+        continue;
+      }
+      try {
+        outputs.push(await tools.execute(call));
+      } catch {
+        outputs.push(LLM_TOOL_RESULT_UNAVAILABLE);
+      }
+    }
+  }
+  if (isAborted(signal)) return aborted();
+  if (script.failAfterRounds === true) {
+    return Result.err(
+      new ExternalServiceError('Falha simulada do provedor mock depois das ferramentas', {
+        context: { provider: 'mock', retryable: true },
+      }),
+    );
+  }
+  const text = typeof script.finalText === 'string' ? script.finalText : script.finalText(outputs);
+  return Result.ok({ text, toolRounds: script.rounds.length, toolCalls });
+}
+
+function aborted(): Result<never, ExternalServiceError> {
+  return Result.err(
+    new ExternalServiceError('Chamada ao provedor mock cancelada', {
+      context: { provider: 'mock', errorType: LLM_ERROR_TYPE.timeout, retryable: false },
+    }),
+  );
 }
 
 function asksForHuman(text: string): boolean {
@@ -164,4 +264,9 @@ function waitForAbort(
     if (signal.aborted) cancelled();
     else signal.addEventListener('abort', cancelled, { once: true });
   });
+}
+
+/** O estado do `AbortSignal` muda fora do fluxo: função à parte para o TypeScript não o fixar. */
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted ?? false;
 }

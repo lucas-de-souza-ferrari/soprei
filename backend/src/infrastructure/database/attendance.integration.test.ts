@@ -427,11 +427,20 @@ describe('isolamento do atendimento entre empresas (A e B, mesmo contactRef e me
   });
 });
 
-describe('pedido de atendimento humano contra o PostgreSQL (spec 030)', () => {
+describe('pedido de atendimento humano contra o PostgreSQL (spec 038)', () => {
   const notificationsOf = (companyId: string) =>
     database.prisma.notification.findMany({ where: { companyId } });
 
   it('simulador: a notificação é gravada com a resposta (mesma transação); externalId repetido não grava outra', async () => {
+    const service = new AttendanceService({
+      companies,
+      conversations,
+      messages,
+      unitOfWork: new PrismaAttendanceUnitOfWork(database.prisma),
+      llm,
+      logger: logs.logger,
+      options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000, handoffEnabled: true },
+    });
     const company = await companyWithPersona('att-handoff');
     const input = { contactRef: 'contato-humano', text: 'quero um atendente', externalId: 'h-1' };
     const result = await service.handleInboundMessage(company.id, input);
@@ -479,7 +488,7 @@ describe('pedido de atendimento humano contra o PostgreSQL (spec 030)', () => {
       unitOfWork: failing,
       llm,
       logger: logs.logger,
-      options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000 },
+      options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000, handoffEnabled: true },
     });
     await local.acceptInboundMessage(company.id, {
       contactRef: 'c-rb',

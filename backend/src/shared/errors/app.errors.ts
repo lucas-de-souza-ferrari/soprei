@@ -23,8 +23,13 @@ export class UnauthorizedError extends BaseError {
 }
 
 export class ForbiddenError extends BaseError {
-  constructor(message = 'Acesso negado', options: AppErrorOptions = {}) {
-    super({ message, code: 'FORBIDDEN', statusCode: 403, ...options });
+  /** `options.code` dá à recusa um código próprio (ex.: `PLAN_COMPANY_LIMIT`); sem ele, `FORBIDDEN`. */
+  constructor(
+    message = 'Acesso negado',
+    options: AppErrorOptions & { readonly code?: string } = {},
+  ) {
+    const { code, ...rest } = options;
+    super({ message, statusCode: 403, ...rest, code: code ?? 'FORBIDDEN' });
   }
 }
 

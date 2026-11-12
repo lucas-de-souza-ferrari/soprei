@@ -13,15 +13,10 @@ import {
   agendaApi,
   agendaMessageOf,
 } from './agenda-api';
-import {
-  NAME_MAX_LENGTH,
-  serviceFormProblem,
-  SLOT_STEPS,
-  WEEKDAY_LABELS,
-  windowsProblem,
-} from './agenda-rules';
-import { Field, FIELD_CLASS, Problem } from './AgendaDialogs';
+import { NAME_MAX_LENGTH, SLOT_STEPS, WEEKDAY_LABELS, windowsProblem } from './agenda-rules';
+import { Field, FIELD_CLASS, Problem, ServiceForm } from './AgendaDialogs';
 import { Modal } from './Modal';
+import { SectionTabs } from './SectionTabs';
 import type { PageProps } from './PersonaPage';
 
 type Notice = { tone: 'error' | 'success'; text: string } | null;
@@ -33,79 +28,6 @@ type Dialog =
 
 const SAVE_FAILED = 'Não foi possível salvar agora. Tente de novo.';
 const OWN_MESSAGE_STATUSES = [403, 429, 502, 503];
-
-function ServiceForm({
-  service,
-  busy,
-  problem,
-  onSubmit,
-}: {
-  service: AgendaService | null;
-  busy: boolean;
-  problem: string | null;
-  onSubmit: (values: { name: string; durationMinutes: number; bufferMinutes: number }) => void;
-}) {
-  const [name, setName] = useState(service?.name ?? '');
-  const [duration, setDuration] = useState(String(service?.durationMinutes ?? 30));
-  const [buffer, setBuffer] = useState(String(service?.bufferMinutes ?? 0));
-  const [local, setLocal] = useState<string | null>(null);
-  return (
-    <form
-      className="grid gap-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const found = serviceFormProblem({ name, duration, buffer });
-        if (found !== null) {
-          setLocal(found);
-          return;
-        }
-        onSubmit({
-          name: name.trim(),
-          durationMinutes: Number(duration),
-          bufferMinutes: buffer.trim() === '' ? 0 : Number(buffer),
-        });
-      }}
-    >
-      <Problem text={local ?? problem} />
-      <Input
-        label="Nome do serviço"
-        value={name}
-        maxLength={NAME_MAX_LENGTH}
-        onChange={(value) => {
-          setName(value);
-          setLocal(null);
-        }}
-      />
-      <p className="m-0 text-sm text-muted-foreground">
-        Evite nomes que revelem diagnóstico ou tratamento: o nome pode ser lido pela IA e aparece na
-        agenda.
-      </p>
-      <Input
-        label="Duração (minutos, múltiplos de 5)"
-        inputMode="numeric"
-        value={duration}
-        onChange={(value) => {
-          setDuration(value);
-          setLocal(null);
-        }}
-      />
-      <Input
-        label="Intervalo depois do serviço (minutos)"
-        inputMode="numeric"
-        value={buffer}
-        onChange={(value) => {
-          setBuffer(value);
-          setLocal(null);
-        }}
-      />
-      <div>
-        <Button type="submit" disabled={busy}>
-          {busy ? 'Aguarde…' : 'Salvar'}
-        </Button>
-      </div>
-    </form>
-  );
-}
 
 function ResourceForm({
   resource,
@@ -268,6 +190,7 @@ export interface AgendaConfigPageProps extends PageProps {
  * muda a hora local mostrada.
  */
 export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPageProps) {
+  const [tab, setTab] = useState<'servicos' | 'horarios' | 'geral' | 'ia'>('servicos');
   const [settings, setSettings] = useState<AgendaSettings | null>(null);
   const [resources, setResources] = useState<readonly AgendaResource[]>([]);
   const [services, setServices] = useState<readonly AgendaService[]>([]);
@@ -281,6 +204,10 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
   const [step, setStep] = useState('30');
   const [minNotice, setMinNotice] = useState('120');
   const [maxAdvance, setMaxAdvance] = useState('60');
+  // Spec 028: a IA pode solicitar, cancelar e remarcar horários; confirmar automaticamente.
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiAuto, setAiAuto] = useState(false);
+  const [aiProblem, setAiProblem] = useState<string | null>(null);
   const [generalProblem, setGeneralProblem] = useState<string | null>(null);
   const generation = useRef(0);
 
@@ -299,6 +226,8 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
         setStep(String(loadedSettings.slotStepMinutes));
         setMinNotice(String(loadedSettings.minNoticeMinutes));
         setMaxAdvance(String(loadedSettings.maxAdvanceDays));
+        setAiEnabled(loadedSettings.aiBookingEnabled);
+        setAiAuto(loadedSettings.aiAutoConfirm);
         setResources(resourceList);
         setServices(serviceList);
       })
@@ -384,6 +313,32 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
       setNotice({ tone: 'success', text: 'Configurações salvas.' });
       reload();
     }, 'general');
+
+  /** Só as opções da IA: o resto da configuração vai como já está salvo (não como está sendo editado). */
+  const saveAi = (): Promise<void> =>
+    run(async () => {
+      if (settings === null) return;
+      setAiProblem(null);
+      try {
+        // Relê as configurações antes de salvar: o PUT leva o objeto inteiro e outra aba pode ter mudado o resto.
+        const fresh = await agendaApi.settings(companyId);
+        await agendaApi.saveSettings(companyId, {
+          timezone: fresh.timezone,
+          slotStepMinutes: fresh.slotStepMinutes,
+          minNoticeMinutes: fresh.minNoticeMinutes,
+          maxAdvanceDays: fresh.maxAdvanceDays,
+          aiBookingEnabled: aiEnabled,
+          aiAutoConfirm: aiEnabled && aiAuto,
+        });
+      } catch (error) {
+        const own = agendaMessageOf(error);
+        if (own === null) throw error;
+        setAiProblem(own);
+        return;
+      }
+      setNotice({ tone: 'success', text: 'Opções da IA salvas.' });
+      reload();
+    }, 'page');
 
   const saveService = (
     service: AgendaService | null,
@@ -536,180 +491,262 @@ export function AgendaConfigPage({ companyId, settle, onBack }: AgendaConfigPage
         </section>
       )}
 
-      <section className="grid gap-3" aria-labelledby="cfg-geral">
-        <h3 id="cfg-geral" className="m-0 text-lg font-semibold">
-          Geral
-        </h3>
-        <Problem text={generalProblem} />
-        <Field id="cfg-passo" label="Passo entre horários (minutos)">
-          <select
-            id="cfg-passo"
-            className={FIELD_CLASS}
-            value={step}
-            onChange={(event) => setStep(event.target.value)}
-          >
-            {SLOT_STEPS.map((value) => (
-              <option key={value} value={String(value)}>
-                {String(value)}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Input
-          label="Antecedência mínima (minutos)"
-          inputMode="numeric"
-          value={minNotice}
-          onChange={setMinNotice}
-        />
-        <Input
-          label="Agendar com até quantos dias de antecedência"
-          inputMode="numeric"
-          value={maxAdvance}
-          onChange={setMaxAdvance}
-        />
-        <div>
-          <Button disabled={busy} onClick={() => void saveGeneral()}>
-            {busy ? 'Aguarde…' : 'Salvar configurações'}
-          </Button>
-        </div>
-      </section>
-
-      <section className="grid gap-3" aria-labelledby="cfg-servicos">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="cfg-servicos" className="m-0 text-lg font-semibold">
-            Serviços
-          </h3>
-          <Button
-            size="sm"
-            onClick={() => {
-              setDialogProblem(null);
-              setDialog({ kind: 'service', service: null });
-            }}
-          >
-            Novo serviço
-          </Button>
-        </div>
-        {services.length === 0 ? (
-          <p className="m-0 text-sm text-muted-foreground">
-            Nenhum serviço ainda. Crie o primeiro para poder agendar.
-          </p>
-        ) : (
-          <ul className="m-0 grid list-none gap-2 p-0">
-            {services.map((service) => (
-              <li
-                key={service.id}
-                className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 text-sm text-card-foreground ${service.active ? '' : 'opacity-70'}`}
-              >
-                <span className="min-w-0 [overflow-wrap:anywhere]">
-                  <strong>{service.name}</strong> · {String(service.durationMinutes)} min
-                  {service.bufferMinutes > 0
-                    ? ` + ${String(service.bufferMinutes)} min de intervalo`
-                    : ''}
-                  {service.active ? '' : ' · Desativado'}
-                </span>
-                <span className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    aria-label={`Editar ${service.name}`}
-                    onClick={() => {
-                      setDialogProblem(null);
-                      setDialog({ kind: 'service', service });
-                    }}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    aria-label={`${service.active ? 'Desativar' : 'Reativar'} ${service.name}`}
-                    onClick={() => void toggleService(service)}
-                  >
-                    {service.active ? 'Desativar' : 'Reativar'}
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="grid gap-3" aria-labelledby="cfg-recursos">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="cfg-recursos" className="m-0 text-lg font-semibold">
-            {single ? 'Horários de atendimento' : 'Profissionais, recursos e horários'}
-          </h3>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setDialogProblem(null);
-              setDialog({ kind: 'resource', resource: null });
-            }}
-          >
-            Adicionar profissional ou recurso
-          </Button>
-        </div>
-        <ul className="m-0 grid list-none gap-2 p-0">
-          {resources.map((resource) => (
-            <li
-              key={resource.id}
-              className={`grid gap-2 rounded-xl border border-border bg-card p-3 text-sm text-card-foreground ${resource.active ? '' : 'opacity-70'}`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="min-w-0 [overflow-wrap:anywhere]">
-                  <strong>{resource.name}</strong>
-                  {resource.active ? '' : ' · Desativado'}
-                </span>
-                <span className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    aria-label={`Horários de ${resource.name}`}
-                    onClick={() => {
-                      setDialogProblem(null);
-                      setDialog({ kind: 'rules', resource });
-                    }}
-                  >
-                    Horários
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    aria-label={`Renomear ${resource.name}`}
-                    onClick={() => {
-                      setDialogProblem(null);
-                      setDialog({ kind: 'resource', resource });
-                    }}
-                  >
-                    Renomear
-                  </Button>
-                  {!single && (
+      <SectionTabs
+        label="Seções da configuração"
+        active={tab}
+        onChange={setTab}
+        tabs={[
+          {
+            key: 'servicos',
+            label: 'Serviços',
+            content: (
+              <>
+                <section className="grid gap-3" aria-labelledby="cfg-servicos">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 id="cfg-servicos" className="m-0 text-lg font-semibold">
+                      Serviços
+                    </h3>
                     <Button
-                      variant="outline"
                       size="sm"
-                      disabled={busy}
-                      aria-label={`${resource.active ? 'Desativar' : 'Reativar'} ${resource.name}`}
-                      onClick={() => void toggleResource(resource)}
+                      onClick={() => {
+                        setDialogProblem(null);
+                        setDialog({ kind: 'service', service: null });
+                      }}
                     >
-                      {resource.active ? 'Desativar' : 'Reativar'}
+                      Novo serviço
                     </Button>
+                  </div>
+                  {services.length === 0 ? (
+                    <p className="m-0 text-sm text-muted-foreground">
+                      Nenhum serviço ainda. Crie o primeiro para poder agendar.
+                    </p>
+                  ) : (
+                    <ul className="m-0 grid list-none gap-2 p-0">
+                      {services.map((service) => (
+                        <li
+                          key={service.id}
+                          className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 text-sm text-card-foreground ${service.active ? '' : 'opacity-70'}`}
+                        >
+                          <span className="min-w-0 [overflow-wrap:anywhere]">
+                            <strong>{service.name}</strong> · {String(service.durationMinutes)} min
+                            {service.bufferMinutes > 0
+                              ? ` + ${String(service.bufferMinutes)} min de intervalo`
+                              : ''}
+                            {service.active ? '' : ' · Desativado'}
+                          </span>
+                          <span className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busy}
+                              aria-label={`Editar ${service.name}`}
+                              onClick={() => {
+                                setDialogProblem(null);
+                                setDialog({ kind: 'service', service });
+                              }}
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busy}
+                              aria-label={`${service.active ? 'Desativar' : 'Reativar'} ${service.name}`}
+                              onClick={() => void toggleService(service)}
+                            >
+                              {service.active ? 'Desativar' : 'Reativar'}
+                            </Button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   )}
-                </span>
-              </div>
-              {resource.windows.length === 0 && (
-                <p className="m-0 text-muted-foreground">
-                  Sem horários: nenhum horário livre será oferecido até você configurar.
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
+                </section>
+              </>
+            ),
+          },
+          {
+            key: 'horarios',
+            label: 'Horários',
+            content: (
+              <>
+                <section className="grid gap-3" aria-labelledby="cfg-recursos">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 id="cfg-recursos" className="m-0 text-lg font-semibold">
+                      {single ? 'Horários de atendimento' : 'Profissionais, recursos e horários'}
+                    </h3>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setDialogProblem(null);
+                        setDialog({ kind: 'resource', resource: null });
+                      }}
+                    >
+                      Adicionar profissional ou recurso
+                    </Button>
+                  </div>
+                  <ul className="m-0 grid list-none gap-2 p-0">
+                    {resources.map((resource) => (
+                      <li
+                        key={resource.id}
+                        className={`grid gap-2 rounded-xl border border-border bg-card p-3 text-sm text-card-foreground ${resource.active ? '' : 'opacity-70'}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="min-w-0 [overflow-wrap:anywhere]">
+                            <strong>{resource.name}</strong>
+                            {resource.active ? '' : ' · Desativado'}
+                          </span>
+                          <span className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busy}
+                              aria-label={`Horários de ${resource.name}`}
+                              onClick={() => {
+                                setDialogProblem(null);
+                                setDialog({ kind: 'rules', resource });
+                              }}
+                            >
+                              Horários
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busy}
+                              aria-label={`Renomear ${resource.name}`}
+                              onClick={() => {
+                                setDialogProblem(null);
+                                setDialog({ kind: 'resource', resource });
+                              }}
+                            >
+                              Renomear
+                            </Button>
+                            {!single && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={busy}
+                                aria-label={`${resource.active ? 'Desativar' : 'Reativar'} ${resource.name}`}
+                                onClick={() => void toggleResource(resource)}
+                              >
+                                {resource.active ? 'Desativar' : 'Reativar'}
+                              </Button>
+                            )}
+                          </span>
+                        </div>
+                        {resource.windows.length === 0 && (
+                          <p className="m-0 text-muted-foreground">
+                            Sem horários: nenhum horário livre será oferecido até você configurar.
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              </>
+            ),
+          },
+          {
+            key: 'geral',
+            label: 'Geral',
+            content: (
+              <>
+                <section className="grid gap-3" aria-labelledby="cfg-geral">
+                  <h3 id="cfg-geral" className="m-0 text-lg font-semibold">
+                    Geral
+                  </h3>
+                  <Problem text={generalProblem} />
+                  <Field id="cfg-passo" label="Passo entre horários (minutos)">
+                    <select
+                      id="cfg-passo"
+                      className={FIELD_CLASS}
+                      value={step}
+                      onChange={(event) => setStep(event.target.value)}
+                    >
+                      {SLOT_STEPS.map((value) => (
+                        <option key={value} value={String(value)}>
+                          {String(value)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Input
+                    label="Antecedência mínima (minutos)"
+                    inputMode="numeric"
+                    value={minNotice}
+                    onChange={setMinNotice}
+                  />
+                  <Input
+                    label="Agendar com até quantos dias de antecedência"
+                    inputMode="numeric"
+                    value={maxAdvance}
+                    onChange={setMaxAdvance}
+                  />
+                  <div>
+                    <Button disabled={busy} onClick={() => void saveGeneral()}>
+                      {busy ? 'Aguarde…' : 'Salvar configurações'}
+                    </Button>
+                  </div>
+                </section>
+              </>
+            ),
+          },
+          {
+            key: 'ia',
+            label: 'IA no WhatsApp',
+            content: (
+              <>
+                <section className="grid gap-3" aria-labelledby="cfg-ia">
+                  <h3 id="cfg-ia" className="m-0 text-lg font-semibold">
+                    IA no WhatsApp
+                  </h3>
+                  <Problem text={aiProblem} />
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-5 shrink-0"
+                      checked={aiEnabled}
+                      onChange={(event) => {
+                        setAiEnabled(event.target.checked);
+                        if (!event.target.checked) setAiAuto(false);
+                      }}
+                    />
+                    <span>
+                      A IA pode solicitar, cancelar e remarcar horários para quem escreve no
+                      WhatsApp
+                    </span>
+                  </label>
+                  <label
+                    className={`flex items-start gap-2 text-sm ${aiEnabled ? '' : 'text-muted-foreground'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-5 shrink-0"
+                      checked={aiAuto}
+                      disabled={!aiEnabled}
+                      onChange={(event) => setAiAuto(event.target.checked)}
+                    />
+                    <span>Confirmar automaticamente (sem passar pela equipe)</span>
+                  </label>
+                  <p className="m-0 text-sm text-muted-foreground">
+                    A IA só mexe nos agendamentos do próprio contato, respeitando os horários, o
+                    passo e a antecedência desta agenda, e nunca passa de 2 agendamentos ativos por
+                    contato. O contato não é avisado quando a equipe confirma ou cancela depois; por
+                    isso existe a confirmação automática. Sem ela, os pedidos da IA ficam aguardando
+                    a confirmação da equipe. Só vale com a IA de agenda ativada no servidor.
+                  </p>
+                  <div>
+                    <Button disabled={busy} onClick={() => void saveAi()}>
+                      {busy ? 'Aguarde…' : 'Salvar opções da IA'}
+                    </Button>
+                  </div>
+                </section>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         open={dialog?.kind === 'service'}

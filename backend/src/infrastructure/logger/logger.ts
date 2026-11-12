@@ -39,6 +39,14 @@ const REDACTED_KEYS = [
   'registrationPin',
   'registrationPinCiphertext',
   'CHANNEL_CREDENTIALS_KEYS',
+  // Checkout (spec 031, E3): a API Key da InfinitePay, o link de pagamento e as referencias da transacao.
+  'INFINITEPAY_API_KEY',
+  'checkoutUrl',
+  'providerTransactionRef',
+  'webhookToken',
+  'transactionNsu',
+  'invoiceSlug',
+  'receiptUrl',
   // Convites (spec 025): o token do link e o próprio link nunca vão a log.
   'invitationToken',
   'inviteLink',

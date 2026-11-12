@@ -6,7 +6,7 @@ import type { NotificationRepository } from '../notifications.js';
 export interface AttendanceTransaction {
   readonly conversations: ConversationRepository;
   readonly messages: MessageRepository;
-  /** Notificações (spec 030): o pedido de atendimento humano grava junto com a resposta. */
+  /** Notificações (spec 038): o pedido de atendimento humano grava junto com a resposta. */
   readonly notifications: NotificationRepository;
 }
 

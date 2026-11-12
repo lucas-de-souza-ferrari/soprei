@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { request } from '../api';
 
 /**
- * Contratos das notificações (spec 030). Estritos: a resposta **não pode** trazer `contactRef`,
+ * Contratos das notificações (spec 038). Estritos: a resposta **não pode** trazer `contactRef`,
  * `externalId`, texto de mensagem nem o id de quem resolveu (se o servidor voltar a mandá-los, a tela
  * falha em vez de exibir). Mensagens da tela vêm de `status` e `error.code` (ver `failureOf`).
  */

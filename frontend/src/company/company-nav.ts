@@ -1,3 +1,5 @@
+import { isWizardPath } from './onboarding-steps';
+
 /**
  * Menu da área da empresa (spec 023): quais abas o papel enxerga, a partir das `permissions` que o
  * servidor devolve em `GET /account/companies`. É só conveniência de tela: o backend continua sendo a
@@ -5,6 +7,7 @@
  */
 export type AreaPage =
   | 'conversas'
+  | 'primeirosPassos'
   | 'agenda'
   | 'agendaConfig'
   | 'canal'
@@ -13,6 +16,7 @@ export type AreaPage =
   | 'estoque'
   | 'equipe'
   | 'testar'
+  | 'assinatura'
   | 'notificacoes';
 
 /** Ordem do menu: Conversas é a primeira aba e a página inicial de quem pode ler (spec 024). */
@@ -26,6 +30,12 @@ export const AREA_PAGES: readonly AreaPage[] = [
   'estoque',
   'equipe',
   'testar',
+  // Assinatura (spec 031, E4): só para a conta titular com a cobrança ligada; o site acrescenta a permissão
+  // de conta abaixo. Fica antes de Primeiros passos, que continua por último.
+  'assinatura',
+  // Assistente de primeiros passos (spec 030): só com `onboarding:manage`. Fica por último para nunca ser a
+  // primeira tela permitida (a página inicial continua sendo Conversas).
+  'primeirosPassos',
 ];
 
 /**
@@ -36,6 +46,7 @@ const HIDDEN_PAGES: readonly AreaPage[] = ['agendaConfig', 'notificacoes'];
 
 const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   conversas: '/painel/conversas',
+  primeirosPassos: '/painel/primeiros-passos',
   agenda: '/painel/agenda',
   agendaConfig: '/painel/agenda/configurar',
   canal: '/painel/canal',
@@ -47,12 +58,14 @@ const AREA_PATHS: Readonly<Record<AreaPage, string>> = {
   // Equipe (spec 025): depois de Persona e antes de Testar, só com `membership:read`.
   equipe: '/painel/equipe',
   testar: '/painel/testar',
-  // Notificações (spec 030): fora do menu; abre pelo sino do cabeçalho, com `notification:read`.
+  assinatura: '/painel/assinatura',
+  // Notificações (spec 038): fora do menu; abre pelo sino do cabeçalho, com `notification:read`.
   notificacoes: '/painel/notificacoes',
 };
 
 export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   conversas: 'Conversas',
+  primeirosPassos: 'Primeiros passos',
   agenda: 'Agenda',
   agendaConfig: 'Configurar agenda',
   canal: 'Canal',
@@ -61,12 +74,20 @@ export const AREA_LABELS: Readonly<Record<AreaPage, string>> = {
   estoque: 'Estoque',
   equipe: 'Equipe',
   testar: 'Testar',
+  assinatura: 'Assinatura',
   notificacoes: 'Notificações',
 };
+
+/**
+ * Permissão de CONTA (não de papel): o site a acrescenta às permissões da empresa só para a conta titular da
+ * assinatura e com a cobrança ligada. É conveniência de tela; o backend barra de verdade (cookie da conta).
+ */
+export const BILLING_PERMISSION = 'account:billing';
 
 /** Permissão que dá acesso a cada aba. */
 const REQUIRED: Readonly<Record<AreaPage, string>> = {
   conversas: 'conversation:read',
+  primeirosPassos: 'onboarding:manage',
   agenda: 'schedule:read',
   agendaConfig: 'schedule:configure',
   canal: 'channel:read',
@@ -75,6 +96,7 @@ const REQUIRED: Readonly<Record<AreaPage, string>> = {
   estoque: 'inventory:manage',
   equipe: 'membership:read',
   testar: 'conversation:simulate',
+  assinatura: BILLING_PERMISSION,
   notificacoes: 'notification:read',
 };
 
@@ -109,6 +131,8 @@ export function conversasPath(route: ConversasRoute): string {
 
 export function areaPageForPath(pathname: string): AreaPage | null {
   if (conversasRouteForPath(pathname) !== null) return 'conversas';
+  // Qualquer sufixo de /painel/primeiros-passos abre o assistente; a tela decide o passo (spec 030).
+  if (isWizardPath(pathname)) return 'primeirosPassos';
   return [...AREA_PAGES, ...HIDDEN_PAGES].find((page) => AREA_PATHS[page] === pathname) ?? null;
 }
 

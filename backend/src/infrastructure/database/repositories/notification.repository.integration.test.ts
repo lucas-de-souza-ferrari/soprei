@@ -13,7 +13,7 @@ import { PrismaMembershipRepository } from './membership.repository.js';
 import { PrismaMessageRepository } from './message.repository.js';
 import { PrismaNotificationRepository } from './notification.repository.js';
 
-// Spec 030: repositório de notificações contra o Postgres (isolamento, CHECKs, FKs compostas e o
+// Spec 038: repositório de notificações contra o Postgres (isolamento, CHECKs, FKs compostas e o
 // índice único parcial "uma aberta por conversa").
 
 const config = loadIntegrationConfig();

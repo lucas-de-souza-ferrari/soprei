@@ -4,8 +4,10 @@ import {
   BookOpen,
   CalendarDays,
   FlaskConical,
+  ListChecks,
   MessageSquare,
   Package,
+  CreditCard,
   Radio,
   UserRound,
   Users,
@@ -20,6 +22,7 @@ import { CompanySwitcher, type SwitcherCompany } from './CompanySwitcher';
 
 const ICONS: Readonly<Record<AreaPage, LucideIcon>> = {
   conversas: MessageSquare,
+  primeirosPassos: ListChecks,
   agenda: CalendarDays,
   agendaConfig: CalendarDays,
   canal: Radio,
@@ -28,6 +31,7 @@ const ICONS: Readonly<Record<AreaPage, LucideIcon>> = {
   estoque: Package,
   equipe: Users,
   testar: FlaskConical,
+  assinatura: CreditCard,
   notificacoes: Bell,
 };
 
@@ -36,7 +40,7 @@ export interface AppShellProps {
   readonly title: string;
   /** Aviso do site (erro, informação) acima do conteúdo. */
   readonly banner?: ReactNode;
-  /** Ações à direita do título (spec 030: o sino de notificações). */
+  /** Ações à direita do título (spec 038: o sino de notificações). */
   readonly headerActions?: ReactNode;
   readonly children: ReactNode;
   readonly current: SwitcherCompany;

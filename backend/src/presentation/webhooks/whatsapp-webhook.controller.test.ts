@@ -15,7 +15,11 @@ import {
   signWebhookBody,
   webhookPayload,
 } from '../../test-support/whatsapp-payloads.js';
-import { WEBHOOK_BODY_LIMIT_BYTES, WHATSAPP_WEBHOOK_ROUTE } from './whatsapp-webhook.controller.js';
+import {
+  stampReceivedAt,
+  WEBHOOK_BODY_LIMIT_BYTES,
+  WHATSAPP_WEBHOOK_ROUTE,
+} from './whatsapp-webhook.controller.js';
 
 const APP_SECRET = `app-secret-${randomUUID()}`;
 const VERIFY_TOKEN = `verify-token-${randomUUID()}`;
@@ -93,6 +97,14 @@ async function post(
     payload: body,
   });
 }
+
+/** A mensagem sem o carimbo de recebimento (spec 034), para comparar só o que veio do payload. */
+const withoutReceivedAt = (message: InboundChannelMessage) => ({
+  phoneNumberId: message.phoneNumberId,
+  messageId: message.messageId,
+  sender: message.sender,
+  content: message.content,
+});
 
 const textPayload = (
   phoneNumberId = '106540352242922',
@@ -233,7 +245,7 @@ describe('POST /webhooks/whatsapp (assinatura e corpo cru)', () => {
       assert.equal(response.statusCode, 200);
       assert.equal(h.intake.calls.length, 1);
       const call = h.intake.calls[0];
-      assert.deepEqual(call?.messages, [
+      assert.deepEqual(call?.messages.map(withoutReceivedAt), [
         {
           phoneNumberId: '106540352242922',
           messageId: fakeWamid(CONTACT),
@@ -403,7 +415,7 @@ describe('POST /webhooks/whatsapp (conteúdo)', () => {
         ]),
       );
       assert.equal((await post(h, body)).statusCode, 200);
-      assert.deepEqual(h.intake.calls[0]?.messages, [
+      assert.deepEqual(h.intake.calls[0]?.messages.map(withoutReceivedAt), [
         {
           phoneNumberId: '1001',
           messageId: 'wamid.1',
@@ -475,6 +487,7 @@ describe('POST /webhooks/whatsapp (conteúdo)', () => {
         'content',
         'messageId',
         'phoneNumberId',
+        'receivedAt',
         'sender',
       ]);
     });
@@ -691,5 +704,52 @@ describe('POST /webhooks/whatsapp (tipos de mensagem)', () => {
         ],
       );
     });
+  });
+});
+
+describe('POST /webhooks/whatsapp: instante de recebimento (spec 034)', () => {
+  it('cada mensagem do lote leva receivedAt estritamente crescente, na ordem do payload', async () => {
+    await withServer(async (h) => {
+      const body = JSON.stringify(
+        webhookPayload([
+          {
+            phoneNumberId: '1001',
+            messages: [
+              { id: 'wamid.r1', from: CONTACT, text: 'um' },
+              { id: 'wamid.r2', from: CONTACT, type: 'image' },
+              { id: 'wamid.r3', from: CONTACT, text: 'tres' },
+            ],
+          },
+        ]),
+      );
+      const before = Date.now();
+      assert.equal((await post(h, body)).statusCode, 200);
+      const after = Date.now();
+
+      const messages = h.intake.calls[0]?.messages ?? [];
+      assert.deepEqual(
+        messages.map((message) => message.messageId),
+        ['wamid.r1', 'wamid.r2', 'wamid.r3'],
+      );
+      const [first, second, third] = messages.map((message) => message.receivedAt?.getTime());
+      assert.ok(first !== undefined && second !== undefined && third !== undefined);
+      assert.ok(first >= before && first <= after, 'o carimbo é o relógio do servidor');
+      assert.equal(second, first + 1);
+      assert.equal(third, first + 2);
+    });
+  });
+
+  it('stampReceivedAt soma 1 ms por posição e não altera os outros campos', () => {
+    const base = new Date(Date.UTC(2026, 10, 11, 12, 0, 0, 0));
+    const stamped = stampReceivedAt([{ id: 'a' }, { id: 'b' }, { id: 'c' }], base);
+    assert.deepEqual(
+      stamped.map((item) => [item.id, item.receivedAt.getTime() - base.getTime()]),
+      [
+        ['a', 0],
+        ['b', 1],
+        ['c', 2],
+      ],
+    );
+    assert.deepEqual(stampReceivedAt([], base), []);
   });
 });

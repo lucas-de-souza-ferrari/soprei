@@ -216,7 +216,9 @@ test('reenviar: desabilitado com a contagem dentro do intervalo, libera depois e
   });
   const resend = page.getByRole('button', { name: /^Reenviar/ });
   await expect(resend).toBeDisabled();
-  await expect(resend).toContainText('Reenviar (30 s)');
+  // O relógio instalado continua andando em tempo real até o `fastForward`: num runner lento a
+  // tela já mostra 29 s ou menos quando a asserção roda. Confere a contagem, não o segundo exato.
+  await expect(resend).toHaveText(/^Reenviar \((30|[12]?\d) s\)$/);
   await page.clock.fastForward(31_000);
   await expect(resend).toBeEnabled();
   await expect(resend).toHaveText('Reenviar');

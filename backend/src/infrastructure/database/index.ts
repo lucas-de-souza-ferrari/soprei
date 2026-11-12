@@ -45,6 +45,7 @@ export {
   PrismaProductRepository,
   PrismaStockMovementRepository,
 } from './repositories/inventory.repository.js';
+export { PrismaOnboardingStore } from './repositories/onboarding.store.js';
 export { PrismaKnowledgeRetriever } from './repositories/knowledge-retriever.js';
 export { PrismaCompanyInvitationRepository } from './repositories/company-invitation.repository.js';
 export { PrismaInvitationExpiryRepository } from './repositories/invitation-expiry.repository.js';
@@ -57,4 +58,11 @@ export {
   PrismaScheduleServiceRepository,
   PrismaScheduleSettingsRepository,
 } from './repositories/schedule.repository.js';
+export { PrismaContactScheduleUnitOfWork } from './repositories/contact-schedule-unit-of-work.js';
 export { PrismaScheduleAvailabilityReader } from './repositories/schedule-availability-reader.js';
+export { PrismaBillingRepository } from './repositories/billing.repository.js';
+export { PrismaBillingNoticeRepository } from './repositories/billing-notice.repository.js';
+export { PrismaCheckoutRepository } from './repositories/checkout.repository.js';
+export { PrismaPendingReplyReader } from './repositories/pending-reply-reader.js';
+export { PrismaEntitlementReader } from './repositories/entitlement-reader.js';
+export { PrismaUsageMeter } from './repositories/usage-meter.js';

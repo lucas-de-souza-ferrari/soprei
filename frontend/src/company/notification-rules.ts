@@ -1,5 +1,5 @@
 /**
- * Regras puras do sino de notificações (spec 030): texto do selo, quando avisar a chegada e o
+ * Regras puras do sino de notificações (spec 038): texto do selo, quando avisar a chegada e o
  * temporizador da leitura do resumo (30 s com a aba visível, pausado com ela oculta). Relógio e
  * visibilidade entram por parâmetro, para os testes.
  */

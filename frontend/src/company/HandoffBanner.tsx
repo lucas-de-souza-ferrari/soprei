@@ -18,7 +18,7 @@ export interface HandoffBannerProps {
   readonly onResolved: () => void;
 }
 
-/** Faixa no topo da conversa (spec 030): pedido de atendimento humano aberto, com "Marcar como resolvido". */
+/** Faixa no topo da conversa (spec 038): pedido de atendimento humano aberto, com "Marcar como resolvido". */
 export function HandoffBanner({
   companyId,
   handoff,

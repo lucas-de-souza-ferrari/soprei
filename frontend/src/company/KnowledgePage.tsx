@@ -23,6 +23,7 @@ import {
   KNOWLEDGE_PRIVACY_NOTICE,
   titleFromFileName,
 } from './knowledge-rules';
+import type { StepBridge } from './onboarding-steps';
 import type { PageProps } from './PersonaPage';
 import { RetryAlert } from './RetryAlert';
 import { SampleControls } from './SampleControls';
@@ -63,7 +64,9 @@ export function KnowledgePage({
   companyId,
   settle,
   canSample,
-}: PageProps & { readonly canSample: boolean }) {
+  onProgress,
+  onDraft,
+}: PageProps & StepBridge & { readonly canSample: boolean }) {
   const [items, setItems] = useState<KnowledgeDocumentItem[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -116,11 +119,11 @@ export function KnowledgePage({
     [settle],
   );
 
-  const add = async (): Promise<void> => {
+  const add = async (): Promise<boolean> => {
     const problem = documentFormProblem(title, content);
     if (problem !== null) {
       setFieldError(problem);
-      return;
+      return false;
     }
     const stamp = ++generation.current;
     setBusy(true);
@@ -128,20 +131,33 @@ export function KnowledgePage({
     setFieldError(undefined);
     try {
       const created = await knowledgeApi.create(companyId, { title: title.trim(), content });
-      if (stamp !== generation.current) return;
+      if (stamp !== generation.current) return false;
       setItems((current) => [created, ...current]);
       setTitle('');
       setContent('');
       setFileNote(undefined);
       if (fileInput.current !== null) fileInput.current.value = '';
       setNotice({ tone: 'success', text: 'Documento adicionado. A IA já pode usá-lo.' });
+      onProgress?.();
+      return true;
     } catch (error) {
-      if (stamp !== generation.current) return;
+      if (stamp !== generation.current) return false;
       failure(error);
+      return false;
     } finally {
       if (stamp === generation.current) setBusy(false);
     }
   };
+
+  // Rascunho (spec 030): título ou texto ainda não adicionados; só em memória.
+  const dirty = title.trim().length > 0 || content.trim().length > 0;
+  const draftAdd = useRef<() => Promise<boolean>>(() => Promise.resolve(false));
+  draftAdd.current = add;
+  useEffect(() => {
+    if (onDraft === undefined) return;
+    onDraft(dirty ? { save: () => draftAdd.current() } : null);
+    return () => onDraft(null);
+  }, [dirty, onDraft]);
 
   const remove = async (document: KnowledgeDocumentItem): Promise<void> => {
     const stamp = ++generation.current;
@@ -152,6 +168,7 @@ export function KnowledgePage({
       if (stamp !== generation.current) return;
       setItems((current) => current.filter((item) => item.id !== document.id));
       setNotice({ tone: 'success', text: 'Documento apagado.' });
+      onProgress?.();
     } catch (error) {
       if (stamp !== generation.current) return;
       if (error instanceof ApiError && error.status === 404) {
@@ -251,7 +268,10 @@ export function KnowledgePage({
           isEmpty={items.length === 0}
           hasSample={items.some((item) => item.isSample)}
           settle={settle}
-          onChanged={() => setAttempt((value) => value + 1)}
+          onChanged={() => {
+            setAttempt((value) => value + 1);
+            onProgress?.();
+          }}
         />
       )}
 

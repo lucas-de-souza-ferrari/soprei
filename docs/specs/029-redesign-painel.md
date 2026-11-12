@@ -1,6 +1,6 @@
 # 029 — Redesign do painel: sidebar, empresa sempre aberta, bolhas de mensagem e calendário da agenda
 
-- **Status:** aprovada (2026-11-05, dono: "Aprovo tudo", com D1 a D10 como recomendadas e D11 pela alternativa (a))
+- **Status:** concluída e mergeada (2026-11-06, CI verde); aprovada (2026-11-05, dono: "Aprovo tudo", com D1 a D10 como recomendadas e D11 pela alternativa (a))
 - **Branch:** `spec/029-redesign-painel`
 - **Depende de:** 018 (beUI, tokens, modo escuro), 023 (área da empresa), 024 (conversas), 025 (equipe e convite), 026 (conhecimento e estoque), 027 (agenda)
 - **Observação de numeração:** a 028 continua **reservada** ao tool use da agenda (marcar pelo WhatsApp; ver `docs/context.md`, spec 027). Esta spec usa o próximo número livre, **029**. A ordem de execução é a do roadmap, não a numeração.

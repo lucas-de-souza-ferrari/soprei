@@ -6,6 +6,7 @@ import type {
 } from '../../application/channel/channel-connection.service.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, requirePermission, membershipAuth } from '../common/auth.hooks.js';
+import { subscriptionExempt } from '../common/entitlement-config.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { embeddedSignupBodySchema, putChannelBodySchema } from './channel.validators.js';
 
@@ -122,10 +123,11 @@ export const adminChannelController: FastifyPluginCallback<AdminChannelControlle
     },
   );
 
+  // Desconectar o canal segue funcionando com a assinatura inativa (spec 031, D6).
   app.delete(
     '/:companyId/channel',
     {
-      config,
+      config: { ...config, ...subscriptionExempt() },
       onRequest: requirePermission('channel:manage', { companyParam: 'companyId', metrics }),
     },
     async (request, reply) => {

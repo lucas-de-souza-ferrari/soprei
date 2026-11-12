@@ -17,6 +17,7 @@ import type { SecretString } from '../../shared/types/index.js';
 import { messageRef } from '../../shared/utils/index.js';
 import { describeError } from './describe-error.js';
 import type {
+  AcceptInboundOptions,
   AcceptedMessage,
   PendingResponse,
   RespondToPendingOptions,
@@ -39,13 +40,18 @@ import {
   MessageSendError,
   type MessageSender,
 } from '../ports/message-sender.js';
+import type { UsageMeter } from '../ports/usage-meter.js';
 import { flushDelayMs } from './batch-window.js';
 import { CHANNEL_NOTICE_TEXTS } from './channel-texts.js';
 import type { ChannelLogger } from './channel-intake.service.js';
 
 /** O que o processador precisa do atendimento (o `AttendanceService` satisfaz). */
 export interface InboundAttendance {
-  acceptInboundMessage(companyId: CompanyId, input: InboundMessage): Promise<AcceptedMessage>;
+  acceptInboundMessage(
+    companyId: CompanyId,
+    input: InboundMessage,
+    options?: AcceptInboundOptions,
+  ): Promise<AcceptedMessage>;
   respondToPending(
     companyId: CompanyId,
     contactRef: string,
@@ -76,7 +82,15 @@ export interface ChannelInboundProcessorDeps {
   readonly credentials: ChannelCredentials;
   /** Marca `TOKEN_INVALID` (condicional à `tokenVersion`) quando o envio é recusado com 190. */
   readonly connections: Pick<ChannelConnectionRepository, 'markTokenInvalid'>;
-  readonly metrics?: Pick<Metrics, 'countChannelStateTransition'> | undefined;
+  readonly metrics?:
+    | (Pick<Metrics, 'countChannelStateTransition'> &
+        Partial<Pick<Metrics, 'countUsageSentMessage' | 'countUsageMeterError'>>)
+    | undefined;
+  /**
+   * Medição de respostas enviadas (spec 031): conta a mensagem de saída depois do `sendText` bem-sucedido.
+   * Só existe com `BILLING_ENABLED`; falha da medição nunca impede o envio nem o `markSent`.
+   */
+  readonly usage?: Pick<UsageMeter, 'recordSent'> | undefined;
   /** Agenda o `flush` do contato (e o próximo, quando sobra pendente). */
   readonly queue: Pick<InboundJobQueue, 'scheduleFlush'>;
   readonly batch: ChannelBatchSettings;
@@ -189,11 +203,12 @@ export class ChannelInboundProcessor {
     let delayMs: number;
     let mode: 'slide' | 'ensure';
     try {
-      const accepted = await this.deps.attendance.acceptInboundMessage(companyId, {
-        contactRef: job.contactRef,
-        text: job.text,
-        externalId: job.externalId,
-      });
+      const accepted = await this.deps.attendance.acceptInboundMessage(
+        companyId,
+        { contactRef: job.contactRef, text: job.text, externalId: job.externalId },
+        // Spec 034: a mensagem é gravada com o instante em que o webhook a recebeu.
+        job.receivedAt === undefined ? {} : { receivedAt: new Date(job.receivedAt) },
+      );
       if (accepted.status === 'answered') {
         this.deps.logger.info(
           { companyId, ...refs },
@@ -256,6 +271,12 @@ export class ChannelInboundProcessor {
       throw await this.onAttendanceFailure(companyId, job, context, error);
     }
 
+    if (response.outcome === 'blocked') {
+      // Cota esgotada ou assinatura inativa (spec 031): nada ao contato, o provedor não foi chamado e as
+      // mensagens seguem pendentes e visíveis; só o dono é avisado (painel e e-mail).
+      this.deps.logger.info({ companyId, ...refs }, 'IA em pausa; mensagens seguem pendentes');
+      return 'done';
+    }
     const { reply } = response;
     if (reply === null) {
       this.deps.logger.info({ companyId, ...refs }, 'nada pendente para responder');
@@ -340,6 +361,7 @@ export class ChannelInboundProcessor {
     const outcome = await this.deliver(companyId, job, text);
     if (outcome.kind === 'discarded') return 'discarded';
 
+    await this.recordSent(companyId, job);
     try {
       const marked = await this.deps.messages.markSent(companyId, replyId, {
         channelMessageId: outcome.channelMessageId,
@@ -360,6 +382,29 @@ export class ChannelInboundProcessor {
     }
     this.deps.logger.info({ companyId, replyId, ...refFields(job) }, 'resposta enviada ao contato');
     return 'done';
+  }
+
+  /**
+   * Conta a resposta enviada na assinatura da empresa (spec 031). Só o `companyId` do job; nenhum texto,
+   * contato nem `contactRef`. O contato já recebeu a resposta: falhar aqui só loga (ids) e conta a métrica.
+   */
+  private async recordSent(companyId: CompanyId, job: ChannelJob): Promise<void> {
+    const meter = this.deps.usage;
+    if (meter === undefined) return;
+    try {
+      await meter.recordSent(companyId);
+      this.deps.metrics?.countUsageSentMessage?.();
+    } catch (error) {
+      try {
+        this.deps.metrics?.countUsageMeterError?.();
+      } catch {
+        // A métrica nunca derruba o envio.
+      }
+      this.deps.logger.warn(
+        { companyId, ...refFields(job), ...describeError(error) },
+        'falha ao contar a resposta enviada; o envio segue',
+      );
+    }
   }
 
   /**

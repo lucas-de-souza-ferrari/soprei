@@ -28,7 +28,7 @@ import { withTimeout } from '../../shared/utils/index.js';
 import { describeRedisError } from '../cache/rate-limit-redis.js';
 import { closeRedisClient } from '../cache/redis.client.js';
 import type { QueueSettings } from '../config/index.js';
-import type { QueueJobResult } from '../metrics/index.js';
+import type { QueueJobKind, QueueJobResult } from '../metrics/index.js';
 
 /** Nome da fila de entrada do canal (sem `:`, que o BullMQ recusa). */
 export const INBOUND_QUEUE_NAME = 'channel-inbound';
@@ -37,7 +37,10 @@ export const DEFAULT_QUEUE_PREFIX = 'soprei:queue';
 
 /** Quanto esperar o Redis ao enfileirar; passou disso, o webhook responde 500 e a Meta retenta. */
 const DEFAULT_ENQUEUE_TIMEOUT_MS = 5_000;
-/** Quanto esperar o job ativo no encerramento antes de forçar (LLM 15 s + envio 10 s com folga). */
+/**
+ * Quanto esperar os jobs ativos no encerramento antes de forçar, quando quem cria a fila não informa.
+ * Em produção o valor vem da config (`workerCloseTimeoutMs`: prazo do turno + envio + folga).
+ */
 const DEFAULT_WORKER_CLOSE_TIMEOUT_MS = 30_000;
 const CONNECT_TIMEOUT_MS = 5_000;
 /** Prazo para fechar fila e worker quando a conexão com o Redis não está pronta. */
@@ -47,7 +50,14 @@ export interface InboundQueueOptions {
   readonly redisUrl: string;
   readonly settings: QueueSettings;
   readonly logger: FastifyBaseLogger;
-  readonly metrics?: { countQueueJob(queue: string, result: QueueJobResult): void };
+  readonly metrics?: {
+    countQueueJob(queue: string, result: QueueJobResult): void;
+    observeQueueJob?(
+      queue: string,
+      kind: QueueJobKind,
+      sample: { readonly durationSeconds: number; readonly waitSeconds?: number },
+    ): void;
+  };
   readonly prefix?: string;
   readonly enqueueTimeoutMs?: number;
   readonly workerCloseTimeoutMs?: number;
@@ -66,7 +76,7 @@ export interface WorkerHooks {
 export interface InboundQueueHandle {
   /** Lado produtor: a única coisa que a aplicação e a apresentação enxergam. */
   readonly queue: InboundJobQueue;
-  /** Liga o worker (concorrência 1, no mesmo processo). Chamar duas vezes não faz nada. */
+  /** Liga o worker (concorrência de `settings.concurrency`). Chamar duas vezes não faz nada. */
   startWorker(handler: InboundJobHandler, hooks?: WorkerHooks): void;
   /** Contagem de jobs por estado (diagnóstico e testes). */
   jobCounts(): Promise<Record<string, number>>;
@@ -100,6 +110,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
   const prefix = options.prefix ?? DEFAULT_QUEUE_PREFIX;
   const enqueueTimeoutMs = options.enqueueTimeoutMs ?? DEFAULT_ENQUEUE_TIMEOUT_MS;
   const workerCloseTimeoutMs = options.workerCloseTimeoutMs ?? DEFAULT_WORKER_CLOSE_TIMEOUT_MS;
+  const concurrency = settings.concurrency ?? 1;
 
   const producerRedis = new Redis(redisUrl, {
     connectTimeout: CONNECT_TIMEOUT_MS,
@@ -214,14 +225,34 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
     const attempt = job.attemptsMade + 1;
     const finalAttempt = attempt >= attempts;
 
+    // Espera na fila além do atraso agendado (spec 034): só na primeira tentativa, porque nas
+    // seguintes o intervalo inclui o backoff e não diz nada sobre falta de concorrência.
+    const startedMs = Date.now();
+    const waitSeconds =
+      attempt === 1
+        ? Math.max(0, startedMs - (job.timestamp + (job.opts.delay ?? 0))) / 1000
+        : undefined;
+    const observe = (): void => {
+      try {
+        metrics?.observeQueueJob?.(INBOUND_QUEUE_NAME, data.kind, {
+          durationSeconds: (Date.now() - startedMs) / 1000,
+          ...(waitSeconds === undefined ? {} : { waitSeconds }),
+        });
+      } catch (err) {
+        logger.warn(describeError(err), 'falha ao registrar métrica da fila');
+      }
+    };
+
     return runWithContext(createRequestContext(data.requestId), async () => {
       setCompanyId(data.companyId);
       setOperation(`job ${INBOUND_QUEUE_NAME}/${data.kind}`);
       try {
         const outcome = await handler(data, { attempt, finalAttempt });
+        observe();
         count(outcome === 'discarded' ? 'discarded' : 'completed');
         return outcome;
       } catch (error) {
+        observe();
         const fields = {
           jobKind: data.kind,
           attempt,
@@ -274,8 +305,10 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
       worker = new Worker(INBOUND_QUEUE_NAME, (job: Job) => runJob(job, handler), {
         connection,
         prefix,
-        // Concorrência 1 preserva a ordem de chegada (decisão 2 da spec 011).
-        concurrency: 1,
+        // Spec 034: vários jobs ao mesmo tempo. A ordem das mensagens de um contato vem do
+        // `receivedAt` do job (instante do webhook), e o `flush` é único por contato pela
+        // deduplicação no Redis; nada depende de processar um job por vez.
+        concurrency,
         ...(options.stalledIntervalMs === undefined
           ? {}
           : { stalledInterval: options.stalledIntervalMs }),
@@ -316,7 +349,7 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
       worker.on('error', (err: Error) => {
         logger.error(describeRedisError(err), 'erro no worker da fila de entrada');
       });
-      logger.info({ queue: INBOUND_QUEUE_NAME, concurrency: 1 }, 'worker da fila iniciado');
+      logger.info({ queue: INBOUND_QUEUE_NAME, concurrency }, 'worker da fila iniciado');
     },
 
     async jobCounts() {

@@ -20,11 +20,11 @@ export interface AdminAttendanceControllerOptions {
   readonly auth: Pick<AuthService, 'authenticate'>;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection' | 'countAuthzDenial'> | undefined;
   readonly attendance: AttendanceService;
-  /** Spec 030: sem isto as conversas saem sem `openHandoff` (como antes). */
+  /** Spec 038: sem isto as conversas saem sem `openHandoff` (como antes). */
   readonly notifications?: Pick<NotificationService, 'openHandoffs'> | undefined;
 }
 
-/** Pedido de atendimento humano aberto na conversa (spec 030); só id, motivo e quando. */
+/** Pedido de atendimento humano aberto na conversa (spec 038); só id, motivo e quando. */
 function toOpenHandoffResponse(
   handoff: OpenHandoff | undefined,
 ): { notificationId: string; reason: string | null; createdAt: string } | null {
@@ -125,7 +125,7 @@ export const adminAttendanceController: FastifyPluginCallback<AdminAttendanceCon
       const page = await attendance.listConversations(companyId, toListOptions(query));
       const items = page.items.map(toConversationResponse);
       if (notifications === undefined) return { items, nextCursor: page.nextCursor };
-      // Spec 030: selo "Humano" na lista (uma consulta em lote, sem N+1).
+      // Spec 038: selo "Humano" na lista (uma consulta em lote, sem N+1).
       const open = await notifications.openHandoffs(
         companyId,
         items.map((item) => item.id),

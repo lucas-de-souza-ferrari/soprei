@@ -98,6 +98,8 @@ export interface AppointmentView extends LocalFields {
   readonly startsAt: Date;
   readonly endsAt: Date;
   readonly customerLabel: string | null;
+  /** Quem cancelou (spec 028: `CONTACT` = o próprio contato, pela IA); nulo se não foi cancelado. */
+  readonly cancelledBy: Appointment['cancelledBy'];
   /** Rótulo mascarado da 024 (`Contato final 1234`); **nunca** o `contactRef`. */
   readonly contactLabel: string | null;
   readonly createdAt: Date;
@@ -197,7 +199,20 @@ export class ScheduleService {
       if (!isValidTimeZone(body.timezone)) {
         throw new ValidationError('Fuso horário inválido', { code: 'INVALID_TIMEZONE' });
       }
-      const updated = await this.deps.settings.update(companyId, body);
+      const current = await this.deps.settings.ensure(companyId);
+      const booking = body.aiBookingEnabled ?? current.aiBookingEnabled;
+      // Confirmar automaticamente exige a IA ligada (o banco também recusa); desligar a IA desliga a confirmação.
+      if (body.aiAutoConfirm === true && !booking) {
+        throw new ValidationError('Confirmar automaticamente exige a IA ligada', {
+          code: 'INVALID_AI_SETTINGS',
+        });
+      }
+      const autoConfirm = booking ? (body.aiAutoConfirm ?? current.aiAutoConfirm) : false;
+      const updated = await this.deps.settings.update(companyId, {
+        ...body,
+        aiBookingEnabled: booking,
+        aiAutoConfirm: autoConfirm,
+      });
       return { ...updated, today: localPartsOf(this.now(), updated.timezone).date };
     });
   }
@@ -423,6 +438,7 @@ export class ScheduleService {
       endsAt: row.endsAt,
       ...this.localFields(row.startsAt, row.endsAt, timezone),
       customerLabel: row.customerLabel,
+      cancelledBy: row.cancelledBy,
       contactLabel:
         row.contactRef === null
           ? null

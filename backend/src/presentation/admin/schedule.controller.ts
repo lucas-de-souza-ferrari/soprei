@@ -28,6 +28,7 @@ import type {
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { authenticateHook, membershipAuth, requirePermission } from '../common/auth.hooks.js';
+import { requireModule } from '../common/entitlement-config.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { companyIdSchema } from './company.validators.js';
 
@@ -70,6 +71,8 @@ function toSettingsResponse(settings: ScheduleSettings & { readonly today: strin
   slotStepMinutes: number;
   minNoticeMinutes: number;
   maxAdvanceDays: number;
+  aiBookingEnabled: boolean;
+  aiAutoConfirm: boolean;
 } {
   return {
     timezone: settings.timezone,
@@ -77,6 +80,8 @@ function toSettingsResponse(settings: ScheduleSettings & { readonly today: strin
     slotStepMinutes: settings.slotStepMinutes,
     minNoticeMinutes: settings.minNoticeMinutes,
     maxAdvanceDays: settings.maxAdvanceDays,
+    aiBookingEnabled: settings.aiBookingEnabled,
+    aiAutoConfirm: settings.aiAutoConfirm,
   };
 }
 
@@ -132,6 +137,7 @@ function toAppointmentResponse(view: AppointmentView): Record<string, unknown> {
     localEnd: view.localEnd,
     weekday: view.weekday,
     customerLabel: view.customerLabel,
+    cancelledBy: view.cancelledBy,
     contactLabel: view.contactLabel,
     createdAt: view.createdAt.toISOString(),
   };
@@ -159,7 +165,8 @@ export const adminScheduleController: FastifyPluginCallback<AdminScheduleControl
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
-  const config = rateLimitProfile('admin');
+  // Escrita exige o módulo Agenda contratado (spec 031); leitura segue.
+  const config = { ...rateLimitProfile('admin'), ...requireModule('schedule') };
   const gate = (permission: 'schedule:read' | 'schedule:manage' | 'schedule:configure') => ({
     config,
     onRequest: requirePermission(permission, { companyParam: 'companyId', metrics }),

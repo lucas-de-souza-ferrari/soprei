@@ -6,6 +6,16 @@ import type { AuthService } from '../../application/auth/auth.service.js';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
 import type { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import type { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
+import type { BillingService } from '../../application/billing/billing.service.js';
+import type {
+  EntitlementReader,
+  SubscriptionHolderReader,
+} from '../../application/ports/entitlement-reader.js';
+import type { CheckoutService } from '../../application/billing/checkout.service.js';
+import { billingController } from '../../presentation/billing/billing.controller.js';
+import { infinitepayWebhookController } from '../../presentation/webhooks/infinitepay-webhook.controller.js';
+import { adminEntitlementsController } from '../../presentation/admin/entitlements.controller.js';
+import { registerEntitlementGate } from './entitlement-gate.js';
 import type { CompanyService } from '../../application/companies/company.service.js';
 import type { InvitationService } from '../../application/invitations/invitation.service.js';
 import type { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
@@ -24,6 +34,7 @@ import {
   type ReadinessChecks,
 } from '../../presentation/system/health.controller.js';
 import { adminKnowledgeController } from '../../presentation/admin/knowledge.controller.js';
+import { adminOnboardingController } from '../../presentation/admin/onboarding.controller.js';
 import { adminPersonaController } from '../../presentation/admin/persona.controller.js';
 import { adminInventoryController } from '../../presentation/admin/inventory.controller.js';
 import { adminNotificationsController } from '../../presentation/admin/notifications.controller.js';
@@ -34,6 +45,7 @@ import {
 } from '../../presentation/admin/schedule.controller.js';
 import type { InventoryService } from '../../application/inventory/inventory.service.js';
 import type { SampleDataService } from '../../application/knowledge/sample.service.js';
+import type { OnboardingService } from '../../application/onboarding/onboarding.service.js';
 import type { KnowledgeService } from '../../application/knowledge/knowledge.service.js';
 import { metricsController } from '../../presentation/system/metrics.controller.js';
 import { whatsappWebhookController } from '../../presentation/webhooks/whatsapp-webhook.controller.js';
@@ -55,6 +67,8 @@ export interface AdminRoutesParams {
     ChannelConnectionService,
     'getState' | 'connect' | 'disconnect' | 'embeddedSignup'
   >;
+  /** Assistente de primeiros passos (spec 030); sem isto as rotas `.../onboarding` não existem. */
+  readonly onboarding?: Pick<OnboardingService, 'get' | 'setDismissed'>;
   /** Documentos da base de conhecimento (spec 026); sem isto as rotas `.../knowledge/*` não existem. */
   readonly knowledge?: Pick<KnowledgeService, 'list' | 'create' | 'delete'>;
   /** Dados de exemplo (spec 026, E3); sem isto as rotas `.../knowledge/sample` não existem. */
@@ -69,7 +83,7 @@ export interface AdminRoutesParams {
   /** Exemplo da agenda (spec 027, E4); sem isto as rotas `.../schedule/sample` não existem. */
   readonly scheduleSample?: AdminScheduleControllerOptions['sample'];
   /**
-   * Notificações do painel (spec 030); sem isto (ou sem `attendance`) as rotas `.../notifications/*` não
+   * Notificações do painel (spec 038); sem isto (ou sem `attendance`) as rotas `.../notifications/*` não
    * existem e as conversas não trazem `openHandoff`.
    */
   readonly notifications?: Pick<
@@ -89,7 +103,34 @@ export interface WhatsappRoutesParams {
   readonly intake: Pick<ChannelIntakeService, 'accept'>;
 }
 
+/**
+ * Cobrança (spec 031). Opt-in: sem isto (`BILLING_ENABLED=false`) nada é limitado, as rotas de cobrança não
+ * existem (404) e as rotas de tenant têm exatamente o custo de antes.
+ */
+export interface BillingRoutesParams {
+  readonly service: Pick<BillingService, 'overview'>;
+  readonly entitlements: Pick<EntitlementReader, 'forCompany'> & Partial<SubscriptionHolderReader>;
+  /** Host do link de pagamento (INFINITEPAY_CHECKOUT_HOST): o site só o abre se for este (defesa em profundidade). */
+  readonly checkoutHost?: string | undefined;
+  /** Checkout da InfinitePay (E3, CHECKOUT_ENABLED): pedido, "Já paguei" e webhook. Sem isto essas rotas não existem. */
+  readonly checkout?: Pick<
+    CheckoutService,
+    | 'createOrder'
+    | 'checkOrder'
+    | 'acceptWebhook'
+    | 'quote'
+    | 'upgrade'
+    | 'scheduleChange'
+    | 'undoPendingChange'
+    | 'cancel'
+    | 'reactivate'
+    | 'changeState'
+  >;
+}
+
 export interface BuildServerParams {
+  /** Cobrança por planos (spec 031); precisa de `accounts` para as rotas da conta. */
+  readonly billing?: BillingRoutesParams;
   readonly accounts?: {
     service: AccountService;
     origin: string;
@@ -151,6 +192,7 @@ export function buildServer({
   rateLimit,
   trustProxy = false,
   accounts,
+  billing,
 }: BuildServerParams): FastifyInstance {
   const app = Fastify({
     loggerInstance: logger,
@@ -219,6 +261,22 @@ export function buildServer({
     });
   }
 
+  // Política de assinatura das escritas de tenant (spec 031): só com a cobrança ligada.
+  if (billing !== undefined) registerEntitlementGate(app, billing.entitlements);
+  if (billing !== undefined && accounts !== undefined) {
+    void app.register(billingController, {
+      service: billing.service,
+      accounts: accounts.service,
+      origin: accounts.origin,
+      checkout: billing.checkout,
+      checkoutHost: billing.checkoutHost,
+    });
+  }
+  // Webhook público do checkout (spec 031, E3): corpo não confiado, só grava a referência e confirma por consulta.
+  if (billing?.checkout !== undefined) {
+    void app.register(infinitepayWebhookController, { checkout: billing.checkout, metrics });
+  }
+
   void app.register(healthController, { readiness });
   if (metrics !== undefined && metricsToken !== undefined && metricsToken !== '') {
     void app.register(metricsController, { token: metricsToken, source: metrics });
@@ -274,12 +332,26 @@ export function buildServer({
         setup: admin.channelSetup,
       });
     }
+    void app.register(adminEntitlementsController, {
+      prefix: '/admin/companies',
+      auth,
+      metrics,
+      entitlements: billing?.entitlements,
+    });
     void app.register(adminPersonaController, {
       prefix: '/admin/companies',
       auth,
       metrics,
       companies: admin.companies,
     });
+    if (admin.onboarding !== undefined) {
+      void app.register(adminOnboardingController, {
+        prefix: '/admin/companies',
+        auth,
+        metrics,
+        onboarding: admin.onboarding,
+      });
+    }
     if (admin.knowledge !== undefined) {
       void app.register(adminKnowledgeController, {
         prefix: '/admin/companies',
@@ -287,6 +359,7 @@ export function buildServer({
         metrics,
         knowledge: admin.knowledge,
         sample: admin.sample,
+        entitlements: billing?.entitlements,
       });
     }
     if (admin.inventory !== undefined) {

@@ -107,10 +107,22 @@ export interface ScheduleSettings {
   readonly slotStepMinutes: number;
   readonly minNoticeMinutes: number;
   readonly maxAdvanceDays: number;
+  /** Spec 028: a IA pode solicitar, cancelar e remarcar horários (padrão desligado). */
+  readonly aiBookingEnabled: boolean;
+  /** Spec 028: o que a IA solicita nasce confirmado (só com `aiBookingEnabled`). */
+  readonly aiAutoConfirm: boolean;
 }
 
 export type ScheduleSettingsUpdate = Partial<
-  Pick<ScheduleSettings, 'timezone' | 'slotStepMinutes' | 'minNoticeMinutes' | 'maxAdvanceDays'>
+  Pick<
+    ScheduleSettings,
+    | 'timezone'
+    | 'slotStepMinutes'
+    | 'minNoticeMinutes'
+    | 'maxAdvanceDays'
+    | 'aiBookingEnabled'
+    | 'aiAutoConfirm'
+  >
 >;
 
 export interface ScheduleResource {

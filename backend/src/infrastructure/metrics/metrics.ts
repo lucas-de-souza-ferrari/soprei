@@ -1,9 +1,11 @@
 import type {
   AuditAction,
+  BillingNoticeKind,
   HandoffReason,
   NotificationCreateResult,
   NotificationKind,
   Permission,
+  QuotaBlockReason,
 } from '../../domain/index.js';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 
@@ -91,6 +93,8 @@ export type ChannelConnectionResult =
   | 'unsubscribe_failed';
 /** Mudança de persona pela própria empresa (spec 023): conjunto fixo. */
 export type PersonaUpdateAction = 'set' | 'cleared';
+/** Assistente de primeiros passos (spec 030): conjunto fixo; nunca id nem passo. */
+export type OnboardingMetricAction = 'dismissed' | 'reopened';
 
 /** Operação de convite (spec 025). Conjunto fixo; nunca e-mail, id nem token. */
 export type InvitationMetricAction =
@@ -106,6 +110,24 @@ export interface ChannelSendSample {
   readonly result: ChannelSendResult;
   readonly durationSeconds: number;
 }
+
+/** Estados de job expostos em `queue_jobs` (spec 034; conjunto fixo). */
+export const QUEUE_JOB_STATES = ['waiting', 'active', 'delayed', 'failed'] as const;
+/** Tipos de job da fila do canal (label `kind`; conjunto fixo). */
+export type QueueJobKind = 'text' | 'notice' | 'flush';
+/** Prazo da leitura das contagens da fila durante a coleta de `/metrics`. */
+export const QUEUE_COUNTS_TIMEOUT_MS = 1_000;
+/** De 5 ms a 60 s: cobre o aceite (banco) e o turno inteiro (modelo + envio). */
+export const QUEUE_JOB_DURATION_BUCKETS: readonly number[] = [
+  0.005, 0.025, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60,
+];
+/** De 10 ms a 5 min: espera na fila além do atraso agendado. */
+export const QUEUE_JOB_WAIT_BUCKETS: readonly number[] = [
+  0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300,
+];
+
+/** Erro fatal do processo (spec 034). */
+export type ProcessFatalErrorKind = 'unhandled_rejection' | 'uncaught_exception';
 
 /** Resultado de um job da fila: `completed`, `retried`, `failed` ou `discarded`. */
 export type QueueJobResult = 'completed' | 'retried' | 'failed' | 'discarded';
@@ -133,6 +155,40 @@ export type PasswordResetAttemptResult =
 export type PasswordResetEmailKind = 'code' | 'notice';
 /** Execução do expurgo de contas não confirmadas (spec 021). */
 export type AccountPurgeRunResult = 'ok' | 'error';
+/** Pedidos de pagamento (spec 031, E3). Conjuntos fixos: nunca id, valor, e-mail nem link. */
+export type BillingOrderKind = 'NEW' | 'RENEWAL' | 'UPGRADE' | 'EXTRA_PACK';
+export type BillingOrderResult =
+  | 'created'
+  | 'link_failed'
+  | 'provider_config'
+  | 'limit'
+  | 'rejected'
+  | 'paid'
+  | 'amount_mismatch'
+  | 'reference_conflict'
+  | 'upgrade_stale'
+  | 'renewal_stale';
+export type BillingWebhookResult =
+  'recorded' | 'duplicate' | 'unknown_order' | 'bad_token' | 'throttled' | 'invalid' | 'error';
+/** Resultado de um aviso de cobrança por e-mail (spec 031, E5). Conjunto fixo. */
+export type BillingNoticeResult = 'sent' | 'failed' | 'skipped_recipient';
+export type BillingNoticeRunResult = 'ok' | 'error';
+export type BillingCheckResult =
+  | 'paid'
+  | 'already_paid'
+  | 'not_paid'
+  | 'amount_mismatch'
+  | 'upgrade_stale'
+  | 'renewal_stale'
+  | 'unverifiable'
+  | 'unknown_order'
+  | 'ignored'
+  | 'cooldown'
+  | 'reference_conflict'
+  | 'unavailable'
+  | 'config_error'
+  | 'rejected';
+
 /** Recuperação da base de conhecimento (spec 026). Conjunto fixo: vai a label. */
 export type KnowledgeRetrievalResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
 
@@ -152,6 +208,31 @@ export type ScheduleActionResult = 'ok' | 'slot_taken' | 'conflict' | 'invalid';
 
 /** Consulta de horários livres para o prompt da IA (spec 027, E3). */
 export type ScheduleContextResult = 'hit' | 'empty' | 'skipped' | 'error' | 'timeout';
+
+/** Ferramentas de agenda da IA (spec 028): conjuntos fixos; nunca argumento, resultado nem id. */
+export type ScheduleToolLabel =
+  | 'listar_horarios'
+  | 'solicitar_agendamento'
+  | 'cancelar_agendamento'
+  | 'remarcar_agendamento'
+  | 'unknown';
+export type ScheduleToolCallResult =
+  | 'ok'
+  | 'slot_taken'
+  | 'outside_rules'
+  | 'not_found'
+  | 'limit'
+  | 'invalid_args'
+  | 'unavailable'
+  | 'turn_limit'
+  | 'error';
+export type ScheduleToolTurnResult =
+  | 'used'
+  | 'round_cap'
+  | 'provider_error'
+  | 'deterministic_summary'
+  | 'guard_replaced'
+  | 'disabled_fail_safe';
 
 export interface DbQuerySample {
   readonly model: string;
@@ -188,11 +269,35 @@ export interface Metrics {
   countScheduleAction(action: ScheduleAction, result: ScheduleActionResult): void;
   /** Uma consulta de horários livres para o prompt terminou (spec 027). Conjunto fixo. */
   countScheduleContext(result: ScheduleContextResult): void;
-  /** O modelo pediu atendimento humano (spec 030), antes da deduplicação. Motivo de lista fixa. */
+  /** A IA deixou de responder por cota esgotada ou assinatura inativa (spec 031). Conjunto fixo. */
+  countQuotaBlock(reason: QuotaBlockReason): void;
+  /** Uma mensagem de saída ao contato foi contada na assinatura (spec 031). Sem labels. */
+  countUsageSentMessage(): void;
+  /** A medição de uso falhou e o fluxo seguiu (spec 031). Sem labels. */
+  countUsageMeterError(): void;
+  /** A leitura das cotas falhou e o atendimento seguiu sem limite (spec 031). Sem labels. */
+  countEntitlementError(): void;
+  /** Um pedido de pagamento mudou de situação (spec 031, E3). Conjuntos fixos. */
+  countBillingOrder(kind: BillingOrderKind, result: BillingOrderResult): void;
+  /** Um webhook da InfinitePay foi tratado (spec 031, E3). Conjunto fixo. */
+  countBillingWebhook(result: BillingWebhookResult): void;
+  /** Uma confirmação de pagamento por payment_check terminou (spec 031, E3). Conjunto fixo. */
+  countBillingCheck(result: BillingCheckResult): void;
+  /** Um aviso de cobrança por e-mail terminou (spec 031, E5). Conjuntos fixos; nenhum id, valor ou e-mail. */
+  countBillingNotice(kind: BillingNoticeKind, result: BillingNoticeResult): void;
+  /** Uma execução da tarefa periódica de avisos terminou (spec 031, E5). */
+  countBillingNoticeRun(result: BillingNoticeRunResult): void;
+  /** Uma chamada de ferramenta da agenda terminou (spec 028). */
+  countScheduleToolCall(tool: ScheduleToolLabel, result: ScheduleToolCallResult): void;
+  /** Um turno com ferramentas de agenda terminou (spec 028). */
+  countScheduleToolTurn(result: ScheduleToolTurnResult): void;
+  /** Rodadas de ferramenta de um turno com ferramentas oferecidas (spec 028). */
+  observeScheduleToolRounds(rounds: number): void;
+  /** O modelo pediu atendimento humano (spec 038), antes da deduplicação. Motivo de lista fixa. */
   countHandoff(reason: HandoffReason): void;
-  /** Resultado da gravação de uma notificação (spec 030). Sem id, contato nem texto em label. */
+  /** Resultado da gravação de uma notificação (spec 038). Sem id, contato nem texto em label. */
   countNotificationCreated(result: NotificationCreateResult): void;
-  /** Uma notificação foi marcada como resolvida (spec 030). */
+  /** Uma notificação foi marcada como resolvida (spec 038). */
   countNotificationResolved(kind: NotificationKind): void;
   /** Uma requisição ao webhook do canal terminou (spec 011). Sem telefone nem texto em label. */
   countWebhookRequest(channel: string, result: WebhookRequestResult): void;
@@ -240,12 +345,27 @@ export interface Metrics {
   countMembershipAdminAction(action: AuditAction): void;
   /** A empresa gravou ou limpou a própria persona (spec 023). Nunca o texto nem o tamanho. */
   countCompanyPersonaUpdate(action: PersonaUpdateAction): void;
+  /** A empresa dispensou ou reabriu o assistente de primeiros passos (spec 030). */
+  countCompanyOnboardingAction(action: OnboardingMetricAction): void;
   /** Uma operação de convite terminou (spec 025). A razão detalhada de uma falha uniforme vai só aqui. */
   countCompanyInvitation(action: InvitationMetricAction, result: InvitationMetricResult): void;
   /** O e-mail de convite foi enviado, falhou ou foi pulado pela cota (spec 025). */
   countCompanyInvitationEmail(result: InvitationEmailResult): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
+  /**
+   * Liga `queue_jobs{queue,state}` às contagens da fila (spec 034), lidas a cada `render` e com prazo
+   * curto. Falha ou demora deixam o gauge sem amostra e contam `queue_metrics_errors_total`.
+   */
+  bindQueue(queue: string, source: () => Promise<Record<string, number>>): void;
+  /** Um job rodou no handler: duração e, se informada, a espera na fila (spec 034). */
+  observeQueueJob(
+    queue: string,
+    kind: QueueJobKind,
+    sample: { readonly durationSeconds: number; readonly waitSeconds?: number },
+  ): void;
+  /** Erro fatal não tratado no processo (spec 034). */
+  countProcessFatalError(kind: ProcessFatalErrorKind): void;
 }
 
 /** De 5 ms a 10 s. */
@@ -362,22 +482,90 @@ export function createMetrics(): Metrics {
 
   const handoffs = new Counter({
     name: 'attendance_handoffs_total',
-    help: 'Pedidos de atendimento humano feitos pelo modelo, por motivo (spec 030, conjunto fixo)',
+    help: 'Pedidos de atendimento humano feitos pelo modelo, por motivo (spec 038, conjunto fixo)',
     labelNames: ['reason'] as const,
     registers: [registry],
   });
-
   const notificationsCreated = new Counter({
     name: 'notifications_created_total',
-    help: 'Notificações por tipo e resultado da gravação (spec 030: created, deduplicated, capped)',
+    help: 'Notificações por tipo e resultado da gravação (spec 038: created, deduplicated, capped)',
     labelNames: ['kind', 'result'] as const,
     registers: [registry],
   });
-
   const notificationsResolved = new Counter({
     name: 'notifications_resolved_total',
-    help: 'Notificações marcadas como resolvidas, por tipo (spec 030)',
+    help: 'Notificações marcadas como resolvidas, por tipo (spec 038)',
     labelNames: ['kind'] as const,
+    registers: [registry],
+  });
+  const quotaBlocks = new Counter({
+    name: 'quota_blocks_total',
+    help: 'Vezes em que a IA deixou de responder por cota ou assinatura inativa (spec 031, motivo fixo)',
+    labelNames: ['reason'] as const,
+    registers: [registry],
+  });
+  const usageSentMessages = new Counter({
+    name: 'usage_sent_messages_total',
+    help: 'Mensagens de saída ao contato contadas na assinatura (spec 031)',
+    registers: [registry],
+  });
+  const usageMeterErrors = new Counter({
+    name: 'usage_meter_errors_total',
+    help: 'Falhas da medição de uso que não derrubaram o fluxo (spec 031)',
+    registers: [registry],
+  });
+  const billingOrders = new Counter({
+    name: 'billing_orders_total',
+    help: 'Pedidos de pagamento por tipo e resultado (spec 031, conjuntos fixos)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const billingWebhooks = new Counter({
+    name: 'billing_webhooks_total',
+    help: 'Webhooks da InfinitePay por resultado (spec 031, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const billingChecks = new Counter({
+    name: 'billing_checks_total',
+    help: 'Confirmações de pagamento (payment_check) por resultado (spec 031, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const billingNotices = new Counter({
+    name: 'billing_notices_total',
+    help: 'Avisos de cobrança por e-mail por tipo e resultado (spec 031, conjuntos fixos)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const billingNoticeRuns = new Counter({
+    name: 'billing_notice_runs_total',
+    help: 'Execuções da tarefa de avisos de cobrança por resultado (spec 031, E5)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const entitlementErrors = new Counter({
+    name: 'entitlement_errors_total',
+    help: 'Falhas na leitura das cotas; o atendimento seguiu sem limite (spec 031)',
+    registers: [registry],
+  });
+
+  const scheduleToolCalls = new Counter({
+    name: 'schedule_tool_calls_total',
+    help: 'Chamadas de ferramenta de agenda da IA por ferramenta e resultado (spec 028, conjuntos fixos)',
+    labelNames: ['tool', 'result'] as const,
+    registers: [registry],
+  });
+  const scheduleToolTurns = new Counter({
+    name: 'schedule_tool_turns_total',
+    help: 'Turnos com ferramentas de agenda por resultado (spec 028, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const scheduleToolRounds = new Histogram({
+    name: 'schedule_tool_rounds',
+    help: 'Rodadas de ferramenta por turno com ferramentas oferecidas (spec 028)',
+    buckets: [0, 1, 2, 3],
     registers: [registry],
   });
 
@@ -538,6 +726,13 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const companyOnboardingActions = new Counter({
+    name: 'company_onboarding_actions_total',
+    help: 'Assistente de primeiros passos dispensado ou reaberto (spec 030), por ação (conjunto fixo)',
+    labelNames: ['action'] as const,
+    registers: [registry],
+  });
+
   const companyInvitations = new Counter({
     name: 'company_invitations_total',
     help: 'Operações de convite por ação e resultado (spec 025, conjuntos fixos)',
@@ -550,6 +745,69 @@ export function createMetrics(): Metrics {
     labelNames: ['result'] as const,
     registers: [registry],
   });
+
+  const queueJobDuration = new Histogram({
+    name: 'queue_job_duration_seconds',
+    help: 'Tempo de um job da fila dentro do handler, por fila e tipo (text, notice, flush)',
+    labelNames: ['queue', 'kind'] as const,
+    buckets: [...QUEUE_JOB_DURATION_BUCKETS],
+    registers: [registry],
+  });
+  const queueJobWait = new Histogram({
+    name: 'queue_job_wait_seconds',
+    help: 'Espera de um job na fila além do atraso agendado, por fila e tipo',
+    labelNames: ['queue', 'kind'] as const,
+    buckets: [...QUEUE_JOB_WAIT_BUCKETS],
+    registers: [registry],
+  });
+  const queueMetricsErrors = new Counter({
+    name: 'queue_metrics_errors_total',
+    help: 'Falhas ao ler as contagens da fila durante a coleta de métricas',
+    registers: [registry],
+  });
+  const processFatalErrors = new Counter({
+    name: 'process_fatal_errors_total',
+    help: 'Erros fatais não tratados no processo por tipo (unhandled_rejection, uncaught_exception)',
+    labelNames: ['kind'] as const,
+    registers: [registry],
+  });
+  const queueSources = new Map<string, () => Promise<Record<string, number>>>();
+  const queueJobsByState = new Gauge({
+    name: 'queue_jobs',
+    help: 'Jobs da fila por estado (waiting, active, delayed, failed)',
+    labelNames: ['queue', 'state'] as const,
+    registers: [registry],
+  });
+  /**
+   * Lê as contagens das filas ligadas e atualiza `queue_jobs`. Roda em `render`, **antes** de o
+   * registro serializar: o prom-client coleta as métricas em paralelo, então um contador
+   * incrementado dentro do `collect` de outra métrica só apareceria na coleta seguinte.
+   */
+  const refreshQueueJobs = async (): Promise<void> => {
+    // Sem amostra antiga: se a leitura falhar, a série some em vez de mostrar um valor velho.
+    queueJobsByState.reset();
+    for (const [queue, source] of queueSources) {
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const counts = await Promise.race([
+          source(),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error('prazo da leitura da fila'));
+            }, QUEUE_COUNTS_TIMEOUT_MS);
+          }),
+        ]);
+        for (const state of QUEUE_JOB_STATES) {
+          queueJobsByState.set({ queue, state }, counts[state] ?? 0);
+        }
+      } catch {
+        // Nunca o erro em si (o ioredis anexa os argumentos do comando): só a contagem.
+        queueMetricsErrors.inc();
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+  };
 
   let poolSource: (() => PoolSnapshot) | undefined;
   new Gauge({
@@ -569,7 +827,10 @@ export function createMetrics(): Metrics {
   return {
     registry,
     contentType: registry.contentType,
-    render: () => registry.metrics(),
+    render: async () => {
+      await refreshQueueJobs();
+      return registry.metrics();
+    },
     observeHttpRequest({ method, route, statusCode, durationSeconds }) {
       const labels = { method, route, status_class: statusClass(statusCode) };
       httpRequests.inc(labels);
@@ -613,6 +874,42 @@ export function createMetrics(): Metrics {
     },
     countNotificationResolved(kind) {
       notificationsResolved.inc({ kind });
+    },
+    countQuotaBlock(reason) {
+      quotaBlocks.inc({ reason });
+    },
+    countUsageSentMessage() {
+      usageSentMessages.inc();
+    },
+    countUsageMeterError() {
+      usageMeterErrors.inc();
+    },
+    countEntitlementError() {
+      entitlementErrors.inc();
+    },
+    countBillingOrder(kind, result) {
+      billingOrders.inc({ kind, result });
+    },
+    countBillingWebhook(result) {
+      billingWebhooks.inc({ result });
+    },
+    countBillingCheck(result) {
+      billingChecks.inc({ result });
+    },
+    countBillingNotice(kind, result) {
+      billingNotices.inc({ kind, result });
+    },
+    countBillingNoticeRun(result) {
+      billingNoticeRuns.inc({ result });
+    },
+    countScheduleToolCall(tool, result) {
+      scheduleToolCalls.inc({ tool, result });
+    },
+    countScheduleToolTurn(result) {
+      scheduleToolTurns.inc({ result });
+    },
+    observeScheduleToolRounds(rounds) {
+      scheduleToolRounds.observe(rounds);
     },
     countWebhookRequest(channel, result) {
       webhookRequests.inc({ channel, result });
@@ -687,6 +984,9 @@ export function createMetrics(): Metrics {
     countCompanyPersonaUpdate(action) {
       companyPersonaUpdates.inc({ action });
     },
+    countCompanyOnboardingAction(action) {
+      companyOnboardingActions.inc({ action });
+    },
     countCompanyInvitation(action, result) {
       companyInvitations.inc({ action, result });
     },
@@ -695,6 +995,16 @@ export function createMetrics(): Metrics {
     },
     bindPool(source) {
       poolSource = source;
+    },
+    bindQueue(queue, source) {
+      queueSources.set(queue, source);
+    },
+    observeQueueJob(queue, kind, { durationSeconds, waitSeconds }) {
+      queueJobDuration.observe({ queue, kind }, durationSeconds);
+      if (waitSeconds !== undefined) queueJobWait.observe({ queue, kind }, waitSeconds);
+    },
+    countProcessFatalError(kind) {
+      processFatalErrors.inc({ kind });
     },
   };
 }

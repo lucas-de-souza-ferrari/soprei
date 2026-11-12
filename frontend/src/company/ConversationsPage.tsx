@@ -4,7 +4,9 @@ import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
 import { type ConversationItem, companyApi, CONVERSATIONS_PAGE_SIZE } from './company-api';
 import { areaPath, canOpen, conversasPath, type AreaPage } from './company-nav';
+import { ConfigurationCard } from './ConfigurationCard';
 import { formatActivity } from './conversation-format';
+import type { WizardStepId } from './onboarding-steps';
 import { RetryAlert } from './RetryAlert';
 
 export interface ConversationsPageProps {
@@ -15,6 +17,8 @@ export interface ConversationsPageProps {
   readonly settle: (error: unknown) => string | null;
   readonly onOpen: (conversationId: string) => void;
   readonly onNavigate: (page: AreaPage) => void;
+  /** Abre um passo do assistente de primeiros passos (spec 030); o cartão "Configuração" usa. */
+  readonly onOpenStep: (step: WizardStepId) => void;
 }
 
 type Status = 'loading' | 'ready' | 'failed';
@@ -37,6 +41,7 @@ export function ConversationsPage({
   settle,
   onOpen,
   onNavigate,
+  onOpenStep,
 }: ConversationsPageProps) {
   const [items, setItems] = useState<readonly ConversationItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -145,6 +150,13 @@ export function ConversationsPage({
           Atualizar
         </Button>
       </div>
+
+      <ConfigurationCard
+        companyId={companyId}
+        permissions={permissions}
+        settle={settle}
+        onOpenStep={onOpenStep}
+      />
 
       {error?.retry === 'first' && (
         <RetryAlert text={error.text} disabled={busy !== 'none'} onRetry={() => void loadFirst()} />

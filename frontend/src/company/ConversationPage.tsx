@@ -35,9 +35,9 @@ export interface ConversationPageProps {
   readonly onBack: () => void;
   /** Relógio injetável (os testes de navegador usam o relógio falso do Playwright). */
   readonly now?: () => Date;
-  /** Spec 030: `notification:resolve` (a faixa de atendimento humano mostra o botão). */
+  /** Spec 038: `notification:resolve` (a faixa de atendimento humano mostra o botão). */
   readonly canResolve?: boolean;
-  /** Spec 030: o pedido de atendimento humano desta conversa foi resolvido. */
+  /** Spec 038: o pedido de atendimento humano desta conversa foi resolvido. */
   readonly onHandoffResolved?: () => void;
 }
 

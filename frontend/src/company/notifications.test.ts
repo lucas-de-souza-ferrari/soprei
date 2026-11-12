@@ -18,7 +18,7 @@ import {
   SummaryPoller,
 } from './notification-rules';
 
-// Spec 030: sino, tela de notificações e campos novos das conversas.
+// Spec 038: sino, tela de notificações e campos novos das conversas.
 
 const ID = '0195f5a4-6f1a-7c3e-9b2d-1a2b3c4d5e6f';
 const OTHER = '0195f5a4-6f1a-7c3e-9b2d-1a2b3c4d5e70';

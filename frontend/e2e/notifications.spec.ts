@@ -10,7 +10,7 @@ import {
 } from './company-fixture';
 
 /**
- * Spec 030: sino, tela de notificações e destaque na conversa. Camada por cima de `installApi`: as rotas
+ * Spec 038: sino, tela de notificações e destaque na conversa. Camada por cima de `installApi`: as rotas
  * de notificação e de conversas desta spec são respondidas aqui (rota registrada depois vale primeiro;
  * `route.fallback()` entrega o resto à API falsa de sempre).
  */

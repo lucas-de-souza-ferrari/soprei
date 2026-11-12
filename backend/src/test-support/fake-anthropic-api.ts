@@ -18,11 +18,14 @@ export interface AnthropicRequest {
 export type FakeContentBlock =
   | { readonly type: 'text'; readonly text: string }
   | { readonly type: 'thinking'; readonly thinking: string; readonly signature?: string }
+  | { readonly type: 'redacted_thinking'; readonly data: string }
   | {
       readonly type: 'tool_use';
       readonly id: string;
       readonly name: string;
-      readonly input: Record<string, unknown>;
+      readonly input: unknown;
+      /** Como a API real devolve (spec 028). */
+      readonly caller?: { readonly type: 'direct' };
     };
 
 /** Como o servidor responde a um pedido. */
@@ -66,6 +69,37 @@ export const textMessage = (
     usage: { input_tokens: 42, output_tokens: 7, cache_read_input_tokens: 5 },
     ...extra,
   }) as AnthropicBehavior;
+
+/** Uma chamada de ferramenta do modelo (spec 028). */
+export interface FakeToolCall {
+  readonly id?: string;
+  readonly name: string;
+  readonly input: unknown;
+}
+
+/**
+ * Resposta do modelo pedindo ferramentas (`stop_reason: tool_use`, spec 028). Vários `calls` são o caso
+ * de chamadas paralelas; `before` antecede os `tool_use` (blocos de pensamento assinados e texto, que o
+ * laço precisa devolver intactos e na mesma ordem).
+ */
+export const toolUseMessage = (
+  calls: readonly FakeToolCall[],
+  extra: { readonly before?: readonly FakeContentBlock[]; readonly stopReason?: string } = {},
+): AnthropicBehavior => ({
+  kind: 'message',
+  content: [
+    ...(extra.before ?? []),
+    ...calls.map((call, index): FakeContentBlock => ({
+      type: 'tool_use',
+      id: call.id ?? `toolu_fake_${String(index + 1)}`,
+      name: call.name,
+      input: call.input,
+      caller: { type: 'direct' },
+    })),
+  ],
+  stopReason: extra.stopReason ?? 'tool_use',
+  usage: { input_tokens: 40, output_tokens: 9, cache_read_input_tokens: 3 },
+});
 
 /**
  * Servidor falso da API de mensagens da Anthropic (`POST /v1/messages`), local (`node:http`, porta

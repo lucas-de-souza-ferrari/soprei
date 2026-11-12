@@ -8,7 +8,6 @@ import {
   MOCK_EMPTY_MARKER,
   MOCK_FAIL_MARKER,
   MOCK_HANG_MARKER,
-  MOCK_HANDOFF_SUFFIX,
   MOCK_HUGE_MARKER,
   MockLlmProvider,
 } from './mock-llm.provider.js';
@@ -23,31 +22,6 @@ const input = (userMessage: string, history = 0) => ({
 });
 
 describe('MockLlmProvider', () => {
-  it('spec 030: com allowHandoff, pedido de atendente vira handoff CONTACT_REQUESTED', async () => {
-    const mock = new MockLlmProvider();
-    for (const text of [
-      'Quero falar com um ATENDENTE',
-      'tem algum humano aí?',
-      'Posso falar com uma pessoa?',
-    ]) {
-      const result = await mock.generate({ ...input(text), allowHandoff: true });
-      assert.ok(result.ok);
-      assert.deepEqual(result.value.handoff, { reason: 'CONTACT_REQUESTED' });
-      assert.ok(result.value.text.endsWith(MOCK_HANDOFF_SUFFIX));
-    }
-  });
-
-  it('spec 030: sem allowHandoff, ou sem pedido de humano, não há handoff', async () => {
-    const mock = new MockLlmProvider();
-    const without = await mock.generate(input('Quero falar com um atendente'));
-    assert.ok(without.ok);
-    assert.equal(without.value.handoff, undefined);
-    assert.ok(!without.value.text.endsWith(MOCK_HANDOFF_SUFFIX));
-    const common = await mock.generate({ ...input('Qual o horário?'), allowHandoff: true });
-    assert.ok(common.ok);
-    assert.equal(common.value.handoff, undefined);
-  });
-
   it('responde de forma determinística, citando persona e turnos de histórico', async () => {
     const mock = new MockLlmProvider();
     const first = await mock.generate(input('Olá', 3));
@@ -180,5 +154,89 @@ describe('createLlmProvider', () => {
       (error: unknown) =>
         error instanceof ValidationError && error.context['variable'] === 'ANTHROPIC_API_KEY',
     );
+  });
+});
+
+describe('MockLlmProvider roteirizado com ferramentas (spec 028)', () => {
+  const OK = { content: 'ok: resultado', isError: false };
+  const tools = (executed: string[] = []) => ({
+    definitions: [{ name: 'listar_horarios', description: 'd', inputSchema: { type: 'object' } }],
+    execute: (call: { name: string; input: unknown }) => {
+      executed.push(`${call.name}:${JSON.stringify(call.input)}`);
+      return Promise.resolve(OK);
+    },
+    limits: { maxModelCalls: 4, maxToolCalls: 6 },
+  });
+
+  it('sem roteiro, ou sem ferramentas, comporta-se como hoje', async () => {
+    const mock = new MockLlmProvider();
+    const plain = await mock.generate(input('Olá'));
+    const offered = await mock.generate(input('Olá'), { tools: tools() });
+    assert.deepEqual(plain, offered);
+    mock.scriptTools({ rounds: [], finalText: 'roteiro' });
+    // O roteiro só vale quando o turno oferece ferramentas.
+    assert.deepEqual(await mock.generate(input('Olá')), plain);
+    const scripted = await mock.generate(input('Olá'), { tools: tools() });
+    assert.ok(scripted.ok);
+    assert.equal(scripted.value.text, 'roteiro');
+  });
+
+  it('emite a sequência, chama o executor e devolve o texto final (que vê os resultados)', async () => {
+    const executed: string[] = [];
+    const mock = new MockLlmProvider();
+    mock.scriptTools({
+      rounds: [
+        [{ name: 'listar_horarios', input: { servico: 'a' } }],
+        [
+          { name: 'listar_horarios', input: { servico: 'b' } },
+          { name: 'listar_horarios', input: { servico: 'c' } },
+        ],
+      ],
+      finalText: (outputs) => `final com ${String(outputs.length)} resultados`,
+    });
+    const result = await mock.generate(input('x'), { tools: tools(executed) });
+    assert.ok(result.ok);
+    assert.equal(result.value.text, 'final com 3 resultados');
+    assert.equal(result.value.toolRounds, 2);
+    assert.equal(result.value.toolCalls, 3);
+    assert.deepEqual(executed, [
+      'listar_horarios:{"servico":"a"}',
+      'listar_horarios:{"servico":"b"}',
+      'listar_horarios:{"servico":"c"}',
+    ]);
+  });
+
+  it('respeita os tetos como o provedor real: rodadas, chamadas e prazo', async () => {
+    const mock = new MockLlmProvider();
+    const call = { name: 'listar_horarios', input: {} };
+    mock.scriptTools({ rounds: [[call], [call], [call], [call]], finalText: 'x' });
+    const capped = await mock.generate(input('x'), { tools: tools() });
+    assert.equal(capped.ok, false);
+    assert.equal(capped.error.context['errorType'], 'tool_round_cap');
+
+    const executed: string[] = [];
+    mock.scriptTools({
+      rounds: [Array.from({ length: 7 }, () => call)],
+      finalText: (outputs) => outputs.at(-1)?.content ?? '',
+    });
+    const limited = await mock.generate(input('x'), { tools: tools(executed) });
+    assert.ok(limited.ok);
+    assert.match(limited.value.text, /^limite_turno:/);
+    assert.equal(executed.length, 6);
+
+    mock.scriptTools({ rounds: [[call]], finalText: 'x' });
+    const late = await mock.generate(input('x'), {
+      tools: tools(),
+      signal: AbortSignal.abort(),
+    });
+    assert.equal(late.ok, false);
+    assert.equal(late.error.context['errorType'], 'timeout');
+  });
+
+  it('registra os nomes das ferramentas oferecidas (só com recordCalls)', async () => {
+    const mock = new MockLlmProvider({ recordCalls: true });
+    await mock.generate(input('a'));
+    await mock.generate(input('b'), { tools: tools() });
+    assert.deepEqual(mock.toolsOffered, [undefined, ['listar_horarios']]);
   });
 });

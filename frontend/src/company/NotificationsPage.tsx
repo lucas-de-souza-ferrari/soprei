@@ -27,7 +27,7 @@ const TABS: readonly { readonly id: Tab; readonly label: string }[] = [
 ];
 
 /**
- * Notificações da empresa (spec 030): hoje, os pedidos de atendimento humano feitos pela IA. Abas
+ * Notificações da empresa (spec 038): hoje, os pedidos de atendimento humano feitos pela IA. Abas
  * "Abertas" e "Resolvidas", 30 por página com "Carregar mais", "Abrir conversa" e "Marcar como resolvido".
  * O contato aparece só com o rótulo mascarado do servidor; o motivo é texto fixo do site. Resposta tardia
  * (troca de aba ou de empresa) é descartada pelo contador de geração.

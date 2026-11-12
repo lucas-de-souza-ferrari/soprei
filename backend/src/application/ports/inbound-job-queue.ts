@@ -42,6 +42,12 @@ const identityFields = {
 const baseFields = {
   ...identityFields,
   externalId: jobExternalIdSchema,
+  /**
+   * Instante em que o webhook recebeu a mensagem (ISO UTC, spec 034). É ele que ordena as mensagens
+   * de um contato, não a ordem em que os jobs são processados (a fila roda vários ao mesmo tempo).
+   * Opcional: job enfileirado antes de o campo existir continua válido e usa o relógio do banco.
+   */
+  receivedAt: z.iso.datetime().optional(),
 };
 
 /**

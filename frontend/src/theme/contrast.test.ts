@@ -95,6 +95,32 @@ const textPairs: [string, string][] = [
   ['foreground', 'bubble'],
   ['card-foreground', 'card'],
   ['muted-foreground', 'muted'],
+  // Spec 028 (E4): selo "Pela IA" (primary em muted na lista e no diálogo; primary em card no bloco da
+  // semana), "Aguardando confirmação" e "Cancelado pelo contato" (selos de estado: primary e
+  // muted-foreground em muted), contagem "N aguardando confirmação" (foreground em background) e o texto
+  // das opções da IA na configuração (foreground e muted-foreground em background).
+  ['primary', 'muted'],
+  ['primary', 'card'],
+  ['muted-foreground', 'muted'],
+  ['foreground', 'background'],
+  ['muted-foreground', 'background'],
+  // Spec 030: assistente de primeiros passos. Passo atual (foreground em muted), "Feito" (color-success em
+  // card e em muted), "Pendente"/"Pulado"/"opcional" e o texto de apoio (muted-foreground em card e em muted),
+  // aviso fixo do exemplo (foreground em muted) e cartão "Configuração" (card-foreground em card).
+  ['color-success', 'card'],
+  ['color-success', 'muted'],
+  // Spec 031 (E4): tela de Assinatura. Cartões e histórico em card (card-foreground e muted-foreground sobre
+  // card), faixas de aviso e estimativa da Meta sobre muted (foreground e muted-foreground), alertas de cota em
+  // texto (primary = atenção, destructive = esgotada) e o preenchimento das barras de uso contra a trilha muted
+  // (primary e destructive sobre muted, acima do mínimo de 3:1 de componente).
+  ['card-foreground', 'card'],
+  ['muted-foreground', 'card'],
+  ['foreground', 'muted'],
+  ['muted-foreground', 'muted'],
+  ['primary', 'card'],
+  ['destructive', 'card'],
+  ['primary', 'muted'],
+  ['destructive', 'muted'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],
@@ -102,6 +128,8 @@ const controlPairs: [string, string][] = [
   ['border-strong', 'card'],
   ['ring', 'background'],
   ['ring', 'card'],
+  // Spec 030: preenchimento da barra de progresso (não texto).
+  ['primary', 'muted'],
 ];
 
 for (const [name, selector] of [
