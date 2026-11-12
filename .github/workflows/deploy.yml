@@ -25,9 +25,11 @@ on:
 
 permissions: {}
 
-# Um deploy em andamento nunca é cancelado; um pendente novo substitui o pendente anterior.
+# Um deploy em andamento nunca é cancelado; um pendente novo substitui o pendente anterior do MESMO
+# gatilho. O dry-run manual tem grupo próprio, para nunca tirar da fila um deploy real pendente (os
+# dois juntos no servidor: a trava global recusa o segundo com 1).
 concurrency:
-  group: deploy-production
+  group: deploy-production-${{ github.event_name }}
   cancel-in-progress: false
 
 defaults:
@@ -42,7 +44,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      actions: read
     if: >-
       vars.DEPLOY_ENABLED == 'true' && (
         (github.event_name == 'workflow_run' &&
@@ -84,7 +85,7 @@ jobs:
               {
                 echo '### Deploy: ultrapassado'
                 echo ''
-                echo "O commit ${sha:0:7} foi ultrapassado por um mais novo na main (${tip:0:7}); ele será publicado quando o CI dele terminar."
+                echo "O commit ${sha:0:7} foi ultrapassado por um mais novo na main (${tip:0:7}); o mais novo será publicado se o CI dele passar."
               } >>"$GITHUB_STEP_SUMMARY"
             elif [[ ! $tip =~ ^[0-9a-f]{40}$ ]]; then
               echo 'Não consegui ler a ponta da main; seguindo (o servidor confere a main de novo).'
@@ -154,7 +155,7 @@ jobs:
             3) meaning='INTERVENÇÃO MANUAL: entrar no servidor e seguir docs/ops/deploy.md' ;;
             64) meaning='o programa de entrada recusou o pedido (defeito do workflow)' ;;
             255) meaning='o SSH falhou (rede, chave, known_hosts); o deploy pode não ter começado: conferir /var/log/soprei-deploy/production.log' ;;
-            *) meaning='inesperado (job cancelado ou conexão caída?): o deploy.sh segue no servidor; conferir /var/log/soprei-deploy/production.log' ;;
+            *) meaning='resultado desconhecido (job cancelado ou conexão caída?): o deploy.sh foi feito para seguir até o fim no servidor, ignorando a queda; conferir /var/log/soprei-deploy/production.log' ;;
           esac
           {
             echo "### Deploy ($MODE) de ${SHA:0:7}"

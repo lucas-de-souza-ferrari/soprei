@@ -81,7 +81,8 @@ describe('deploy.yml (spec 037, E3)', () => {
       .split('\n')
       .filter((line) => line.trim() !== '')
       .map((line) => line.trim());
-    assert.deepEqual(granted.sort(), ['actions: read', 'contents: read']);
+    // Ler a ponta da main pela API só precisa de contents: read (revisão da E3, sugestão 5).
+    assert.deepEqual(granted, ['contents: read']);
     assert.doesNotMatch(code, /:\s*write\b/);
     assert.equal(
       [...code.matchAll(/^ *permissions:/gm)].length,
@@ -98,24 +99,27 @@ describe('deploy.yml (spec 037, E3)', () => {
     assert.match(code, /^ {4}environment: production$/m);
     assert.match(code, /^ {4}timeout-minutes: \d+$/m);
     const concurrency = topBlock('concurrency');
-    assert.match(concurrency, /^ {2}group: deploy-production$/m);
+    // O dry-run manual tem grupo próprio: nunca tira da fila um deploy real pendente.
+    assert.match(concurrency, /^ {2}group: deploy-production-\$\{\{ github\.event_name \}\}$/m);
     assert.match(concurrency, /^ {2}cancel-in-progress: false$/m);
   });
 
-  it('o if do job exige CI verde, push na main deste repositório e o interruptor ligado', () => {
+  it('o if do job é exatamente o esperado: CI verde, push na main deste repositório e o interruptor ligado', () => {
     const condition = /^ {4}if: >-\n((?: {6}.+\n)+)/m.exec(code)?.[1] ?? '';
-    for (const part of [
-      "vars.DEPLOY_ENABLED == 'true'",
-      "github.event.workflow_run.conclusion == 'success'",
-      "github.event.workflow_run.event == 'push'",
-      "github.event.workflow_run.head_branch == 'main'",
-      'github.event.workflow_run.head_repository.full_name == github.repository',
-      "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
-    ]) {
-      assert.ok(condition.includes(part), `condição ausente no if do job: ${part}`);
-    }
-    // O interruptor vale para os dois gatilhos (fora dos parênteses).
-    assert.match(condition, /^\s*vars\.DEPLOY_ENABLED == 'true' && \(/);
+    const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim();
+    // Comparação do texto inteiro: uma disjunção a mais (como "|| true") ou uma condição a menos falha.
+    assert.equal(
+      normalize(condition),
+      normalize(`
+        vars.DEPLOY_ENABLED == 'true' && (
+          (github.event_name == 'workflow_run' &&
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.event == 'push' &&
+            github.event.workflow_run.head_branch == 'main' &&
+            github.event.workflow_run.head_repository.full_name == github.repository) ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        )`),
+    );
   });
 
   it('nenhuma ação (uses:), nenhum checkout e nenhum valor do evento dentro de um script', () => {
