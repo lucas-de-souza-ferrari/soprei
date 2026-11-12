@@ -1,6 +1,11 @@
 {
   "fileExceptions": [
     {
+      "path": "backend/src/deploy-scripts.test.ts",
+      "patterns": ["WordUser"],
+      "reason": "confere a diretiva do OpenSSH `Match User soprei-deploy` do exemplo do sshd (spec 037, E3); não é o vínculo antigo"
+    },
+    {
       "path": "backend/src/presentation/auth/account-password-reset.controller.test.ts",
       "patterns": ["ClientHeader", "WordClient"],
       "reason": "prova que o cabeçalho antigo do site (X-Soprei-Client) deixou de valer depois da spec 022"
