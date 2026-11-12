@@ -38,7 +38,7 @@ Encarregado pelo tratamento de dados pessoais: [PREENCHER: nome do encarregado],
 - E-mail e senha (guardamos apenas uma versão protegida da senha, que não permite recuperá-la).
 - Códigos de confirmação de e-mail e de recuperação de senha (guardamos só uma versão protegida, válida por 15 minutos).
 - As empresas de que você participa, seu papel em cada uma e a última empresa que você abriu.
-- Quando você aceitar os Termos de Uso pelo site, a versão aceita e a data do aceite.
+- Quando você aceitar os Termos de Uso pelo site, a versão aceita e a data do aceite. [CONFERIR: E2]
 - Registros de ações administrativas (por exemplo, quem convidou ou mudou o papel de alguém), sem texto livre e sem e-mail.
 - Os dados que você cadastra para a sua empresa: nome, instruções da assistente (persona), documentos da base de conhecimento, produtos e estoque, serviços e horários da agenda.
 
@@ -102,18 +102,18 @@ Alguns fornecedores processam dados fora do Brasil, como indicado acima. [CONFER
 
 A exclusão automática por prazo ainda está em implantação. Enquanto ela não entra no ar, as conversas, as mensagens e os agendamentos **não** são apagados automaticamente; você pode pedir a exclusão a qualquer momento (veja a seção 12). Os prazos que adotamos são estes:
 
-| Dado                            | Prazo                                                                                                                                                                 |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Conversas e mensagens           | 12 meses depois da última mensagem, quando a exclusão automática entrar no ar; até lá, apagadas a pedido                                                              |
-| Nome e telefone em agendamentos | 12 meses depois do horário, quando a exclusão automática entrar no ar; o registro do horário continua, sem dado pessoal                                               |
-| Mensagens em processamento      | 1 hora depois de processadas (24 horas em caso de falha); até a limpeza automática entrar no ar, a remoção pode demorar mais                                          |
-| Conta não confirmada            | apagada 7 dias depois do último pedido de cadastro                                                                                                                    |
-| E-mail de convite não aceito    | apagado 7 dias depois de o convite vencer                                                                                                                             |
-| Conta excluída a pedido         | e-mail e senha removidos; o restante fica sem identificação                                                                                                           |
-| Empresa excluída a pedido       | sai do ar e o número do WhatsApp é desligado na hora; a exclusão definitiva dos dados, 30 dias depois do pedido, está em implantação; os registros de cobrança ficam  |
-| Registros de cobrança           | 5 anos [CONFERIR: S6]                                                                                                                                                 |
-| Logs técnicos                   | 30 dias [CONFERIR: rotação dos logs no servidor]; não contêm o texto das mensagens nem telefones                                                                      |
-| Cópias de segurança             | até 35 dias [CONFERIR: limpeza das cópias no servidor]; se uma cópia for restaurada, as exclusões pedidas depois dela são aplicadas de novo antes de o serviço voltar |
+| Dado                            | Prazo                                                                                                                                                                                  |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Conversas e mensagens           | 12 meses depois da última mensagem, quando a exclusão automática entrar no ar; até lá, apagadas a pedido                                                                               |
+| Nome e telefone em agendamentos | 12 meses depois do horário, quando a exclusão automática entrar no ar; o registro do horário continua, sem dado pessoal                                                                |
+| Mensagens em processamento      | 1 hora depois de processadas (24 horas em caso de falha); até a limpeza automática entrar no ar, a remoção pode demorar mais                                                           |
+| Conta não confirmada            | apagada 7 dias depois do último pedido de cadastro                                                                                                                                     |
+| E-mail de convite não aceito    | apagado 7 dias depois de o convite vencer                                                                                                                                              |
+| Conta excluída a pedido         | a pedido, feita manualmente pela nossa equipe; a remoção do e-mail e da senha, deixando o restante sem identificação, é o resultado pretendido [CONFERIR: E7]                          |
+| Empresa excluída a pedido       | sai do ar e o número do WhatsApp é desligado quando atendemos o pedido; a exclusão definitiva dos dados, 30 dias depois do pedido, está em implantação; os registros de cobrança ficam |
+| Registros de cobrança           | 5 anos [CONFERIR: S6]                                                                                                                                                                  |
+| Logs técnicos                   | 30 dias [CONFERIR: rotação dos logs no servidor]; não contêm o texto das mensagens nem telefones                                                                                       |
+| Cópias de segurança             | até 35 dias [CONFERIR: limpeza das cópias no servidor]; uma cópia restaurada pode trazer de volta dados cuja exclusão foi pedida depois dela [CONFERIR: E5 a E8]                       |
 
 ## 10. Cookies e armazenamento no navegador
 
@@ -129,7 +129,7 @@ Senhas e códigos são guardados apenas em forma protegida; as credenciais do Wh
 
 A LGPD garante, entre outros, os direitos de confirmar se tratamos seus dados, acessá-los, corrigi-los, pedir a eliminação, a portabilidade e informações sobre o compartilhamento.
 
-- **Contatos:** procure a empresa com quem você conversou; ela nos encaminha o pedido e nós fazemos a exclusão. Se não conseguir falar com ela, escreva para [PREENCHER: e-mail de privacidade] e encaminharemos o pedido.
+- **Contatos:** procure a empresa com quem você conversou; ela nos encaminha o pedido e nós fazemos a exclusão manualmente. Se não conseguir falar com ela, escreva para [PREENCHER: e-mail de privacidade] e encaminharemos o pedido.
 - **Usuários:** peça a exclusão da sua conta pelo e-mail [PREENCHER: e-mail de privacidade], escrevendo a partir do e-mail da conta.
 - Veja também as [instruções de exclusão de dados](/exclusao-de-dados).
 

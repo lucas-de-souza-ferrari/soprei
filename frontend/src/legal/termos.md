@@ -76,7 +76,7 @@ O software, a marca e o site do Soprei pertencem a [PREENCHER: razão social]. O
 
 ## 14. Mudanças nos termos
 
-Quando estes termos mudarem de forma relevante, a versão sobe e pediremos um novo aceite. Correções de redação só alteram a data de "Última atualização".
+Quando estes termos mudarem de forma relevante, a versão sobe e pediremos um novo aceite. [CONFERIR: E2] Correções de redação só alteram a data de "Última atualização".
 
 ## 15. Lei e foro
 
