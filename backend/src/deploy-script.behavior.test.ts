@@ -568,6 +568,26 @@ describe('deploy.sh: recusas antes de mexer (saída 1)', { skip: BASH_SKIP }, ()
     assert.equal(stateOf(world, 'current'), '', 'o dry-run não registra nada');
   });
 
+  it('adoção de servidor já atualizado à mão (mesmo SHA, app no ar) registra a versão sem implantar', () => {
+    const world = makeWorld({ registerState: false });
+    const dry = deploy(world, ['--env', 'staging', '--ref', world.prevSha, '--adopt', '--dry-run']);
+    assert.equal(dry.status, 0, dry.out);
+    assert.match(dry.out, /o deploy real registraria/);
+    assert.equal(stateOf(world, 'current'), '', 'o dry-run não registra nada');
+
+    const real = deploy(world, ['--env', 'staging', '--ref', world.prevSha, '--adopt']);
+    assert.equal(real.status, 0, real.out);
+    assert.match(real.out, /versão em execução registrada \(adoção\)/);
+    assert.match(real.out, /já está nessa versão/);
+    assert.equal(stateOf(world, 'current'), world.prevSha);
+    assert.equal(real.events, '', 'nada foi instalado, compilado nem recarregado');
+
+    // Depois da adoção, o deploy seguinte não recusa por falta de versão registrada.
+    const next = deploy(world, ['--env', 'staging', '--ref', world.targetSha, '--dry-run']);
+    assert.equal(next.status, 0, next.out);
+    assert.doesNotMatch(next.out, /nenhuma versão registrada/);
+  });
+
   it('mesmo SHA sai com 0 ("já está nessa versão") e não instala nada', () => {
     const world = makeWorld();
     const result = deploy(world, ['--env', 'staging', '--ref', world.prevSha]);
@@ -680,6 +700,10 @@ describe('deploy.sh: falha de saúde e rollback', { skip: BASH_SKIP }, () => {
       indexOfEvent(result.events, 'db:migrate:deploy') <
         indexOfEvent(result.events, 'startOrReload'),
     );
+    // Depois de voltar, a lista do PM2 é gravada (e só depois do último reload).
+    const lines = result.events.split('\n');
+    const lastReload = lines.map((line) => line.includes('startOrReload')).lastIndexOf(true);
+    assert.ok(indexOfEvent(result.events, 'pm2 save') > lastReload, result.events);
     assertNoSecrets(result);
   });
 
@@ -788,6 +812,8 @@ describe('deploy.sh: deploy concluído e redação de segredos', { skip: BASH_SK
       const migrate = indexOfEvent(result.events, 'db:migrate:deploy');
       const reload = indexOfEvent(result.events, 'startOrReload');
       assert.ok(backup >= 0 && backup < migrate && migrate < reload, result.events);
+      // A lista do PM2 é gravada depois do reload (o servidor volta com esta configuração se reiniciar).
+      assert.ok(indexOfEvent(result.events, 'pm2 save') > reload, result.events);
 
       // A URL do banco chegou aos comandos que precisam dela, mas nunca foi impressa.
       const dbUrl = `postgresql://soprei:${DB_SENTINEL}@127.0.0.1:5432/soprei_test`;

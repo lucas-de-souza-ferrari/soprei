@@ -716,6 +716,12 @@ reload_app() {
   run_cmd pm2 startOrReload "$APP_DIR/deploy/ecosystem.config.cjs" --only "$PM2_APP"
 }
 
+# Grava a lista do PM2 depois de um reload que deu certo: sem isso, um reinício do servidor traria
+# de volta a configuração anterior do app (kill_timeout, cwd...). Falhar aqui não desfaz o deploy.
+save_pm2_list() {
+  run_cmd pm2 save || log 'AVISO: pm2 save falhou; rode "pm2 save" à mão para o PM2 voltar com esta configuração depois de um reinício'
+}
+
 # Espera a saúde: HEALTH_STABLE_COUNT respostas boas seguidas, app online e sem reinício além do
 # da própria troca (pega o laço de reinício, que um 200 só não pega). Primeiro argumento "inject":
 # a primeira espera pode falhar de propósito (staging).
@@ -845,6 +851,7 @@ post_swap_failure() {
     manual_intervention 'falha com --allow-breaking: não há rollback automático (o código antigo pode não funcionar sobre o banco alterado). Restaure o backup feito antes da migration ou corrija para a frente'
   fi
   if rollback_code; then
+    save_pm2_list
     log "DEPLOY FALHOU; VOLTEI PARA $(short "$PREV_SHA")"
     list_unreverted_migrations
     exit 2
@@ -874,6 +881,16 @@ run_deploy() {
   check_staged_rule
   # Sem o app no PM2 (adoção de um ambiente novo) nada está rodando: implanta mesmo sendo o mesmo SHA.
   if [[ $TARGET_SHA == "$PREV_SHA" && $FORCE != true && -n $PM2_STATUS ]]; then
+    # Adoção de um servidor já atualizado à mão: registra a versão em execução mesmo sem nada a
+    # implantar; sem isso o próximo deploy recusaria por falta de versão registrada.
+    if [[ $ADOPT_PENDING == true ]]; then
+      if [[ $DRY_RUN == true ]]; then
+        log "o deploy real registraria $(short "$PREV_SHA") como a versão em execução (adoção)"
+      else
+        write_sha_file "$STATE_DIR/current" "$PREV_SHA" || die1 'não consegui gravar a versão em execução'
+        log "versão em execução registrada (adoção): $(short "$PREV_SHA")"
+      fi
+    fi
     log "já está nessa versão ($(short "$TARGET_SHA")); nada a fazer (--force reimplanta)"
     exit 0
   fi
@@ -932,6 +949,7 @@ run_deploy() {
   if ! write_sha_file "$STATE_DIR/previous" "$PREV_SHA" || ! write_sha_file "$STATE_DIR/current" "$TARGET_SHA"; then
     manual_intervention 'o deploy foi concluído, mas não consegui gravar o estado; grave o SHA atual em current à mão'
   fi
+  save_pm2_list
 
   local other other_label=''
   if [[ $ENV_NAME == production ]]; then other=staging; else other=production; fi
