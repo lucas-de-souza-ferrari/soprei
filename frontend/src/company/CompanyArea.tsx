@@ -15,6 +15,7 @@ import {
 import { ConversationPage } from './ConversationPage';
 import { EstoquePage } from './EstoquePage';
 import { KnowledgePage } from './KnowledgePage';
+import { NotificationsPage } from './NotificationsPage';
 import { ConversationsPage } from './ConversationsPage';
 import { failureOf } from './company-api';
 import { OnboardingPage } from './OnboardingPage';
@@ -57,6 +58,8 @@ export interface CompanyAreaProps {
   readonly onSession: () => void;
   /** 404: a empresa selecionada mudou (outra aba, suspensão); o site recarrega e volta à lista. */
   readonly onChanged: () => void;
+  /** Spec 038: uma notificação foi resolvida; o sino relê a contagem. */
+  readonly onNotificationsChanged?: () => void;
 }
 
 /**
@@ -80,6 +83,7 @@ export function CompanyArea({
   onOpenCompanies,
   onSession,
   onChanged,
+  onNotificationsChanged = () => undefined,
 }: CompanyAreaProps) {
   // `settle` precisa ser estável (as telas o usam em efeitos): os callbacks entram por ref.
   const handlers = useRef({ onSession, onChanged });
@@ -145,8 +149,19 @@ export function CompanyArea({
             settle={settle}
             onChanged={stableChanged}
             onBack={onBackToConversations}
+            canResolve={company.permissions.includes('notification:resolve')}
+            onHandoffResolved={onNotificationsChanged}
           />
         )
+      ) : page === 'notificacoes' ? (
+        <NotificationsPage
+          key={company.companyId}
+          companyId={company.companyId}
+          canResolve={company.permissions.includes('notification:resolve')}
+          settle={settle}
+          onOpenConversation={onOpenConversation}
+          onChanged={onNotificationsChanged}
+        />
       ) : locked && needed !== null ? (
         <ModuleInvite module={needed} holder={holder} onOpenSubscription={openSubscription} />
       ) : page === 'assinatura' ? (

@@ -54,6 +54,7 @@ model Company {
   availabilityRules  AvailabilityRule[]
   appointments       Appointment[]
   lastUsedByAccounts Account[]           @relation("AccountLastCompany")
+  notifications      Notification[]
   /// Assinatura da conta dona da empresa (spec 031); gravada na criacao com a cobranca ligada.
   subscriptionId     String?             @map("subscription_id") @db.Uuid
   subscription       Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
@@ -78,8 +79,9 @@ model Conversation {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  messages Message[]
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  messages      Message[]
+  notifications Notification[]
 
   // `[id, companyId]` existe só para as chaves estrangeiras compostas de Message.
   @@unique([id, companyId])
@@ -114,12 +116,13 @@ model Message {
   /// Várias mensagens do mesmo lote apontam para a mesma resposta. Só mensagem USER tem o campo (CHECK).
   answeredById     String?     @map("answered_by_id") @db.Uuid
 
-  company      Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  conversation Conversation @relation(fields: [conversationId, companyId], references: [id, companyId], onDelete: NoAction)
-  replyTo      Message?     @relation("MessageReply", fields: [replyToId, companyId], references: [id, companyId], onDelete: NoAction)
-  replies      Message[]    @relation("MessageReply")
-  answeredBy   Message?     @relation("MessageAnswer", fields: [answeredById, companyId], references: [id, companyId], onDelete: NoAction)
-  answers      Message[]    @relation("MessageAnswer")
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  conversation  Conversation   @relation(fields: [conversationId, companyId], references: [id, companyId], onDelete: NoAction)
+  replyTo       Message?       @relation("MessageReply", fields: [replyToId, companyId], references: [id, companyId], onDelete: NoAction)
+  replies       Message[]      @relation("MessageReply")
+  answeredBy    Message?       @relation("MessageAnswer", fields: [answeredById, companyId], references: [id, companyId], onDelete: NoAction)
+  answers       Message[]      @relation("MessageAnswer")
+  notifications Notification[]
 
   @@unique([id, companyId])
   @@unique([companyId, externalId])
@@ -159,14 +162,15 @@ model Membership {
   accountId    String?        @map("account_id") @db.Uuid
   account      Account?       @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
-  company             Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  auditAsActor        AuditEvent[]        @relation("AuditActor")
-  auditAsTarget       AuditEvent[]        @relation("AuditTarget")
-  invitationsSent     CompanyInvitation[] @relation("InvitationInviter")
-  invitationAccepted  CompanyInvitation[] @relation("InvitationAccepted")
-  knowledgeDocuments  KnowledgeDocument[] @relation("KnowledgeDocumentCreator")
-  stockMovements      StockMovement[]     @relation("StockMovementCreator")
-  appointmentsCreated Appointment[]       @relation("AppointmentCreator")
+  company               Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  auditAsActor          AuditEvent[]        @relation("AuditActor")
+  auditAsTarget         AuditEvent[]        @relation("AuditTarget")
+  invitationsSent       CompanyInvitation[] @relation("InvitationInviter")
+  invitationAccepted    CompanyInvitation[] @relation("InvitationAccepted")
+  knowledgeDocuments    KnowledgeDocument[] @relation("KnowledgeDocumentCreator")
+  stockMovements        StockMovement[]     @relation("StockMovementCreator")
+  appointmentsCreated   Appointment[]       @relation("AppointmentCreator")
+  notificationsResolved Notification[]      @relation("NotificationResolver")
 
   // `[id, companyId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
   @@unique([id, companyId])
@@ -777,4 +781,54 @@ model PaymentNotice {
 
   @@unique([subscriptionId, kind, windowStart])
   @@map("payment_notices")
+}
+
+enum NotificationKind {
+  HUMAN_HANDOFF
+
+  @@map("notification_kind")
+}
+
+enum NotificationStatus {
+  OPEN
+  RESOLVED
+
+  @@map("notification_status")
+}
+
+enum HandoffReason {
+  CONTACT_REQUESTED
+  CANNOT_HELP
+  COMPLAINT
+  SENSITIVE
+  OTHER
+
+  @@map("handoff_reason")
+}
+
+/// Notificação do painel (spec 038). (TENANT)
+/// Hoje só `HUMAN_HANDOFF`: a IA pediu atendimento humano numa conversa. Estado da EMPRESA (não por
+/// pessoa). Nunca guarda texto de mensagem. FKs COMPOSTAS com `companyId`. Uma aberta por conversa e
+/// tipo: índice único PARCIAL só na migration (o Prisma não o representa). CHECKs na migration.
+model Notification {
+  id                     String             @id @default(uuid(7)) @db.Uuid
+  companyId              String             @map("company_id") @db.Uuid
+  kind                   NotificationKind
+  reason                 HandoffReason?
+  conversationId         String             @map("conversation_id") @db.Uuid
+  messageId              String             @map("message_id") @db.Uuid
+  status                 NotificationStatus @default(OPEN)
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt             DateTime?          @map("resolved_at") @db.Timestamptz(6)
+  resolvedByMembershipId String?            @map("resolved_by_membership_id") @db.Uuid
+
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  conversation Conversation @relation(fields: [conversationId, companyId], references: [id, companyId], onDelete: NoAction)
+  message      Message      @relation(fields: [messageId, companyId], references: [id, companyId], onDelete: NoAction)
+  resolvedBy   Membership?  @relation("NotificationResolver", fields: [resolvedByMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([id, companyId])
+  @@index([companyId, status, createdAt, id])
+  @@index([companyId, conversationId])
+  @@map("notifications")
 }

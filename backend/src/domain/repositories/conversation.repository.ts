@@ -25,4 +25,9 @@ export interface ConversationRepository extends TenantRepository<
    * decrescentes; spec 024). `updatedAt` é tocado quando uma mensagem é gravada na conversa.
    */
   listByActivity(companyId: CompanyId, options?: ListOptions): Promise<Page<Conversation>>;
+  /**
+   * Conversas da empresa com estes ids, em lote (spec 038; sem N+1). Ids malformados ou de outra
+   * empresa simplesmente não aparecem.
+   */
+  findByIds(companyId: CompanyId, ids: readonly string[]): Promise<Conversation[]>;
 }

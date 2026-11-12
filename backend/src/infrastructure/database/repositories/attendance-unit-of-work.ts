@@ -1,6 +1,7 @@
 import type { AttendanceTransaction, AttendanceUnitOfWork } from '../../../domain/index.js';
 import { PrismaConversationRepository } from './conversation.repository.js';
 import { PrismaMessageRepository } from './message.repository.js';
+import { PrismaNotificationRepository } from './notification.repository.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
 import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 
@@ -12,6 +13,7 @@ import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 export class PrismaAttendanceUnitOfWork implements AttendanceUnitOfWork {
   private readonly conversations: PrismaConversationRepository;
   private readonly messages: PrismaMessageRepository;
+  private readonly notifications: PrismaNotificationRepository;
 
   constructor(
     private readonly prisma: TenantScopedPrisma,
@@ -19,6 +21,7 @@ export class PrismaAttendanceUnitOfWork implements AttendanceUnitOfWork {
   ) {
     this.conversations = new PrismaConversationRepository(prisma);
     this.messages = new PrismaMessageRepository(prisma);
+    this.notifications = new PrismaNotificationRepository(prisma);
   }
 
   run<T>(fn: (tx: AttendanceTransaction) => Promise<T>): Promise<T> {
@@ -28,6 +31,7 @@ export class PrismaAttendanceUnitOfWork implements AttendanceUnitOfWork {
         fn({
           conversations: this.conversations.forTransaction(db),
           messages: this.messages.forTransaction(db),
+          notifications: this.notifications.forTransaction(db),
         }),
       this.options,
     );

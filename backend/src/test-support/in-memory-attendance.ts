@@ -17,6 +17,7 @@ import {
   type Page,
 } from '../domain/index.js';
 import { ConflictError, NotFoundError, ValidationError } from '../shared/errors/index.js';
+import { InMemoryNotificationRepository } from './in-memory-notifications.js';
 
 /**
  * Repositórios de conversa e de mensagem em memória, mais a "transação", para os testes de
@@ -30,6 +31,8 @@ import { ConflictError, NotFoundError, ValidationError } from '../shared/errors/
 export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
   readonly conversations: ConversationRepository;
   readonly messages: MessageRepository;
+  /** Notificações (spec 038), dentro da mesma "transação" das mensagens. */
+  readonly notifications: InMemoryNotificationRepository;
 
   private readonly conversationRows: Conversation[] = [];
   private readonly messageRows: Message[] = [];
@@ -44,9 +47,14 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
     answered: string[];
     /** `updatedAt` anterior das conversas tocadas por uma mensagem gravada na transação. */
     touched: { id: string; previous: Date }[];
+    /** Ids das notificações criadas na transação (spec 038). */
+    notifications: string[];
   }>();
 
   constructor(private readonly now: () => Date = () => new Date()) {
+    this.notifications = new InMemoryNotificationRepository((id) => {
+      this.transactionLog.getStore()?.notifications.push(id);
+    });
     this.conversations = {
       findById: (companyId, id) => this.step(() => this.findConversation(companyId, id)),
       list: (companyId, options) =>
@@ -78,6 +86,12 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         }),
       count: (companyId) =>
         this.step(() => this.conversationRows.filter((row) => row.companyId === companyId).length),
+      findByIds: (companyId, ids) =>
+        this.step(() =>
+          this.conversationRows.filter(
+            (row) => row.companyId === companyId && ids.includes(row.id),
+          ),
+        ),
       findByContact: (companyId, contactRef) =>
         this.step(
           () =>
@@ -151,13 +165,19 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
       messages: [] as Message[],
       answered: [] as string[],
       touched: [] as { id: string; previous: Date }[],
+      notifications: [] as string[],
     };
     this.openTransactions += 1;
     try {
       return await this.transactionLog.run(log, () =>
-        fn({ conversations: this.conversations, messages: this.messages }),
+        fn({
+          conversations: this.conversations,
+          messages: this.messages,
+          notifications: this.notifications,
+        }),
       );
     } catch (error) {
+      for (const id of log.notifications) this.notifications.remove(id);
       // Rollback: desfaz só o que ESTA transação gravou (outras podem estar em curso).
       for (const id of log.answered) {
         const index = this.messageRows.findIndex((row) => row.id === id);

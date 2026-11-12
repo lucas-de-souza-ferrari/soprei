@@ -9,6 +9,7 @@ import type {
 } from '../../../domain/index.js';
 import type { Conversation as ConversationRow } from '../../../generated/prisma/client.js';
 import { DatabaseError } from '../../../shared/errors/index.js';
+import { isUuid } from '../../../shared/utils/index.js';
 import { activityOrderBy, buildActivityPageQuery, toActivityPage } from './cursor.js';
 import { toConversation } from './mappers.js';
 import { PrismaTenantRepository, type TenantModelOps } from './tenant.repository.base.js';
@@ -57,6 +58,17 @@ export class PrismaConversationRepository
         take,
       });
       return toActivityPage(rows, limit, toConversation);
+    });
+  }
+
+  findByIds(companyId: CompanyId, ids: readonly string[]): Promise<Conversation[]> {
+    return this.run('findByIds', async () => {
+      const valid = [...new Set(ids.filter((id) => isUuid(id)))];
+      if (valid.length === 0) return [];
+      const rows = await this.db.conversation.findMany({
+        where: { companyId, id: { in: valid } },
+      });
+      return rows.map(toConversation);
     });
   }
 

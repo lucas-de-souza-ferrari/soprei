@@ -29,6 +29,7 @@ export const MODEL_SCOPES = {
   ScheduleService: 'tenant',
   AvailabilityRule: 'tenant',
   Appointment: 'tenant',
+  Notification: 'tenant',
   PlatformAdmin: 'global',
   Account: 'global',
   // Cobranca (spec 031): da CONTA, nao da empresa; a barreira e o repositorio por AccountId/SubscriptionId.

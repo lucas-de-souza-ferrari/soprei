@@ -11,6 +11,7 @@ import { SecretString } from './shared/types/index.js';
 import { OnboardingService } from './application/onboarding/onboarding.service.js';
 import { InventoryService } from './application/inventory/inventory.service.js';
 import { ContactSchedulingService } from './application/schedule/contact-scheduling.service.js';
+import { NotificationService } from './application/notifications/notification.service.js';
 import { ScheduleSampleService } from './application/schedule/sample.service.js';
 import { ScheduleService } from './application/schedule/schedule.service.js';
 import { KnowledgeService } from './application/knowledge/knowledge.service.js';
@@ -42,6 +43,7 @@ import {
   PrismaAvailabilityRuleRepository,
   PrismaInventoryLedger,
   PrismaContactScheduleUnitOfWork,
+  PrismaNotificationRepository,
   PrismaScheduleAvailabilityReader,
   PrismaScheduleResourceRepository,
   PrismaScheduleServiceRepository,
@@ -270,6 +272,8 @@ async function main(): Promise<void> {
       llmTimeoutMs: config.LLM_TIMEOUT_MS,
       inFlightTimeoutMs: config.ATTENDANCE_IN_FLIGHT_TIMEOUT_MS,
       scheduleAiEnabled: config.SCHEDULE_AI_ENABLED,
+      // Spec 038: a IA pode pedir atendimento humano em todo turno (vira notificação no painel).
+      handoffEnabled: true,
     },
     ...(billing === undefined ? {} : { entitlements: billing.entitlements, usage: billing.usage }),
     // Base de conhecimento da empresa (spec 026): recuperação por busca textual, fail-open.
@@ -290,6 +294,12 @@ async function main(): Promise<void> {
           }),
         }
       : {}),
+  });
+  // Notificações do painel (spec 038): o atendimento as grava na sua transação; aqui só leitura e resolução.
+  const notifications = new NotificationService({
+    notifications: new PrismaNotificationRepository(prisma),
+    logger,
+    metrics,
   });
   const documents = new PrismaKnowledgeDocumentRepository(prisma);
   const products = new PrismaProductRepository(prisma);
@@ -528,6 +538,7 @@ async function main(): Promise<void> {
       companies: new CompanyService(companyRepository),
       onboarding: new OnboardingService(new PrismaOnboardingStore(prisma)),
       attendance,
+      notifications,
       knowledge,
       inventory,
       sample,
