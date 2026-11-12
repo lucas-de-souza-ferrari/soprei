@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { installApi } from './company-fixture';
 
 // Spec 032 (E1): páginas públicas de privacidade, termos e exclusão de dados. O texto está no HTML (estático no
@@ -11,6 +12,12 @@ const PAGES = [
 const UPDATED = 'Última atualização: 12/11/2026';
 const DRAFT = 'Texto preliminar, em revisão. Pode mudar.';
 const isMobile = (name: string) => name === 'mobile';
+// D2: os termos só são publicados (link e termos.html) quando `vigente`; o servidor de desenvolvimento serve
+// /termos de qualquer jeito, para revisão.
+const TERMS_VIGENTE = /^situacao: vigente$/m.test(
+  readFileSync(new URL('../src/legal/termos.md', import.meta.url), 'utf8'),
+);
+const LINKS_LABEL = TERMS_VIGENTE ? 'Privacidade e termos' : 'Privacidade';
 
 function watchRequests(page: Page): Request[] {
   const requests: Request[] = [];
@@ -50,6 +57,7 @@ for (const { path, title } of PAGES) {
       expect(html).not.toContain('type="module"');
       expect(html).not.toContain('id="root"');
       expect(html).not.toMatch(/googleapis|gstatic|connect\.facebook/);
+      if (!TERMS_VIGENTE && path !== '/termos') expect(html).not.toContain('href="/termos"');
     }
   });
 }
@@ -114,45 +122,43 @@ test('links: rodapé da página inicial e telas de conta, sem fontes do Google',
   await page.route('**/api/**', (route) => route.fulfill({ status: 401, json: {} }));
   const requests = watchRequests(page);
   await page.goto('/');
-  const footer = page.getByRole('contentinfo').getByRole('navigation', {
-    name: 'Privacidade e termos',
-  });
+  const footer = page.getByRole('contentinfo').getByRole('navigation', { name: LINKS_LABEL });
   for (const [name, href] of [
     ['Política de Privacidade', '/privacidade'],
-    ['Termos de Uso', '/termos'],
     ['Exclusão de dados', '/exclusao-de-dados'],
   ] as const)
     await expect(footer.getByRole('link', { name })).toHaveAttribute('href', href);
+  // D2: "Termos de Uso" só aparece com os termos vigentes.
+  await expect(footer.getByRole('link', { name: 'Termos de Uso' })).toHaveCount(
+    TERMS_VIGENTE ? 1 : 0,
+  );
   for (const path of ['/entrar', '/criar-conta', '/recuperar-senha', '/convite']) {
     await page.goto(path);
-    const nav = page.getByRole('navigation', { name: 'Privacidade e termos' });
+    const nav = page.getByRole('navigation', { name: LINKS_LABEL });
     await expect(nav.getByRole('link', { name: 'Política de Privacidade' })).toHaveAttribute(
       'href',
       '/privacidade',
     );
-    await expect(nav.getByRole('link', { name: 'Termos de Uso' })).toHaveAttribute(
-      'href',
-      '/termos',
+    await expect(nav.getByRole('link', { name: 'Termos de Uso' })).toHaveCount(
+      TERMS_VIGENTE ? 1 : 0,
     );
   }
   await page
-    .getByRole('navigation', { name: 'Privacidade e termos' })
-    .getByRole('link', {
-      name: 'Termos de Uso',
-    })
+    .getByRole('navigation', { name: LINKS_LABEL })
+    .getByRole('link', { name: 'Política de Privacidade' })
     .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Termos de Uso do Soprei' }),
+    page.getByRole('heading', { level: 1, name: 'Política de Privacidade do Soprei' }),
   ).toBeVisible();
   expect(forbidden(requests).filter((url) => !url.includes('/api/'))).toEqual([]);
 });
 
-test('menu do painel tem "Privacidade e termos"', async ({ page }, testInfo) => {
+test('menu do painel tem o link para a política', async ({ page }, testInfo) => {
   test.skip(isMobile(testInfo.project.name), 'menu fixo só no computador');
   await page.setViewportSize({ width: 1280, height: 800 });
   await installApi(page);
   await page.goto('/painel/conversas');
-  await expect(page.getByRole('link', { name: 'Privacidade e termos' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: LINKS_LABEL, exact: true })).toHaveAttribute(
     'href',
     '/privacidade',
   );

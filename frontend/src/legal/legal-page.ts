@@ -21,10 +21,31 @@ export interface LegalDocument {
 
 /** Os três textos: endereço público (sem `.html`) e arquivo em `src/legal/`. */
 export const LEGAL_PAGES = [
-  { path: '/privacidade', file: 'privacidade.md', label: 'Política de Privacidade' },
-  { path: '/termos', file: 'termos.md', label: 'Termos de Uso' },
-  { path: '/exclusao-de-dados', file: 'exclusao-de-dados.md', label: 'Exclusão de dados' },
+  {
+    path: '/privacidade',
+    file: 'privacidade.md',
+    label: 'Política de Privacidade',
+    publishDraft: true,
+  },
+  { path: '/termos', file: 'termos.md', label: 'Termos de Uso', publishDraft: false },
+  {
+    path: '/exclusao-de-dados',
+    file: 'exclusao-de-dados.md',
+    label: 'Exclusão de dados',
+    publishDraft: true,
+  },
 ] as const;
+
+export type LegalPage = (typeof LEGAL_PAGES)[number];
+
+/**
+ * D2 (decisão do dono): a política e as instruções de exclusão vão ao ar como rascunho; os termos só quando
+ * `vigente` (depois da revisão do advogado). Até lá o build não gera `termos.html` e o site não mostra link
+ * para eles (o servidor de desenvolvimento continua servindo `/termos`, para revisar o texto).
+ */
+export function isPublished(page: LegalPage, doc: LegalDocument): boolean {
+  return doc.situacao === 'vigente' || page.publishDraft;
+}
 
 export class LegalDocumentError extends Error {
   constructor(file: string, reason: string) {
@@ -79,7 +100,10 @@ export function parseLegalDocument(file: string, source: string): LegalDocument 
     throw new LegalDocumentError(file, 'situacao deve ser rascunho ou vigente');
   const body = text.slice(header[0].length);
   if (situacao === 'vigente' && PENDING_MARKER.test(body))
-    throw new LegalDocumentError(file, 'texto vigente ainda tem [PREENCHER ou [CONFERIR');
+    throw new LegalDocumentError(
+      file,
+      'texto vigente ainda tem marcador ([PREENCHER, [CONFERIR...)',
+    );
   return { titulo, versao: Number(versao), atualizadoEm, situacao, body };
 }
 
@@ -103,17 +127,23 @@ export function renderLegalPage(
   doc: LegalDocument,
   currentPath: string,
   assets: LegalPageAssets,
+  /** Endereços publicados: a navegação só aponta para eles (a página atual sempre aparece). */
+  publishedPaths: readonly string[] = LEGAL_PAGES.map((page) => page.path),
 ): string {
   const lines = doc.body.replace(/^\n+/, '').split('\n');
   const first = lines[0] ?? '';
   const hasTitle = /^# .+$/.test(first.trim());
   const heading = hasTitle ? first.trim().slice(2) : doc.titulo;
   const body = renderLegalMarkdown(hasTitle ? lines.slice(1).join('\n') : lines.join('\n'));
-  const nav = LEGAL_PAGES.map((page) =>
-    page.path === currentPath
-      ? `<li><a href="${page.path}" aria-current="page">${escapeHtml(page.label)}</a></li>`
-      : `<li><a href="${page.path}">${escapeHtml(page.label)}</a></li>`,
-  ).join('');
+  const nav = LEGAL_PAGES.filter(
+    (page) => page.path === currentPath || publishedPaths.includes(page.path),
+  )
+    .map((page) =>
+      page.path === currentPath
+        ? `<li><a href="${page.path}" aria-current="page">${escapeHtml(page.label)}</a></li>`
+        : `<li><a href="${page.path}">${escapeHtml(page.label)}</a></li>`,
+    )
+    .join('');
   const draft =
     doc.situacao === 'rascunho' ? `<p class="legal-draft" role="note">${DRAFT_NOTICE}</p>` : '';
   return `<!doctype html>
@@ -158,4 +188,31 @@ export function extractThemeScript(indexHtml: string): string {
   if (!script.includes("'soprei-theme'") || script.includes('</'))
     throw new Error('script de tema do index.html inesperado');
   return script;
+}
+
+/** Resultado do build: só as páginas publicadas (D2), montadas com o mesmo `renderLegalPage`. */
+export function buildLegalPages(
+  sources: Readonly<Record<string, string>>,
+  assets: LegalPageAssets,
+): { fileName: string; html: string }[] {
+  const docs = LEGAL_PAGES.map((page) => {
+    const source = sources[page.file];
+    if (source === undefined) throw new LegalDocumentError(page.file, 'arquivo ausente');
+    return { page, doc: parseLegalDocument(page.file, source) };
+  });
+  const published = docs.filter(({ page, doc }) => isPublished(page, doc));
+  const paths = published.map(({ page }) => page.path);
+  return published.map(({ page, doc }) => ({
+    fileName: `${page.path.slice(1)}.html`,
+    html: renderLegalPage(doc, page.path, assets, paths),
+  }));
+}
+
+/** Endereços publicados, lidos dos textos (o build passa isso ao site para decidir os links). */
+export function publishedLegalPaths(sources: Readonly<Record<string, string>>): string[] {
+  return LEGAL_PAGES.filter((page) => {
+    const source = sources[page.file];
+    if (source === undefined) throw new LegalDocumentError(page.file, 'arquivo ausente');
+    return isPublished(page, parseLegalDocument(page.file, source));
+  }).map((page) => page.path);
 }

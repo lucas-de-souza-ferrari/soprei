@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Logo } from '../components/logo';
+import { LEGAL_LINKS_LABEL } from '../legal/LegalLinks';
 import { Button } from '../components/motion/button';
 import { ThemeToggle } from '../components/motion/theme-toggle';
 import { DashboardShell } from '../components/dashboard-shell/dashboard-shell';
@@ -143,7 +144,7 @@ export function AppShell({
               href="/privacidade"
               className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
             >
-              Privacidade e termos
+              {LEGAL_LINKS_LABEL}
             </a>
             <div className="flex items-center justify-between gap-2">
               <ThemeToggle />

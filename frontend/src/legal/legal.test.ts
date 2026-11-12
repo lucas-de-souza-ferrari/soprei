@@ -1,14 +1,21 @@
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import { escapeHtml, isAllowedLinkUrl, renderLegalMarkdown } from './legal-markdown';
 import {
+  escapeHtml,
+  isAllowedLinkUrl,
+  PENDING_MARKER,
+  renderLegalMarkdown,
+} from './legal-markdown';
+import {
+  buildLegalPages,
   DRAFT_NOTICE,
   extractThemeScript,
   formatLegalDate,
   LEGAL_PAGES,
   LegalDocumentError,
   parseLegalDocument,
+  publishedLegalPaths,
   renderLegalPage,
 } from './legal-page';
 
@@ -198,6 +205,74 @@ describe('legal-page: cabeçalho validado', () => {
   it('data montada do texto, sem fuso', () => {
     assert.equal(formatLegalDate('2026-11-12'), '12/11/2026');
     assert.equal(formatLegalDate('2027-01-01'), '01/01/2027');
+  });
+});
+
+describe('marcadores pendentes', () => {
+  it('pega os quatro tipos, sem distinção de maiúsculas e com espaço depois do colchete', () => {
+    for (const text of [
+      '[PREENCHER: x]',
+      '[CONFERIR: S1]',
+      '[DEPENDE: D8]',
+      '[ATUALIZAR: E4]',
+      '[preencher: x]',
+      '[ Conferir: x]',
+      '[\tDEPENDE: D1]',
+    ])
+      assert.match(text, PENDING_MARKER, text);
+    for (const text of ['[nota]', 'PREENCHER sem colchete', '[PREENCHERX: x]'])
+      assert.doesNotMatch(text, PENDING_MARKER, text);
+    assert.throws(
+      () =>
+        parseLegalDocument(
+          'x.md',
+          `${header({ ...VALID, situacao: 'vigente' })}\nTexto [ preencher: CNPJ].`,
+        ),
+      LegalDocumentError,
+    );
+  });
+});
+
+const SOURCES = Object.fromEntries(LEGAL_PAGES.map((page) => [page.file, read(`./${page.file}`)]));
+const vigente = (source: string) =>
+  source
+    .replace(/^situacao: rascunho$/m, 'situacao: vigente')
+    .replace(/\[(PREENCHER|CONFERIR)[^\]]*\]/g, 'X');
+
+describe('build das páginas (D2: termos só quando vigente)', () => {
+  it('com os textos do repositório gera a política e a exclusão, e termos.html só se os termos forem vigentes', () => {
+    const terms = parseLegalDocument('termos.md', SOURCES['termos.md'] as string);
+    const pages = buildLegalPages(SOURCES, ASSETS);
+    const names = pages.map((page) => page.fileName).sort();
+    const expected = ['exclusao-de-dados.html', 'privacidade.html'];
+    if (terms.situacao === 'vigente') expected.push('termos.html');
+    assert.deepEqual(names, expected.sort());
+    for (const page of pages) assert.ok(page.html.includes('Última atualização:'), page.fileName);
+    if (terms.situacao === 'rascunho') {
+      assert.deepEqual(publishedLegalPaths(SOURCES), ['/privacidade', '/exclusao-de-dados']);
+      for (const page of pages) assert.doesNotMatch(page.html, /href="\/termos"/, page.fileName);
+    }
+  });
+
+  it('termos em rascunho não geram termos.html nem link; vigentes geram os dois', () => {
+    const draft = { ...SOURCES, 'termos.md': SOURCES['termos.md'] as string };
+    assert.ok(/situacao: rascunho/.test(draft['termos.md']));
+    const withoutTerms = buildLegalPages(draft, ASSETS);
+    assert.equal(
+      withoutTerms.some((page) => page.fileName === 'termos.html'),
+      false,
+    );
+    const published = { ...SOURCES, 'termos.md': vigente(SOURCES['termos.md'] as string) };
+    const withTerms = buildLegalPages(published, ASSETS);
+    assert.ok(withTerms.some((page) => page.fileName === 'termos.html'));
+    const privacy = withTerms.find((page) => page.fileName === 'privacidade.html');
+    assert.match(privacy?.html ?? '', /href="\/termos"/);
+  });
+
+  it('enquanto os termos são rascunho, a política e a exclusão não apontam para /termos', () => {
+    if (/^situacao: vigente$/m.test(SOURCES['termos.md'] as string)) return;
+    for (const file of ['privacidade.md', 'exclusao-de-dados.md'])
+      assert.doesNotMatch(SOURCES[file] as string, /\]\(\/termos/, file);
   });
 });
 

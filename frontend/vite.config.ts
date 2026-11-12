@@ -5,44 +5,62 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { loadEnv } from 'vite';
 import {
+  buildLegalPages,
   extractThemeScript,
   LEGAL_PAGES,
   parseLegalDocument,
+  publishedLegalPaths,
   renderLegalPage,
 } from './src/legal/legal-page';
 
 const legalDir = fileURLToPath(new URL('./src/legal/', import.meta.url));
 const indexHtmlPath = fileURLToPath(new URL('./index.html', import.meta.url));
 
-/** Lê e valida os três textos (texto inválido ou `vigente` com marcador quebra o build). */
-function readLegalDocuments() {
-  return LEGAL_PAGES.map((page) => ({
-    page,
-    doc: parseLegalDocument(page.file, readFileSync(legalDir + page.file, 'utf8')),
-  }));
+/** Os três textos, por nome de arquivo (relidos a cada uso: no desenvolvimento, editar o texto já vale). */
+function readLegalSources(): Record<string, string> {
+  return Object.fromEntries(
+    LEGAL_PAGES.map((page) => [page.file, readFileSync(legalDir + page.file, 'utf8')]),
+  );
 }
 
 /**
- * Páginas legais estáticas (spec 032, E1): no build grava `privacidade.html`, `termos.html` e
- * `exclusao-de-dados.html` com o CSS do site e só o script de tema do `index.html` (texto legível sem
- * JavaScript; o nginx tenta `$uri.html` antes do SPA). No desenvolvimento serve as mesmas páginas, relendo os
- * arquivos a cada pedido. Sem dependência nova.
+ * Páginas legais estáticas (spec 032, E1): no build grava `privacidade.html` e `exclusao-de-dados.html` (e
+ * `termos.html` só quando os termos estão `vigente`, D2) com o CSS do site e só o script de tema do
+ * `index.html` (texto legível sem JavaScript; o nginx tenta `$uri.html` antes do SPA). Texto inválido ou
+ * `vigente` com marcador quebra o build. No desenvolvimento serve as três páginas (também os termos em
+ * rascunho, para revisar), relendo os arquivos a cada pedido. Define `import.meta.env.SOPREI_LEGAL_PUBLISHED`
+ * com os endereços publicados, que o site usa para mostrar os links. Sem dependência nova.
  */
 function legalPages(): Plugin {
   return {
     name: 'soprei-legal-pages',
     enforce: 'post',
+    config() {
+      return {
+        define: {
+          'import.meta.env.SOPREI_LEGAL_PUBLISHED': JSON.stringify(
+            publishedLegalPaths(readLegalSources()).join(','),
+          ),
+        },
+      };
+    },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = (req.url ?? '').split('?')[0]?.replace(/\.html$/, '');
         const page = LEGAL_PAGES.find((item) => item.path === path);
         if (!page || (req.method !== 'GET' && req.method !== 'HEAD')) return next();
         try {
-          const doc = parseLegalDocument(page.file, readFileSync(legalDir + page.file, 'utf8'));
-          const html = renderLegalPage(doc, page.path, {
-            stylesheetHref: '/src/style.css',
-            themeScript: extractThemeScript(readFileSync(indexHtmlPath, 'utf8')),
-          });
+          const sources = readLegalSources();
+          const doc = parseLegalDocument(page.file, sources[page.file] as string);
+          const html = renderLegalPage(
+            doc,
+            page.path,
+            {
+              stylesheetHref: '/src/style.css',
+              themeScript: extractThemeScript(readFileSync(indexHtmlPath, 'utf8')),
+            },
+            publishedLegalPaths(sources),
+          );
           res.statusCode = 200;
           res.setHeader('Content-Type', 'text/html; charset=utf-8');
           res.end(req.method === 'HEAD' ? undefined : html);
@@ -62,13 +80,8 @@ function legalPages(): Plugin {
         stylesheetHref: (stylesheets[0] as RegExpMatchArray)[1] as string,
         themeScript: extractThemeScript(html),
       };
-      for (const { page, doc } of readLegalDocuments()) {
-        this.emitFile({
-          type: 'asset',
-          fileName: `${page.path.slice(1)}.html`,
-          source: renderLegalPage(doc, page.path, assets),
-        });
-      }
+      for (const { fileName, html: source } of buildLegalPages(readLegalSources(), assets))
+        this.emitFile({ type: 'asset', fileName, source });
     },
   };
 }

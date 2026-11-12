@@ -34,8 +34,11 @@ export function isAllowedLinkUrl(url: string): boolean {
 const LINK = /^\[([^[\]\n]+)\]\(([^()\s]+)\)/;
 const MARKER = /^\[(?:PREENCHER|CONFERIR): [^[\]\n]+\]/;
 
-/** Marcadores que impedem um texto de ficar `vigente`. */
-export const PENDING_MARKER = /\[(?:PREENCHER|CONFERIR)\b/;
+/**
+ * Marcadores que impedem um texto de ficar `vigente`: `[PREENCHER`, `[CONFERIR`, `[DEPENDE` e `[ATUALIZAR`, sem
+ * distinção de maiúsculas e com espaço tolerado depois do colchete (marcador digitado torto também barra).
+ */
+export const PENDING_MARKER = /\[\s*(?:PREENCHER|CONFERIR|DEPENDE|ATUALIZAR)\b/i;
 
 function renderInline(text: string, allowBold = true): string {
   let html = '';
