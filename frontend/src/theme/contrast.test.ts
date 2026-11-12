@@ -121,6 +121,16 @@ const textPairs: [string, string][] = [
   ['destructive', 'card'],
   ['primary', 'muted'],
   ['destructive', 'muted'],
+  // Spec 032 (E1): páginas legais estáticas e links "Privacidade e termos". Texto em foreground/background,
+  // data e links do rodapé em muted-foreground/background (e muted-foreground/card no menu do painel), links em
+  // primary/background, faixa de rascunho e cabeçalho da tabela em foreground/muted, marcador [PREENCHER] em
+  // foreground/bubble. Nenhum token novo.
+  ['foreground', 'background'],
+  ['muted-foreground', 'background'],
+  ['muted-foreground', 'card'],
+  ['primary', 'background'],
+  ['foreground', 'muted'],
+  ['foreground', 'bubble'],
 ];
 const controlPairs: [string, string][] = [
   ['input', 'background'],

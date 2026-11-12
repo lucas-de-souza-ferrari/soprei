@@ -1,5 +1,52 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 @import 'tailwindcss';
+
+/*
+ * Fontes servidas pelo próprio site (spec 032, D5): DM Sans e Manrope, licença SIL OFL 1.1, arquivos variáveis
+ * copiados do Google Fonts (subconjuntos latin e latin-ext) para public/fonts/. Origem, versão e licença em
+ * frontend/NOTICE.md. Nenhum visitante envia o IP ao Google.
+ */
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dm-sans-latin-ext.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dm-sans-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/manrope-latin-ext.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/manrope-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 /* Modo escuro: classe `dark` no <html> (ver src/theme e o script do index.html). */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -568,6 +615,164 @@
   }
   .footer a {
     color: var(--foreground);
+  }
+  .footer-legal {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+  }
+  .footer-legal a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  /*
+   * Páginas legais estáticas (spec 032, E1; HTML gerado pelo plugin do vite.config.ts). Só tokens do tema:
+   * faixa de rascunho em foreground/muted, marcador [PREENCHER]/[CONFERIR] em foreground/bubble, links em
+   * primary/background, data em muted-foreground/background, cabeçalho da tabela em foreground/muted
+   * (pares em src/theme/contrast.test.ts).
+   */
+  .legal-body {
+    min-height: 100vh;
+    background: var(--background);
+    color: var(--foreground);
+  }
+  .legal-header,
+  .legal-main {
+    width: min(760px, calc(100% - 32px));
+    margin: 0 auto;
+  }
+  .legal-header {
+    padding: 28px 0 8px;
+  }
+  .legal-brand {
+    display: inline-block;
+    width: 120px;
+  }
+  .legal-brand img {
+    width: 100%;
+  }
+  .legal-logo-dark,
+  .dark .legal-logo-light {
+    display: none;
+  }
+  .dark .legal-logo-dark {
+    display: block;
+  }
+  .legal-main {
+    padding: 16px 0 64px;
+  }
+  .legal-draft {
+    margin: 0 0 24px;
+    padding: 12px 16px;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    background: var(--muted);
+    color: var(--foreground);
+    font-weight: 600;
+  }
+  .legal-doc {
+    font-size: 16px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+  .legal-doc h1 {
+    font-size: clamp(30px, 6vw, 44px);
+    line-height: 1.1;
+    letter-spacing: -0.05em;
+  }
+  .legal-doc h2 {
+    margin-top: 36px;
+    font-size: 24px;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+  }
+  .legal-doc h3 {
+    margin-top: 22px;
+    font-family: Manrope, sans-serif;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .legal-doc p,
+  .legal-doc ul,
+  .legal-doc ol,
+  .legal-table {
+    margin-top: 12px;
+  }
+  .legal-doc .legal-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin-top: 12px;
+    color: var(--muted-foreground);
+    font-size: 14px;
+  }
+  .legal-doc ul,
+  .legal-doc ol {
+    padding-left: 24px;
+  }
+  .legal-doc ul {
+    list-style: disc;
+  }
+  .legal-doc ol {
+    list-style: decimal;
+  }
+  .legal-doc li + li {
+    margin-top: 6px;
+  }
+  .legal-doc strong {
+    font-weight: 700;
+  }
+  .legal-doc a,
+  .legal-nav a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .legal-marker {
+    background: var(--bubble);
+    color: var(--foreground);
+    padding: 0 3px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .legal-table {
+    overflow-x: auto;
+  }
+  .legal-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  .legal-table th,
+  .legal-table td {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+    /* `break-word` não reduz a largura mínima da coluna: palavras inteiras, a tabela rola dentro do contêiner. */
+    overflow-wrap: break-word;
+  }
+  .legal-table th {
+    background: var(--muted);
+    color: var(--foreground);
+    font-weight: 600;
+  }
+  .legal-nav {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .legal-nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    font-size: 14px;
+  }
+  .legal-nav a[aria-current='page'] {
+    color: var(--foreground);
+    text-decoration: none;
+    font-weight: 600;
   }
 }
 
