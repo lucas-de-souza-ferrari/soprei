@@ -17,6 +17,7 @@ import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
 import { NotificationBell } from './company/NotificationBell';
 import { InvitePage } from './invite/InvitePage';
+import { LegalLinks } from './legal/LegalLinks';
 import { wizardPath, wizardStepForPath, type WizardStepId } from './company/onboarding-steps';
 import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
 import {
@@ -988,6 +989,7 @@ export function AccountApp({
       <p className="mt-8 text-center text-xs text-muted-foreground">
         Inteligência para conversas que importam.
       </p>
+      <LegalLinks className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground [&_a]:underline [&_a]:underline-offset-2" />
     </div>
   );
 }

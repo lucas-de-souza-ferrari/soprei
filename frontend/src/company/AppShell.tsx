@@ -138,6 +138,13 @@ export function AppShell({
             <p className="m-0 truncate text-xs text-muted-foreground" title={email}>
               {email}
             </p>
+            {/* Spec 032 (E1): link comum para a página estática (fora do aplicativo). */}
+            <a
+              href="/privacidade"
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              Privacidade e termos
+            </a>
             <div className="flex items-center justify-between gap-2">
               <ThemeToggle />
               <Button variant="outline" size="sm" onClick={onLogout} disabled={busy}>

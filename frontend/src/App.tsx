@@ -1,6 +1,7 @@
 import { Logo } from './components/logo';
 import { ButtonLink } from './components/motion/button';
 import { ThemeToggle } from './components/motion/theme-toggle';
+import { LegalLinks } from './legal/LegalLinks';
 
 const Arrow = () => <span aria-hidden="true">↗</span>;
 
@@ -226,6 +227,7 @@ export function App() {
       <footer className="footer wrap">
         <Logo alt="Soprei" />
         <span>Inteligência para conversas que importam.</span>
+        <LegalLinks className="footer-legal" />
         <a href="#inicio">Voltar ao topo ↑</a>
       </footer>
     </>
