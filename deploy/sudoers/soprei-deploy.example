@@ -7,6 +7,7 @@
 #
 # Conferir depois de instalar (S29): `sudo -l -U soprei-deploy` deve listar só a linha abaixo, e
 # `sudo -n -u soprei-deploy sudo -n /bin/true` deve ser NEGADO.
+# Sem `Defaults ... !requiretty`: o Ubuntu 26.04 usa o sudo-rs, que não conhece essa opção (o visudo recusa o
+# arquivo) e nunca exige terminal; no sudo clássico do Ubuntu ela já vem desligada.
 Defaults:soprei-deploy env_reset
-Defaults:soprei-deploy !requiretty
 soprei-deploy ALL=(root) NOPASSWD: /usr/local/sbin/soprei-deploy-entry --from-ssh *

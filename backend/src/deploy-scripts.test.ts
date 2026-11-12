@@ -326,8 +326,10 @@ describe('exemplos do servidor para o deploy automático (spec 037, E3)', () => 
       'soprei-deploy ALL=(root) NOPASSWD: /usr/local/sbin/soprei-deploy-entry --from-ssh *',
     ]);
     for (const line of rules.filter((item) => item.startsWith('Defaults'))) {
-      assert.match(line, /^Defaults:soprei-deploy (env_reset|!requiretty)$/);
+      assert.match(line, /^Defaults:soprei-deploy env_reset$/);
     }
+    // O sudo-rs do Ubuntu 26.04 não conhece `requiretty`: o visudo recusaria o arquivo inteiro.
+    assert.doesNotMatch(rules.join(' '), /requiretty/);
   });
 
   it('sshd: ForceCommand, só chave pública, sem encaminhamento, terminal nem rc', () => {
