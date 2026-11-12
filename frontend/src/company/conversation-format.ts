@@ -117,3 +117,41 @@ export function withDaySeparators(
   }
   return entries;
 }
+
+/** Quem escreveu a mensagem (spec 039: `HUMAN` é a equipe, pelo aplicativo no celular). Texto, não só cor. */
+export function authorLabel(role: MessageItem['role']): string {
+  if (role === 'USER') return 'Contato';
+  if (role === 'HUMAN') return 'Equipe (pelo celular)';
+  return 'Assistente';
+}
+
+/** A mensagem é do lado da empresa (assistente ou equipe)? Fica à direita no histórico. */
+export function isCompanySide(role: MessageItem['role']): boolean {
+  return role !== 'USER';
+}
+
+/** A IA está pausada (spec 039)? `aiPausedUntil` no futuro; vencida ou ausente = ativa. */
+export function isAiPaused(aiPausedUntil: string | null | undefined, now: Date): boolean {
+  if (aiPausedUntil === null || aiPausedUntil === undefined) return false;
+  const until = new Date(aiPausedUntil).getTime();
+  return Number.isFinite(until) && until > now.getTime();
+}
+
+/**
+ * Texto da faixa de pausa (spec 039): "A IA está pausada neste contato até HH:mm de dd/MM porque a
+ * equipe respondeu pelo celular", ou `null` se a pausa já passou.
+ */
+export function pauseBannerText(
+  aiPausedUntil: string | null | undefined,
+  now: Date,
+  timeZone?: string,
+): string | null {
+  if (!isAiPaused(aiPausedUntil, now) || aiPausedUntil == null) return null;
+  const date = new Date(aiPausedUntil);
+  const zone = timeZone === undefined ? {} : { timeZone };
+  const time = new Intl.DateTimeFormat(LOCALE, { timeStyle: 'short', ...zone }).format(date);
+  const day = new Intl.DateTimeFormat(LOCALE, { day: '2-digit', month: '2-digit', ...zone }).format(
+    date,
+  );
+  return `A IA está pausada neste contato até ${time} de ${day} porque a equipe respondeu pelo celular.`;
+}

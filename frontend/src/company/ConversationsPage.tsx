@@ -1,11 +1,11 @@
-import { UserRound } from 'lucide-react';
+import { PauseCircle, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
 import { type ConversationItem, companyApi, CONVERSATIONS_PAGE_SIZE } from './company-api';
 import { areaPath, canOpen, conversasPath, type AreaPage } from './company-nav';
 import { ConfigurationCard } from './ConfigurationCard';
-import { formatActivity } from './conversation-format';
+import { formatActivity, isAiPaused } from './conversation-format';
 import type { WizardStepId } from './onboarding-steps';
 import { RetryAlert } from './RetryAlert';
 
@@ -216,6 +216,15 @@ export function ConversationsPage({
                     >
                       <UserRound aria-hidden="true" className="size-3" />
                       Humano
+                    </span>
+                  )}
+                  {isAiPaused(item.aiPausedUntil, now) && (
+                    <span
+                      data-testid="ai-paused-badge"
+                      className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-foreground"
+                    >
+                      <PauseCircle aria-hidden="true" className="size-3" />
+                      IA pausada
                     </span>
                   )}
                 </span>

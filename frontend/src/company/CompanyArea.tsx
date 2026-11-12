@@ -151,6 +151,7 @@ export function CompanyArea({
             onBack={onBackToConversations}
             canResolve={company.permissions.includes('notification:resolve')}
             onHandoffResolved={onNotificationsChanged}
+            canTakeover={company.permissions.includes('conversation:takeover')}
           />
         )
       ) : page === 'notificacoes' ? (

@@ -13,14 +13,18 @@ import {
 } from './company-api';
 import { conversasPath } from './company-nav';
 import {
+  authorLabel,
   chronological,
   formatActivity,
   formatTime,
   type HistoryEntry,
+  isCompanySide,
+  pauseBannerText,
   sendIndicator,
   withDaySeparators,
 } from './conversation-format';
 import { isPlainClick } from './ConversationsPage';
+import { AiPauseBanner } from './AiPauseBanner';
 import { HandoffBanner } from './HandoffBanner';
 import { RetryAlert } from './RetryAlert';
 
@@ -39,6 +43,8 @@ export interface ConversationPageProps {
   readonly canResolve?: boolean;
   /** Spec 038: o pedido de atendimento humano desta conversa foi resolvido. */
   readonly onHandoffResolved?: () => void;
+  /** Spec 039: `conversation:takeover` (a faixa de IA pausada mostra "Reativar a IA"). */
+  readonly canTakeover?: boolean;
 }
 
 type Status = 'loading' | 'ready' | 'failed' | 'notfound';
@@ -63,6 +69,7 @@ export function ConversationPage({
   now = () => new Date(),
   canResolve = false,
   onHandoffResolved = () => undefined,
+  canTakeover = false,
 }: ConversationPageProps) {
   const [conversation, setConversation] = useState<ConversationDetail | null>(null);
   const [messages, setMessages] = useState<readonly MessageItem[]>([]);
@@ -226,6 +233,7 @@ export function ConversationPage({
   }, [waiting]);
 
   const entries: HistoryEntry[] = withDaySeparators(messages, current);
+  const pauseText = pauseBannerText(conversation?.aiPausedUntil, current);
 
   return (
     <div className="grid gap-4">
@@ -283,6 +291,20 @@ export function ConversationPage({
               );
               onHandoffResolved();
             }}
+          />
+        )}
+        {conversation !== null && pauseText !== null && status === 'ready' && (
+          <AiPauseBanner
+            companyId={companyId}
+            conversationId={conversation.id}
+            text={pauseText}
+            canResume={canTakeover}
+            settle={settle}
+            onResumed={() =>
+              setConversation((value) =>
+                value === null ? value : { ...value, aiPausedUntil: null },
+              )
+            }
           />
         )}
       </div>
@@ -361,7 +383,7 @@ export function ConversationPage({
                       else itemRefs.current.set(entry.message.id, node);
                     }}
                     className="flex outline-none data-[mine=true]:justify-end"
-                    data-mine={entry.message.role === 'ASSISTANT'}
+                    data-mine={isCompanySide(entry.message.role)}
                   >
                     <Bubble
                       message={entry.message}
@@ -392,13 +414,13 @@ function Bubble({
   readonly channel: ConversationItem['channel'];
   readonly now: Date;
 }) {
-  const fromContact = message.role === 'USER';
+  const fromContact = !isCompanySide(message.role);
   const indicator = sendIndicator(message, channel, now);
   return (
-    // Bolha do beUI (spec 029): contato à esquerda, assistente (o nosso lado) à direita.
+    // Bolha do beUI (spec 029): contato à esquerda; assistente e equipe (o nosso lado, spec 039) à direita.
     <MessageBubble align={fromContact ? 'start' : 'end'} variant={fromContact ? 'soft' : 'tint'}>
       <MessageBubbleContent className="min-w-0">
-        <p className="m-0 text-xs font-semibold">{fromContact ? 'Contato' : 'Assistente'}</p>
+        <p className="m-0 text-xs font-semibold">{authorLabel(message.role)}</p>
         <p dir="auto" className="m-0 [overflow-wrap:anywhere] whitespace-pre-wrap">
           {message.content}
         </p>
