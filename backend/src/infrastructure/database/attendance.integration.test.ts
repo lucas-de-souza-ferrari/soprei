@@ -19,6 +19,7 @@ import { PrismaConversationRepository } from './repositories/conversation.reposi
 import { createDatabase, type Database } from './database.js';
 import { PrismaMessageRepository } from './repositories/message.repository.js';
 import { runInTransaction } from './transaction.js';
+import type { AttendanceTransaction, AttendanceUnitOfWork } from '../../domain/index.js';
 
 const config = loadIntegrationConfig();
 
@@ -423,5 +424,88 @@ describe('isolamento do atendimento entre empresas (A e B, mesmo contactRef e me
       assert.equal(call.systemPrompt, withStyle('Persona-Beta-ISO'));
       assert.ok(call.history.every((turn) => !turn.content.includes('concA')));
     }
+  });
+});
+
+describe('pedido de atendimento humano contra o PostgreSQL (spec 038)', () => {
+  const notificationsOf = (companyId: string) =>
+    database.prisma.notification.findMany({ where: { companyId } });
+
+  it('simulador: a notificação é gravada com a resposta (mesma transação); externalId repetido não grava outra', async () => {
+    const service = new AttendanceService({
+      companies,
+      conversations,
+      messages,
+      unitOfWork: new PrismaAttendanceUnitOfWork(database.prisma),
+      llm,
+      logger: logs.logger,
+      options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000, handoffEnabled: true },
+    });
+    const company = await companyWithPersona('att-handoff');
+    const input = { contactRef: 'contato-humano', text: 'quero um atendente', externalId: 'h-1' };
+    const result = await service.handleInboundMessage(company.id, input);
+    const rows = await notificationsOf(company.id);
+    assert.equal(rows.length, 1);
+    const [row] = rows;
+    assert.ok(row);
+    assert.equal(row.messageId, result.reply.id);
+    assert.equal(row.conversationId, result.conversationId);
+    assert.equal(row.reason, 'CONTACT_REQUESTED');
+    assert.equal(row.status, 'OPEN');
+    const again = await service.handleInboundMessage(company.id, input);
+    assert.equal(again.duplicate, true);
+    assert.equal((await notificationsOf(company.id)).length, 1);
+  });
+
+  it('canal: se a transação da resposta desfaz depois de gravar a notificação, nada sobra no banco', async () => {
+    const company = await companyWithPersona('att-handoff-rb');
+    const real = new PrismaAttendanceUnitOfWork(database.prisma);
+    // Mesma unidade de trabalho real; só a notificação falha DEPOIS de gravar, dentro da transação.
+    const failing: AttendanceUnitOfWork = {
+      run: (fn) =>
+        real.run((tx) => {
+          const createHandoff: AttendanceTransaction['notifications']['createHandoff'] = async (
+            ...args
+          ) => {
+            await tx.notifications.createHandoff(...args);
+            throw new ConflictError('falha simulada depois da notificação');
+          };
+          const wrapped: AttendanceTransaction = {
+            ...tx,
+            // Herda os demais métodos do repositório da transação (protótipo), troca só este.
+            notifications: Object.assign(
+              Object.create(tx.notifications) as AttendanceTransaction['notifications'],
+              { createHandoff },
+            ),
+          };
+          return fn(wrapped);
+        }),
+    };
+    const local = new AttendanceService({
+      companies,
+      conversations,
+      messages,
+      unitOfWork: failing,
+      llm,
+      logger: logs.logger,
+      options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000, handoffEnabled: true },
+    });
+    await local.acceptInboundMessage(company.id, {
+      contactRef: 'c-rb',
+      text: 'atendente por favor',
+    });
+    await assert.rejects(
+      local.respondToPending(company.id, 'c-rb', { maxMessages: 10, maxChars: 8_000 }),
+      ConflictError,
+    );
+    assert.equal((await notificationsOf(company.id)).length, 0);
+    const conversation = await conversations.findByContact(company.id, 'c-rb');
+    assert.ok(conversation);
+    const stored = (await messages.listByConversation(company.id, conversation.id)).items;
+    assert.deepEqual(
+      stored.map((message) => message.role),
+      ['USER'],
+      'a resposta também foi desfeita',
+    );
   });
 });

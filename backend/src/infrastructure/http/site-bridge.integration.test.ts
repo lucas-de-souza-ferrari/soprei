@@ -4,6 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { AccountService } from '../../application/auth/account.service.js';
 import { AttendanceService } from '../../application/attendance/attendance.service.js';
+import { NotificationService } from '../../application/notifications/notification.service.js';
 import { ChannelConnectionService } from '../../application/channel/channel-connection.service.js';
 import { InventoryService } from '../../application/inventory/inventory.service.js';
 import { ScheduleService } from '../../application/schedule/schedule.service.js';
@@ -41,6 +42,7 @@ import {
   PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
+  PrismaNotificationRepository,
 } from '../database/index.js';
 import {
   PrismaAppointmentRepository,
@@ -174,6 +176,12 @@ before(async () => {
         logger: logs.logger,
         metrics,
         options: { llmTimeoutMs: 2_000, inFlightTimeoutMs: 60_000 },
+      }),
+      // Spec 038: notificações pela ponte do cookie.
+      notifications: new NotificationService({
+        notifications: new PrismaNotificationRepository(db.prisma),
+        logger: logs.logger,
+        metrics,
       }),
       channel: new ChannelConnectionService({
         companies: companyRepository,
@@ -367,6 +375,9 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
       '/admin/companies/:companyId/schedule/appointments',
       '/admin/companies/:companyId/schedule/appointments/:appointmentId',
       '/admin/companies/:companyId/schedule/blocks/:blockId',
+      '/admin/companies/:companyId/notifications',
+      '/admin/companies/:companyId/notifications/summary',
+      '/admin/companies/:companyId/notifications/:notificationId/resolve',
     ]) {
       assert.ok(
         tenantRoutes.some((route) => route.url === url),
@@ -383,7 +394,8 @@ describe('ponte cookie -> rotas de tenant do site (spec 023)', () => {
         .replace(':resourceId', randomUUID())
         .replace(':serviceId', randomUUID())
         .replace(':appointmentId', randomUUID())
-        .replace(':blockId', randomUUID());
+        .replace(':blockId', randomUUID())
+        .replace(':notificationId', randomUUID());
     const request = (route: (typeof tenantRoutes)[number], companyId: string) =>
       route.method === 'GET'
         ? get(resolve(route.url, companyId), alice)

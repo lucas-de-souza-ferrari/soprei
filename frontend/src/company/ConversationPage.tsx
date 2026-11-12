@@ -4,6 +4,7 @@ import { Button } from '../components/motion/button';
 import { Loader } from '../components/motion/loader';
 import { ApiError } from '../api';
 import {
+  type ConversationDetail,
   type ConversationItem,
   companyApi,
   isStillSelected,
@@ -20,6 +21,7 @@ import {
   withDaySeparators,
 } from './conversation-format';
 import { isPlainClick } from './ConversationsPage';
+import { HandoffBanner } from './HandoffBanner';
 import { RetryAlert } from './RetryAlert';
 
 export interface ConversationPageProps {
@@ -33,6 +35,10 @@ export interface ConversationPageProps {
   readonly onBack: () => void;
   /** Relógio injetável (os testes de navegador usam o relógio falso do Playwright). */
   readonly now?: () => Date;
+  /** Spec 038: `notification:resolve` (a faixa de atendimento humano mostra o botão). */
+  readonly canResolve?: boolean;
+  /** Spec 038: o pedido de atendimento humano desta conversa foi resolvido. */
+  readonly onHandoffResolved?: () => void;
 }
 
 type Status = 'loading' | 'ready' | 'failed' | 'notfound';
@@ -55,8 +61,10 @@ export function ConversationPage({
   onChanged,
   onBack,
   now = () => new Date(),
+  canResolve = false,
+  onHandoffResolved = () => undefined,
 }: ConversationPageProps) {
-  const [conversation, setConversation] = useState<ConversationItem | null>(null);
+  const [conversation, setConversation] = useState<ConversationDetail | null>(null);
   const [messages, setMessages] = useState<readonly MessageItem[]>([]);
   const [older, setOlder] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>(conversationId === null ? 'notfound' : 'loading');
@@ -262,6 +270,20 @@ export function ConversationPage({
               {formatActivity(conversation.updatedAt, current)}
             </time>
           </p>
+        )}
+        {conversation?.openHandoff != null && status === 'ready' && (
+          <HandoffBanner
+            companyId={companyId}
+            handoff={conversation.openHandoff}
+            canResolve={canResolve}
+            settle={settle}
+            onResolved={() => {
+              setConversation((current) =>
+                current === null ? current : { ...current, openHandoff: null },
+              );
+              onHandoffResolved();
+            }}
+          />
         )}
       </div>
 

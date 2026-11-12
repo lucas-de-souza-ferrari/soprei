@@ -21,6 +21,8 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
         'schedule:manage',
         'schedule:configure',
         'onboarding:manage',
+        'notification:read',
+        'notification:resolve',
       ],
       ADMIN: [
         'conversation:read',
@@ -37,9 +39,18 @@ describe('matriz papel -> permissão (snapshot da spec 008)', () => {
         'schedule:manage',
         'schedule:configure',
         'onboarding:manage',
+        'notification:read',
+        'notification:resolve',
       ],
-      AGENT: ['conversation:read', 'conversation:simulate', 'schedule:read', 'schedule:manage'],
-      VIEWER: ['conversation:read', 'schedule:read'],
+      AGENT: [
+        'conversation:read',
+        'conversation:simulate',
+        'schedule:read',
+        'schedule:manage',
+        'notification:read',
+        'notification:resolve',
+      ],
+      VIEWER: ['conversation:read', 'schedule:read', 'notification:read'],
     });
     assert.deepEqual([...MEMBERSHIP_ROLES], ['OWNER', 'ADMIN', 'AGENT', 'VIEWER']);
     assert.deepEqual(Object.keys(ROLE_PERMISSIONS).sort(), [...MEMBERSHIP_ROLES].sort());

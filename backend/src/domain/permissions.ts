@@ -20,6 +20,8 @@ export const PERMISSIONS = [
   'schedule:manage',
   'schedule:configure',
   'onboarding:manage',
+  'notification:read',
+  'notification:resolve',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -39,6 +41,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'schedule:manage',
     'schedule:configure',
     'onboarding:manage',
+    'notification:read',
+    'notification:resolve',
   ],
   ADMIN: [
     'conversation:read',
@@ -55,9 +59,18 @@ export const ROLE_PERMISSIONS: Readonly<Record<MembershipRole, readonly Permissi
     'schedule:manage',
     'schedule:configure',
     'onboarding:manage',
+    'notification:read',
+    'notification:resolve',
   ],
-  AGENT: ['conversation:read', 'conversation:simulate', 'schedule:read', 'schedule:manage'],
-  VIEWER: ['conversation:read', 'schedule:read'],
+  AGENT: [
+    'conversation:read',
+    'conversation:simulate',
+    'schedule:read',
+    'schedule:manage',
+    'notification:read',
+    'notification:resolve',
+  ],
+  VIEWER: ['conversation:read', 'schedule:read', 'notification:read'],
 };
 
 function isMembershipRole(value: unknown): value is MembershipRole {

@@ -15,6 +15,7 @@ import { loadEntitlements, type Entitlements } from './company/billing-api';
 import { hasModule, moduleOfPage, type CheckoutReturn } from './company/billing-rules';
 import { pickCompanyToOpen } from './company/company-pick';
 import { CompanyArea } from './company/CompanyArea';
+import { NotificationBell } from './company/NotificationBell';
 import { InvitePage } from './invite/InvitePage';
 import { wizardPath, wizardStepForPath, type WizardStepId } from './company/onboarding-steps';
 import { INVITE_ACCOUNT_CREATED_MESSAGE } from './invite/invite-flow';
@@ -130,6 +131,8 @@ export function AccountApp({
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(true);
   const [booting, setBooting] = useState(true);
+  /** Spec 038: muda quando uma notificação é resolvida, para o sino reler a contagem. */
+  const [bellRefresh, setBellRefresh] = useState(0);
   const [notice, setNotice] = useState<Notice>(null);
   const [invalid, setInvalid] = useState<{
     field: 'password' | 'confirmation' | 'verification';
@@ -663,6 +666,16 @@ export function AccountApp({
       <AppShell
         title={AREA_LABELS[isAreaPage(page) ? page : 'conversas']}
         banner={noticeNode}
+        headerActions={
+          areaCompany.permissions.includes('notification:read') ? (
+            <NotificationBell
+              key={areaCompany.companyId}
+              companyId={areaCompany.companyId}
+              refreshKey={bellRefresh}
+              onOpen={() => openArea('notificacoes')}
+            />
+          ) : undefined
+        }
         current={switcherItem(areaCompany)}
         companies={companies.map(switcherItem)}
         pages={menuPages(areaCompany.permissions)}
@@ -691,6 +704,7 @@ export function AccountApp({
           onOpenCompanies={() => openArea('companies')}
           onSession={sessionLost}
           onChanged={companyChanged}
+          onNotificationsChanged={() => setBellRefresh((value) => value + 1)}
         />
       </AppShell>
     );
