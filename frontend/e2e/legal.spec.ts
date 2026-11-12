@@ -4,19 +4,30 @@ import { installApi } from './company-fixture';
 
 // Spec 032 (E1): páginas públicas de privacidade, termos e exclusão de dados. O texto está no HTML (estático no
 // build; no desenvolvimento o plugin do vite.config.ts serve a mesma página), legível sem JavaScript.
+const isVigente = (file: string) =>
+  /^situacao: vigente$/m.test(
+    readFileSync(new URL(`../src/legal/${file}`, import.meta.url), 'utf8'),
+  );
+// `vigente` vem do próprio texto: rascunho mostra a faixa e os marcadores; vigente não tem nenhum dos dois.
 const PAGES = [
-  { path: '/privacidade', title: 'Política de Privacidade do Soprei' },
-  { path: '/termos', title: 'Termos de Uso do Soprei' },
-  { path: '/exclusao-de-dados', title: 'Como pedir a exclusão dos seus dados' },
+  {
+    path: '/privacidade',
+    title: 'Política de Privacidade do Soprei',
+    vigente: isVigente('privacidade.md'),
+  },
+  { path: '/termos', title: 'Termos de Uso do Soprei', vigente: isVigente('termos.md') },
+  {
+    path: '/exclusao-de-dados',
+    title: 'Como pedir a exclusão dos seus dados',
+    vigente: isVigente('exclusao-de-dados.md'),
+  },
 ] as const;
 const UPDATED = 'Última atualização: 12/11/2026';
 const DRAFT = 'Texto preliminar, em revisão. Pode mudar.';
 const isMobile = (name: string) => name === 'mobile';
 // D2: os termos só são publicados (link e termos.html) quando `vigente`; o servidor de desenvolvimento serve
 // /termos de qualquer jeito, para revisão.
-const TERMS_VIGENTE = /^situacao: vigente$/m.test(
-  readFileSync(new URL('../src/legal/termos.md', import.meta.url), 'utf8'),
-);
+const TERMS_VIGENTE = isVigente('termos.md');
 const LINKS_LABEL = TERMS_VIGENTE ? 'Privacidade e termos' : 'Privacidade';
 
 function watchRequests(page: Page): Request[] {
@@ -39,7 +50,7 @@ function forbidden(requests: readonly Request[]): string[] {
     .map((url) => url.origin + url.pathname);
 }
 
-for (const { path, title } of PAGES) {
+for (const { path, title, vigente } of PAGES) {
   test(`${path}: o HTML cru já tem o texto, a data, a versão e só o script de tema`, async ({
     request,
   }, testInfo) => {
@@ -52,7 +63,8 @@ for (const { path, title } of PAGES) {
       expect(html).toContain(`<h1>${title}</h1>`);
       expect(html).toContain(UPDATED);
       expect(html).toContain('Versão 1');
-      expect(html).toContain(DRAFT);
+      if (vigente) expect(html).not.toContain(DRAFT);
+      else expect(html).toContain(DRAFT);
       expect(html.match(/<script/g)?.length).toBe(1);
       expect(html).not.toContain('type="module"');
       expect(html).not.toContain('id="root"');
@@ -64,12 +76,14 @@ for (const { path, title } of PAGES) {
 
 test.describe('sem JavaScript', () => {
   test.use({ javaScriptEnabled: false });
-  for (const { path, title } of PAGES) {
-    test(`${path}: título, data e faixa de rascunho visíveis`, async ({ page }) => {
+  for (const { path, title, vigente } of PAGES) {
+    test(`${path}: título, data e faixa de rascunho (só em rascunho) visíveis`, async ({
+      page,
+    }) => {
       await page.goto(path);
       await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
       await expect(page.getByText(UPDATED)).toBeVisible();
-      await expect(page.getByText(DRAFT)).toBeVisible();
+      await expect(page.getByText(DRAFT)).toHaveCount(vigente ? 0 : 1);
       await expect(page.getByRole('navigation', { name: 'Documentos legais' })).toBeVisible();
     });
   }
@@ -84,11 +98,11 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 900 });
       await page.emulateMedia({ colorScheme: scheme });
       const requests = watchRequests(page);
-      for (const { path, title } of PAGES) {
+      for (const { path, title, vigente } of PAGES) {
         await page.goto(path);
         await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
-        // Marcadores do rascunho aparecem destacados.
-        await expect(page.locator('mark.legal-marker').first()).toBeVisible();
+        // Texto vigente nunca tem marcador pendente (o build também recusa).
+        if (vigente) await expect(page.locator('mark.legal-marker')).toHaveCount(0);
         expect(await page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(
           scheme === 'dark',
         );
