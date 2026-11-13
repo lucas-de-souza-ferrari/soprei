@@ -260,6 +260,7 @@ describe('renewalPriceIncrease: aviso de reajuste (spec 040, D6)', () => {
     assert.deepEqual(renewalPriceChange(sub, catalog), {
       currentCents: 335_040,
       nextCents: 349_000,
+      planName: undefined,
     });
   });
 
@@ -292,14 +293,61 @@ describe('renewalPriceIncrease: aviso de reajuste (spec 040, D6)', () => {
     }
   });
 
-  it('troca agendada para um plano mais caro -> verdadeiro (vale a seleção que vai renovar)', () => {
-    const sub = oldSubscription('ESSENTIAL', 'MONTHLY', none, {
+  it('troca escolhida pela pessoa (outro plano ou outro ciclo) nunca é reajuste', () => {
+    const toPro = oldSubscription('ESSENTIAL', 'MONTHLY', none, {
       planCode: 'PROFESSIONAL',
       cycle: 'MONTHLY',
       agenda: false,
       stock: false,
     });
+    assert.equal(renewalPriceChange(toPro, catalog), null);
+    assert.equal(renewalPriceIncrease(toPro, catalog), false);
+    const toAnnual = oldSubscription('ESSENTIAL', 'MONTHLY', none, {
+      planCode: 'ESSENTIAL',
+      cycle: 'ANNUAL',
+      agenda: false,
+      stock: false,
+    });
+    assert.equal(renewalPriceIncrease(toAnnual, catalog), false);
+  });
+
+  it('troca agendada só de módulo, no mesmo plano e ciclo: compara os módulos da renovação nas duas versões', () => {
+    // Escala anual com Agenda, troca para tirar a Agenda: 335.040 -> 349.000 (sobe só o plano).
+    const sub = oldSubscription(
+      'SCALE',
+      'ANNUAL',
+      { agenda: true, stock: false },
+      {
+        planCode: 'SCALE',
+        cycle: 'ANNUAL',
+        agenda: false,
+        stock: false,
+      },
+    );
+    assert.deepEqual(renewalPriceChange(sub, catalog), {
+      currentCents: 335_040,
+      nextCents: 349_000,
+      planName: undefined,
+    });
+  });
+
+  it('preso ao preço de teste de R$ 1,00 da produção: a mesma seleção sobe para o catálogo, então o aviso é devido', () => {
+    const base = oldSubscription('ESSENTIAL', 'MONTHLY', none);
+    const sub = { ...base, price: { ...base.price, baseCents: 100 } };
+    assert.deepEqual(renewalPriceChange(sub, catalog), {
+      currentCents: 100,
+      nextCents: 4_790,
+      planName: undefined,
+    });
     assert.equal(renewalPriceIncrease(sub, catalog), true);
+  });
+
+  it('o nome do plano da renovação vem do catálogo quando ele o traz', () => {
+    const named = catalog.map((entry) => ({ ...entry, plan: { ...entry.plan, name: 'Escala' } }));
+    assert.equal(
+      renewalPriceChange(oldSubscription('SCALE', 'ANNUAL', none), named)?.planName,
+      'Escala',
+    );
   });
 
   it('plano ou ciclo fora do catálogo: sem comparação (falso)', () => {
@@ -367,5 +415,39 @@ describe('dueNotices: PRICE_CHANGE entre 30 e 45 dias antes da renovação (spec
       [],
     );
     assert.deepEqual(kindsAt(subjectFor({ ...scale, status: 'EXPIRED' }), 40), []);
+  });
+});
+
+describe('dueNotices: troca agendada de mensal para anual não gera reajuste (revisão da E1)', () => {
+  it('Essencial mensal, período 2026-12-01 a 2027-01-01, troca agendada para anual: sem PRICE_CHANGE', () => {
+    const base = oldSubscription(
+      'ESSENTIAL',
+      'MONTHLY',
+      { agenda: false, stock: false },
+      {
+        planCode: 'ESSENTIAL',
+        cycle: 'ANNUAL',
+        agenda: false,
+        stock: false,
+      },
+    );
+    const sub: SubscriptionRecord = {
+      ...base,
+      currentPeriodStart: new Date('2026-12-01T00:00:00Z'),
+      currentPeriodEnd: new Date('2027-01-01T00:00:00Z'),
+    };
+    const kinds = dueNotices(
+      {
+        subscription: sub,
+        usage: { tokens: 0, sentMessages: 0, extraReplies: 0 },
+        usageWindowStart: sub.currentPeriodStart,
+        companies: 1,
+        pendingPlanMaxCompanies: null,
+        catalog: catalogOf(NEW),
+      },
+      new Date('2026-12-01T12:00:00Z'),
+      { graceDays: 5, trialTokens: 600_000, trialReplies: 100 },
+    ).map((notice) => notice.kind);
+    assert.ok(!kinds.includes('PRICE_CHANGE'), kinds.join(','));
   });
 });

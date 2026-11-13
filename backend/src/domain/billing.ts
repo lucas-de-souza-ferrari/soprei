@@ -359,7 +359,7 @@ export function perReplyMilliCents(
 
 /** Uma entrada do catálogo vigente, só com o que as regras puras precisam (estrutural, sem repositório). */
 export interface CatalogLike {
-  readonly plan: Pick<PlanRecord, 'code'>;
+  readonly plan: Pick<PlanRecord, 'code'> & { readonly name?: string };
   readonly prices: readonly Pick<
     PlanPriceRecord,
     'cycle' | 'baseCents' | 'agendaCents' | 'stockCents'
@@ -367,16 +367,20 @@ export interface CatalogLike {
 }
 
 export interface RenewalPriceChange {
-  /** Total da assinatura ao preço que ela pagou (`sub.price`, com os módulos atuais). */
+  /** Total da seleção que vai renovar ao preço da versão que a assinatura paga (`sub.price`). */
   readonly currentCents: number;
-  /** Total da próxima renovação ao preço vigente do catálogo (seleção atual ou a troca agendada). */
+  /** Total da MESMA seleção ao preço vigente do catálogo. */
   readonly nextCents: number;
+  /** Nome do plano da renovação no catálogo vigente (para o e-mail), quando o catálogo o traz. */
+  readonly planName?: string | undefined;
 }
 
 /**
- * Totais da próxima renovação (spec 040, D6): a seleção que vai renovar (a troca agendada, se houver, ou a
- * atual) ao preço vigente do catálogo, contra o total ao preço da própria assinatura. `null` se o catálogo não
- * tem o plano ou o ciclo (nada a comparar).
+ * Reajuste da próxima renovação (spec 040, D6, revisada): compara a MESMA seleção (plano, ciclo e módulos que
+ * vão renovar) ao preço da versão que a assinatura paga (`sub.price`) contra o preço vigente do catálogo. Uma
+ * troca escolhida pela pessoa (troca agendada para outro plano ou outro ciclo) nunca é reajuste: devolve
+ * `null`. Troca agendada que só tira ou põe módulo no mesmo plano e ciclo compara os módulos da renovação nas
+ * duas versões. `null` também se o catálogo não tem o plano ou o ciclo.
  */
 export function renewalPriceChange(
   subscription: Pick<
@@ -391,15 +395,15 @@ export function renewalPriceChange(
     agenda: subscription.agendaEnabled,
     stock: subscription.stockEnabled,
   };
+  if (next.planCode !== subscription.plan.code || next.cycle !== subscription.cycle) return null;
   const entry = catalog.find((candidate) => candidate.plan.code === next.planCode);
   const price = entry?.prices.find((candidate) => candidate.cycle === next.cycle);
-  if (price === undefined) return null;
+  if (entry === undefined || price === undefined) return null;
+  const modules = { agenda: next.agenda, stock: next.stock };
   return {
-    currentCents: priceTotalCents(subscription.price, {
-      agenda: subscription.agendaEnabled,
-      stock: subscription.stockEnabled,
-    }),
-    nextCents: priceTotalCents(price, { agenda: next.agenda, stock: next.stock }),
+    currentCents: priceTotalCents(subscription.price, modules),
+    nextCents: priceTotalCents(price, modules),
+    planName: entry.plan.name,
   };
 }
 
