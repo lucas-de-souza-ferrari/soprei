@@ -1,6 +1,6 @@
 # 040 — Conhecimento: ler PDF e DOCX no navegador
 
-- **Status:** aprovada pelo dono em 2026-11-12 ("Aprovo todas": D1 decidida antes; D2 a D13 como recomendadas)
+- **Status:** aprovada pelo dono em 2026-11-12 ("Aprovo todas": D1 decidida antes; D2 a D13 como recomendadas); E1 e E2 implementadas em 2026-11-12 (aguardando CI, `reviewer` e merge)
 - **Branch:** `spec/040-conhecimento-pdf-docx`
 - **Depende de:** 026 (base de conhecimento, aba Conhecimento), 018 (interface e tokens de cor), 030 (o passo "Documentos" dos Primeiros passos reaproveita a mesma tela)
 
@@ -118,32 +118,32 @@ Legenda: [U] unitário (`pnpm --filter soprei-frontend test`), [E] Playwright (d
 
 **E1**
 
-- [ ] [U] `detectFileKind`: `.txt`, `.md`, `.markdown`, `.pdf`, `.docx` (maiúsculas e minúsculas) reconhecidos; `.doc`, `.odt` e outra extensão devolvem o problema próprio.
-- [ ] [U] Tamanho antes de ler: texto no limite de 200 KB passa e 1 byte acima recusa; PDF/DOCX no limite da D2 passa e 1 byte acima recusa; 0 byte = vazio.
-- [ ] [U] Assinatura: `%PDF-` no byte 0 e no byte 1.000 passa; ausente nos primeiros 1.024 bytes recusa; `PK\x03\x04` passa para `.docx`; cabeçalho OLE em `.docx` dá o problema "protegido ou antigo"; texto qualquer com extensão `.pdf` ou `.docx` recusa.
-- [ ] [U] `normalizeExtractedText`: NFC, `\r\n`/`\r`, controles, U+FFFD, U+00AD, largura zero, espaços repetidos, quebras em excesso e `trim` (vetores fixos); aplicada duas vezes dá o mesmo resultado; o resultado nunca contém NUL.
-- [ ] [U] `extractedTextProblem`: texto só com espaços e pontuação = sem texto; 100.000 caracteres passa; 100.001 recusa.
-- [ ] [U] `joinPdfTextItems`: `hasEOL` vira quebra, páginas separadas por linha em branco; para ao passar de 100.000 caracteres.
-- [ ] [U] `titleFromFileName` tira `.pdf` e `.docx` e mantém a regra atual (os vetores antigos continuam passando).
-- [ ] [U] Orquestração (com leitores falsos): escolher um segundo arquivo cancela o primeiro e só o segundo preenche; resultado tardio do primeiro é descartado; "Cancelar leitura" não gera mensagem de erro; prazo estourado gera a mensagem de prazo e chama o cancelamento do leitor; falha no carregamento do módulo gera "leitor não carregou"; erro do leitor com texto qualquer vira a mensagem fixa (a mensagem original nunca aparece).
-- [ ] [U] Todas as mensagens de `FILE_PROBLEM_MESSAGES` são as da tabela e nenhuma interpola texto do arquivo.
-- [ ] [B] `pnpm typecheck`, `pnpm lint`, `pnpm format:check` e `pnpm build` verdes; o ESLint recusa importar `pdfjs-dist` fora de `pdf-text.ts`; o build gera o worker do pdf.js em `dist/assets/`.
-- [ ] [U] Teste de texto do código: `pdf-text.ts` só é referenciado por `import(` (nunca por import estático); o código não define `cMapUrl`, `standardFontDataUrl`, `wasmUrl` nem `iccUrl`, e passa `isEvalSupported: false` e `enableXfa: false`.
-- [ ] [E] Aba Conhecimento com API falsa: escolher um PDF gerado com duas páginas de texto preenche o `Textarea` com o texto das duas páginas, sugere o título pelo nome, mostra "Texto lido do arquivo: N caracteres" e "Adicionar" envia `{ title, content }` à rota de sempre.
-- [ ] [E] "Lendo arquivo…" aparece enquanto o worker do pdf.js está atrasado (atraso injetado por `page.route` no endereço do worker); escolher outro arquivo nesse intervalo faz valer só o segundo; "Cancelar leitura" volta a tela ao estado anterior sem erro.
-- [ ] [E] PDF sem nenhum texto (página só com desenho) mostra a mensagem "sem texto"; PDF protegido por senha mostra a mensagem de senha; PDF truncado mostra "não foi possível ler"; arquivo de texto renomeado para `.pdf` mostra "não é um PDF válido"; arquivo de 10 MB + 1 byte mostra "passa de 10 MB" sem carregar o leitor (nenhum pedido ao módulo do pdf.js).
-- [ ] [E] Módulo do leitor bloqueado por `page.route` mostra "Não foi possível carregar o leitor de arquivos".
-- [ ] [E] Privacidade: com um PDF que contém uma frase secreta, o `console` do navegador nunca a mostra, `localStorage` só tem a chave do tema, `sessionStorage` fica vazio, a URL e o título não mudam e nenhum pedido sai para host diferente do site (todo pedido fora de `127.0.0.1:5186` falha o teste).
-- [ ] [E] `.txt` continua como antes (um caso de regressão), e a tela a 360 px de largura não tem rolagem horizontal com a nota e o "Lendo arquivo…" visíveis.
+- [x] [U] `detectFileKind`: `.txt`, `.md`, `.markdown`, `.pdf`, `.docx` (maiúsculas e minúsculas) reconhecidos; `.doc`, `.odt` e outra extensão devolvem o problema próprio.
+- [x] [U] Tamanho antes de ler: texto no limite de 200 KB passa e 1 byte acima recusa; PDF/DOCX no limite da D2 passa e 1 byte acima recusa; 0 byte = vazio.
+- [x] [U] Assinatura: `%PDF-` no byte 0 e no byte 1.000 passa; ausente nos primeiros 1.024 bytes recusa; `PK\x03\x04` passa para `.docx`; cabeçalho OLE em `.docx` dá o problema "protegido ou antigo"; texto qualquer com extensão `.pdf` ou `.docx` recusa.
+- [x] [U] `normalizeExtractedText`: NFC, `\r\n`/`\r`, controles, U+FFFD, U+00AD, largura zero, espaços repetidos, quebras em excesso e `trim` (vetores fixos); aplicada duas vezes dá o mesmo resultado; o resultado nunca contém NUL.
+- [x] [U] `extractedTextProblem`: texto só com espaços e pontuação = sem texto; 100.000 caracteres passa; 100.001 recusa.
+- [x] [U] `joinPdfTextItems`: `hasEOL` vira quebra, páginas separadas por linha em branco; para ao passar de 100.000 caracteres.
+- [x] [U] `titleFromFileName` tira `.pdf` e `.docx` e mantém a regra atual (os vetores antigos continuam passando).
+- [x] [U] Orquestração (com leitores falsos): escolher um segundo arquivo cancela o primeiro e só o segundo preenche; resultado tardio do primeiro é descartado; "Cancelar leitura" não gera mensagem de erro; prazo estourado gera a mensagem de prazo e chama o cancelamento do leitor; falha no carregamento do módulo gera "leitor não carregou"; erro do leitor com texto qualquer vira a mensagem fixa (a mensagem original nunca aparece).
+- [x] [U] Todas as mensagens de `FILE_PROBLEM_MESSAGES` são as da tabela e nenhuma interpola texto do arquivo.
+- [x] [B] `pnpm typecheck`, `pnpm lint`, `pnpm format:check` e `pnpm build` verdes; o ESLint recusa importar `pdfjs-dist` fora de `pdf-text.ts`; o build gera o worker do pdf.js em `dist/assets/`.
+- [x] [U] Teste de texto do código: `pdf-text.ts` só é referenciado por `import(` (nunca por import estático); o código não define `cMapUrl`, `standardFontDataUrl`, `wasmUrl` nem `iccUrl`, e passa `isEvalSupported: false` e `enableXfa: false`.
+- [x] [E] Aba Conhecimento com API falsa: escolher um PDF gerado com duas páginas de texto preenche o `Textarea` com o texto das duas páginas, sugere o título pelo nome, mostra "Texto lido do arquivo: N caracteres" e "Adicionar" envia `{ title, content }` à rota de sempre.
+- [x] [E] "Lendo arquivo…" aparece enquanto o worker do pdf.js está atrasado (atraso injetado por `page.route` no endereço do worker); escolher outro arquivo nesse intervalo faz valer só o segundo; "Cancelar leitura" volta a tela ao estado anterior sem erro.
+- [x] [E] PDF sem nenhum texto (página só com desenho) mostra a mensagem "sem texto"; PDF protegido por senha mostra a mensagem de senha; PDF truncado mostra "não foi possível ler"; arquivo de texto renomeado para `.pdf` mostra "não é um PDF válido"; arquivo de 10 MB + 1 byte mostra "passa de 10 MB" sem carregar o leitor (nenhum pedido ao módulo do pdf.js).
+- [x] [E] Módulo do leitor bloqueado por `page.route` mostra "Não foi possível carregar o leitor de arquivos".
+- [x] [E] Privacidade: com um PDF que contém uma frase secreta, o `console` do navegador nunca a mostra, `localStorage` só tem a chave do tema, `sessionStorage` fica vazio, a URL e o título não mudam e nenhum pedido sai para host diferente do site (todo pedido fora de `127.0.0.1:5186` falha o teste).
+- [x] [E] `.txt` continua como antes (um caso de regressão), e a tela a 360 px de largura não tem rolagem horizontal com a nota e o "Lendo arquivo…" visíveis.
 
 **E2**
 
-- [ ] [U] `readZipDirectory`: lê nomes e tamanhos de um ZIP gerado no teste; acusa ausência de `word/document.xml` ou `[Content_Types].xml`; soma descompactada acima do teto e ZIP64 recusam; ZIP truncado ou sem fim de diretório recusa sem lançar exceção crua.
-- [ ] [U] Teste de texto do código: `docx-text.worker.ts` só é criado por `new Worker(new URL(...))` e usa só `extractRawText`; `mammoth` não é importado fora dele (ESLint).
-- [ ] [E] DOCX gerado com dois parágrafos preenche o `Textarea` com os dois, separados por linha em branco, e o título sugerido não tem `.docx`.
-- [ ] [E] ZIP sem `word/document.xml` renomeado para `.docx` mostra "não é um documento do Word válido"; arquivo com cabeçalho OLE renomeado para `.docx` mostra "protegido por senha ou em formato antigo"; DOCX sem texto mostra "sem texto"; `.doc` e `.odt` são recusados pela extensão.
-- [ ] [E] Trocar de arquivo durante a leitura de um DOCX (worker atrasado por `page.route`) faz valer só o segundo.
-- [ ] [E] Privacidade do DOCX: mesma prova do PDF (frase secreta fora do `console`, do armazenamento e da URL).
+- [x] [U] `readZipDirectory`: lê nomes e tamanhos de um ZIP gerado no teste; acusa ausência de `word/document.xml` ou `[Content_Types].xml`; soma descompactada acima do teto e ZIP64 recusam; ZIP truncado ou sem fim de diretório recusa sem lançar exceção crua.
+- [x] [U] Teste de texto do código: `docx-text.worker.ts` só é criado por `new Worker(new URL(...))` e usa só `extractRawText`; `mammoth` não é importado fora dele (ESLint).
+- [x] [E] DOCX gerado com dois parágrafos preenche o `Textarea` com os dois, separados por linha em branco, e o título sugerido não tem `.docx`.
+- [x] [E] ZIP sem `word/document.xml` renomeado para `.docx` mostra "não é um documento do Word válido"; arquivo com cabeçalho OLE renomeado para `.docx` mostra "protegido por senha ou em formato antigo"; DOCX sem texto mostra "sem texto"; `.doc` e `.odt` são recusados pela extensão.
+- [x] [E] Trocar de arquivo durante a leitura de um DOCX (worker atrasado por `page.route`) faz valer só o segundo.
+- [x] [E] Privacidade do DOCX: mesma prova do PDF (frase secreta fora do `console`, do armazenamento e da URL).
 
 **Geral**
 
@@ -258,3 +258,53 @@ O navegador extrai e o servidor continua recebendo só texto pela rota existente
 1. Aprovar ou ajustar D2 a D13.
 2. Depois do merge e do deploy (só o site muda; não há migration nem variável), teste manual num computador e num celular (iPhone com Safari e Android com Chrome): um PDF de texto real, um PDF escaneado, um PDF com senha e um DOCX real; conferir o texto no campo antes de adicionar e perguntar algo do documento em "Testar".
 3. Não ponha segredo nem dado pessoal nos documentos (o aviso da aba continua valendo).
+
+## Registro da implementação
+
+2026-11-12, Claude Code (Opus 5.5, implementer), branch `spec/040-conhecimento-pdf-docx`. Commits: E1 `6fe744c` (regras, orquestração, PDF, tela, ESLint, NOTICE, testes) e E2 `75a656b` (DOCX). **Nenhum arquivo do `backend/` mudou**: sem rota, migration, variável de ambiente nem métrica.
+
+### Arquivos
+
+- `frontend/src/company/knowledge-file-rules.ts` (puro): `detectFileKind`, `checkFileSizeFor`, `checkMagicBytes`, `readZipDirectory`, `docxZipProblem`, `normalizeExtractedText`, `extractedTextProblem`, `pdfPageText`, `PdfTextCollector`, `joinPdfTextItems` e as constantes `KNOWLEDGE_BINARY_FILE_MAX_BYTES` (10 MB), `KNOWLEDGE_PDF_MAX_PAGES` (500), `KNOWLEDGE_DOCX_MAX_UNCOMPRESSED_BYTES` (50 MB), `KNOWLEDGE_FILE_READ_TIMEOUT_MS` (60 s), `FILE_HEAD_BYTES` (1.024).
+- `frontend/src/company/knowledge-file-reader.ts`: `FileReadController` (contador próprio + um `AbortController` por leitura, prazo, carregadores e relógio injetáveis) e `readBlob` (o `FileReader` da 026).
+- `frontend/src/company/pdf-text.ts` (único que importa `pdfjs-dist`), `docx-text.ts` (cria o worker) e `docx-text.worker.ts` (único que importa o `mammoth`).
+- `knowledge-rules.ts` (tipos e mensagens novos, `checkFileName` e `titleFromFileName` com `.pdf`/`.docx`), `KnowledgePage.tsx` (rótulo, `hint`, `accept`, "Lendo arquivo…", "Cancelar leitura", nota de caracteres, cancelamento no desmonte), `frontend/eslint.config.js` (`no-restricted-imports`), `frontend/vite.config.ts` (`optimizeDeps.include: ['mammoth']`), `frontend/NOTICE.md`, `shell.test.ts` (a lista fixa de dependências do site ganhou as duas).
+- Testes: `src/company/knowledge-file.test.ts` (20 unitários), `e2e/knowledge-files.spec.ts` (12 casos x desktop e celular), `e2e/knowledge-fixture.ts`, `e2e/file-builders.ts`.
+
+### Dependências e o que foi conferido (S1 a S6)
+
+- **`pdfjs-dist` 6.5.438** (estável mais recente, publicada em 2026-11-01; acima de 4.2.67) e **`mammoth` 1.13.0** (mais recente, 2026-09-26), versão exata, instaladas com `corepack pnpm` 12.3.4 (o `pnpm` global desta máquina falha ao baixar a versão do `packageManager`); `pnpm install --frozen-lockfile` passa.
+- **S1 (licenças, lidas no `package.json` e no `LICENSE` de cada pacote instalado):** `pdfjs-dist` Apache-2.0 (sem dependência de execução; a opcional `@napi-rs/canvas`, MIT, é só do Node e entra no lockfile, não no build). `mammoth` BSD-2-Clause; dependências: `jszip` 3.10.2 (MIT ou GPL-3.0-or-later, usado sob MIT), `pako` 1.0.11 (MIT e Zlib), `lie`, `immediate`, `setimmediate`, `readable-stream` e dependências (MIT; `inherits` ISC), `@xmldom/xmldom` 0.8.15 (MIT), `underscore` 1.13.8 (MIT), `base64-js` (MIT), `xmlbuilder` 10.1.1 (MIT), `lop`, `option`, `duck`, `dingbat-to-unicode` (BSD-2-Clause), `argparse` (MIT) e `sprintf-js` (BSD-3-Clause, só do CLI). **Diferente do esperado:** o `mammoth` 1.13.0 não usa mais o `bluebird` (trocado por promessas nativas, NEWS da 1.13.0). Nenhuma licença copyleft obrigatória. Tudo em `frontend/NOTICE.md`.
+- **S2 (API do pdf.js 6.5.438, lida em `types/src/display/api.d.ts` e `legacy/build/pdf.mjs` do pacote):** existem `enableXfa`, `disableFontFace`, `useSystemFonts`, `useWorkerFetch`, `disableAutoFetch`, `disableStream`, `disableRange`, `verbosity` (`VerbosityLevel.ERRORS` = 0) e `onPassword` (na tarefa; sem ele a promessa rejeita com `PasswordException`); `getTextContent` devolve itens com `str` e `hasEOL`; o worker do build `legacy` é `legacy/build/pdf.worker.min.mjs`. **`isEvalSupported` não existe mais** no 6.x: o worker instalado não tem `eval(` nem `new Function(` (conferido por busca no `pdf.worker.mjs`). Passamos `isEvalSupported: false` mesmo assim (tipo por interseção), para o caso de uma troca de versão, e acrescentamos `useWasm: false` (sem isso o worker poderia tentar buscar `.wasm`).
+- **S3:** CVE-2024-4367 (execução de código pela matriz de fonte) foi corrigida na 4.2.67; na 6.5.438 o caminho com `eval` nem existe. `pnpm audit --prod` (2026-11-12) não acusa nada no `pdfjs-dist` nem no `mammoth` (só dois avisos antigos do `lodash` do Prisma Studio, no backend).
+- **S5:** o `mammoth` roda no Web Worker de módulo no `vite` de desenvolvimento e no build (`docx-text.worker-*.js`, ~311 kB); o campo `browser` do pacote troca `unzip.js` e `docx/files.js` pelas versões de navegador (sem `fs`).
+- **S6:** NEWS do `mammoth`: 1.11.0 desligou o acesso a arquivos externos por padrão (o CVE de caminho relativo), 1.12.2 corrigiu poluição de protótipo pelos estilos do documento, 1.12.3 um retrocesso exponencial (DoS) e 1.13.0 o escape do Markdown. A 1.13.0 não tem alerta aberto; o próprio NEWS recomenda rodar documento não confiável em thread separada com prazo, que é o que a D6 faz.
+- **S7:** `new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url)` funciona no Vite 6.4.5 (dev e build; o build emite `dist/assets/pdf.worker.min-<hash>.mjs`, copiado sem alteração). O worker do DOCX também, sem plugin. O build continua com um único CSS no `index.html`. **Precisou** de `optimizeDeps.include: ['mammoth']`: a varredura do Vite não entra no worker, e no primeiro DOCX o servidor de desenvolvimento reotimizava as dependências e recarregava a página (o Playwright pegou isso). O pacote inicial (`index-*.js`) não tem código do pdf.js nem do mammoth.
+- **S4:** o Playwright aborta e registra todo pedido fora de `127.0.0.1:5186` (rota no contexto, que pega também os workers) e a lista fica vazia em todos os casos de PDF e DOCX.
+- **S8:** só Chromium (canal `chrome` local); Safari e Chrome no Android ficam para o teste manual do dono.
+- **S9:** não mudou nada no servidor.
+
+### Desvios e decisões de implementação
+
+- **`isEvalSupported`** (acima): sem efeito no 6.x, mantido por defesa; o critério do teste de texto continua valendo.
+- **Limite de 100.000 caracteres no PDF:** o coletor normaliza **cada página** antes de somar (o limite vale sobre o texto normalizado, não sobre o bruto, que tem espaços repetidos); páginas vazias não deixam linha a mais. `joinPdfTextItems` recebe as páginas (iterável) e para de consumir ao passar.
+- **Teto de páginas:** conferido por `numPages` logo ao abrir (não lê nenhuma página de um PDF com mais de 500).
+- **ZIP truncado ou com diretório inválido** mostra "não foi possível ler" (`unreadable`); ZIP válido sem `word/document.xml` ou `[Content_Types].xml` mostra "não é um documento do Word (.docx) válido". Só a assinatura e o diretório são conferidos antes de carregar o leitor.
+- **`.txt` passa pelo mesmo controlador** (mesmas mensagens e o mesmo `decodeTextFile`), sem "Lendo arquivo…" nem nota.
+- **Normalização:** a NFC é aplicada depois de remover os invisíveis (senão "e" + largura zero + acento agudo não seria idempotente); a tabulação vira espaço antes da remoção de controles; os de largura zero removidos são U+200B a U+200D, U+2060 e U+FEFF.
+- **Erro do worker do DOCX:** `event.preventDefault()` no `onerror`, para o navegador não escrever a mensagem no console.
+- **E1 e E2 em commits separados:** o `mammoth` entrou só no commit da E2; no da E1, um `.docx` mostrava "leitor não carregou" (estado intermediário, nunca publicado).
+- Os unitários do DOCX reaproveitam os geradores de `e2e/file-builders.ts` (import relativo do teste).
+
+### Verificação local (Node 22.22.3, `corepack pnpm` 12.3.4)
+
+- Verde: `tsc --noEmit` e `eslint .` do frontend; `prettier --check` do repositório; `vite build` (worker do pdf.js e do DOCX em `dist/assets/`); **todos os unitários do frontend** (241); `domain-vocabulary.test.ts` do backend; o ESLint recusa `pdfjs-dist` e `mammoth` fora dos módulos próprios (conferido com `--stdin`).
+- Playwright (`e2e/knowledge-files.spec.ts`, desktop e celular, Chromium do sistema): 24 de 24, repetido (`--repeat-each=2`, 48 de 48) depois da E2; a E1 também repetida. `e2e/onboarding.spec.ts` (o passo Documentos usa a mesma tela): 88 de 88.
+- **Não rodado:** o resto do Playwright, os unitários e a integração do backend (o backend não mudou), a versão do Node do `.nvmrc` (24). CI é a palavra final.
+
+### Riscos e pendências
+
+- **nginx e `.mjs`:** o worker do pdf.js é servido como `.mjs`. Worker de módulo exige tipo JavaScript; o `mime.types` do nginx do servidor precisa mapear `mjs` para `text/javascript` ou `application/javascript` (senão o PDF mostra "não foi possível ler"). **Conferir no servidor antes do teste manual** (`curl -I https://<site>/assets/pdf.worker.min-*.mjs`); se vier `application/octet-stream`, acrescentar `types { text/javascript mjs; }` no `location /` (não mudei os exemplos de `deploy/nginx/`).
+- O CSP pendente (023) precisa de `worker-src 'self'` para os dois workers.
+- Rodar o servidor de desenvolvimento dos testes reotimizou o cache de dependências do Vite (`frontend/node_modules/.vite`), compartilhado com o servidor do dono na 5173: ele pode ter recarregado a página uma vez.
+- Passos do dono: os da seção "Passos do dono" (teste manual em computador, iPhone e Android) e a conferência do `.mjs`.
