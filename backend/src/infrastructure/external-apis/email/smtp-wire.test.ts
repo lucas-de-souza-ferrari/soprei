@@ -174,3 +174,25 @@ test('SMTP falso: STARTTLS exigido e não oferecido falha sem enviar nada em tex
     await smtp.close();
   }
 });
+
+test('SMTP falso: contato comercial com Reply-To só com o endereço e assunto fixo (spec 040)', async () => {
+  const smtp = await startFakeSmtp();
+  try {
+    await new SmtpVerificationMailer(optionsFor(smtp.port)).sendSalesContact(
+      'vendas@example.test',
+      {
+        subject: 'Novo contato comercial pelo site do Soprei',
+        text: 'Nome: Maria\nMensagem:\nOi',
+        replyTo: 'maria@empresa.test',
+      },
+    );
+    assert.match(smtp.captured.rcptTo.join(' '), /vendas@example\.test/);
+    assert.doesNotMatch(smtp.captured.rcptTo.join(' '), /maria@empresa\.test/);
+    const headers = smtp.captured.data.split('\n\n')[0] ?? '';
+    assert.match(headers, /^Reply-To: maria@empresa\.test$/m);
+    assert.match(headers, /^Subject: Novo contato comercial pelo site do Soprei$/m);
+    assert.doesNotMatch(headers, /^(Cc|Bcc):/im);
+  } finally {
+    await smtp.close();
+  }
+});

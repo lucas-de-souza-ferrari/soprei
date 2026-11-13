@@ -1,4 +1,4 @@
-import { useId, type TextareaHTMLAttributes } from 'react';
+import { type Ref, useId, type TextareaHTMLAttributes } from 'react';
 import { cn } from '../lib/utils';
 
 export interface TextareaProps extends Omit<
@@ -12,6 +12,8 @@ export interface TextareaProps extends Omit<
   error?: string | undefined;
   /** Texto de apoio, ligado ao campo por `aria-describedby`. */
   hint?: string | undefined;
+  /** React 19: `ref` é prop comum e vai ao `<textarea>` (para mover o foco ao campo com erro). */
+  ref?: Ref<HTMLTextAreaElement>;
 }
 
 /**

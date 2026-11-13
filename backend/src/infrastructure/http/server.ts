@@ -18,6 +18,8 @@ import { adminEntitlementsController } from '../../presentation/admin/entitlemen
 import { registerEntitlementGate } from './entitlement-gate.js';
 import type { CompanyService } from '../../application/companies/company.service.js';
 import type { InvitationService } from '../../application/invitations/invitation.service.js';
+import type { SalesContactService } from '../../application/contact/sales-contact.service.js';
+import { salesContactController } from '../../presentation/contact/sales-contact.controller.js';
 import type { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
 import { authController } from '../../presentation/auth/auth.controller.js';
 import { adminAttendanceController } from '../../presentation/admin/attendance.controller.js';
@@ -140,6 +142,11 @@ export interface BuildServerParams {
     secure: boolean;
     /** Convites por e-mail (spec 025): só existem com contas globais ligadas (sem isto, 404). */
     invitations?: InvitationService;
+    /** Formulário de contato comercial (spec 040, E4): `/contact/sales*`; sem isto, 404. */
+    salesContact?: Pick<
+      SalesContactService,
+      'issueFormToken' | 'submit' | 'recordInvalid' | 'drain'
+    >;
   };
   readonly logger: FastifyBaseLogger;
   readonly readiness: ReadinessChecks;
@@ -254,6 +261,7 @@ export function buildServer({
     app.addHook('onClose', async () => {
       await accounts.service.drain();
       await accounts.invitations?.drain();
+      await accounts.salesContact?.drain();
     });
     void app.register(accountController, {
       service: accounts.service,
@@ -262,6 +270,12 @@ export function buildServer({
       ...(accounts.invitations === undefined ? {} : { invitations: accounts.invitations }),
       ...(auth === undefined ? {} : { legacyAuth: auth }),
     });
+    if (accounts.salesContact !== undefined) {
+      void app.register(salesContactController, {
+        service: accounts.salesContact,
+        origin: accounts.origin,
+      });
+    }
   }
 
   // Política de assinatura das escritas de tenant (spec 031): só com a cobrança ligada.

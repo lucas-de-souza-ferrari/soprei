@@ -48,6 +48,7 @@ function profiles(overrides: Partial<RateLimitProfiles> = {}): RateLimitProfiles
     webhook: { max: 1_000, windowSeconds: 60 },
     login: { max: 1_000, windowSeconds: 60 },
     refresh: { max: 1_000, windowSeconds: 60 },
+    contact: { max: 1_000, windowSeconds: 60 },
     ...overrides,
   };
 }

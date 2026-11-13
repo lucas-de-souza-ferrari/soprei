@@ -8,8 +8,17 @@
  * - `webhook`: webhook do canal de mensagens (declarado pela spec 011).
  * - `login`: `/auth/login` e `/auth/platform/login` (spec 007). **Fail-closed**: Redis fora = 503.
  * - `refresh`: `/auth/refresh` e `/auth/logout` (spec 007). **Fail-closed**.
+ * - `contact`: `POST /contact/sales`, o formulário de contato comercial (spec 040). **Fail-closed**: sem o
+ *   limiter, nada impediria um robô de fazer o SMTP do Soprei mandar e-mails em rajada.
  */
-export const RATE_LIMIT_PROFILES = ['public', 'admin', 'webhook', 'login', 'refresh'] as const;
+export const RATE_LIMIT_PROFILES = [
+  'public',
+  'admin',
+  'webhook',
+  'login',
+  'refresh',
+  'contact',
+] as const;
 
 export type RateLimitProfile = (typeof RATE_LIMIT_PROFILES)[number];
 
@@ -23,4 +32,8 @@ export function isRateLimitProfile(value: unknown): value is RateLimitProfile {
  * Perfis em que o Redis do limiter fora **bloqueia** a rota (503) em vez de liberá-la: com o
  * limiter fora, nada impediria força bruta de senha ou de refresh. Os demais seguem fail-open.
  */
-export const FAIL_CLOSED_RATE_LIMIT_PROFILES: readonly RateLimitProfile[] = ['login', 'refresh'];
+export const FAIL_CLOSED_RATE_LIMIT_PROFILES: readonly RateLimitProfile[] = [
+  'login',
+  'refresh',
+  'contact',
+];

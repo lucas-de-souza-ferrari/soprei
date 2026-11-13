@@ -4,25 +4,39 @@ import { installApi } from './company-fixture';
 
 // Spec 032 (E1): páginas públicas de privacidade, termos e exclusão de dados. O texto está no HTML (estático no
 // build; no desenvolvimento o plugin do vite.config.ts serve a mesma página), legível sem JavaScript.
-const isVigente = (file: string) =>
-  /^situacao: vigente$/m.test(
-    readFileSync(new URL(`../src/legal/${file}`, import.meta.url), 'utf8'),
-  );
+const source = (file: string) =>
+  readFileSync(new URL(`../src/legal/${file}`, import.meta.url), 'utf8');
+const isVigente = (file: string) => /^situacao: vigente$/m.test(source(file));
+// Data e versão vêm do cabeçalho de cada texto (a política passou à versão 2 na spec 040, E3).
+const headerOf = (file: string) => {
+  const date = /^atualizado-em: (\d{4})-(\d{2})-(\d{2})$/m.exec(source(file));
+  const version = /^versao: (\d+)$/m.exec(source(file));
+  return {
+    updated: `Última atualização: ${date?.[3] ?? ''}/${date?.[2] ?? ''}/${date?.[1] ?? ''}`,
+    version: `Versão ${version?.[1] ?? ''}`,
+  };
+};
 // `vigente` vem do próprio texto: rascunho mostra a faixa e os marcadores; vigente não tem nenhum dos dois.
 const PAGES = [
   {
     path: '/privacidade',
     title: 'Política de Privacidade do Soprei',
     vigente: isVigente('privacidade.md'),
+    ...headerOf('privacidade.md'),
   },
-  { path: '/termos', title: 'Termos de Uso do Soprei', vigente: isVigente('termos.md') },
+  {
+    path: '/termos',
+    title: 'Termos de Uso do Soprei',
+    vigente: isVigente('termos.md'),
+    ...headerOf('termos.md'),
+  },
   {
     path: '/exclusao-de-dados',
     title: 'Como pedir a exclusão dos seus dados',
     vigente: isVigente('exclusao-de-dados.md'),
+    ...headerOf('exclusao-de-dados.md'),
   },
 ] as const;
-const UPDATED = 'Última atualização: 12/11/2026';
 const DRAFT = 'Texto preliminar, em revisão. Pode mudar.';
 const isMobile = (name: string) => name === 'mobile';
 // D2: os termos só são publicados (link e termos.html) quando `vigente`; o servidor de desenvolvimento serve
@@ -50,7 +64,7 @@ function forbidden(requests: readonly Request[]): string[] {
     .map((url) => url.origin + url.pathname);
 }
 
-for (const { path, title, vigente } of PAGES) {
+for (const { path, title, vigente, updated, version } of PAGES) {
   test(`${path}: o HTML cru já tem o texto, a data, a versão e só o script de tema`, async ({
     request,
   }, testInfo) => {
@@ -61,8 +75,8 @@ for (const { path, title, vigente } of PAGES) {
       expect(response.headers()['content-type']).toContain('text/html');
       const html = await response.text();
       expect(html).toContain(`<h1>${title}</h1>`);
-      expect(html).toContain(UPDATED);
-      expect(html).toContain('Versão 1');
+      expect(html).toContain(updated);
+      expect(html).toContain(version);
       if (vigente) expect(html).not.toContain(DRAFT);
       else expect(html).toContain(DRAFT);
       expect(html.match(/<script/g)?.length).toBe(1);
@@ -76,13 +90,13 @@ for (const { path, title, vigente } of PAGES) {
 
 test.describe('sem JavaScript', () => {
   test.use({ javaScriptEnabled: false });
-  for (const { path, title, vigente } of PAGES) {
+  for (const { path, title, vigente, updated } of PAGES) {
     test(`${path}: título, data e faixa de rascunho (só em rascunho) visíveis`, async ({
       page,
     }) => {
       await page.goto(path);
       await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
-      await expect(page.getByText(UPDATED)).toBeVisible();
+      await expect(page.getByText(updated)).toBeVisible();
       await expect(page.getByText(DRAFT)).toHaveCount(vigente ? 0 : 1);
       await expect(page.getByRole('navigation', { name: 'Documentos legais' })).toBeVisible();
     });

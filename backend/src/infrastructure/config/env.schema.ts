@@ -95,6 +95,11 @@ export const envSchema = z
       'e-mail inválido',
     ),
     EMAIL_PROVIDER_USER: optionalSecret,
+    // Caixa que recebe os pedidos de contato comercial (spec 040, D11); vazia = EMAIL_PROVIDER_FROM.
+    SALES_CONTACT_EMAIL: optionalSecret.refine(
+      (value) => value === undefined || z.email().safeParse(value).success,
+      'e-mail inválido',
+    ),
     EMAIL_PROVIDER_PSWD: optionalSecret,
     // Expurgo de contas nunca confirmadas (spec 021): retenção em dias e intervalo da varredura (0 desliga).
     ACCOUNT_UNVERIFIED_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(7),
@@ -216,6 +221,9 @@ export const envSchema = z
     RATE_LIMIT_LOGIN_WINDOW_SECONDS: rateLimitWindowSeconds(900),
     RATE_LIMIT_REFRESH_MAX: rateLimitMax(60),
     RATE_LIMIT_REFRESH_WINDOW_SECONDS: rateLimitWindowSeconds(900),
+    // Formulário de contato comercial (spec 040, E4): 5 por hora por IP, fail-closed.
+    RATE_LIMIT_CONTACT_MAX: rateLimitMax(5),
+    RATE_LIMIT_CONTACT_WINDOW_SECONDS: rateLimitWindowSeconds(3_600),
     // Prazo de cada comando da conexão Redis dedicada ao limiter; estourou: fail-open.
     RATE_LIMIT_REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(10_000).default(250),
     // Canal WhatsApp (spec 011). Opt-in: sem `WHATSAPP_ENABLED=true` as rotas do webhook não existem.

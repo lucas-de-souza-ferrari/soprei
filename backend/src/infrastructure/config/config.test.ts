@@ -331,6 +331,37 @@ describe('parseConfig', () => {
       assert.equal(tokens.value.BILLING_TRIAL_TOKENS, 300_000);
     });
 
+    it('contato comercial (spec 040, E4): SALES_CONTACT_EMAIL opcional e validado; perfil contact 5 por hora', () => {
+      const off = parseConfig(VALID_ENV);
+      assert.ok(off.ok);
+      assert.equal(off.value.SALES_CONTACT_EMAIL, undefined);
+      assert.equal(off.value.RATE_LIMIT_CONTACT_MAX, 5);
+      assert.equal(off.value.RATE_LIMIT_CONTACT_WINDOW_SECONDS, 3_600);
+      const empty = parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, SALES_CONTACT_EMAIL: '' });
+      assert.ok(empty.ok);
+      assert.equal(empty.value.SALES_CONTACT_EMAIL, undefined);
+      const set = parseConfig({
+        ...VALID_ENV,
+        ...ACCOUNTS_ON,
+        SALES_CONTACT_EMAIL: 'vendas@x.com',
+      });
+      assert.ok(set.ok);
+      assert.equal(set.value.SALES_CONTACT_EMAIL, 'vendas@x.com');
+      for (const value of ['nao-e-email', 'a@b.com\r\nBcc: x@y.com', 'Vendas <v@x.com>']) {
+        const parsed = parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, SALES_CONTACT_EMAIL: value });
+        assert.equal(parsed.ok, false, value);
+      }
+      const custom = parseConfig({
+        ...VALID_ENV,
+        RATE_LIMIT_CONTACT_MAX: '3',
+        RATE_LIMIT_CONTACT_WINDOW_SECONDS: '600',
+      });
+      assert.ok(custom.ok);
+      assert.equal(custom.value.RATE_LIMIT_CONTACT_MAX, 3);
+      assert.equal(custom.value.RATE_LIMIT_CONTACT_WINDOW_SECONDS, 600);
+      assert.equal(parseConfig({ ...VALID_ENV, RATE_LIMIT_CONTACT_MAX: '0' }).ok, false);
+    });
+
     it('BILLING_ENABLED exige ACCOUNTS_ENABLED=true (a cobrança vive na sessão da conta)', () => {
       const alone = parseConfig({ ...VALID_ENV, BILLING_ENABLED: 'true' });
       assert.equal(alone.ok, false);

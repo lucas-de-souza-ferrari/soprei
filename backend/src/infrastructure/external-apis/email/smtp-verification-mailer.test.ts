@@ -113,3 +113,39 @@ test('log de falha e de sucesso do envio nunca expõe usuário nem senha SMTP', 
   assert.ok(!capture.raw().includes(pass));
   assert.ok(capture.raw().includes('[Redacted]'));
 });
+
+test('contato comercial (spec 040, E4): só from, to, replyTo (sem nome) e subject; falha fixa', async () => {
+  const sent: SendMailOptions[] = [];
+  const mailer = new SmtpVerificationMailer(BASE, {
+    sendMail: (options) => {
+      sent.push(options);
+      return Promise.resolve({});
+    },
+  });
+  await mailer.sendSalesContact('vendas@example.test', {
+    subject: 'Novo contato comercial pelo site do Soprei',
+    text: 'corpo',
+    replyTo: 'maria@empresa.test',
+  });
+  const message = sent[0];
+  assert.ok(message);
+  assert.deepEqual(Object.keys(message).sort(), ['from', 'replyTo', 'subject', 'text', 'to']);
+  assert.deepEqual(message.from, { name: 'Soprei', address: 'noreply@example.test' });
+  assert.equal(message.to, 'vendas@example.test');
+  assert.deepEqual(message.replyTo, { name: '', address: 'maria@empresa.test' });
+  assert.equal(message.subject, 'Novo contato comercial pelo site do Soprei');
+  assert.equal(message.html, undefined);
+
+  const failing = new SmtpVerificationMailer(BASE, {
+    sendMail: () => Promise.reject(new Error('550 maria@empresa.test corpo')),
+  });
+  await assert.rejects(
+    failing.sendSalesContact('vendas@example.test', {
+      subject: 's',
+      text: 'corpo',
+      replyTo: 'maria@empresa.test',
+    }),
+    (error: unknown) =>
+      error instanceof ServiceUnavailableError && !error.message.includes('maria@empresa.test'),
+  );
+});

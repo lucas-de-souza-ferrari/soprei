@@ -50,6 +50,10 @@ const REDACTED_KEYS = [
   // Convites (spec 025): o token do link e o próprio link nunca vão a log.
   'invitationToken',
   'inviteLink',
+  // Contato comercial (spec 040, E4): token do formulário e dados do interessado (o e-mail já está acima).
+  'formToken',
+  'phone',
+  'companyName',
 ] as const;
 
 /**

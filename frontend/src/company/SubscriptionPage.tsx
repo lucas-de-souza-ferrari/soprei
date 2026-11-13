@@ -42,6 +42,7 @@ import {
   type Tone,
 } from './billing-rules';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EnterpriseCard } from '../contact/EnterpriseCard';
 import { SectionTabs } from './SectionTabs';
 import { formatMoney } from './money';
 import { RetryAlert } from './RetryAlert';
@@ -752,6 +753,8 @@ export function SubscriptionPage({
                     plano e o uso.
                   </p>
                 )}
+                {/* Spec 040 (D10): o quarto cartão, fora do grupo de rádios e com ou sem checkout. */}
+                <EnterpriseCard />
               </>
             ),
           },
