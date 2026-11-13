@@ -18,7 +18,12 @@ const DAY = 86_400_000;
 const GRACE = 5;
 const END = new Date('2026-12-01T00:00:00Z');
 const EMAIL = 'sentinela-email-titular@exemplo.test';
-const SETTINGS = { graceDays: GRACE, trialTokens: 300_000, appOrigin: 'https://site.exemplo.test' };
+const SETTINGS = {
+  graceDays: GRACE,
+  trialTokens: 300_000,
+  trialReplies: 100,
+  appOrigin: 'https://site.exemplo.test',
+};
 const at = (offsetMs: number): Date => new Date(END.getTime() + offsetMs);
 
 const PLAN = {

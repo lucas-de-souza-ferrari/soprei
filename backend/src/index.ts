@@ -178,11 +178,13 @@ async function main(): Promise<void> {
           graceDays: config.BILLING_GRACE_DAYS,
           trialDays: config.BILLING_TRIAL_DAYS,
           trialTokens: config.BILLING_TRIAL_TOKENS,
+          trialReplies: config.BILLING_TRIAL_REPLIES,
         },
         entitlements: new PrismaEntitlementReader(prisma, {
           graceDays: config.BILLING_GRACE_DAYS,
           trialDays: config.BILLING_TRIAL_DAYS,
           trialTokens: config.BILLING_TRIAL_TOKENS,
+          trialReplies: config.BILLING_TRIAL_REPLIES,
         }),
         usage: new PrismaUsageMeter(prisma),
       }
@@ -210,13 +212,16 @@ async function main(): Promise<void> {
             accountMailer === undefined
               ? undefined
               : new BillingNoticeService({
-                  repository: new PrismaBillingNoticeRepository(prisma),
+                  repository: new PrismaBillingNoticeRepository(prisma, {
+                    allowSopreiPaysMeta: config.SOPREI_PAYS_META_ENABLED,
+                  }),
                   mailer: accountMailer,
                   logger,
                   metrics,
                   settings: {
                     graceDays: config.BILLING_GRACE_DAYS,
                     trialTokens: config.BILLING_TRIAL_TOKENS,
+                    trialReplies: config.BILLING_TRIAL_REPLIES,
                     appOrigin: config.APP_ORIGIN,
                   },
                 });

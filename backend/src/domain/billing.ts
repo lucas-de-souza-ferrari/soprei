@@ -235,19 +235,52 @@ export interface QuotaSettings {
   readonly graceDays: number;
   /** Cota de tokens do teste gratuito (`BILLING_TRIAL_TOKENS`). */
   readonly trialTokens: number;
+  /** Cota de respostas do teste gratuito (`BILLING_TRIAL_REPLIES`, spec 040 D8), limitada à do plano. */
+  readonly trialReplies: number;
 }
 
-/** Cotas efetivas (plano + respostas extras compradas; o teste usa a cota de tokens própria). */
+/**
+ * Cotas efetivas (plano + respostas extras compradas). O teste gratuito usa as cotas próprias: tokens =
+ * `trialTokens`, respostas = o menor entre `trialReplies` e a cota do plano (spec 040, D8).
+ */
 export function quotaLimits(
   subscription: Pick<SubscriptionRecord, 'status' | 'plan'>,
   extraReplies: number,
-  settings: Pick<QuotaSettings, 'trialTokens'>,
+  settings: Pick<QuotaSettings, 'trialTokens' | 'trialReplies'>,
 ): { readonly tokens: number; readonly replies: number } {
-  const baseTokens =
-    subscription.status === 'TRIAL' ? settings.trialTokens : subscription.plan.monthlyTokens;
+  const trial = subscription.status === 'TRIAL';
+  const baseTokens = trial ? settings.trialTokens : subscription.plan.monthlyTokens;
+  const baseReplies = trial
+    ? Math.min(settings.trialReplies, subscription.plan.monthlyReplies)
+    : subscription.plan.monthlyReplies;
   return {
     tokens: baseTokens + extraReplies * TOKENS_PER_EXTRA_REPLY,
-    replies: subscription.plan.monthlyReplies + extraReplies,
+    replies: baseReplies + extraReplies,
+  };
+}
+
+/** As duas cotas mensais de uma linha de `Plan` (respostas e tokens). */
+export interface PlanQuotas {
+  readonly monthlyReplies: number;
+  readonly monthlyTokens: number;
+}
+
+/**
+ * Regra do máximo (spec 040, D4): para cada cota, o MAIOR valor entre a linha de `Plan` da assinatura
+ * (`own`) e a versão ativa mais nova do mesmo código (`current`). Assim um catálogo mais generoso vale na
+ * hora para quem já assina, e uma versão futura com cota menor nunca reduz a de quem já pagou (só vale quando
+ * a assinatura renovar e a concessão gravar a linha nova). Sem `current` (catálogo sem o código), fica a própria.
+ */
+export function effectiveQuotas(
+  own: PlanQuotas,
+  current: PlanQuotas | null | undefined,
+): PlanQuotas {
+  if (current === null || current === undefined) {
+    return { monthlyReplies: own.monthlyReplies, monthlyTokens: own.monthlyTokens };
+  }
+  return {
+    monthlyReplies: Math.max(own.monthlyReplies, current.monthlyReplies),
+    monthlyTokens: Math.max(own.monthlyTokens, current.monthlyTokens),
   };
 }
 
@@ -307,6 +340,76 @@ export function priceTotalCents(
     (modules.agenda ? price.agendaCents : 0) +
     (modules.stock ? price.stockCents : 0)
   );
+}
+
+/**
+ * Preço por resposta incluída, em milésimos de centavo, arredondado para baixo (spec 040, D9): o preço do
+ * plano (sem módulos) dividido pelas respostas do ciclo inteiro (mensal = 1 mês de cota; anual = 12).
+ * Cota inválida devolve 0 (nada é exibido como "de graça" por engano: a tela trata 0 como ausente).
+ */
+export function perReplyMilliCents(
+  baseCents: number,
+  monthlyReplies: number,
+  cycle: BillingCycle,
+): number {
+  const replies = monthlyReplies * CYCLE_MONTHS[cycle];
+  if (!(replies > 0) || !(baseCents > 0)) return 0;
+  return Math.floor((baseCents * 1000) / replies);
+}
+
+/** Uma entrada do catálogo vigente, só com o que as regras puras precisam (estrutural, sem repositório). */
+export interface CatalogLike {
+  readonly plan: Pick<PlanRecord, 'code'>;
+  readonly prices: readonly Pick<
+    PlanPriceRecord,
+    'cycle' | 'baseCents' | 'agendaCents' | 'stockCents'
+  >[];
+}
+
+export interface RenewalPriceChange {
+  /** Total da assinatura ao preço que ela pagou (`sub.price`, com os módulos atuais). */
+  readonly currentCents: number;
+  /** Total da próxima renovação ao preço vigente do catálogo (seleção atual ou a troca agendada). */
+  readonly nextCents: number;
+}
+
+/**
+ * Totais da próxima renovação (spec 040, D6): a seleção que vai renovar (a troca agendada, se houver, ou a
+ * atual) ao preço vigente do catálogo, contra o total ao preço da própria assinatura. `null` se o catálogo não
+ * tem o plano ou o ciclo (nada a comparar).
+ */
+export function renewalPriceChange(
+  subscription: Pick<
+    SubscriptionRecord,
+    'plan' | 'price' | 'cycle' | 'agendaEnabled' | 'stockEnabled' | 'pendingChange'
+  >,
+  catalog: readonly CatalogLike[],
+): RenewalPriceChange | null {
+  const next: PlanSelection = subscription.pendingChange ?? {
+    planCode: subscription.plan.code,
+    cycle: subscription.cycle,
+    agenda: subscription.agendaEnabled,
+    stock: subscription.stockEnabled,
+  };
+  const entry = catalog.find((candidate) => candidate.plan.code === next.planCode);
+  const price = entry?.prices.find((candidate) => candidate.cycle === next.cycle);
+  if (price === undefined) return null;
+  return {
+    currentCents: priceTotalCents(subscription.price, {
+      agenda: subscription.agendaEnabled,
+      stock: subscription.stockEnabled,
+    }),
+    nextCents: priceTotalCents(price, { agenda: next.agenda, stock: next.stock }),
+  };
+}
+
+/** A próxima renovação custa MAIS que o preço que a assinatura paga hoje? (Aviso de reajuste, D6.) */
+export function renewalPriceIncrease(
+  subscription: Parameters<typeof renewalPriceChange>[0],
+  catalog: readonly CatalogLike[],
+): boolean {
+  const change = renewalPriceChange(subscription, catalog);
+  return change !== null && change.nextCents > change.currentCents;
 }
 
 // ---------------------------------------------------------------------------------------------

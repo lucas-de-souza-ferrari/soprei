@@ -9,6 +9,10 @@ export interface BillingMailData {
   readonly graceEnd: Date;
   /** Uso da cota do aviso de respostas, quando é um aviso de cota. */
   readonly quota?: { readonly used: number; readonly limit: number } | undefined;
+  /** Início da próxima janela de uso (quando a IA volta), só no aviso de limite de uso da IA (spec 040, D3). */
+  readonly nextWindowStart?: Date | undefined;
+  /** Total da próxima renovação, do catálogo, em centavos; só no aviso de reajuste (spec 040, D6). */
+  readonly renewalCents?: number | undefined;
 }
 
 const CONTROL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
@@ -19,6 +23,12 @@ const DATE = new Intl.DateTimeFormat('pt-BR', {
   year: 'numeric',
 });
 const NUMBER = new Intl.NumberFormat('pt-BR');
+const MONEY = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+/** Centavos inteiros em reais (R$ 3.490,00). Só no aviso de reajuste. */
+export function formatNoticeMoney(cents: number): string {
+  return MONEY.format(cents / 100).replace(/\s/gu, ' ');
+}
 
 /** Nome do plano vem do catálogo, mas é tratado como texto livre: sem controle, quebra de linha nem excesso. */
 function cleanName(name: string): string {
@@ -36,6 +46,7 @@ export const BILLING_NOTICE_SUBJECTS: Readonly<Record<BillingNoticeKind, string>
   PERIOD_ENDING_7D: 'Sua assinatura do Soprei vence em poucos dias',
   PERIOD_ENDING_1D: 'Sua assinatura do Soprei vence em menos de 24 horas',
   PERIOD_ENDED: 'Sua assinatura do Soprei venceu',
+  PRICE_CHANGE: 'O valor da renovação da sua assinatura do Soprei vai mudar',
   PERIOD_GRACE_ENDED: 'A carência da sua assinatura do Soprei terminou',
   PAYMENT_RECEIVED: 'Recebemos o seu pagamento no Soprei',
   PLAN_CHANGE_APPLIED: 'Sua troca de plano do Soprei foi aplicada',
@@ -45,7 +56,8 @@ export const BILLING_NOTICE_SUBJECTS: Readonly<Record<BillingNoticeKind, string>
   QUOTA_REPLIES_80: 'Você já usou 80% das respostas do seu plano do Soprei',
   QUOTA_REPLIES_100: 'As respostas do seu plano do Soprei acabaram',
   QUOTA_TOKENS_80: 'Você já usou 80% da cota de IA do seu plano do Soprei',
-  QUOTA_TOKENS_100: 'A cota de IA do seu plano do Soprei acabou',
+  // Spec 040 (D3): sem a palavra "token" nem números de tokens (a cota de tokens não aparece na tela).
+  QUOTA_TOKENS_100: 'As respostas automáticas do Soprei pararam este mês',
 };
 
 function quotaLine(data: BillingMailData): string {
@@ -116,15 +128,27 @@ function bodyOf(kind: BillingNoticeKind, data: BillingMailData): string[] {
       ];
     case 'QUOTA_TOKENS_100':
       return [
-        `A cota de uso da IA do seu plano ${plan} acabou neste mês.`,
-        'O atendente parou de responder e as mensagens recebidas continuam guardadas e visíveis no painel. Ele volta no início do próximo mês ou quando você trocar de plano.',
+        `O limite de uso da inteligência artificial do seu plano ${plan} foi atingido neste mês, antes da cota de respostas.`,
+        'O atendente parou de responder e as mensagens recebidas continuam guardadas e visíveis no painel; nada se perde.',
+        data.nextWindowStart === undefined
+          ? 'Ele volta a responder no início do próximo mês de uso do plano.'
+          : `Ele volta a responder em ${formatNoticeDate(data.nextWindowStart)}, quando começa o próximo mês de uso do plano.`,
+      ];
+    case 'PRICE_CHANGE':
+      return [
+        data.renewalCents === undefined
+          ? `O valor da renovação do seu plano ${plan} vai mudar.`
+          : `O valor da renovação do seu plano ${plan} passa a ser ${formatNoticeMoney(data.renewalCents)}.`,
+        `O novo valor vale a partir da próxima renovação, em ${end}. O período que você já pagou não muda.`,
+        'Se não quiser renovar, você pode cancelar antes dessa data na tela de Assinatura. Nada é cobrado automaticamente.',
       ];
   }
 }
 
 /**
  * E-mail de aviso de cobrança em texto simples (pt-BR). O link leva só à tela de Assinatura (sem token nem
- * dado sensível); nenhum valor em dinheiro, dado de cartão ou dado de outra conta entra no texto.
+ * dado sensível); nenhum dado de cartão ou de outra conta entra no texto. O único valor em dinheiro é o da
+ * próxima renovação no aviso de reajuste (spec 040, D6), vindo do catálogo.
  */
 export function billingNoticeMail(
   kind: BillingNoticeKind,

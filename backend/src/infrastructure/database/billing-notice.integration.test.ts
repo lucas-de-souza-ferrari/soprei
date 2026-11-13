@@ -24,7 +24,7 @@ const baseConfig = loadIntegrationConfig();
 const config = { ...baseConfig, DB_POOL_MAX: 30, DB_POOL_CONNECTION_TIMEOUT_MS: 30_000 };
 const DAY = 86_400_000;
 const GRACE = 5;
-const SETTINGS = { graceDays: GRACE, trialDays: 7, trialTokens: 300_000 };
+const SETTINGS = { graceDays: GRACE, trialDays: 7, trialTokens: 300_000, trialReplies: 100 };
 const APP_ORIGIN = 'https://site.exemplo.test';
 const API_KEY = `inchk_${randomBytes(12).toString('hex')}`;
 const RUN = randomBytes(4).toString('hex');
@@ -61,7 +61,12 @@ function service(mailer: RecordingMailer, logs = captureLogs(), metrics = create
     mailer,
     logger: logs.logger,
     metrics,
-    settings: { graceDays: GRACE, trialTokens: SETTINGS.trialTokens, appOrigin: APP_ORIGIN },
+    settings: {
+      graceDays: GRACE,
+      trialTokens: SETTINGS.trialTokens,
+      trialReplies: SETTINGS.trialReplies,
+      appOrigin: APP_ORIGIN,
+    },
     now: () => clock,
   });
 }
@@ -211,12 +216,12 @@ describe('avisos periódicos com o banco real (spec 031, E5)', () => {
     assert.equal(mailer.mine().filter((entry) => entry.email === account.email).length, 0);
   });
 
-  it('o aviso de 80% e o de 100% de cada cota saem separados, uma vez por janela, com o uso real do contador', async () => {
+  it('o aviso de 80% e o de 100% de respostas e o de 100% de tokens saem separados, uma vez por janela, com o uso real do contador', async () => {
     const { account, subscriptionId, end } = await paidSubscription('cota', 20 * DAY);
     const windowStart = new Date(end.getTime() - 30 * DAY);
-    // Essencial: 800 respostas e 3.000.000 de tokens por janela.
+    // Essencial (catálogo da spec 040): 2.500 respostas e 15.000.000 de tokens por janela.
     await db().usageCounter.create({
-      data: { subscriptionId, windowStart, sentMessages: 650n, tokens: 3_000_000n },
+      data: { subscriptionId, windowStart, sentMessages: 2_000n, tokens: 15_000_000n },
     });
     const mailer = new RecordingMailer();
     const s = service(mailer);
@@ -228,13 +233,18 @@ describe('avisos periódicos com o banco real (spec 031, E5)', () => {
         .sort();
     await s.runOnce();
     assert.deepEqual(subjects(), [
-      'A cota de IA do seu plano do Soprei acabou',
+      'As respostas automáticas do Soprei pararam este mês',
       'Você já usou 80% das respostas do seu plano do Soprei',
     ]);
+    // O de 80% dos tokens nunca é gerado nem marcado (spec 040, D3).
+    assert.equal(
+      await db().paymentNotice.count({ where: { subscriptionId, kind: 'QUOTA_TOKENS_80' } }),
+      0,
+    );
     // Em 100% de respostas: um e-mail novo; o de 80% já tinha saído e não se repete.
     await db().usageCounter.updateMany({
       where: { subscriptionId, windowStart },
-      data: { sentMessages: 800n },
+      data: { sentMessages: 2_500n },
     });
     await s.runOnce();
     await s.runOnce();
@@ -441,5 +451,101 @@ describe('aviso de pagamento recebido e de troca aplicada (spec 031, E5)', () =>
     // Nada de e-mail nem texto de aviso em log ou métrica.
     assert.ok(!logContains(s.logs.raw(), account.email));
     assert.ok(!(await s.metrics.registry.metrics()).includes(EMAIL_SENTINEL));
+  });
+});
+
+describe('aviso de reajuste PRICE_CHANGE (spec 040, D6)', () => {
+  /**
+   * Assinatura anual do Escala presa ao catálogo ANTIGO (versão 1: R$ 3.350,40 por ano). A renovação ao
+   * catálogo novo custa R$ 3.490,00: sobe, e o aviso é devido entre 45 e 30 dias antes do fim do período.
+   */
+  async function oldAnnualScale(
+    label: string,
+    endsInMs: number,
+    extra: Parameters<typeof newAccount>[1] & { cancel?: boolean } = {},
+  ) {
+    const { account, subscriptionId, end } = await paidSubscription(label, endsInMs, extra);
+    const oldPlan = await db().plan.findFirst({ where: { code: 'SCALE', version: 1 } });
+    assert.ok(oldPlan !== null);
+    const oldPrice = await db().planPrice.findFirst({
+      where: { planId: oldPlan.id, cycle: 'ANNUAL', version: 1 },
+    });
+    assert.ok(oldPrice !== null);
+    assert.equal(oldPrice.baseCents, 335_040);
+    await db().subscription.update({
+      where: { id: subscriptionId },
+      data: {
+        planId: oldPlan.id,
+        priceId: oldPrice.id,
+        cycle: 'ANNUAL',
+        agendaEnabled: false,
+        stockEnabled: false,
+        currentPeriodStart: new Date(end.getTime() - 365 * DAY),
+      },
+    });
+    return { account, subscriptionId, end };
+  }
+
+  const priceMails = (mailer: RecordingMailer, email: string) =>
+    mailer
+      .mine()
+      .filter(
+        (entry) =>
+          entry.email === email &&
+          entry.mail.subject === 'O valor da renovação da sua assinatura do Soprei vai mudar',
+      );
+
+  it('sai uma vez, a 40 dias do fim, mesmo com execuções simultâneas; o texto tem o valor do catálogo e nada de outra conta', async () => {
+    const { account, subscriptionId } = await oldAnnualScale('reajuste', 40 * DAY);
+    const other = await oldAnnualScale('reajuste-outra', 40 * DAY);
+    const mailer = new RecordingMailer();
+    const a = service(mailer);
+    const b = service(mailer);
+    await Promise.all([a.runOnce(), b.runOnce(), a.runOnce(), b.runOnce()]);
+    await a.runOnce();
+    const mine = priceMails(mailer, account.email);
+    assert.equal(mine.length, 1, 'um e-mail só por período');
+    const text = mine[0]?.mail.text ?? '';
+    assert.ok(text.includes('R$ 3.490,00'), 'o valor da renovação vem do catálogo novo');
+    assert.ok(text.includes('O período que você já pagou não muda'));
+    assert.ok(text.includes(`${APP_ORIGIN}/painel/assinatura`));
+    assert.ok(!text.includes(other.account.email));
+    assert.ok(!text.includes('reajuste-outra'));
+    assert.ok(!text.includes(subscriptionId));
+    assert.equal(
+      await db().paymentNotice.count({ where: { subscriptionId, kind: 'PRICE_CHANGE' } }),
+      1,
+    );
+    // A outra conta recebe o próprio aviso, separado.
+    assert.equal(priceMails(mailer, other.account.email).length, 1);
+  });
+
+  it('não sai a 46 dias nem a 29 dias do fim', async () => {
+    const far = await oldAnnualScale('reajuste-46', 46 * DAY);
+    const near = await oldAnnualScale('reajuste-29', 29 * DAY);
+    const mailer = new RecordingMailer();
+    await service(mailer).runOnce();
+    assert.equal(priceMails(mailer, far.account.email).length, 0);
+    assert.equal(priceMails(mailer, near.account.email).length, 0);
+  });
+
+  it('não sai com cancelAtPeriodEnd, para conta não confirmada nem desativada, nem para quem não sobe', async () => {
+    const cancelled = await oldAnnualScale('reajuste-cancel', 40 * DAY, { cancel: true });
+    const unverified = await oldAnnualScale('reajuste-naoconf', 40 * DAY, { verified: false });
+    const disabled = await oldAnnualScale('reajuste-off', 40 * DAY, { status: 'DISABLED' });
+    // Essencial mensal ao preço novo (o de paidSubscription): a renovação não sobe.
+    const same = await paidSubscription('reajuste-igual', 40 * DAY);
+    const mailer = new RecordingMailer();
+    await service(mailer).runOnce();
+    for (const entry of [cancelled, unverified, disabled, same]) {
+      assert.equal(priceMails(mailer, entry.account.email).length, 0, entry.account.email);
+    }
+    // Conta sem destinatário não é marcada (nada enviado nem travado).
+    assert.equal(
+      await db().paymentNotice.count({
+        where: { subscriptionId: unverified.subscriptionId, kind: 'PRICE_CHANGE' },
+      }),
+      0,
+    );
   });
 });

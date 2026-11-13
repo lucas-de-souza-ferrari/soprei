@@ -1,7 +1,9 @@
 import {
+  type CatalogLike,
   type QuotaSettings,
   quotaLimits,
   reachedAlertFractions,
+  renewalPriceIncrease,
   resolveAccess,
   type SubscriptionRecord,
   type UsageNumbers,
@@ -20,6 +22,7 @@ export const BILLING_NOTICE_KINDS = [
   'PERIOD_ENDING_7D',
   'PERIOD_ENDING_1D',
   'PERIOD_ENDED',
+  'PRICE_CHANGE',
   'PERIOD_GRACE_ENDED',
   'PAYMENT_RECEIVED',
   'PLAN_CHANGE_APPLIED',
@@ -39,6 +42,11 @@ export const NOTICE_TRIAL_ENDING_MS = DAY_MS;
  * pausa do timer, ninguém recebe um e-mail sobre algo que acabou há semanas.
  */
 export const NOTICE_RECENT_END_MS = 3 * DAY_MS;
+/**
+ * Aviso de reajuste (spec 040, D6): sai quando o fim do período está entre 30 e 45 dias à frente (os termos
+ * pedem 30 dias de antecedência; a folga de 15 dias cobre uma tarefa parada por alguns dias).
+ */
+export const NOTICE_PRICE_CHANGE_DAYS = { min: 30, max: 45 } as const;
 
 /** Um aviso devido e os tipos que ele cobre (marcados sem enviar: 100% cobre o de 80%). */
 export interface DueNotice {
@@ -57,12 +65,20 @@ export interface NoticeSubject {
   readonly companies: number;
   /** Vagas do plano da troca agendada, ou `null` se não há troca agendada. */
   readonly pendingPlanMaxCompanies: number | null;
+  /**
+   * Catálogo vigente (spec 040, D6): sem ele, o aviso de reajuste não é avaliado. É global (o mesmo para
+   * todas as contas); nada de outra conta entra aqui.
+   */
+  readonly catalog?: readonly CatalogLike[] | undefined;
 }
 
 /**
  * Avisos devidos a esta assinatura em `now`. Relógio e carência injetados. Regras:
- * - Só quem o acesso ainda permite recebe alerta de cota (80% e 100%, respostas e tokens separados);
- *   se a cota já está em 100%, o de 80% é coberto (um e-mail só).
+ * - Só quem o acesso ainda permite recebe alerta de cota. Respostas: 80% e 100% (se a cota já está em 100%,
+ *   o de 80% é coberto: um e-mail só). Tokens (spec 040, D3): só o de 100% (a cota de tokens não aparece na
+ *   tela; o de 80% é sinal interno, nas métricas e no log de bloqueio).
+ * - Reajuste (spec 040, D6): assinatura paga em vigor, não cancelada, cuja próxima renovação custa mais que o
+ *   preço que paga hoje, com o fim do período entre 30 e 45 dias à frente; uma vez por período.
  * - Cancelada para o fim do período (`cancelAtPeriodEnd`): nenhum aviso de renovação, vencimento ou carência.
  * - Teste: aviso a 1 dia do fim e, passado o fim (recente), o de teste encerrado.
  * - Pago: a até 7 dias do vencimento (e depois a até 1 dia), ao vencer (começa a carência) e ao fim da carência.
@@ -104,6 +120,14 @@ export function dueNotices(
       ) {
         add('DOWNGRADE_BLOCKED', periodEnd);
       }
+      if (
+        subject.catalog !== undefined &&
+        remaining >= NOTICE_PRICE_CHANGE_DAYS.min * DAY_MS &&
+        remaining <= NOTICE_PRICE_CHANGE_DAYS.max * DAY_MS &&
+        renewalPriceIncrease(subscription, subject.catalog)
+      ) {
+        add('PRICE_CHANGE', periodEnd);
+      }
     } else if (resolved.state === 'PAST_DUE') {
       add('PERIOD_ENDED', periodEnd);
     } else if (resolved.state === 'EXPIRED') {
@@ -115,23 +139,17 @@ export function dueNotices(
   // Cotas: só enquanto o acesso não está bloqueado (a IA já parou por falta de assinatura, não de cota).
   if (resolved.access !== 'blocked') {
     const limits = quotaLimits(subscription, subject.usage.extraReplies, settings);
-    const quotas = [
-      {
-        used: subject.usage.sentMessages,
-        limit: limits.replies,
-        kinds: ['REPLIES_80', 'REPLIES_100'],
-      },
-      { used: subject.usage.tokens, limit: limits.tokens, kinds: ['TOKENS_80', 'TOKENS_100'] },
-    ] as const;
-    for (const quota of quotas) {
-      const reached = reachedAlertFractions(quota.used, quota.limit);
-      const k80 = `QUOTA_${quota.kinds[0]}` as BillingNoticeKind;
-      const k100 = `QUOTA_${quota.kinds[1]}` as BillingNoticeKind;
-      if (reached.includes(1)) {
-        add(k100, subject.usageWindowStart, [{ kind: k80, windowStart: subject.usageWindowStart }]);
-      } else if (reached.includes(0.8)) {
-        add(k80, subject.usageWindowStart);
-      }
+    const reached = reachedAlertFractions(subject.usage.sentMessages, limits.replies);
+    if (reached.includes(1)) {
+      add('QUOTA_REPLIES_100', subject.usageWindowStart, [
+        { kind: 'QUOTA_REPLIES_80', windowStart: subject.usageWindowStart },
+      ]);
+    } else if (reached.includes(0.8)) {
+      add('QUOTA_REPLIES_80', subject.usageWindowStart);
+    }
+    // Tokens: só o de 100% (D3). O QUOTA_TOKENS_80 continua no enum do banco, mas nunca é gerado.
+    if (reachedAlertFractions(subject.usage.tokens, limits.tokens).includes(1)) {
+      add('QUOTA_TOKENS_100', subject.usageWindowStart);
     }
   }
   return out;

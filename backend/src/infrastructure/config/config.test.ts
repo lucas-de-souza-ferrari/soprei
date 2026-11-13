@@ -297,7 +297,8 @@ describe('parseConfig', () => {
       assert.equal(off.value.SOPREI_PAYS_META_ENABLED, false);
       assert.equal(off.value.BILLING_GRACE_DAYS, 5);
       assert.equal(off.value.BILLING_TRIAL_DAYS, 7);
-      assert.equal(off.value.BILLING_TRIAL_TOKENS, 300_000);
+      // Spec 040 (D8): padrão dos tokens do teste subiu para 600.000 (100 respostas x 6.000).
+      assert.equal(off.value.BILLING_TRIAL_TOKENS, 600_000);
       const on = parseConfig({ ...VALID_ENV, ...ACCOUNTS_ON, BILLING_ENABLED: 'true' });
       assert.ok(on.ok);
       assert.equal(on.value.BILLING_ENABLED, true);
@@ -311,6 +312,23 @@ describe('parseConfig', () => {
       }
       assert.equal(parseConfig({ ...VALID_ENV, BILLING_TRIAL_DAYS: '0' }).ok, false);
       assert.equal(parseConfig({ ...VALID_ENV, BILLING_GRACE_DAYS: '-1' }).ok, false);
+    });
+
+    it('teste gratuito em respostas (spec 040, D8): BILLING_TRIAL_REPLIES opcional (padrão 100), de 1 a 1.000', () => {
+      const off = parseConfig(VALID_ENV);
+      assert.ok(off.ok);
+      assert.equal(off.value.BILLING_TRIAL_REPLIES, 100);
+      for (const value of ['1', '100', '1000']) {
+        const parsed = parseConfig({ ...VALID_ENV, BILLING_TRIAL_REPLIES: value });
+        assert.ok(parsed.ok, value);
+        assert.equal(parsed.value.BILLING_TRIAL_REPLIES, Number(value));
+      }
+      for (const value of ['0', '1001', '-1', '2.5', 'cem']) {
+        assert.equal(parseConfig({ ...VALID_ENV, BILLING_TRIAL_REPLIES: value }).ok, false, value);
+      }
+      const tokens = parseConfig({ ...VALID_ENV, BILLING_TRIAL_TOKENS: '300000' });
+      assert.ok(tokens.ok);
+      assert.equal(tokens.value.BILLING_TRIAL_TOKENS, 300_000);
     });
 
     it('BILLING_ENABLED exige ACCOUNTS_ENABLED=true (a cobrança vive na sessão da conta)', () => {

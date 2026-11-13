@@ -222,10 +222,15 @@ describe('addMonthsUtc e usageWindowStart (spec 031): janelas ancoradas no perí
 });
 
 describe('cotas e entitlements (spec 031)', () => {
-  const settings = { graceDays: GRACE, trialTokens: 300_000 };
+  const settings = { graceDays: GRACE, trialTokens: 300_000, trialReplies: 100 };
 
-  it('o teste usa a cota de tokens própria; o plano pago, a do plano; respostas extras somam às duas', () => {
+  it('o teste usa as cotas próprias (respostas limitadas à do plano); o plano pago, as do plano; respostas extras somam às duas', () => {
     assert.deepEqual(quotaLimits(subscription('TRIAL'), 0, settings), {
+      tokens: 300_000,
+      replies: 100,
+    });
+    // A cota de respostas do teste nunca passa da do plano (spec 040, D8).
+    assert.deepEqual(quotaLimits(subscription('TRIAL'), 0, { ...settings, trialReplies: 1_000 }), {
       tokens: 300_000,
       replies: 800,
     });

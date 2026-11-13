@@ -6,7 +6,7 @@ import type {
   CheckoutService,
   OrderCheckResult,
 } from '../../application/billing/checkout.service.js';
-import { BILLING_CYCLES, PLAN_CODES } from '../../domain/index.js';
+import { BILLING_CYCLES, PLAN_CODES, perReplyMilliCents } from '../../domain/index.js';
 import { ForbiddenError } from '../../shared/errors/index.js';
 import { accountCookie } from '../auth/account.controller.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
@@ -162,6 +162,12 @@ export function toBillingResponse(
         whatsappBillingMode: price.whatsappBillingMode,
         extraPackCents: price.extraPackCents,
         extraPackReplies: price.extraPackReplies,
+        // Preço por resposta incluída (spec 040, D9), calculado só no servidor (o navegador não calcula preço).
+        perReplyMilliCents: perReplyMilliCents(
+          price.baseCents,
+          entry.plan.monthlyReplies,
+          price.cycle,
+        ),
       })),
     })),
     trial: overview.trial,

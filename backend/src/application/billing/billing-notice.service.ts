@@ -2,15 +2,18 @@ import type { FastifyBaseLogger } from 'fastify';
 import {
   type BillingNoticeKind,
   type BillingNoticeRepository,
+  type CatalogLike,
   dueNotices,
   type DueNotice,
   type NoticeRecipient,
   type PaymentOrderKindValue,
   type QuotaSettings,
   quotaLimits,
+  renewalPriceChange,
   statusToSync,
   type SubscriptionRecord,
   type UsageNumbers,
+  usageWindowEnd,
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import type { BillingMailer } from '../ports/billing-mailer.js';
@@ -93,7 +96,10 @@ export class BillingNoticeService {
                 candidate.subscription,
                 candidate.recipient,
                 notice,
-                this.dataFor(candidate.subscription, candidate.usage, notice.kind),
+                this.dataFor(candidate.subscription, candidate.usage, notice.kind, {
+                  usageWindowStart: candidate.usageWindowStart,
+                  catalog: candidate.catalog,
+                }),
               );
               if (result === 'sent') sent += 1;
               else if (result === 'failed') {
@@ -150,6 +156,7 @@ export class BillingNoticeService {
       'PERIOD_ENDING_1D',
       'PERIOD_ENDED',
       'PERIOD_GRACE_ENDED',
+      'PRICE_CHANGE',
       'DOWNGRADE_BLOCKED',
       'TRIAL_ENDING',
       'TRIAL_ENDED',
@@ -223,8 +230,22 @@ export class BillingNoticeService {
     subscription: SubscriptionRecord,
     usage: UsageNumbers | undefined,
     kind: BillingNoticeKind,
+    context: {
+      readonly usageWindowStart?: Date | undefined;
+      readonly catalog?: readonly CatalogLike[] | undefined;
+    } = {},
   ): BillingMailData {
     const { settings } = this.deps;
+    // Quando a IA volta (aviso de limite de uso da IA): o início da próxima janela de uso.
+    const nextWindowStart =
+      kind === 'QUOTA_TOKENS_100' && context.usageWindowStart !== undefined
+        ? usageWindowEnd(context.usageWindowStart, subscription.currentPeriodStart)
+        : undefined;
+    // O valor da renovação vem só do catálogo vigente (o mesmo que decidiu o aviso).
+    const renewalCents =
+      kind === 'PRICE_CHANGE' && context.catalog !== undefined
+        ? renewalPriceChange(subscription, context.catalog)?.nextCents
+        : undefined;
     const quota =
       usage !== undefined && (kind === 'QUOTA_REPLIES_80' || kind === 'QUOTA_REPLIES_100')
         ? {
@@ -239,6 +260,8 @@ export class BillingNoticeService {
         subscription.currentPeriodEnd.getTime() + Math.max(0, settings.graceDays) * DAY_MS,
       ),
       quota,
+      nextWindowStart,
+      renewalCents,
     };
   }
 

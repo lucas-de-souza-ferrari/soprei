@@ -5,11 +5,14 @@ import {
   BILLING_CYCLES,
   type BillingRepository,
   type CatalogEntry,
+  effectiveQuotas,
   type OrderSummary,
   type PlanPriceRecord,
   type PendingChange,
   type PlanRecord,
   PLAN_CODES,
+  type PlanCode,
+  type PlanQuotas,
   type SubscriptionRecord,
   type TrialSettings,
   type UsageWindow,
@@ -68,11 +71,45 @@ export function parsePendingChange(value: unknown): PendingChange | null {
   return parsed.success ? parsed.data : null;
 }
 
-export function toSubscription(row: SubscriptionRow): SubscriptionRecord {
+/**
+ * Cotas da versão ATIVA mais nova de cada código de plano (spec 040, D4). Lê só o catálogo global (nada de
+ * conta, empresa nem uso). `codes` limita a leitura aos códigos que interessam.
+ */
+export async function currentPlanQuotas(
+  db: TenantScopedDb,
+  codes?: readonly PlanCode[],
+): Promise<ReadonlyMap<PlanCode, PlanQuotas>> {
+  const rows = await db.plan.findMany({
+    where: { active: true, ...(codes === undefined ? {} : { code: { in: [...codes] } }) },
+    orderBy: [{ code: 'asc' }, { version: 'desc' }],
+    select: { code: true, monthlyReplies: true, monthlyTokens: true },
+  });
+  const out = new Map<PlanCode, PlanQuotas>();
+  for (const row of rows) {
+    if (out.has(row.code)) continue;
+    out.set(row.code, {
+      monthlyReplies: row.monthlyReplies,
+      monthlyTokens: Number(row.monthlyTokens),
+    });
+  }
+  return out;
+}
+
+/**
+ * Mapeamento ÚNICO da assinatura (usado pelos três loaders: por conta, por id e o dos avisos). As cotas do
+ * plano já saem pela regra do máximo (spec 040, D4): o maior entre a linha de `Plan` da assinatura e a versão
+ * ativa mais nova do mesmo código (`current`). Assim IA, gate, `GET /account/billing`, `entitlements` e os
+ * avisos por e-mail veem o mesmo número. O resto do plano (id, versão, nome, `maxCompanies`) é o da própria linha.
+ */
+export function toSubscription(
+  row: SubscriptionRow,
+  current: ReadonlyMap<PlanCode, PlanQuotas>,
+): SubscriptionRecord {
+  const own = toPlan(row.plan);
   return {
     id: row.id,
     accountId: row.accountId,
-    plan: toPlan(row.plan),
+    plan: { ...own, ...effectiveQuotas(own, current.get(own.code)) },
     price: toPrice(row.price),
     cycle: row.cycle,
     agendaEnabled: row.agendaEnabled,
@@ -86,27 +123,67 @@ export function toSubscription(row: SubscriptionRow): SubscriptionRecord {
   };
 }
 
+async function loadSubscription(
+  db: TenantScopedDb,
+  where: { readonly accountId: string } | { readonly id: string },
+): Promise<SubscriptionRecord | null> {
+  const row = await db.subscription.findFirst({ where, include: subscriptionInclude });
+  if (row === null) return null;
+  return toSubscription(row, await currentPlanQuotas(db, [row.plan.code]));
+}
+
 /** A assinatura de uma conta (ou `null`). Só por `accountId` ou pelo id da própria assinatura. */
-export async function findSubscriptionByAccount(
+export function findSubscriptionByAccount(
   db: TenantScopedDb,
   accountId: string,
 ): Promise<SubscriptionRecord | null> {
-  const row = await db.subscription.findFirst({
-    where: { accountId },
-    include: subscriptionInclude,
-  });
-  return row === null ? null : toSubscription(row);
+  return loadSubscription(db, { accountId });
 }
 
-export async function findSubscriptionById(
+export function findSubscriptionById(
   db: TenantScopedDb,
   subscriptionId: string,
 ): Promise<SubscriptionRecord | null> {
-  const row = await db.subscription.findFirst({
-    where: { id: subscriptionId },
-    include: subscriptionInclude,
+  return loadSubscription(db, { id: subscriptionId });
+}
+
+/**
+ * Catálogo vigente em `now`: por código, a maior versão ATIVA de `Plan`; dentro dela, por ciclo, o preço de
+ * maior versão com `validFrom <= now` (e só o modo C sem `allowSopreiPaysMeta`). Global: nada de conta.
+ */
+export async function readCatalog(
+  db: TenantScopedDb,
+  now: Date,
+  allowSopreiPaysMeta: boolean,
+): Promise<readonly CatalogEntry[]> {
+  const plans = await db.plan.findMany({
+    where: { active: true },
+    orderBy: [{ code: 'asc' }, { version: 'desc' }],
+    include: {
+      prices: {
+        where: {
+          validFrom: { lte: now },
+          // Gate do modo S: sem a flag, versão de preço SOPREI_PAYS_META é ignorada na leitura.
+          ...(allowSopreiPaysMeta ? {} : { whatsappBillingMode: 'CUSTOMER_PAYS_META' as const }),
+        },
+        // Ordem estável (mensal antes de anual, pela ordem do enum): a tela e os testes não dependem do acaso.
+        orderBy: [{ version: 'desc' }, { cycle: 'asc' }],
+      },
+    },
   });
-  return row === null ? null : toSubscription(row);
+  // Um plano por código (a versão mais nova ativa) e, por ciclo, o preço mais novo vigente.
+  const seen = new Set<string>();
+  const entries: CatalogEntry[] = [];
+  for (const row of plans) {
+    if (seen.has(row.code)) continue;
+    seen.add(row.code);
+    const byCycle = new Map<string, PlanPriceRecord>();
+    for (const price of row.prices) {
+      if (!byCycle.has(price.cycle)) byCycle.set(price.cycle, toPrice(price));
+    }
+    entries.push({ plan: toPlan(row), prices: [...byCycle.values()] });
+  }
+  return entries;
 }
 
 /**
@@ -201,38 +278,9 @@ export class PrismaBillingRepository implements BillingRepository {
   }
 
   catalog(now: Date, allowSopreiPaysMeta: boolean): Promise<readonly CatalogEntry[]> {
-    return withRepositoryErrors('Billing.catalog', async () => {
-      const plans = await this.db.plan.findMany({
-        where: { active: true },
-        orderBy: [{ code: 'asc' }, { version: 'desc' }],
-        include: {
-          prices: {
-            where: {
-              validFrom: { lte: now },
-              // Gate do modo S: sem a flag, versão de preço SOPREI_PAYS_META é ignorada na leitura.
-              ...(allowSopreiPaysMeta
-                ? {}
-                : { whatsappBillingMode: 'CUSTOMER_PAYS_META' as const }),
-            },
-            // Ordem estável (mensal antes de anual, pela ordem do enum): a tela e os testes não dependem do acaso.
-            orderBy: [{ version: 'desc' }, { cycle: 'asc' }],
-          },
-        },
-      });
-      // Um plano por código (a versão mais nova ativa) e, por ciclo, o preço mais novo vigente.
-      const seen = new Set<string>();
-      const entries: CatalogEntry[] = [];
-      for (const row of plans) {
-        if (seen.has(row.code)) continue;
-        seen.add(row.code);
-        const byCycle = new Map<string, PlanPriceRecord>();
-        for (const price of row.prices) {
-          if (!byCycle.has(price.cycle)) byCycle.set(price.cycle, toPrice(price));
-        }
-        entries.push({ plan: toPlan(row), prices: [...byCycle.values()] });
-      }
-      return entries;
-    });
+    return withRepositoryErrors('Billing.catalog', () =>
+      readCatalog(this.db, now, allowSopreiPaysMeta),
+    );
   }
 
   usage(accountId: string, windowStart: Date): Promise<UsageWindow> {

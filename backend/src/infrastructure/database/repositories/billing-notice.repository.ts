@@ -9,7 +9,12 @@ import {
 } from '../../../domain/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
 import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
-import { currentWindowStart, toSubscription } from './billing.repository.js';
+import {
+  currentPlanQuotas,
+  currentWindowStart,
+  readCatalog,
+  toSubscription,
+} from './billing.repository.js';
 import { withRepositoryErrors } from './repository-errors.js';
 
 const include = {
@@ -38,7 +43,11 @@ function recipientOf(account: AccountRow): NoticeRecipient | null {
  * nenhum SQL cru. A trava de "um aviso por ciclo e tipo" é a chave única de `payment_notices`.
  */
 export class PrismaBillingNoticeRepository implements BillingNoticeRepository {
-  constructor(private readonly db: TenantScopedPrisma) {}
+  constructor(
+    private readonly db: TenantScopedPrisma,
+    /** `SOPREI_PAYS_META_ENABLED`: o catálogo do aviso de reajuste é o mesmo que a renovação lê. */
+    private readonly options: { readonly allowSopreiPaysMeta?: boolean } = {},
+  ) {}
 
   listBatch(now: Date, after: string | null, limit: number): Promise<readonly NoticeCandidate[]> {
     return withRepositoryErrors('BillingNotice.listBatch', async () => {
@@ -49,7 +58,13 @@ export class PrismaBillingNoticeRepository implements BillingNoticeRepository {
         include,
       });
       if (rows.length === 0) return [];
-      const subscriptions = rows.map((row) => toSubscription(row));
+      // Catálogo global, lido uma vez por lote: as cotas pela regra do máximo (spec 040, D4) e o preço da
+      // próxima renovação para o aviso de reajuste (D6). Nada de outra conta entra aqui.
+      const [quotas, catalog] = await Promise.all([
+        currentPlanQuotas(this.db),
+        readCatalog(this.db, now, this.options.allowSopreiPaysMeta ?? false),
+      ]);
+      const subscriptions = rows.map((row) => toSubscription(row, quotas));
       const windows = subscriptions.map((subscription) => ({
         subscriptionId: subscription.id,
         windowStart: currentWindowStart(subscription, now),
@@ -103,6 +118,7 @@ export class PrismaBillingNoticeRepository implements BillingNoticeRepository {
           usageWindowStart: window.windowStart,
           companies,
           pendingPlanMaxCompanies,
+          catalog,
           recipient: recipientOf(row.account),
         });
       }
@@ -145,9 +161,9 @@ export class PrismaBillingNoticeRepository implements BillingNoticeRepository {
     return withRepositoryErrors('BillingNotice.findTarget', async () => {
       if (!isUuid(subscriptionId)) return null;
       const row = await this.db.subscription.findFirst({ where: { id: subscriptionId }, include });
-      return row === null
-        ? null
-        : { subscription: toSubscription(row), recipient: recipientOf(row.account) };
+      if (row === null) return null;
+      const quotas = await currentPlanQuotas(this.db, [row.plan.code]);
+      return { subscription: toSubscription(row, quotas), recipient: recipientOf(row.account) };
     });
   }
 

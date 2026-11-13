@@ -6,6 +6,8 @@ import {
   type CompanyBillingPolicy,
   type CompanyId,
   CompanyId as CompanyIdParser,
+  dueNotices,
+  quotaBlockReason,
   resolveAccess,
 } from '../../domain/index.js';
 import { ForbiddenError } from '../../shared/errors/index.js';
@@ -14,6 +16,7 @@ import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { createLogger } from '../logger/logger.js';
 import { createDatabase, type Database } from './database.js';
 import { PrismaAccountRepository } from './repositories/account.repository.js';
+import { PrismaBillingNoticeRepository } from './repositories/billing-notice.repository.js';
 import { PrismaBillingRepository } from './repositories/billing.repository.js';
 import { PrismaEntitlementReader } from './repositories/entitlement-reader.js';
 import { PrismaUsageMeter } from './repositories/usage-meter.js';
@@ -24,7 +27,7 @@ const baseConfig = loadIntegrationConfig();
 const config = { ...baseConfig, DB_POOL_MAX: 30, DB_POOL_CONNECTION_TIMEOUT_MS: 30_000 };
 const DAY = 86_400_000;
 const GRACE = 5;
-const SETTINGS = { graceDays: GRACE, trialDays: 7, trialTokens: 300_000 };
+const SETTINGS = { graceDays: GRACE, trialDays: 7, trialTokens: 300_000, trialReplies: 100 };
 
 let database: Database;
 let tenants: TestTenants;
@@ -96,8 +99,8 @@ after(async () => {
   }
 });
 
-describe('catálogo semeado pela migration (spec 031, E1)', () => {
-  it('3 planos e 6 preços (mensal e anual, 20% de desconto) só no modo CUSTOMER_PAYS_META', async () => {
+describe('catálogo vigente (spec 031, E1; valores da spec 040, D1 e D2)', () => {
+  it('3 planos e 6 preços (mensal e anual = 10 x o mensal) só no modo CUSTOMER_PAYS_META', async () => {
     const catalog = await billing.catalog(new Date(), false);
     assert.deepEqual(
       catalog.map((entry) => [
@@ -107,9 +110,9 @@ describe('catálogo semeado pela migration (spec 031, E1)', () => {
         entry.plan.monthlyReplies,
       ]),
       [
-        ['ESSENTIAL', 1, 3_000_000, 800],
-        ['PROFESSIONAL', 3, 12_000_000, 3_200],
-        ['SCALE', 10, 40_000_000, 10_800],
+        ['ESSENTIAL', 1, 15_000_000, 2_500],
+        ['PROFESSIONAL', 3, 48_000_000, 8_000],
+        ['SCALE', 10, 180_000_000, 30_000],
       ],
     );
     const prices = Object.fromEntries(
@@ -124,17 +127,23 @@ describe('catálogo semeado pela migration (spec 031, E1)', () => {
       ]),
     );
     assert.deepEqual(prices.ESSENTIAL, [
-      ['MONTHLY', 5_900, 2_900, 1_900],
-      ['ANNUAL', 56_640, 27_840, 18_240],
+      ['MONTHLY', 4_790, 2_900, 1_900],
+      ['ANNUAL', 47_900, 29_000, 19_000],
     ]);
     assert.deepEqual(prices.PROFESSIONAL, [
-      ['MONTHLY', 14_900, 4_900, 3_900],
-      ['ANNUAL', 143_040, 47_040, 37_440],
+      ['MONTHLY', 11_990, 4_900, 3_900],
+      ['ANNUAL', 119_900, 49_000, 39_000],
     ]);
     assert.deepEqual(prices.SCALE, [
       ['MONTHLY', 34_900, 9_900, 7_900],
-      ['ANNUAL', 335_040, 95_040, 75_840],
+      ['ANNUAL', 349_000, 99_000, 79_000],
     ]);
+    // Relógio anterior ao deploy (datas fixas dos testes): o mesmo catálogo (valid_from da semente da 031).
+    const early = await billing.catalog(new Date('2026-11-10T12:00:00Z'), false);
+    assert.deepEqual(
+      early.map((entry) => [entry.plan.code, entry.plan.version, entry.prices.length]),
+      catalog.map((entry) => [entry.plan.code, entry.plan.version, 2]),
+    );
     for (const entry of catalog) {
       for (const price of entry.prices) {
         assert.equal(price.whatsappBillingMode, 'CUSTOMER_PAYS_META');
@@ -144,7 +153,11 @@ describe('catálogo semeado pela migration (spec 031, E1)', () => {
   });
 
   it('gate do modo S: versão de preço SOPREI_PAYS_META é ignorada sem a flag e só aparece com ela', async () => {
-    const plan = await db().plan.findFirst({ where: { code: 'ESSENTIAL' } });
+    // A versão vigente do Essencial (a que o catálogo lê).
+    const plan = await db().plan.findFirst({
+      where: { code: 'ESSENTIAL', active: true },
+      orderBy: { version: 'desc' },
+    });
     assert.ok(plan !== null);
     const row = await db().planPrice.create({
       data: {
@@ -306,12 +319,13 @@ describe('teste gratuito e isolamento entre contas (spec 031, E1)', () => {
     assert.equal(overview.subscription.access, 'ok');
     assert.equal(overview.subscription.whatsappNotice, 'NOT_INCLUDED');
     assert.deepEqual(overview.usage.tokens, { used: 1_000, limit: 300_000 });
-    assert.deepEqual(overview.usage.replies, { used: 10, limit: 800 });
+    // Teste gratuito: min(BILLING_TRIAL_REPLIES, cota do plano) = min(100, 2.500) (spec 040, D8).
+    assert.deepEqual(overview.usage.replies, { used: 10, limit: 100 });
     // 10 mensagens x 3.500 milésimos de centavo, rotulada como estimativa.
     assert.deepEqual(overview.usage.metaEstimate, { isEstimate: true, milliCents: 35_000 });
     // A estimativa vem do catálogo: muda quando o catálogo muda.
     await db().plan.updateMany({
-      where: { code: 'ESSENTIAL', version: 1 },
+      where: { id: sub.plan.id },
       data: { metaEstimateMilliCents: 4_000 },
     });
     try {
@@ -319,7 +333,7 @@ describe('teste gratuito e isolamento entre contas (spec 031, E1)', () => {
       assert.equal(changed.usage?.metaEstimate.milliCents, 40_000);
     } finally {
       await db().plan.updateMany({
-        where: { code: 'ESSENTIAL', version: 1 },
+        where: { id: sub.plan.id },
         data: { metaEstimateMilliCents: 3_500 },
       });
     }
@@ -483,10 +497,10 @@ describe('EntitlementReader e UsageMeter (spec 031, E2)', () => {
       agenda: true,
       stock: true,
       tokens: { used: 1_200, limit: 300_000 },
-      replies: { used: 1, limit: 800 },
+      replies: { used: 1, limit: 100 },
     });
     assert.deepEqual(b.tokens, { used: 0, limit: 300_000 });
-    assert.deepEqual(b.replies, { used: 0, limit: 800 });
+    assert.deepEqual(b.replies, { used: 0, limit: 100 });
     // Sem dinheiro, e o resultado não carrega nada da assinatura além de números e flags.
     assert.doesNotMatch(JSON.stringify(a), /cents|price|account|subscription/i);
   });
@@ -549,7 +563,7 @@ describe('EntitlementReader e UsageMeter (spec 031, E2)', () => {
     assert.equal(renewed.tokens?.used, 0);
     assert.equal(
       renewed.tokens.limit,
-      3_000_000,
+      15_000_000,
       'plano pago: cota de tokens do plano (não a do teste)',
     );
     assert.equal(
@@ -700,5 +714,158 @@ describe('revisão da 031: adoção só por OWNER ativo e limite com empresas an
     const rows = await db().company.findMany({ where: { id: { in: ids } } });
     assert.equal(new Set(rows.map((r) => r.subscriptionId)).size, 1);
     assert.ok(rows[0]?.subscriptionId !== null);
+  });
+});
+
+describe('regra do máximo: cotas novas valem na hora para quem já assina (spec 040, D4)', () => {
+  const now = new Date('2026-11-12T12:00:00Z');
+  const periodStart = new Date('2026-11-10T12:00:00Z');
+  const periodEnd = new Date('2026-12-10T12:00:00Z');
+
+  /** Assinatura ACTIVE mensal presa à linha ANTIGA do Essencial (versão 1: 800 respostas, 3 M de tokens). */
+  async function activeOnOldEssential(label: string) {
+    const account = await newAccount(label);
+    const company = await createCompanyFor(account, periodStart);
+    const sub = await subscriptionOf(account);
+    const oldPlan = await db().plan.findFirst({ where: { code: 'ESSENTIAL', version: 1 } });
+    assert.ok(oldPlan !== null);
+    assert.equal(oldPlan.monthlyReplies, 800, 'a linha antiga continua intacta no banco');
+    const oldPrice = await db().planPrice.findFirst({
+      where: { planId: oldPlan.id, cycle: 'MONTHLY', version: 1 },
+    });
+    assert.ok(oldPrice !== null);
+    await db().subscription.updateMany({
+      where: { id: sub.id },
+      data: {
+        planId: oldPlan.id,
+        priceId: oldPrice.id,
+        status: 'ACTIVE',
+        trialEndsAt: null,
+        agendaEnabled: false,
+        stockEnabled: false,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+      },
+    });
+    return { account, company, subscriptionId: sub.id, oldPlanId: oldPlan.id };
+  }
+
+  async function setUsage(subscriptionId: string, sentMessages: bigint, tokens = 0n) {
+    const existing = await db().usageCounter.updateMany({
+      where: { subscriptionId, windowStart: periodStart },
+      data: { sentMessages, tokens },
+    });
+    if (existing.count === 0) {
+      await db().usageCounter.create({
+        data: { subscriptionId, windowStart: periodStart, sentMessages, tokens },
+      });
+    }
+  }
+
+  it('entitlements, GET /account/billing e os avisos veem 2.500 respostas e 15 M de tokens; a linha da assinatura e o uso não mudam', async () => {
+    const { account, company, subscriptionId, oldPlanId } =
+      await activeOnOldEssential('max-quotas');
+    await setUsage(subscriptionId, 2_000n, 1_000n);
+
+    const entitlements = await reader(() => now).forCompany(company);
+    assert.deepEqual(entitlements.replies, { used: 2_000, limit: 2_500 });
+    assert.deepEqual(entitlements.tokens, { used: 1_000, limit: 15_000_000 });
+
+    const service = new BillingService({
+      billing,
+      settings: { ...SETTINGS, allowSopreiPaysMeta: false },
+      now: () => now,
+    });
+    const overview = await service.overview(account);
+    assert.deepEqual(overview.usage?.replies, { used: 2_000, limit: 2_500 });
+    assert.deepEqual(overview.usage.tokens, { used: 1_000, limit: 15_000_000 });
+
+    // Os avisos usam o mesmo mapeamento: 2.000 de 2.500 é 80% (com a cota antiga seria 100%).
+    const notices = new PrismaBillingNoticeRepository(db());
+    const target = await notices.findTarget(subscriptionId);
+    assert.ok(target !== null);
+    assert.equal(target.subscription.plan.monthlyReplies, 2_500);
+    assert.equal(target.subscription.plan.monthlyTokens, 15_000_000);
+    const kinds = dueNotices(
+      {
+        subscription: target.subscription,
+        usage: { tokens: 1_000, sentMessages: 2_000, extraReplies: 0 },
+        usageWindowStart: periodStart,
+        companies: 1,
+        pendingPlanMaxCompanies: null,
+      },
+      now,
+      SETTINGS,
+    ).map((notice) => notice.kind);
+    assert.deepEqual(kinds, ['QUOTA_REPLIES_80']);
+
+    // Nada foi gravado: a assinatura segue na linha antiga e o contador da janela não mudou.
+    const row = await db().subscription.findFirst({ where: { id: subscriptionId } });
+    assert.equal(row?.planId, oldPlanId);
+    const counter = await db().usageCounter.findFirst({
+      where: { subscriptionId, windowStart: periodStart },
+    });
+    assert.equal(counter?.sentMessages, 2_000n);
+    assert.equal(counter.tokens, 1_000n);
+    // O resto do plano (id, versão, vagas) continua o da própria linha.
+    const sub = await billing.findSubscription(account);
+    assert.equal(sub?.plan.id, oldPlanId);
+    assert.equal(sub.plan.version, 1);
+    assert.equal(sub.plan.maxCompanies, 1);
+  });
+
+  it('a IA só é bloqueada a partir de 2.500 respostas (não em 800)', async () => {
+    const { company, subscriptionId } = await activeOnOldEssential('max-block');
+    for (const [sent, blocked] of [
+      [800n, false],
+      [2_499n, false],
+      [2_500n, true],
+    ] as const) {
+      await setUsage(subscriptionId, sent);
+      const reason = quotaBlockReason(await reader(() => now).forCompany(company));
+      assert.equal(reason, blocked ? 'replies' : null, String(sent));
+    }
+  });
+
+  it('isolamento entre contas: a cota efetiva de uma conta não depende de uso, plano nem pedido de outra', async () => {
+    const a = await activeOnOldEssential('max-iso-a');
+    // B no Escala novo, com uso alto e um pedido aberto.
+    const accountB = await newAccount('max-iso-b');
+    const companyB = await createCompanyFor(accountB, periodStart);
+    const subB = await subscriptionOf(accountB);
+    const scale = await db().plan.findFirst({
+      where: { code: 'SCALE', active: true },
+      orderBy: { version: 'desc' },
+    });
+    assert.ok(scale !== null);
+    await db().subscription.updateMany({
+      where: { id: subB.id },
+      data: {
+        planId: scale.id,
+        status: 'ACTIVE',
+        trialEndsAt: null,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+      },
+    });
+    await setUsage(subB.id, 20_000n, 9_000_000n);
+    await db().paymentOrder.create({
+      data: {
+        subscriptionId: subB.id,
+        kind: 'RENEWAL',
+        amountCents: 34_900,
+        breakdown: { plan: 'SCALE' },
+        expiresAt: new Date(now.getTime() + DAY),
+      },
+    });
+    await setUsage(a.subscriptionId, 10n);
+
+    const entA = await reader(() => now).forCompany(a.company);
+    assert.deepEqual(entA.replies, { used: 10, limit: 2_500 });
+    assert.deepEqual(entA.tokens, { used: 0, limit: 15_000_000 });
+    const entB = await reader(() => now).forCompany(companyB);
+    assert.deepEqual(entB.replies, { used: 20_000, limit: 30_000 });
+    assert.deepEqual(entB.tokens, { used: 9_000_000, limit: 180_000_000 });
+    assert.equal((await billing.listOrders(a.account, 10)).length, 0);
   });
 });

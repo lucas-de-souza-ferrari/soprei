@@ -12,7 +12,7 @@ import type { SubscriptionRecord, SubscriptionStatus } from './billing.js';
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const GRACE = 5;
-const SETTINGS = { graceDays: GRACE, trialTokens: 300_000 } as const;
+const SETTINGS = { graceDays: GRACE, trialTokens: 300_000, trialReplies: 100 } as const;
 const END = new Date('2026-12-01T00:00:00Z');
 const at = (offsetMs: number): Date => new Date(END.getTime() + offsetMs);
 
@@ -132,13 +132,16 @@ describe('dueNotices: teste gratuito', () => {
 describe('dueNotices: cotas (respostas e tokens separados)', () => {
   const now = at(-20 * DAY);
 
-  it('80% e 100% de respostas, e de tokens, são tipos diferentes', () => {
+  it('80% e 100% de respostas são tipos diferentes; de tokens só existe o de 100% (spec 040, D3)', () => {
     assert.deepEqual(kinds(subject('ACTIVE', { usage: { sentMessages: 639 } }), now), []);
     assert.deepEqual(kinds(subject('ACTIVE', { usage: { sentMessages: 640 } }), now), [
       'QUOTA_REPLIES_80',
     ]);
-    assert.deepEqual(kinds(subject('ACTIVE', { usage: { tokens: 2_400_000 } }), now), [
-      'QUOTA_TOKENS_80',
+    // 80% (e 99%) dos tokens: nenhum e-mail (é só sinal interno).
+    assert.deepEqual(kinds(subject('ACTIVE', { usage: { tokens: 2_400_000 } }), now), []);
+    assert.deepEqual(kinds(subject('ACTIVE', { usage: { tokens: 2_999_999 } }), now), []);
+    assert.deepEqual(kinds(subject('ACTIVE', { usage: { tokens: 3_000_000 } }), now), [
+      'QUOTA_TOKENS_100',
     ]);
     assert.deepEqual(
       kinds(subject('ACTIVE', { usage: { sentMessages: 640, tokens: 3_000_000 } }), now),
@@ -167,10 +170,38 @@ describe('dueNotices: cotas (respostas e tokens separados)', () => {
     );
   });
 
-  it('o teste usa a cota de tokens própria', () => {
-    assert.deepEqual(kinds(subject('TRIAL', { usage: { tokens: 240_000 } }), at(-5 * DAY)), [
-      'QUOTA_TOKENS_80',
+  it('o teste usa as cotas próprias: tokens do teste e respostas do teste (limitadas à do plano)', () => {
+    assert.deepEqual(kinds(subject('TRIAL', { usage: { tokens: 240_000 } }), at(-5 * DAY)), []);
+    assert.deepEqual(kinds(subject('TRIAL', { usage: { tokens: 300_000 } }), at(-5 * DAY)), [
+      'QUOTA_TOKENS_100',
     ]);
+    assert.deepEqual(kinds(subject('TRIAL', { usage: { sentMessages: 80 } }), at(-5 * DAY)), [
+      'QUOTA_REPLIES_80',
+    ]);
+    assert.deepEqual(kinds(subject('TRIAL', { usage: { sentMessages: 100 } }), at(-5 * DAY)), [
+      'QUOTA_REPLIES_100',
+    ]);
+  });
+
+  it('QUOTA_TOKENS_80 nunca é devolvido, em nenhum uso nem estado (spec 040, D3)', () => {
+    for (const status of ['TRIAL', 'ACTIVE', 'PAST_DUE'] as const) {
+      for (const tokens of [0, 2_400_000, 2_999_999, 3_000_000, 9_000_000, 240_000, 299_999]) {
+        for (const offset of [-20 * DAY, -5 * DAY, DAY]) {
+          const list = kinds(subject(status, { usage: { tokens } }), at(offset));
+          assert.ok(!list.includes('QUOTA_TOKENS_80'), `${status} ${String(tokens)}`);
+        }
+      }
+    }
+  });
+
+  it('QUOTA_TOKENS_100 sai com a janela de uso como chave (uma vez por janela) e sem cobrir outro tipo', () => {
+    const notice = dueNotices(
+      subject('ACTIVE', { usage: { tokens: 3_000_000 } }),
+      now,
+      SETTINGS,
+    ).find((candidate) => candidate.kind === 'QUOTA_TOKENS_100');
+    assert.equal(notice?.windowStart.toISOString(), '2026-11-01T00:00:00.000Z');
+    assert.deepEqual(notice.covers, []);
   });
 
   it('na carência ainda há alerta; bloqueado (EXPIRED por tempo) não há', () => {

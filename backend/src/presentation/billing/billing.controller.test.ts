@@ -43,7 +43,7 @@ const OVERVIEW: BillingOverview = {
   trial: { available: false, days: 7 },
 };
 
-function setup(billing: boolean) {
+function setup(billing: boolean, overview: BillingOverview = OVERVIEW) {
   const seen: { overview: string[]; me: string[] } = { overview: [], me: [] };
   const accounts = {
     me: (secret: string) => {
@@ -68,7 +68,7 @@ function setup(billing: boolean) {
             service: {
               overview: (accountId: string) => {
                 seen.overview.push(accountId);
-                return Promise.resolve(OVERVIEW);
+                return Promise.resolve(overview);
               },
             },
             entitlements: { forCompany: () => Promise.reject(new Error('n/a')) },
@@ -122,6 +122,56 @@ describe('GET /account/billing (spec 031, E1)', () => {
     assert.equal(body.checkoutEnabled, false);
     assert.equal(body.checkoutHost, null);
     assert.equal(body.subscription.pendingChange, null);
+    await app.close();
+  });
+
+  it('cada preço do catálogo traz perReplyMilliCents, calculado no servidor (spec 040, D9)', async () => {
+    const price = (cycle: 'MONTHLY' | 'ANNUAL', baseCents: number) => ({
+      id: `pr-${cycle}`,
+      cycle,
+      baseCents,
+      agendaCents: 2_900,
+      stockCents: 1_900,
+      whatsappBillingMode: 'CUSTOMER_PAYS_META' as const,
+      metaPerReplyMilliCents: 3_500,
+      extraPackCents: 5_900,
+      extraPackReplies: 500,
+      version: 1,
+      validFrom: new Date('2026-11-01T00:00:00Z'),
+    });
+    const catalog: BillingOverview['catalog'] = [
+      {
+        plan: {
+          id: 'p-ess',
+          code: 'ESSENTIAL',
+          name: 'Essencial',
+          maxCompanies: 1,
+          monthlyTokens: 15_000_000,
+          monthlyReplies: 2_500,
+          metaEstimateMilliCents: 3_500,
+          version: 2,
+        },
+        prices: [price('MONTHLY', 4_790), price('ANNUAL', 47_900)],
+      },
+    ];
+    const { app } = setup(true, { ...OVERVIEW, catalog });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/account/billing',
+      headers: { cookie: `soprei_session=${SECRET}` },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body) as {
+      catalog: { prices: { cycle: string; perReplyMilliCents: number }[] }[];
+    };
+    // 4.790 x 1.000 / 2.500 = 1.916; anual: 47.900 x 1.000 / 30.000 = 1.596 (para baixo).
+    assert.deepEqual(
+      body.catalog[0]?.prices.map((p) => [p.cycle, p.perReplyMilliCents]),
+      [
+        ['MONTHLY', 1_916],
+        ['ANNUAL', 1_596],
+      ],
+    );
     await app.close();
   });
 

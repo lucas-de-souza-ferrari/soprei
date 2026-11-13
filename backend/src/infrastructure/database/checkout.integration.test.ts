@@ -35,7 +35,7 @@ const APP_ORIGIN = 'https://site.exemplo.test';
 const WEBHOOK_BASE = 'https://api.exemplo.test';
 const WEBHOOK_SECRET = deriveWebhookSecret('segredo-de-teste-do-webhook-0123456789');
 const tokenFor = (orderId: string): string => webhookToken(WEBHOOK_SECRET, orderId);
-const SETTINGS = { graceDays: GRACE, trialDays: 7, trialTokens: 300_000 };
+const SETTINGS = { graceDays: GRACE, trialDays: 7, trialTokens: 300_000, trialReplies: 100 };
 
 let database: Database;
 let tenants: TestTenants;
@@ -159,8 +159,8 @@ const ESSENTIAL_AGENDA = {
   agenda: true,
   stock: false,
 } as const;
-// Essencial mensal (R$ 59,00) + Agenda (R$ 29,00).
-const ESSENTIAL_AGENDA_CENTS = 5_900 + 2_900;
+// Essencial mensal (R$ 47,90, catálogo da spec 040) + Agenda (R$ 29,00).
+const ESSENTIAL_AGENDA_CENTS = 4_790 + 2_900;
 
 before(async () => {
   database = createDatabase(config, createLogger(config));
@@ -329,7 +329,7 @@ describe('criar o pedido e o link (spec 031, E3)', () => {
       ...ESSENTIAL_AGENDA,
       planCode: 'PROFESSIONAL',
     });
-    assert.equal(created.amountCents, 14_900 + 4_900);
+    assert.equal(created.amountCents, 11_990 + 4_900);
   });
 
   it('teto de pedidos por assinatura em 24 h', async () => {
@@ -397,7 +397,7 @@ describe('webhook, confirmação e concessão (spec 031, E3)', () => {
     const s = stack();
     const { account } = await accountWithTrial('annual');
     const created = await s.service.createOrder(account, { ...ESSENTIAL_AGENDA, cycle: 'ANNUAL' });
-    assert.equal(created.amountCents, 56_640 + 27_840);
+    assert.equal(created.amountCents, 47_900 + 29_000);
     fake.markPaid(created.orderId, { amount: created.amountCents });
     assert.equal(await s.verifier.verify(created.orderId), 'paid');
     const sub = await billing.findSubscription(account.id);
@@ -1188,10 +1188,10 @@ describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)',
     });
     clock = new Date('2026-11-20T12:00:00Z'); // restam 20 dos 30 dias
 
-    // Essencial (R$ 59) -> Profissional + Agenda (R$ 149 + R$ 49): diferença 13.900 x 20/30 = 9.266,67 -> 9.267.
+    // Essencial (R$ 47,90) -> Profissional + Agenda (R$ 119,90 + R$ 49): diferença 12.100 x 20/30 = 8.066,67 -> 8.067.
     const quote = await s.service.quote(account.id, PRO_AGENDA);
     assert.equal(quote.kind, 'UPGRADE');
-    assert.equal(quote.amountCents, 9_267);
+    assert.equal(quote.amountCents, 8_067);
     assert.equal(quote.effective, 'now');
     assert.equal(quote.remainingDays, 20);
     // Cotar não cria pedido.
@@ -1203,15 +1203,15 @@ describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)',
     );
 
     const created = await s.service.upgrade(account, PRO_AGENDA);
-    assert.equal(created.amountCents, 9_267);
+    assert.equal(created.amountCents, 8_067);
     const order = await checkoutRepo.findOrder(account.id, created.orderId);
     assert.equal(order?.kind, 'UPGRADE');
     assert.equal(order.breakdown.upgradeBase?.planCode, 'ESSENTIAL');
     assert.equal(order.breakdown.upgradeBase.periodEnd, '2026-12-10T12:00:00.000Z');
     const link = fake.callsTo('/links').at(-1)?.body as { items: { price: number }[] };
-    assert.equal(link.items[0]?.price, 9_267);
+    assert.equal(link.items[0]?.price, 8_067);
 
-    fake.markPaid(created.orderId, { amount: 9_267 });
+    fake.markPaid(created.orderId, { amount: 8_067 });
     assert.equal(await s.verifier.verify(created.orderId), 'paid');
     const after = await state(account.id);
     assert.equal(after?.plan.code, 'PROFESSIONAL');
@@ -1225,7 +1225,7 @@ describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)',
     const usage = await billing.usage(account.id, after.currentPeriodStart);
     assert.equal(usage.tokens, 777);
     assert.equal(usage.sentMessages, 5);
-    assert.equal(after.plan.monthlyTokens, 12_000_000);
+    assert.equal(after.plan.monthlyTokens, 48_000_000);
     const paid = await checkoutRepo.findOrder(account.id, created.orderId);
     assert.equal(paid?.periodEnd?.toISOString(), '2026-12-10T12:00:00.000Z');
   });
@@ -1378,9 +1378,9 @@ describe('troca de plano no meio do ciclo, cancelar e reativar (spec 031, D11)',
       'USE_PLAN_CHANGE',
     );
     const renewal = await s.service.createOrder(account, ESSENTIAL_PLAIN);
-    assert.equal(renewal.amountCents, 5_900);
+    assert.equal(renewal.amountCents, 4_790);
     assert.equal((await checkoutRepo.findOrder(account.id, renewal.orderId))?.kind, 'RENEWAL');
-    fake.markPaid(renewal.orderId, { amount: 5_900 });
+    fake.markPaid(renewal.orderId, { amount: 4_790 });
     assert.equal(await s.verifier.verify(renewal.orderId), 'paid');
     const after = await state(account.id);
     assert.equal(after?.agendaEnabled, false);
@@ -1713,5 +1713,103 @@ describe('privacidade (spec 031, E3)', () => {
     ]) {
       assert.equal(everything.includes(secret), false, `vazou: ${secret}`);
     }
+  });
+});
+
+describe('transição para o catálogo novo (spec 040, D4 e D5)', () => {
+  const ESSENTIAL_MONTHLY = {
+    planCode: 'ESSENTIAL',
+    cycle: 'MONTHLY',
+    agenda: false,
+    stock: false,
+  } as const;
+
+  /** Assinatura paga do Essencial mensal, presa à linha ANTIGA do catálogo (versão 1: R$ 59,00, 800 respostas). */
+  async function oldSubscriber(label: string) {
+    const s = stack();
+    clock = new Date('2026-11-10T12:00:00Z');
+    const { account, subscription } = await accountWithTrial(label);
+    const oldPlan = await db().plan.findFirst({ where: { code: 'ESSENTIAL', version: 1 } });
+    assert.ok(oldPlan !== null);
+    const oldPrice = await db().planPrice.findFirst({
+      where: { planId: oldPlan.id, cycle: 'MONTHLY', version: 1 },
+    });
+    assert.ok(oldPrice !== null);
+    assert.equal(oldPrice.baseCents, 5_900);
+    await db().subscription.updateMany({
+      where: { id: subscription.id },
+      data: {
+        planId: oldPlan.id,
+        priceId: oldPrice.id,
+        status: 'ACTIVE',
+        trialEndsAt: null,
+        agendaEnabled: false,
+        stockEnabled: false,
+        currentPeriodStart: new Date('2026-11-10T12:00:00Z'),
+        currentPeriodEnd: new Date('2026-12-10T12:00:00Z'),
+      },
+    });
+    return { s, account, subscriptionId: subscription.id, oldPlan, oldPrice };
+  }
+
+  it('RENEWAL criado no catálogo antigo (R$ 59,00) e pago depois grava a linha antiga, e a cota continua 2.500', async () => {
+    const { s, account, subscriptionId, oldPlan, oldPrice } = await oldSubscriber('old-renewal');
+    clock = new Date('2026-12-05T12:00:00Z');
+    // O pedido como o código anterior o criava: preço e versão do catálogo antigo no detalhamento.
+    const order = await db().paymentOrder.create({
+      data: {
+        subscriptionId,
+        kind: 'RENEWAL',
+        status: 'PENDING',
+        amountCents: 5_900,
+        breakdown: {
+          ...ESSENTIAL_MONTHLY,
+          priceId: oldPrice.id,
+          priceVersion: oldPrice.version,
+          whatsappBillingMode: 'CUSTOMER_PAYS_META',
+        },
+        checkoutUrl: 'https://127.0.0.1/pay/antigo',
+        expiresAt: new Date(clock.getTime() + DAY),
+      },
+    });
+    fake.markPaid(order.id, { amount: 5_900 });
+    assert.equal(await s.verifier.verify(order.id), 'paid');
+
+    const row = await db().subscription.findFirst({ where: { id: subscriptionId } });
+    assert.equal(row?.planId, oldPlan.id, 'a concessão grava a linha do pedido (a antiga)');
+    assert.equal(row.priceId, oldPrice.id);
+    assert.equal(row.currentPeriodEnd.toISOString(), '2027-01-10T12:00:00.000Z');
+    const after = await billing.findSubscription(account.id);
+    assert.equal(after?.plan.monthlyReplies, 2_500, 'regra do máximo: não volta à cota antiga');
+    assert.equal(after.plan.monthlyTokens, 15_000_000);
+
+    // Um pedido criado agora cobra o catálogo novo: R$ 47,90.
+    const next = await s.service.createOrder(account, ESSENTIAL_MONTHLY);
+    assert.equal(next.amountCents, 4_790);
+    const created = await checkoutRepo.findOrder(account.id, next.orderId);
+    assert.equal(created?.kind, 'RENEWAL');
+    assert.equal(created.amountCents, 4_790);
+  });
+
+  it('renovação do Essencial mensal de quem assina o antigo: cotação e pedido de 4.790, e o período pago em curso não muda', async () => {
+    const { s, account, subscriptionId } = await oldSubscriber('old-quote');
+    clock = new Date('2026-12-01T12:00:00Z');
+    const quote = await s.service.quote(account.id, ESSENTIAL_MONTHLY);
+    assert.equal(quote.kind, 'RENEWAL');
+    assert.equal(quote.amountCents, 4_790);
+    const renewal = await s.service.createOrder(account, ESSENTIAL_MONTHLY);
+    assert.equal(renewal.amountCents, 4_790);
+    // Cotar e criar o pedido não mexem no período pago (nem no preço gravado na assinatura).
+    const pending = await db().subscription.findFirst({ where: { id: subscriptionId } });
+    assert.equal(pending?.currentPeriodEnd.toISOString(), '2026-12-10T12:00:00.000Z');
+    fake.markPaid(renewal.orderId, { amount: 4_790 });
+    assert.equal(await s.verifier.verify(renewal.orderId), 'paid');
+    const after = await billing.findSubscription(account.id);
+    assert.equal(after?.price.baseCents, 4_790, 'a renovação passa ao preço novo');
+    assert.equal(after.plan.version > 1, true, 'e à linha nova do plano');
+    assert.equal(after.plan.monthlyReplies, 2_500);
+    // O período soma a partir do fim do atual (renovação antecipada), sem reembolso proporcional.
+    assert.equal(after.currentPeriodStart.toISOString(), '2026-11-10T12:00:00.000Z');
+    assert.equal(after.currentPeriodEnd.toISOString(), '2027-01-10T12:00:00.000Z');
   });
 });

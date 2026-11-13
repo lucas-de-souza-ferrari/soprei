@@ -20,6 +20,7 @@ export interface BillingServiceSettings {
   readonly graceDays: number;
   readonly trialDays: number;
   readonly trialTokens: number;
+  readonly trialReplies: number;
   /** `SOPREI_PAYS_META_ENABLED`: sem ela o modo S não aparece na tela nem vale na leitura. */
   readonly allowSopreiPaysMeta: boolean;
 }

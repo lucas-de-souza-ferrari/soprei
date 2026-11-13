@@ -155,7 +155,10 @@ export const envSchema = z
     SOPREI_PAYS_META_ENABLED: booleanLiteral(false),
     BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(60).default(5),
     BILLING_TRIAL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
-    BILLING_TRIAL_TOKENS: z.coerce.number().int().min(1).max(100_000_000).default(300_000),
+    // Teste gratuito (spec 040, D8): cota de respostas própria (limitada à do plano) e de tokens (proteção de
+    // custo, fora da tela: 6.000 por resposta incluída).
+    BILLING_TRIAL_TOKENS: z.coerce.number().int().min(1).max(100_000_000).default(600_000),
+    BILLING_TRIAL_REPLIES: z.coerce.number().int().min(1).max(1_000).default(100),
     // Checkout da InfinitePay (spec 031, E3). Flag propria, desligada por padrao: com ela desligada nao existe rota
     // de pedido, webhook nem reconciliacao, e nenhuma variavel INFINITEPAY_* e exigida. A chave nunca vai a log.
     CHECKOUT_ENABLED: booleanLiteral(false),

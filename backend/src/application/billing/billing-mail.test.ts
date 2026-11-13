@@ -20,7 +20,7 @@ describe('e-mails de aviso de cobrança (spec 031, E5)', () => {
       // Só o endereço da tela: sem token, sem query, sem fragmento.
       assert.ok(!/painel\/assinatura[?#]/.test(mail.text), kind);
       assert.ok(!mail.text.includes('<'), kind);
-      // Nenhum valor em dinheiro nem dado de cartão.
+      // Nenhum valor em dinheiro nem dado de cartão (o valor do reajuste só entra com renewalCents, abaixo).
       assert.ok(
         !/R\$|cart[aã]o de|CVV/.test(mail.text.replace('dados de cartão por e-mail', '')),
         kind,
@@ -60,5 +60,42 @@ describe('e-mails de aviso de cobrança (spec 031, E5)', () => {
     assert.ok(line.length < 200);
     assert.ok(!text.includes('\r'));
     assert.ok(!text.includes(String.fromCharCode(0)));
+  });
+
+  it('o aviso de limite da IA (QUOTA_TOKENS_100) não tem a palavra token nem contagens, e diz quando a IA volta (spec 040, D3)', () => {
+    const mail = billingNoticeMail(
+      'QUOTA_TOKENS_100',
+      {
+        ...DATA,
+        quota: { used: 15_000_000, limit: 15_000_000 },
+        nextWindowStart: new Date('2026-12-10T12:00:00Z'),
+      },
+      ORIGIN,
+    );
+    assert.equal(mail.subject, 'As respostas automáticas do Soprei pararam este mês');
+    for (const part of [mail.subject, mail.text]) {
+      assert.doesNotMatch(part, /token/i);
+      // Nenhuma contagem (de tokens nem de respostas), em nenhum formato.
+      assert.doesNotMatch(part, /15[.]?000[.]?000|15000000|15 M/);
+      // Números com separador de milhar são contagem; a única sequência de dígitos é a data dd/MM/aaaa.
+      assert.doesNotMatch(part, /\d[.]\d{3}/);
+      assert.deepEqual(part.match(/\d+/g) ?? [], part === mail.text ? ['10', '12', '2026'] : []);
+    }
+    assert.ok(mail.text.includes('inteligência artificial'));
+    assert.ok(mail.text.includes('antes da cota de respostas'));
+    assert.ok(mail.text.includes('10/12/2026'), 'a data em que a IA volta');
+    assert.ok(mail.text.includes('guardadas e visíveis no painel'));
+  });
+
+  it('o aviso de reajuste (PRICE_CHANGE) traz o valor do catálogo, a data da renovação e que dá para cancelar (spec 040, D6)', () => {
+    const mail = billingNoticeMail('PRICE_CHANGE', { ...DATA, renewalCents: 349_000 }, ORIGIN);
+    assert.equal(mail.subject, BILLING_NOTICE_SUBJECTS.PRICE_CHANGE);
+    assert.ok(mail.text.includes('R$ 3.490,00'), mail.text);
+    assert.ok(mail.text.includes('01/12/2026'));
+    assert.ok(mail.text.includes('O período que você já pagou não muda'));
+    assert.ok(mail.text.includes('cancelar'));
+    assert.ok(!mail.text.includes(String.fromCharCode(0xa0)), 'sem espaço não separável');
+    // O assunto não leva valor.
+    assert.doesNotMatch(mail.subject, /R\$|\d/);
   });
 });
