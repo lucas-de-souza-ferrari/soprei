@@ -13,17 +13,23 @@ import {
 } from './billing-api';
 import {
   accessNotice,
+  AI_LIMIT_NOTE,
+  AI_LIMIT_TITLE,
   canCancel,
   canCheckOrder,
   canReactivate,
+  CYCLE_NOTES,
   daysLeft,
   defaultSelection,
+  exhaustedBanner,
   formatDate,
   hasModule,
   metaEstimateCents,
   moduleOfPage,
   parseCheckoutReturn,
+  perReplyText,
   quotaLevel,
+  quotaReason,
   quoteView,
   safeCheckoutUrl,
   samePlan,
@@ -330,10 +336,8 @@ test('faixa de acesso para qualquer papel: carência, encerrada e cota esgotada,
   assert.match(grace?.text ?? '', /tela de Assinatura/);
   const full = accessNotice({ ...ok, replies: { used: 100, limit: 100 } }, true);
   assert.match(full?.title ?? '', /Respostas do mês esgotadas/);
-  assert.match(
-    accessNotice({ ...ok, tokens: { used: 100, limit: 100 } }, true)?.title ?? '',
-    /Cota de IA/,
-  );
+  const ai = accessNotice({ ...ok, tokens: { used: 100, limit: 100 } }, true);
+  assert.equal(ai?.title, 'O limite de uso da inteligência artificial deste mês foi atingido');
   // Os dois contratos: o acesso da empresa não carrega dinheiro.
   assert.ok(entitlementsSchema.safeParse(ok).success);
   // O titular vem do servidor; sem o campo vale como não titular (nunca oferece a tela por engano).
@@ -384,4 +388,128 @@ test('nenhum texto da tela usa o termo antigo da empresa', () => {
     )?.text ?? '',
   ].join(' ');
   assert.ok(!/clien/i.test(sample));
+});
+
+test('spec 040 (E2): o limite de uso da IA esgotado tem texto genérico, sem número nem a palavra token', () => {
+  const ok: Entitlements = {
+    access: 'ok',
+    agenda: true,
+    stock: true,
+    tokens: { used: 14_999_999, limit: 15_000_000 },
+    replies: { used: 2_499, limit: 2_500 },
+    holder: true,
+  };
+  assert.equal(quotaReason(ok.replies, ok.tokens), null);
+  // Por tokens: título fixo, sem número; a mesma explicação (nada se perde, quando volta, como resolver).
+  for (const holder of [true, false]) {
+    const ai = accessNotice({ ...ok, tokens: { used: 15_000_000, limit: 15_000_000 } }, holder);
+    assert.equal(ai?.tone, 'error');
+    assert.equal(ai?.title, AI_LIMIT_TITLE);
+    assert.equal(
+      AI_LIMIT_TITLE,
+      'O limite de uso da inteligência artificial deste mês foi atingido',
+    );
+    const all = `${ai?.title ?? ''} ${ai?.text ?? ''}`;
+    assert.ok(!/\d/.test(all), all);
+    assert.ok(!/token/i.test(all), all);
+    assert.match(all, /mensagens ficam guardadas/);
+    assert.match(all, /próximo mês/);
+    assert.ok(all.includes(AI_LIMIT_NOTE), all);
+  }
+  // Por respostas: mantém o texto das respostas (e vale ele se as duas acabaram).
+  const replies = accessNotice({ ...ok, replies: { used: 2_500, limit: 2_500 } }, true);
+  assert.equal(replies?.title, 'Respostas do mês esgotadas');
+  assert.ok(!(replies?.text ?? '').includes(AI_LIMIT_NOTE));
+  const both = accessNotice(
+    {
+      ...ok,
+      replies: { used: 2_500, limit: 2_500 },
+      tokens: { used: 15_000_000, limit: 15_000_000 },
+    },
+    true,
+  );
+  assert.equal(both?.title, 'Respostas do mês esgotadas');
+  assert.equal(quotaReason(null, null), null);
+});
+
+test('spec 040 (E2): a faixa da tela de Assinatura com a cota esgotada traz a data de volta e nenhum número de tokens', () => {
+  const usage = (repliesUsed: number, tokensUsed: number): NonNullable<Billing['usage']> => ({
+    windowStart: '2026-11-01T03:00:00.000Z',
+    windowEnd: '2026-12-01T03:00:00.000Z',
+    replies: { used: repliesUsed, limit: 2_500 },
+    tokens: { used: tokensUsed, limit: 15_000_000 },
+    metaEstimate: { isEstimate: true, milliCents: 0 },
+  });
+  assert.equal(exhaustedBanner(null), null);
+  assert.equal(exhaustedBanner(usage(10, 10)), null);
+  const replies = exhaustedBanner(usage(2_500, 10));
+  assert.equal(replies?.title, 'Cota do mês esgotada');
+  assert.match(replies?.text ?? '', /01\/12\/2026/);
+  const ai = exhaustedBanner(usage(10, 15_000_000));
+  assert.equal(ai?.title, AI_LIMIT_TITLE);
+  assert.match(ai?.text ?? '', /nada é perdido/);
+  assert.ok((ai?.text ?? '').startsWith(AI_LIMIT_NOTE));
+  assert.ok(!(replies?.text ?? '').includes(AI_LIMIT_NOTE));
+  assert.match(ai?.text ?? '', /01\/12\/2026/);
+  const all = `${ai?.title ?? ''} ${ai?.text ?? ''}`;
+  assert.ok(!/token/i.test(all));
+  // Além da data de volta, nenhum número (nem de tokens nem de uso).
+  assert.ok(!/\d/.test(all.replace('01/12/2026', '')), all);
+});
+
+test('spec 040 (E2): preço por resposta só formata o valor do servidor; anual com "2 meses grátis"', () => {
+  assert.equal(perReplyText(1_916), 'equivale a R$ 0,0192 por resposta');
+  assert.equal(perReplyText(1_596), 'equivale a R$ 0,0160 por resposta');
+  assert.equal(perReplyText(1_498), 'equivale a R$ 0,0150 por resposta');
+  assert.equal(perReplyText(1_248), 'equivale a R$ 0,0125 por resposta');
+  assert.equal(perReplyText(1_163), 'equivale a R$ 0,0116 por resposta');
+  assert.equal(perReplyText(969), 'equivale a R$ 0,0097 por resposta');
+  // Ausente (servidor anterior) ou 0 (cota inválida): a linha não aparece.
+  assert.equal(perReplyText(undefined), null);
+  assert.equal(perReplyText(0), null);
+  assert.equal(CYCLE_NOTES.ANNUAL, ' (um pagamento por ano: 2 meses grátis)');
+  assert.equal(CYCLE_NOTES.MONTHLY, '');
+  // O contrato aceita o campo novo e continua aceitando o catálogo sem ele (compatível com rollback).
+  const plan = {
+    code: 'ESSENTIAL',
+    name: 'Essencial',
+    maxCompanies: 1,
+    monthlyTokens: 15_000_000,
+    monthlyReplies: 2_500,
+    prices: [
+      {
+        cycle: 'MONTHLY',
+        baseCents: 4_790,
+        agendaCents: 2_900,
+        stockCents: 1_900,
+        whatsappBillingMode: 'CUSTOMER_PAYS_META',
+        perReplyMilliCents: 1_916,
+      },
+    ],
+  };
+  const base = {
+    subscription: null,
+    usage: null,
+    orders: [],
+    trial: { available: true, days: 7 },
+    checkoutEnabled: true,
+  };
+  const parsed = billingSchema.parse({ ...base, catalog: [plan] });
+  assert.equal(parsed.catalog[0]?.prices[0]?.perReplyMilliCents, 1_916);
+  const withoutField = {
+    cycle: 'MONTHLY',
+    baseCents: 4_790,
+    agendaCents: 2_900,
+    stockCents: 1_900,
+    whatsappBillingMode: 'CUSTOMER_PAYS_META',
+  };
+  assert.ok(
+    billingSchema.safeParse({ ...base, catalog: [{ ...plan, prices: [withoutField] }] }).success,
+  );
+  assert.ok(
+    !billingSchema.safeParse({
+      ...base,
+      catalog: [{ ...plan, prices: [{ ...plan.prices[0], perReplyMilliCents: -1 }] }],
+    }).success,
+  );
 });

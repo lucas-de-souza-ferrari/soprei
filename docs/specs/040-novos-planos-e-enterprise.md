@@ -200,9 +200,9 @@ A ordem sugerida pelo pedido foi ajustada: o cartão Enterprise depende do formu
 - [x] `config.test.ts`: as variáveis novas são opcionais e validadas. Cobertura: `backend/src/infrastructure/config/config.test.ts` (verde; nesta etapa só `BILLING_TRIAL_REPLIES` e o padrão de `BILLING_TRIAL_TOKENS`; as do E4 entram no E4).
 
 **E2**
-- [ ] `billing.test.ts` (frontend, regras puras): a faixa de cota esgotada por tokens usa o texto "O limite de uso da inteligência artificial deste mês foi atingido" e não tem número; por respostas mantém o texto com as respostas.
-- [ ] `e2e/billing.spec.ts` (desktop e celular, claro e escuro): a área de Assinatura não contém o texto "token" (busca no texto visível da página, sem diferenciar maiúsculas); só há uma barra de uso (`role="progressbar"`) de respostas; o cartão anual mostra "2 meses grátis"; com D9, o cartão mostra o preço por resposta vindo da fixture da API (a fixture muda o valor e a tela acompanha, provando que não é calculado no navegador).
-- [ ] Par de cor novo, se houver, entra em `theme/contrast.test.ts` (mínimo 4,5:1 nos dois temas).
+- [x] `billing.test.ts` (frontend, regras puras): a faixa de cota esgotada por tokens usa o texto "O limite de uso da inteligência artificial deste mês foi atingido" e não tem número; por respostas mantém o texto com as respostas. Cobertura: `frontend/src/company/billing.test.ts` (três testes "spec 040 (E2)", verdes: `accessNotice`, `exhaustedBanner`, `perReplyText`, `CYCLE_NOTES` e o contrato com e sem `perReplyMilliCents`).
+- [x] `e2e/billing.spec.ts` (desktop e celular, claro e escuro): a área de Assinatura não contém o texto "token" (busca no texto visível da página, sem diferenciar maiúsculas); só há uma barra de uso (`role="progressbar"`) de respostas; o cartão anual mostra "2 meses grátis"; com D9, o cartão mostra o preço por resposta vindo da fixture da API (a fixture muda o valor e a tela acompanha, provando que não é calculado no navegador). Cobertura: `frontend/e2e/billing.spec.ts` (testes "spec 040 (E2)": texto das três abas sem "token", uma barra, "2 meses grátis", preço por resposta mensal e anual e a troca do valor na fixture; 360 px sem rolagem; limite da IA esgotado na tela e na faixa do painel, sem número) e `billing-fixture.ts` (catálogo novo, `perReply` sobrescrevível). Arquivo inteiro verde localmente (68 testes, desktop e celular).
+- [x] Par de cor novo, se houver, entra em `theme/contrast.test.ts` (mínimo 4,5:1 nos dois temas). Nenhum par novo: a linha do preço por resposta usa `muted-foreground` sobre `card`, já coberto.
 
 **E3**
 - [ ] `legal.test.ts`: `privacidade.md` tem `versao: 2`, `situacao: vigente`, nenhum marcador; o corpo contém "contato comercial", "art. 7º, V" e a linha de prazo da seção 9; a página gerada mostra "Versão 2".
@@ -313,3 +313,18 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 - Só na transição: quem já tinha estourado as 800 respostas na janela atual tem o `QUOTA_REPLIES_100` já marcado nessa janela (a chave é assinatura, tipo e início da janela), então não recebe novo aviso de 100% ao chegar às 2.500 nesta mesma janela; a partir da janela seguinte vale normalmente.
 
 **Pendente:** CI verde (inclusive as quatro suítes de integração acima), revisão do `reviewer` e o passo 2 do dono antes do deploy (pedidos `PENDING` abertos e assinaturas anuais de Escala ou com módulos). E2, E3 e E4 não foram feitos.
+
+### E2 (tela sem tokens), 2026-11-13, Claude Code (Opus 5.5, implementer), branch `spec/040-e2-tela`
+
+**Feito (só frontend; backend intocado):** `frontend/src/company/billing-api.ts` (`perReplyMilliCents` opcional em cada preço do catálogo), `billing-rules.ts` (`quotaReason`, `AI_LIMIT_TITLE`, `exhaustedBanner`, `CYCLE_NOTES`, `perReplyText`; `accessNotice` com o texto genérico do limite da IA), `SubscriptionPage.tsx` (sai a barra "Uso da IA" e "Vale a cota que acabar primeiro"; fica a barra de respostas com "Respostas enviadas pelo WhatsApp neste mês"; faixa de cota esgotada por respostas ou pelo limite da IA; linha "equivale a R$ X por resposta" nos cartões; anual "2 meses grátis"), `AccessNotice.tsx` (só comentário; a regra está em `accessNotice`), testes em `billing.test.ts`, `e2e/billing.spec.ts` e `e2e/billing-fixture.ts`.
+
+**Validação local (Node 24, Windows):** `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes; `pnpm --filter soprei-frontend test` (224 verdes); `playwright test e2e/billing.spec.ts` (68 verdes, desktop e celular). Os outros arquivos e2e não foram rodados (nenhum usa a fixture da Assinatura).
+
+**Decisões tomadas na implementação (não mudam a spec):**
+- Com as duas cotas esgotadas vale o texto das respostas (é a cota que a pessoa enxerga).
+- O título da faixa por tokens é a própria frase da spec ("O limite de uso da inteligência artificial deste mês foi atingido"); o texto explicativo é o mesmo da cota de respostas (nada se perde, quando volta, como resolver). Na tela de Assinatura a data de volta continua sendo o fim da janela de uso (`usage.windowEnd`), como antes; a faixa do painel continua sem data ("início do próximo mês"), como antes (o `entitlements` não traz a janela).
+- O preço por resposta é só formatado no navegador (milésimos de centavo / 100.000, quatro casas, `Intl` BRL); o valor vem do servidor. Ausente (servidor anterior, rollback) ou 0 não mostra a linha.
+- A fixture do e2e passou ao catálogo novo (2.500/8.000/30.000 respostas, 47,90/119,90/349,00, anual = 10 x); por isso o total do teste de pagamento mudou de R$ 1.708,80 para R$ 1.689,00 (com o preço dos módulos de cada plano na fixture: Profissional anual 1.199,00 + Agenda 490,00).
+- Nenhum par de cor novo.
+
+**Pendente:** CI verde, revisão do `reviewer` junto com a E1 (se o dono revisar as duas no mesmo PR). E3 e E4 não foram feitas.

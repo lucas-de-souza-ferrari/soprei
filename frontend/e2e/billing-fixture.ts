@@ -46,7 +46,13 @@ export interface FakeBilling {
   holder?: boolean | undefined;
   /** `null` = a conta não tem assinatura própria (quem entrou por convite). */
   sub: FakeSubscription | null;
+  /** `tokens` só existe na API (proteção de custo); a tela não o mostra (spec 040). */
   usage: { replies: [number, number]; tokens: [number, number]; milliCents: number };
+  /**
+   * Preço por resposta que o "servidor" devolve no catálogo (milésimos de centavo, por plano e ciclo). O teste
+   * troca o valor e a tela acompanha: prova de que o navegador não o calcula (spec 040, D9).
+   */
+  perReply?: Partial<Record<'ESSENTIAL' | 'PROFESSIONAL' | 'SCALE', [number, number]>> | undefined;
   orders: FakeOrder[];
   /** Acesso entregue em `GET .../entitlements` (`undefined` = deriva da assinatura). */
   access?: { access: 'ok' | 'grace' | 'blocked'; agenda: boolean; stock: boolean } | undefined;
@@ -58,19 +64,39 @@ export interface FakeBilling {
   created: string[];
 }
 
+// Catálogo vigente da spec 040 (anual = 10 x o mensal; preço por resposta calculado pelo servidor).
 const PLANS = [
-  { code: 'ESSENTIAL', name: 'Essencial', maxCompanies: 1, replies: 800, base: [5900, 56640] },
+  {
+    code: 'ESSENTIAL',
+    name: 'Essencial',
+    maxCompanies: 1,
+    replies: 2500,
+    base: [4790, 47900],
+    agenda: [2900, 29000],
+    stock: [1900, 19000],
+    perReply: [1916, 1596],
+  },
   {
     code: 'PROFESSIONAL',
     name: 'Profissional',
     maxCompanies: 3,
-    replies: 3200,
-    base: [14900, 143040],
+    replies: 8000,
+    base: [11990, 119900],
+    agenda: [4900, 49000],
+    stock: [3900, 39000],
+    perReply: [1498, 1248],
   },
-  { code: 'SCALE', name: 'Escala', maxCompanies: 10, replies: 10800, base: [34900, 335040] },
+  {
+    code: 'SCALE',
+    name: 'Escala',
+    maxCompanies: 10,
+    replies: 30000,
+    base: [34900, 349000],
+    agenda: [9900, 99000],
+    stock: [7900, 79000],
+    perReply: [1163, 969],
+  },
 ] as const;
-const AGENDA = [2900, 27840] as const;
-const STOCK = [1900, 18240] as const;
 const RANK = { ESSENTIAL: 1, PROFESSIONAL: 2, SCALE: 3 } as const;
 export const CHECKOUT_HOST = 'https://checkout.exemplo.test';
 const DAY = 86_400_000;
@@ -91,7 +117,7 @@ export function newBilling(overrides: Partial<FakeBilling> = {}): FakeBilling {
       pendingChange: null,
       companies: 1,
     },
-    usage: { replies: [120, 800], tokens: [600_000, 3_000_000], milliCents: 420_000 },
+    usage: { replies: [120, 2500], tokens: [600_000, 15_000_000], milliCents: 420_000 },
     orders: [],
     checks: ['paid'],
     quoteError: null,
@@ -111,7 +137,9 @@ function total(selection: {
 }): number {
   const plan = PLANS.find((item) => item.code === selection.planCode) ?? PLANS[0];
   const i = index(selection.cycle);
-  return plan.base[i] + (selection.agenda ? AGENDA[i] : 0) + (selection.stock ? STOCK[i] : 0);
+  return (
+    plan.base[i] + (selection.agenda ? plan.agenda[i] : 0) + (selection.stock ? plan.stock[i] : 0)
+  );
 }
 
 const iso = (offsetDays: number): string => new Date(Date.now() + offsetDays * DAY).toISOString();
@@ -203,15 +231,16 @@ export async function installBillingApi(
           code: plan.code,
           name: plan.name,
           maxCompanies: plan.maxCompanies,
-          monthlyTokens: 3_000_000,
+          monthlyTokens: plan.replies * 6_000,
           monthlyReplies: plan.replies,
           metaEstimateMilliCents: 3_500,
           prices: (['MONTHLY', 'ANNUAL'] as const).map((cycle) => ({
             cycle,
             baseCents: plan.base[index(cycle)],
-            agendaCents: AGENDA[index(cycle)],
-            stockCents: STOCK[index(cycle)],
+            agendaCents: plan.agenda[index(cycle)],
+            stockCents: plan.stock[index(cycle)],
             whatsappBillingMode: 'CUSTOMER_PAYS_META',
+            perReplyMilliCents: (state.perReply?.[plan.code] ?? plan.perReply)[index(cycle)],
           })),
         })),
         trial: { available: sub === null, days: 7 },
