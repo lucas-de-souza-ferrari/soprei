@@ -7,7 +7,7 @@ import {
 } from './knowledge-file-rules';
 
 /**
- * Único módulo que importa o `pdfjs-dist` (spec 040; o ESLint impõe). Só é alcançado por `import()`
+ * Único módulo que importa o `pdfjs-dist` (spec 041; o ESLint impõe). Só é alcançado por `import()`
  * quando um PDF é escolhido: o pacote inicial do site não muda.
  *
  * O worker do pdf.js é servido pelo próprio site (o Vite emite o arquivo em `dist/assets/` com

@@ -12,7 +12,7 @@ import {
 import { decodeTextFile, type FileProblem } from './knowledge-rules';
 
 /**
- * Orquestração da leitura de um arquivo da base de conhecimento (spec 040): tipo, tamanho e
+ * Orquestração da leitura de um arquivo da base de conhecimento (spec 041): tipo, tamanho e
  * assinatura antes de ler, carregamento sob demanda do leitor de PDF/DOCX, prazo e cancelamento.
  * As dependências (leitura de bytes, carregadores dos leitores, relógio) são injetáveis: os testes
  * rodam em Node sem o pdf.js e sem o mammoth. O conteúdo do arquivo nunca sai daqui a não ser no

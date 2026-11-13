@@ -2,7 +2,7 @@ import { KNOWLEDGE_CONTENT_MAX, KNOWLEDGE_FILE_MAX_BYTES } from './knowledge-api
 import type { FileProblem } from './knowledge-rules';
 
 /**
- * Regras puras da leitura de arquivos da base de conhecimento (spec 040): tipo pelo nome, tamanho
+ * Regras puras da leitura de arquivos da base de conhecimento (spec 041): tipo pelo nome, tamanho
  * antes de ler, assinatura pelos primeiros bytes, diretório do ZIP do DOCX e normalização do texto
  * extraído. Nada aqui toca o pdf.js, o mammoth nem o DOM; tudo roda em Node nos testes.
  */

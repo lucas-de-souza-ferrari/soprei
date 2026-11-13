@@ -3,7 +3,7 @@ import type { ExtractResult } from './knowledge-file-reader';
 import { KNOWLEDGE_DOCX_MAX_UNCOMPRESSED_BYTES, readZipDirectory } from './knowledge-file-rules';
 
 /**
- * Leitor de DOCX (spec 040): só é alcançado por `import()` quando um `.docx` é escolhido. Cada leitura
+ * Leitor de DOCX (spec 041): só é alcançado por `import()` quando um `.docx` é escolhido. Cada leitura
  * cria um Web Worker de módulo próprio (`docx-text.worker.ts`, o único que toca o `mammoth`) e o
  * encerra no fim; no `abort` (outro arquivo, "Cancelar leitura", prazo, desmonte da tela) o worker é
  * encerrado na hora (`terminate`), o que libera a memória de verdade.

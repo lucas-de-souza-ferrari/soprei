@@ -84,7 +84,7 @@ export function KnowledgePage({
   const [pending, setPending] = useState<KnowledgeDocumentItem | null>(null);
   const generation = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
-  // Leitura de arquivo (spec 040): contador próprio, separado do `generation` da tela, para que
+  // Leitura de arquivo (spec 041): contador próprio, separado do `generation` da tela, para que
   // "Carregar mais" ou apagar um documento não cancelem a leitura.
   const fileRun = useRef(0);
   const fileReader = useRef<FileReadController | null>(null);

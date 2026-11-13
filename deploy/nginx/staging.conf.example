@@ -72,7 +72,7 @@ server {
         proxy_set_header Authorization "";
     }
 
-    # Worker do pdf.js (spec 040): o .mjs precisa sair como JavaScript (o mime.types de versões antigas
+    # Worker do pdf.js (spec 041): o .mjs precisa sair como JavaScript (o mime.types de versões antigas
     # do nginx não conhece a extensão e o navegador recusa o worker servido como octet-stream).
     location ~* \.mjs$ {
         types { text/javascript mjs; }

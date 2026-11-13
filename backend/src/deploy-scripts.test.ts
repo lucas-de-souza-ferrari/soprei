@@ -638,7 +638,7 @@ describe('exemplos do staging (spec 037, E2)', () => {
     assert.doesNotMatch(production, /auth_basic|3002/);
   });
 
-  it('nginx (produção e staging): o worker .mjs do pdf.js sai como JavaScript (spec 040)', () => {
+  it('nginx (produção e staging): o worker .mjs do pdf.js sai como JavaScript (spec 041)', () => {
     for (const file of [
       'deploy/nginx/production.conf.example',
       'deploy/nginx/staging.conf.example',

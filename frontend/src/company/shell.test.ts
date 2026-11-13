@@ -21,7 +21,7 @@ const AUTHORIZED = [
   'class-variance-authority',
 ] as const;
 
-/** Leitores de arquivo da base de conhecimento, autorizados pela spec 040 (versão exata). */
+/** Leitores de arquivo da base de conhecimento, autorizados pela spec 041 (versão exata). */
 const KNOWLEDGE_READERS = ['mammoth', 'pdfjs-dist'] as const;
 
 test('spec 029 E1: só as dependências autorizadas entraram, em versão exata, e o CLI do shadcn não rodou', () => {

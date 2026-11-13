@@ -1,7 +1,7 @@
-# 040 — Conhecimento: ler PDF e DOCX no navegador
+# 041 — Conhecimento: ler PDF e DOCX no navegador
 
 - **Status:** aprovada pelo dono em 2026-11-12 ("Aprovo todas": D1 decidida antes; D2 a D13 como recomendadas); E1 e E2 implementadas em 2026-11-12 (aguardando CI, `reviewer` e merge)
-- **Branch:** `spec/040-conhecimento-pdf-docx`
+- **Branch:** `spec/041-conhecimento-pdf-docx`
 - **Depende de:** 026 (base de conhecimento, aba Conhecimento), 018 (interface e tokens de cor), 030 (o passo "Documentos" dos Primeiros passos reaproveita a mesma tela)
 
 ## Objetivo
@@ -320,3 +320,7 @@ Veredito: **aprovada com ressalvas, sem bloqueantes**. Todas as ressalvas foram 
 - **S-5:** `task.destroy()` do pdf.js com `.catch(() => undefined)`.
 
 Verificação local: `typecheck`, `lint`, `format:check`, 242 testes unitários do site, `deploy-scripts.test.ts` (57) e `knowledge-files.spec.ts` 30/30 (desktop e celular).
+
+## Renumeração (2026-11-13)
+
+Esta spec foi escrita, aprovada e implementada como **040** (branch `spec/040-conhecimento-pdf-docx`, PR #8). Enquanto isso, outra spec 040 (`040-novos-planos-e-enterprise.md`) entrou na `main`, e o PR #8 foi fechado sem merge. A decisão do dono (2026-11-13) foi renumerar esta para **041**: o arquivo, a branch (`spec/041-conhecimento-pdf-docx`, sobre a `main` `2a2fbdc`) e as referências no código, nos testes, no `AGENTS.md`, no `frontend/NOTICE.md`, nos exemplos do nginx e em `docs/ops/deploy.md`. Os commits levados para a branch nova mantêm as mensagens originais ("spec 040"), e o Registro acima cita a branch e os commits antigos. O conteúdo não mudou.

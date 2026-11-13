@@ -14,7 +14,7 @@ export type FileProblem =
   | 'not-utf8'
   | 'content-too-large'
   | 'wrong-type'
-  // Spec 040: PDF e DOCX lidos no navegador.
+  // Spec 041: PDF e DOCX lidos no navegador.
   | 'doc-legacy'
   | 'odt'
   | 'binary-too-large'
@@ -29,7 +29,7 @@ export type FileProblem =
   | 'loader-failed';
 
 /**
- * Mensagens fixas (spec 026 e 040). Nunca interpolam texto do arquivo nem a mensagem de erro do
+ * Mensagens fixas (spec 026 e 041). Nunca interpolam texto do arquivo nem a mensagem de erro do
  * pdf.js, do mammoth ou do navegador.
  */
 export const FILE_PROBLEM_MESSAGES: Readonly<Record<FileProblem, string>> = {

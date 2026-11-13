@@ -5,7 +5,7 @@ import { installApi, SENTINEL, type FakeApi } from './company-fixture';
 /** Origem do servidor de desenvolvimento dos testes (a mesma do `baseURL`). */
 export const SITE_ORIGIN = 'http://127.0.0.1:5186';
 
-/** Estado da API falsa da aba Conhecimento (spec 040): só os documentos e os envios. */
+/** Estado da API falsa da aba Conhecimento (spec 041): só os documentos e os envios. */
 export interface FakeKnowledge {
   posts: { title: string; content: string }[];
   /** Pedidos a host diferente do site (devem ficar vazios). */

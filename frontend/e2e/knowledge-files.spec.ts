@@ -15,7 +15,7 @@ import {
   type FakeKnowledge,
 } from './knowledge-fixture';
 
-/** Spec 040: ler PDF e DOCX no navegador, na aba Conhecimento. */
+/** Spec 041: ler PDF e DOCX no navegador, na aba Conhecimento. */
 
 const MESSAGES = {
   noText: 'Não encontramos texto neste arquivo.',
@@ -186,7 +186,7 @@ test('leitor bloqueado mostra "Não foi possível carregar o leitor de arquivos"
 test('privacidade: a frase secreta do PDF não vai ao console, ao armazenamento, à URL nem a outro host', async ({
   page,
 }) => {
-  const secret = 'FRASE-SECRETA-DO-ARQUIVO-040';
+  const secret = 'FRASE-SECRETA-DO-ARQUIVO-041';
   const { knowledge } = await openKnowledge(page);
   await ready(page);
   const url = page.url();
@@ -348,7 +348,7 @@ test('trocar de arquivo durante a leitura de um DOCX faz valer só o segundo', a
 test('privacidade do DOCX: a frase secreta não vai ao console, ao armazenamento, à URL nem a outro host', async ({
   page,
 }) => {
-  const secret = 'FRASE-SECRETA-DO-DOCX-040';
+  const secret = 'FRASE-SECRETA-DO-DOCX-041';
   const { knowledge } = await openKnowledge(page);
   await ready(page);
   const url = page.url();

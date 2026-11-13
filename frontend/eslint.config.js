@@ -3,18 +3,18 @@ import tseslint from 'typescript-eslint';
 import globals from 'globals';
 
 /**
- * Spec 040: os leitores de PDF e DOCX interpretam arquivo não confiável e só podem ser alcançados por
+ * Spec 041: os leitores de PDF e DOCX interpretam arquivo não confiável e só podem ser alcançados por
  * `import()`/`new Worker`. O `pdfjs-dist` só entra em `pdf-text.ts`; o `mammoth`, só no worker do DOCX.
  */
 const PDF_MODULE = 'src/company/pdf-text.ts';
 const DOCX_WORKER = 'src/company/docx-text.worker.ts';
 const pdfRestriction = {
   group: ['pdfjs-dist', 'pdfjs-dist/*'],
-  message: 'O pdfjs-dist só é importado em src/company/pdf-text.ts (spec 040).',
+  message: 'O pdfjs-dist só é importado em src/company/pdf-text.ts (spec 041).',
 };
 const docxRestriction = {
   group: ['mammoth', 'mammoth/*'],
-  message: 'O mammoth só é importado em src/company/docx-text.worker.ts (spec 040).',
+  message: 'O mammoth só é importado em src/company/docx-text.worker.ts (spec 041).',
 };
 
 export default [

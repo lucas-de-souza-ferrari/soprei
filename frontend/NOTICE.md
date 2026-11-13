@@ -31,7 +31,7 @@ nenhum visitante enviar o IP a terceiros. O `@font-face` está no começo de `sr
 - **Para atualizar:** repita o pedido acima, baixe os novos `woff2`, troque os arquivos e os hashes desta tabela
   e confira o `unicode-range` do `src/style.css` contra a folha de estilo.
 
-## Leitores de PDF e DOCX da base de conhecimento (spec 040)
+## Leitores de PDF e DOCX da base de conhecimento (spec 041)
 
 O texto de PDFs e DOCX escolhidos na aba Conhecimento é extraído no navegador. As bibliotecas só são
 carregadas quando um arquivo desses é escolhido (`import()` e Web Worker; arquivos `pdf-text-*.js`,

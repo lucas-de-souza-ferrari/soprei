@@ -1,7 +1,7 @@
 import type { ZipEntry } from './knowledge-file-rules';
 
 /**
- * Defesa contra bomba de compressão no DOCX (spec 040, revisão I-1). O tamanho descompactado que o
+ * Defesa contra bomba de compressão no DOCX (spec 041, revisão I-1). O tamanho descompactado que o
  * diretório do ZIP declara pode mentir, e o JSZip (dentro do mammoth) descompacta cada entrada
  * inteira na memória. Aqui cada entrada é descompactada em fluxo (`DecompressionStream`), contando os
  * bytes que saem de verdade, e a leitura para assim que a soma passa do teto: o mammoth só recebe

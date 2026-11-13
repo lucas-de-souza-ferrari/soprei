@@ -3,7 +3,7 @@ import type { ZipEntry } from './knowledge-file-rules';
 import { canInflateRaw, inflatedSizeWithin } from './zip-inflate-guard';
 
 /**
- * Worker do leitor de DOCX (spec 040, D6): único módulo que importa o `mammoth` (o ESLint impõe). Roda
+ * Worker do leitor de DOCX (spec 041, D6): único módulo que importa o `mammoth` (o ESLint impõe). Roda
  * fora da thread principal, então um DOCX grande não trava a tela e cancelar é `worker.terminate()`.
  * Só `extractRawText` (texto puro): sem imagens, sem HTML. Os avisos do mammoth (`messages`) são
  * descartados, e a mensagem de erro nunca volta à tela (só `{ ok: false }`).

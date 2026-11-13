@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 
 /**
- * Geradores de arquivos de teste da spec 040 (D8): PDF e ZIP/DOCX mínimos escritos à mão, sem
+ * Geradores de arquivos de teste da spec 041 (D8): PDF e ZIP/DOCX mínimos escritos à mão, sem
  * dependência e sem binário no git. O conteúdo de cada arquivo fica legível no teste.
  */
 
@@ -68,7 +68,7 @@ interface Encryption {
 
 /** Algoritmos 2, 3 e 4 da especificação do PDF (revisão 2): exige senha para abrir. */
 function standardEncryption(userPassword: string, ownerPassword: string): Encryption {
-  const id = md5(latin1('soprei-spec-040'));
+  const id = md5(latin1('soprei-spec-041'));
   const permissions = -44;
   const ownerKey = md5(padPassword(ownerPassword)).subarray(0, 5);
   const owner = rc4(ownerKey, padPassword(userPassword));
