@@ -23,7 +23,7 @@ import type { RateLimitProfiles } from './rate-limit/rate-limit.js';
 import { buildServer } from './server.js';
 
 // Spec 040 (E4): perfil `contact` com o Redis real (/15) e o teto diário real; e-mail falso. Prefixo único por
-// teste, sem FLUSHALL/FLUSHDB.
+// teste, sem apagar o banco do Redis inteiro.
 const config = loadIntegrationConfig();
 const ORIGIN = 'http://localhost:5174';
 const KEY = deriveSalesContactKey(randomUUID());
