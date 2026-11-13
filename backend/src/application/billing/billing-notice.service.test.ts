@@ -12,7 +12,7 @@ import type {
 import type { BillingNoticeResult } from '../../infrastructure/metrics/index.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
 import type { BillingMailer, BillingNoticeMail } from '../ports/billing-mailer.js';
-import { BillingNoticeService } from './billing-notice.service.js';
+import { aiResumeOf, BillingNoticeService } from './billing-notice.service.js';
 
 const DAY = 86_400_000;
 const GRACE = 5;
@@ -378,5 +378,130 @@ describe('cursor rotativo, releitura e recibo (spec 031, E5, revisão)', () => {
       t.mailer.sent.map((entry) => entry.mail.subject),
       ['Recebemos o seu pagamento no Soprei'],
     );
+  });
+});
+
+describe('revisão da E1 da spec 040: data de volta da IA e reajuste com dados velhos', () => {
+  it('aiResumeOf: teste gratuito sem data; mensal volta com a renovação; anual volta na próxima janela do período', () => {
+    const start = new Date('2026-11-10T12:00:00Z');
+    assert.deepEqual(
+      aiResumeOf(
+        {
+          status: 'TRIAL',
+          currentPeriodStart: start,
+          currentPeriodEnd: new Date('2026-11-17T12:00:00Z'),
+        },
+        start,
+      ),
+      { kind: 'trial' },
+    );
+    assert.deepEqual(
+      aiResumeOf(
+        {
+          status: 'ACTIVE',
+          currentPeriodStart: start,
+          currentPeriodEnd: new Date('2026-12-10T12:00:00Z'),
+        },
+        start,
+      ),
+      { kind: 'renewal' },
+    );
+    assert.deepEqual(
+      aiResumeOf(
+        {
+          status: 'ACTIVE',
+          currentPeriodStart: start,
+          currentPeriodEnd: new Date('2027-11-10T12:00:00Z'),
+        },
+        new Date('2027-03-10T12:00:00Z'),
+      ),
+      { kind: 'window', at: new Date('2027-04-10T12:00:00Z') },
+    );
+    // Última janela do anual: a próxima seria o fim do período, então volta com a renovação.
+    assert.deepEqual(
+      aiResumeOf(
+        {
+          status: 'ACTIVE',
+          currentPeriodStart: start,
+          currentPeriodEnd: new Date('2027-11-10T12:00:00Z'),
+        },
+        new Date('2027-10-10T12:00:00Z'),
+      ),
+      { kind: 'renewal' },
+    );
+  });
+
+  it('QUOTA_TOKENS_100 do teste gratuito sai sem data de volta', async () => {
+    const t = build(at(-3 * DAY));
+    t.repository.candidates = [
+      {
+        ...candidate('s1', {
+          sub: { status: 'TRIAL', trialEndsAt: END },
+          usage: { tokens: 300_000 },
+        }),
+      },
+    ];
+    await t.service.runOnce();
+    const mail = t.mailer.sent.find(
+      (entry) => entry.mail.subject === 'As respostas automáticas do Soprei pararam este mês',
+    );
+    assert.ok(mail !== undefined);
+    assert.ok(mail.mail.text.includes('escolher um plano'));
+    assert.doesNotMatch(mail.mail.text, /volta a responder em \d/);
+  });
+
+  const ANNUAL_SCALE_OLD: Partial<SubscriptionRecord> = {
+    plan: { ...PLAN, code: 'SCALE', name: 'Escala antigo' },
+    price: {
+      id: 'pr-old',
+      cycle: 'ANNUAL',
+      baseCents: 335_040,
+      agendaCents: 95_040,
+      stockCents: 75_840,
+      whatsappBillingMode: 'CUSTOMER_PAYS_META',
+      metaPerReplyMilliCents: 3_500,
+      extraPackCents: 5_900,
+      extraPackReplies: 500,
+      version: 1,
+      validFrom: new Date('2026-01-01T00:00:00Z'),
+    },
+    cycle: 'ANNUAL',
+    agendaEnabled: false,
+    stockEnabled: false,
+    currentPeriodStart: new Date('2025-12-01T00:00:00Z'),
+  };
+  const CATALOG = [
+    {
+      plan: { code: 'SCALE' as const, name: 'Escala' },
+      prices: [
+        { cycle: 'ANNUAL' as const, baseCents: 349_000, agendaCents: 99_000, stockCents: 79_000 },
+      ],
+    },
+  ];
+
+  it('PRICE_CHANGE usa o nome do plano da renovação (catálogo vigente) e o valor novo', async () => {
+    const t = build(at(-40 * DAY));
+    t.repository.candidates = [{ ...candidate('s1', { sub: ANNUAL_SCALE_OLD }), catalog: CATALOG }];
+    await t.service.runOnce();
+    assert.equal(t.mailer.sent.length, 1);
+    const text = t.mailer.sent[0]?.mail.text ?? '';
+    assert.ok(text.includes('plano Escala passa a ser R$ 3.490,00'), text);
+    assert.ok(!text.includes('Escala antigo'));
+  });
+
+  it('PRICE_CHANGE não sai se, relida logo antes do envio, a renovação já não sobe (upgrade pago ou troca no meio)', async () => {
+    const t = build(at(-40 * DAY));
+    t.repository.candidates = [{ ...candidate('s1', { sub: ANNUAL_SCALE_OLD }), catalog: CATALOG }];
+    // Entre a varredura e o envio, a assinatura passou ao preço vigente (renovou/fez upgrade no catálogo novo).
+    t.repository.target = {
+      subscription: subscription('s1', {
+        ...ANNUAL_SCALE_OLD,
+        price: { ...(ANNUAL_SCALE_OLD.price as SubscriptionRecord['price']), baseCents: 349_000 },
+      }),
+      recipient: { email: EMAIL },
+    };
+    await t.service.runOnce();
+    assert.equal(t.mailer.sent.length, 0);
+    assert.equal(t.repository.claimed.size, 0, 'nada marcado: um aviso velho não trava o próximo');
   });
 });

@@ -68,7 +68,7 @@ describe('e-mails de aviso de cobrança (spec 031, E5)', () => {
       {
         ...DATA,
         quota: { used: 15_000_000, limit: 15_000_000 },
-        nextWindowStart: new Date('2026-12-10T12:00:00Z'),
+        aiResume: { kind: 'window', at: new Date('2026-12-10T12:00:00Z') },
       },
       ORIGIN,
     );
@@ -85,6 +85,25 @@ describe('e-mails de aviso de cobrança (spec 031, E5)', () => {
     assert.ok(mail.text.includes('antes da cota de respostas'));
     assert.ok(mail.text.includes('10/12/2026'), 'a data em que a IA volta');
     assert.ok(mail.text.includes('guardadas e visíveis no painel'));
+  });
+
+  it('QUOTA_TOKENS_100: no teste gratuito não há data; no pago sem próxima janela no período, volta com a renovação', () => {
+    const trial = billingNoticeMail(
+      'QUOTA_TOKENS_100',
+      { ...DATA, aiResume: { kind: 'trial' } },
+      ORIGIN,
+    );
+    assert.ok(trial.text.includes('escolher um plano'));
+    assert.doesNotMatch(trial.text, /\d{2}\/\d{2}\/\d{4}/);
+    const renewal = billingNoticeMail(
+      'QUOTA_TOKENS_100',
+      { ...DATA, aiResume: { kind: 'renewal' } },
+      ORIGIN,
+    );
+    assert.ok(renewal.text.includes('quando a assinatura for renovada'));
+    assert.ok(renewal.text.includes('01/12/2026'), 'a data é a do vencimento');
+    assert.ok(!renewal.text.includes('próximo mês de uso'));
+    assert.doesNotMatch(renewal.text, /token/i);
   });
 
   it('o aviso de reajuste (PRICE_CHANGE) traz o valor do catálogo, a data da renovação e que dá para cancelar (spec 040, D6)', () => {

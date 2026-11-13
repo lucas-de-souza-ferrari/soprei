@@ -10,6 +10,7 @@ import {
   type QuotaSettings,
   quotaLimits,
   renewalPriceChange,
+  renewalPriceIncrease,
   statusToSync,
   type SubscriptionRecord,
   type UsageNumbers,
@@ -17,7 +18,7 @@ import {
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import type { BillingMailer } from '../ports/billing-mailer.js';
-import { billingNoticeMail, type BillingMailData } from './billing-mail.js';
+import { type AiResume, billingNoticeMail, type BillingMailData } from './billing-mail.js';
 
 const DAY_MS = 86_400_000;
 /** Assinaturas lidas por lote e lotes por execução (o resto fica para a próxima; nada é perdido). */
@@ -91,7 +92,9 @@ export class BillingNoticeService {
             for (const notice of dueNotices(candidate, now, settings)) {
               // Relê a assinatura imediatamente antes de enviar um aviso de período: um pagamento no meio
               // da varredura não pode gerar um e-mail velho ("venceu") logo depois.
-              if (await this.isStale(candidate.subscription.id, notice)) continue;
+              if (await this.isStale(candidate.subscription.id, notice, candidate.catalog)) {
+                continue;
+              }
               const result = await this.sendNotice(
                 candidate.subscription,
                 candidate.recipient,
@@ -149,8 +152,16 @@ export class BillingNoticeService {
     return { scanned, sent, failed, skipped, synced };
   }
 
-  /** O aviso de período ainda vale? Relê a assinatura: o fim do período, o teste e o cancelamento precisam ser os da varredura. */
-  private async isStale(subscriptionId: string, notice: DueNotice): Promise<boolean> {
+  /**
+   * O aviso de período ainda vale? Relê a assinatura: o fim do período, o teste e o cancelamento precisam ser os
+   * da varredura. No reajuste, também reconfere que a renovação ainda sobe (um upgrade pago ou uma troca
+   * agendada no meio da varredura tornam o aviso falso).
+   */
+  private async isStale(
+    subscriptionId: string,
+    notice: DueNotice,
+    catalog?: readonly CatalogLike[],
+  ): Promise<boolean> {
     const periodKinds: readonly BillingNoticeKind[] = [
       'PERIOD_ENDING_7D',
       'PERIOD_ENDING_1D',
@@ -171,7 +182,11 @@ export class BillingNoticeService {
         : sub.currentPeriodEnd;
     if (key.getTime() !== notice.windowStart.getTime()) return true;
     if (notice.kind.startsWith('TRIAL')) return sub.status !== 'TRIAL';
-    return sub.status === 'TRIAL' || sub.status === 'EXPIRED' || sub.cancelAtPeriodEnd;
+    if (sub.status === 'TRIAL' || sub.status === 'EXPIRED' || sub.cancelAtPeriodEnd) return true;
+    if (notice.kind === 'PRICE_CHANGE') {
+      return catalog === undefined || !renewalPriceIncrease(sub, catalog);
+    }
+    return false;
   }
 
   /** Recibos de pagamentos concedidos cujo e-mail não saiu (falha de SMTP ou queda): a tarefa os reenvia, uma vez só pela chave única. */
@@ -236,16 +251,13 @@ export class BillingNoticeService {
     } = {},
   ): BillingMailData {
     const { settings } = this.deps;
-    // Quando a IA volta (aviso de limite de uso da IA): o início da próxima janela de uso.
-    const nextWindowStart =
-      kind === 'QUOTA_TOKENS_100' && context.usageWindowStart !== undefined
-        ? usageWindowEnd(context.usageWindowStart, subscription.currentPeriodStart)
-        : undefined;
-    // O valor da renovação vem só do catálogo vigente (o mesmo que decidiu o aviso).
-    const renewalCents =
+    const aiResume =
+      kind === 'QUOTA_TOKENS_100' ? aiResumeOf(subscription, context.usageWindowStart) : undefined;
+    // O valor e o nome do plano da renovação vêm só do catálogo vigente (o mesmo que decidiu o aviso).
+    const renewal =
       kind === 'PRICE_CHANGE' && context.catalog !== undefined
-        ? renewalPriceChange(subscription, context.catalog)?.nextCents
-        : undefined;
+        ? renewalPriceChange(subscription, context.catalog)
+        : null;
     const quota =
       usage !== undefined && (kind === 'QUOTA_REPLIES_80' || kind === 'QUOTA_REPLIES_100')
         ? {
@@ -254,14 +266,14 @@ export class BillingNoticeService {
           }
         : undefined;
     return {
-      planName: subscription.plan.name,
+      planName: renewal?.planName ?? subscription.plan.name,
       periodEnd: subscription.currentPeriodEnd,
       graceEnd: new Date(
         subscription.currentPeriodEnd.getTime() + Math.max(0, settings.graceDays) * DAY_MS,
       ),
       quota,
-      nextWindowStart,
-      renewalCents,
+      aiResume,
+      renewalCents: renewal?.nextCents,
     };
   }
 
@@ -312,4 +324,21 @@ export class BillingNoticeService {
       return 'failed';
     }
   }
+}
+
+/**
+ * Quando a IA volta depois do limite de uso da IA (spec 040, D3): teste gratuito, só escolhendo um plano; pago,
+ * a próxima janela mensal se ela começa antes do fim do período pago (anual ou mensal estendido); senão, com a
+ * renovação.
+ */
+export function aiResumeOf(
+  subscription: Pick<SubscriptionRecord, 'status' | 'currentPeriodStart' | 'currentPeriodEnd'>,
+  usageWindowStart: Date | undefined,
+): AiResume {
+  if (subscription.status === 'TRIAL') return { kind: 'trial' };
+  if (usageWindowStart === undefined) return { kind: 'renewal' };
+  const next = usageWindowEnd(usageWindowStart, subscription.currentPeriodStart);
+  return next.getTime() < subscription.currentPeriodEnd.getTime()
+    ? { kind: 'window', at: next }
+    : { kind: 'renewal' };
 }
