@@ -28,22 +28,22 @@ O dono decidiu um catálogo novo, mais barato na entrada e com muito mais respos
 
 Modo `CUSTOMER_PAYS_META` (a empresa paga a Meta direto). Centavos no banco; reais aqui. **Anual = 10 x o mensal** (dois meses de desconto), para plano **e** módulos.
 
-| Plano | Empresas | Respostas por mês | Tokens por mês (proteção, D2) | Mensal | Anual | Agenda (mês / ano) | Estoque (mês / ano) |
-| --- | :-: | :-: | :-: | --: | --: | --: | --: |
-| Essencial | 1 | 2.500 | 15 M | R$ 47,90 | R$ 479,00 | R$ 29 / R$ 290 | R$ 19 / R$ 190 |
-| Profissional | 3 | 8.000 | 48 M | R$ 119,90 | R$ 1.199,00 | R$ 49 / R$ 490 | R$ 39 / R$ 390 |
-| Escala | 10 | 30.000 | 180 M | R$ 349,00 | R$ 3.490,00 | R$ 99 / R$ 990 | R$ 79 / R$ 790 |
-| Enterprise | sob consulta | sob consulta | — | — | — | — | — |
+| Plano        |   Empresas   | Respostas por mês | Tokens por mês (proteção, D2) |    Mensal |       Anual | Agenda (mês / ano) | Estoque (mês / ano) |
+| ------------ | :----------: | :---------------: | :---------------------------: | --------: | ----------: | -----------------: | ------------------: |
+| Essencial    |      1       |       2.500       |             15 M              |  R$ 47,90 |   R$ 479,00 |     R$ 29 / R$ 290 |      R$ 19 / R$ 190 |
+| Profissional |      3       |       8.000       |             48 M              | R$ 119,90 | R$ 1.199,00 |     R$ 49 / R$ 490 |      R$ 39 / R$ 390 |
+| Escala       |      10      |      30.000       |             180 M             | R$ 349,00 | R$ 3.490,00 |     R$ 99 / R$ 990 |      R$ 79 / R$ 790 |
+| Enterprise   | sob consulta |   sob consulta    |               —               |         — |           — |                  — |                   — |
 
 Colunas que não mudam: `metaEstimateMilliCents` e `metaPerReplyMilliCents` = 3.500; `extraPackCents` = 5.900 e `extraPackReplies` = 500 (copiados; o pacote continua sem existir). O Enterprise **não** é linha do catálogo (ver D10).
 
 **Efeito "batata do McDonald's" (regra do catálogo, com teste):** o preço por resposta incluída **cai a cada degrau**, no mensal e no anual.
 
-| Plano | Mensal por resposta (`perReplyMilliCents`) | Anual por resposta, 12 meses de cota (`perReplyMilliCents`) |
-| --- | --: | --: |
-| Essencial | R$ 0,0192 (4.790 x 1.000 / 2.500 = 1.916) | R$ 0,0160 (47.900 x 1.000 / 30.000 = 1.596) |
-| Profissional | R$ 0,0150 (11.990 x 1.000 / 8.000 = 1.498) | R$ 0,0125 (119.900 x 1.000 / 96.000 = 1.248) |
-| Escala | R$ 0,0116 (34.900 x 1.000 / 30.000 = 1.163) | R$ 0,0097 (349.000 x 1.000 / 360.000 = 969) |
+| Plano        |  Mensal por resposta (`perReplyMilliCents`) | Anual por resposta, 12 meses de cota (`perReplyMilliCents`) |
+| ------------ | ------------------------------------------: | ----------------------------------------------------------: |
+| Essencial    |   R$ 0,0192 (4.790 x 1.000 / 2.500 = 1.916) |                 R$ 0,0160 (47.900 x 1.000 / 30.000 = 1.596) |
+| Profissional |  R$ 0,0150 (11.990 x 1.000 / 8.000 = 1.498) |                R$ 0,0125 (119.900 x 1.000 / 96.000 = 1.248) |
+| Escala       | R$ 0,0116 (34.900 x 1.000 / 30.000 = 1.163) |                 R$ 0,0097 (349.000 x 1.000 / 360.000 = 969) |
 
 (Milésimos de centavo, arredondados para baixo, como o servidor calcula em D9.)
 
@@ -57,31 +57,32 @@ Colunas que não mudam: `metaEstimateMilliCents` e `metaPerReplyMilliCents` = 3.
 
 **Mensal**
 
-| Plano (mensal) | Receita | IA (pior) | Cartão | Imposto | Infra | Custo | Margem pior caso | Margem esperada (IA a 0,0025) |
-| --- | --: | --: | --: | --: | --: | --: | --: | --: |
-| Essencial | 47,90 | 15,00 | 1,68 | 2,87 | 3 | 22,55 | **R$ 25,35 (52,9%)** | R$ 34,10 (71,2%) |
-| Essencial + Agenda + Estoque | 95,90 | 15,00 | 3,36 | 5,75 | 3 | 27,11 | R$ 68,79 (71,7%) | R$ 77,54 (80,9%) |
-| Profissional | 119,90 | 48,00 | 4,20 | 7,19 | 9 | 68,39 | **R$ 51,51 (43,0%)** | R$ 79,51 (66,3%) |
-| Profissional + Agenda + Estoque | 207,90 | 48,00 | 7,28 | 12,47 | 9 | 76,75 | R$ 131,15 (63,1%) | R$ 159,15 (76,6%) |
-| Escala | 349,00 | 180,00 | 12,22 | 20,94 | 30 | 243,16 | **R$ 105,85 (30,3%)** | R$ 210,85 (60,4%) |
-| Escala + Agenda + Estoque | 527,00 | 180,00 | 18,45 | 31,62 | 30 | 260,07 | R$ 266,94 (50,7%) | R$ 371,94 (70,6%) |
+| Plano (mensal)                  | Receita | IA (pior) | Cartão | Imposto | Infra |  Custo |      Margem pior caso | Margem esperada (IA a 0,0025) |
+| ------------------------------- | ------: | --------: | -----: | ------: | ----: | -----: | --------------------: | ----------------------------: |
+| Essencial                       |   47,90 |     15,00 |   1,68 |    2,87 |     3 |  22,55 |  **R$ 25,35 (52,9%)** |              R$ 34,10 (71,2%) |
+| Essencial + Agenda + Estoque    |   95,90 |     15,00 |   3,36 |    5,75 |     3 |  27,11 |      R$ 68,79 (71,7%) |              R$ 77,54 (80,9%) |
+| Profissional                    |  119,90 |     48,00 |   4,20 |    7,19 |     9 |  68,39 |  **R$ 51,51 (43,0%)** |              R$ 79,51 (66,3%) |
+| Profissional + Agenda + Estoque |  207,90 |     48,00 |   7,28 |   12,47 |     9 |  76,75 |     R$ 131,15 (63,1%) |             R$ 159,15 (76,6%) |
+| Escala                          |  349,00 |    180,00 |  12,22 |   20,94 |    30 | 243,16 | **R$ 105,85 (30,3%)** |             R$ 210,85 (60,4%) |
+| Escala + Agenda + Estoque       |  527,00 |    180,00 |  18,45 |   31,62 |    30 | 260,07 |     R$ 266,94 (50,7%) |             R$ 371,94 (70,6%) |
 
 (Valores exatos com meio centavo, arredondados para cima: o Escala dá R$ 105,845 e R$ 210,845.)
 
 **Anual** (receita = 10 x o mensal; custos de IA e infra x 12; taxa e imposto sobre o valor pago)
 
-| Plano (anual) | Receita | IA (pior) | Cartão | Imposto | Infra | Custo | Margem pior caso | Margem esperada (IA a 0,0025) |
-| --- | --: | --: | --: | --: | --: | --: | --: | --: |
-| Essencial | 479,00 | 180,00 | 16,77 | 28,74 | 36 | 261,51 | **R$ 217,50 (45,4%)** | R$ 322,50 (67,3%) |
-| Essencial + Agenda + Estoque | 959,00 | 180,00 | 33,57 | 57,54 | 36 | 307,11 | R$ 651,90 (68,0%) | R$ 756,90 (78,9%) |
-| Profissional | 1.199,00 | 576,00 | 41,97 | 71,94 | 108 | 797,91 | **R$ 401,10 (33,5%)** | R$ 737,10 (61,5%) |
-| Profissional + Agenda + Estoque | 2.079,00 | 576,00 | 72,77 | 124,74 | 108 | 881,51 | R$ 1.197,50 (57,6%) | R$ 1.533,50 (73,8%) |
-| Escala | 3.490,00 | 2.160,00 | 122,15 | 209,40 | 360 | 2.851,55 | **R$ 638,45 (18,3%)** | R$ 1.898,45 (54,4%) |
-| Escala + Agenda + Estoque | 5.270,00 | 2.160,00 | 184,45 | 316,20 | 360 | 3.020,65 | R$ 2.249,35 (42,7%) | R$ 3.509,35 (66,6%) |
+| Plano (anual)                   |  Receita | IA (pior) | Cartão | Imposto | Infra |    Custo |      Margem pior caso | Margem esperada (IA a 0,0025) |
+| ------------------------------- | -------: | --------: | -----: | ------: | ----: | -------: | --------------------: | ----------------------------: |
+| Essencial                       |   479,00 |    180,00 |  16,77 |   28,74 |    36 |   261,51 | **R$ 217,50 (45,4%)** |             R$ 322,50 (67,3%) |
+| Essencial + Agenda + Estoque    |   959,00 |    180,00 |  33,57 |   57,54 |    36 |   307,11 |     R$ 651,90 (68,0%) |             R$ 756,90 (78,9%) |
+| Profissional                    | 1.199,00 |    576,00 |  41,97 |   71,94 |   108 |   797,91 | **R$ 401,10 (33,5%)** |             R$ 737,10 (61,5%) |
+| Profissional + Agenda + Estoque | 2.079,00 |    576,00 |  72,77 |  124,74 |   108 |   881,51 |   R$ 1.197,50 (57,6%) |           R$ 1.533,50 (73,8%) |
+| Escala                          | 3.490,00 |  2.160,00 | 122,15 |  209,40 |   360 | 2.851,55 | **R$ 638,45 (18,3%)** |           R$ 1.898,45 (54,4%) |
+| Escala + Agenda + Estoque       | 5.270,00 |  2.160,00 | 184,45 |  316,20 |   360 | 3.020,65 |   R$ 2.249,35 (42,7%) |           R$ 3.509,35 (66,6%) |
 
 **Ponto de equilíbrio do custo de IA por resposta** (sem módulos, margem zero): mensal Essencial R$ 0,0161, Profissional R$ 0,0124, Escala R$ 0,0095; anual Essencial R$ 0,0132, Profissional R$ 0,0102, Escala R$ 0,0078. Todos acima do R$ 0,006 do pior caso; o mais próximo é o Escala anual (1,3 x).
 
 **Riscos aceitos pelo dono (registrar em `docs/context.md` na aprovação):**
+
 1. **O Escala é o plano mais apertado** (30,3% no pior caso mensal e 18,3% no anual, porque o anual recebe 10 meses e entrega 12 meses de cota). Com as cotas da primeira versão desta spec (40 mil respostas), o Escala anual dava prejuízo no pior caso (-R$ 81,55 por ano); a redução da cota para 30 mil resolveu isso (D7).
 2. **A infra de R$ 3 por empresa é chute** (servidor próprio na Hetzner, sem medição por empresa); no Escala ela pesa R$ 30 por mês.
 3. O pior caso exige a cota inteira usada todo mês; o teto de tokens (D2) garante que o custo de IA por resposta não passe de ~R$ 0,006.
@@ -133,18 +134,18 @@ Alteração de `frontend/src/legal/privacidade.md` (`versao: 2`, `atualizado-em:
 
 **Campos (D17):** Zod `strict`, NFC, sem caractere de controle (exceto quebra de linha na mensagem), sem caracteres invisíveis de formatação (categoria Cf), tamanhos medidos depois da normalização.
 
-| Campo | Regra | Obrigatório |
-| --- | --- | :-: |
-| `name` | 2 a 100, uma linha | sim |
-| `email` | e-mail válido (o mesmo normalizador das contas), até 254 | sim |
-| `phone` | 8 a 20 caracteres de dígitos, espaço, `+`, `(`, `)` e `-`, com 8 a 15 dígitos | não |
-| `companyName` | 2 a 120, uma linha | sim |
-| `units` | enum: `1-10`, `11-30`, `31-100`, `100+` | sim |
-| `monthlyVolume` | enum: `ate-30-mil`, `30-a-100-mil`, `100-a-500-mil`, `mais-de-500-mil`, `nao-sei` | sim |
-| `message` | 10 a 2.000, até 40 linhas | sim |
-| `privacyAck` | literal `true` ("Li a Política de Privacidade", link para `/privacidade`; é ciência, a base legal é o art. 7º, V) | sim |
-| `website` | **honeypot**: campo escondido (fora da tela e do leitor de tela, `tabindex="-1"`, `autocomplete="off"`); só aceita vazio | — |
-| `formToken` | token do formulário (abaixo) | sim |
+| Campo           | Regra                                                                                                                    | Obrigatório |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------ | :---------: |
+| `name`          | 2 a 100, uma linha                                                                                                       |     sim     |
+| `email`         | e-mail válido (o mesmo normalizador das contas), até 254                                                                 |     sim     |
+| `phone`         | 8 a 20 caracteres de dígitos, espaço, `+`, `(`, `)` e `-`, com 8 a 15 dígitos                                            |     não     |
+| `companyName`   | 2 a 120, uma linha                                                                                                       |     sim     |
+| `units`         | enum: `1-10`, `11-30`, `31-100`, `100+`                                                                                  |     sim     |
+| `monthlyVolume` | enum: `ate-30-mil`, `30-a-100-mil`, `100-a-500-mil`, `mais-de-500-mil`, `nao-sei`                                        |     sim     |
+| `message`       | 10 a 2.000, até 40 linhas                                                                                                |     sim     |
+| `privacyAck`    | literal `true` ("Li a Política de Privacidade", link para `/privacidade`; é ciência, a base legal é o art. 7º, V)        |     sim     |
+| `website`       | **honeypot**: campo escondido (fora da tela e do leitor de tela, `tabindex="-1"`, `autocomplete="off"`); só aceita vazio |      —      |
+| `formToken`     | token do formulário (abaixo)                                                                                             |     sim     |
 
 **Rotas (D12, D13, D14)** em `presentation/contact/sales-contact.controller.ts`, **só com `ACCOUNTS_ENABLED=true`** (é quando `APP_ORIGIN` e o SMTP existem; sem ele, 404). Públicas: não leem cookie nem token, e a resposta é a mesma logado ou não.
 
@@ -183,6 +184,7 @@ A ordem sugerida pelo pedido foi ajustada: o cartão Enterprise depende do formu
 ## Critérios de aceite
 
 **E1**
+
 - [ ] `catalog-2026-11-migration.integration.test.ts` (schema temporário com rollback, como os testes de migration da 031): depois da migration, `catalog(now)` devolve exatamente os valores de D1 e D2 (centavos e cotas) para os três códigos e os dois ciclos; toda linha antiga de `plans` e `plan_prices` está **idêntica** à de antes (comparação coluna a coluna); nenhuma linha nova tem `SOPREI_PAYS_META`. Cobertura: `backend/src/infrastructure/database/catalog-2026-11-migration.integration.test.ts` (o catálogo vigente é lido no schema temporário por SQL com a mesma regra do repositório; o `billing.catalog(now)` real está em `billing.integration.test.ts`) (teste escrito; aguarda o CI, integração não rodada localmente).
 - [ ] A mesma migration aplicada sobre um catálogo com versões extras do Essencial (o caso da produção: `Plan` versões 2 e 3, e também `PlanPrice` versões 2 e 3 no plano 1) cria a versão `máx + 1` sem erro de unicidade, e o catálogo passa a ser o novo. Cobertura: `catalog-2026-11-migration.integration.test.ts` (teste escrito; aguarda o CI, integração não rodada localmente).
 - [x] Regras do catálogo vigente, em teste: anual = 10 x mensal para base e módulos; `perReplyMilliCents` estritamente decrescente Essencial > Profissional > Escala no mensal (1.916 > 1.498 > 1.163) e no anual (1.596 > 1.248 > 969); `monthlyReplies` = 2.500, 8.000 e 30.000 e `monthlyTokens` = 6.000 x respostas (15 M, 48 M, 180 M). Cobertura: `backend/src/domain/billing-catalog-2026-11.test.ts` (unitário, verde) e, sobre o banco, `catalog-2026-11-migration.integration.test.ts` e `billing.integration.test.ts`.
@@ -200,14 +202,17 @@ A ordem sugerida pelo pedido foi ajustada: o cartão Enterprise depende do formu
 - [x] `config.test.ts`: as variáveis novas são opcionais e validadas. Cobertura: `backend/src/infrastructure/config/config.test.ts` (verde; nesta etapa só `BILLING_TRIAL_REPLIES` e o padrão de `BILLING_TRIAL_TOKENS`; as do E4 entram no E4).
 
 **E2**
+
 - [x] `billing.test.ts` (frontend, regras puras): a faixa de cota esgotada por tokens usa o texto "O limite de uso da inteligência artificial deste mês foi atingido" e não tem número; por respostas mantém o texto com as respostas. Cobertura: `frontend/src/company/billing.test.ts` (três testes "spec 040 (E2)", verdes: `accessNotice`, `exhaustedBanner`, `perReplyText`, `CYCLE_NOTES` e o contrato com e sem `perReplyMilliCents`).
 - [x] `e2e/billing.spec.ts` (desktop e celular, claro e escuro): a área de Assinatura não contém o texto "token" (busca no texto visível da página, sem diferenciar maiúsculas); só há uma barra de uso (`role="progressbar"`) de respostas; o cartão anual mostra "2 meses grátis"; com D9, o cartão mostra o preço por resposta vindo da fixture da API (a fixture muda o valor e a tela acompanha, provando que não é calculado no navegador). Cobertura: `frontend/e2e/billing.spec.ts` (testes "spec 040 (E2)": texto das três abas sem "token", uma barra, "2 meses grátis", preço por resposta mensal e anual e a troca do valor na fixture; 360 px sem rolagem; limite da IA esgotado na tela e na faixa do painel, sem número) e `billing-fixture.ts` (catálogo novo, `perReply` sobrescrevível). Arquivo inteiro verde localmente (68 testes, desktop e celular).
 - [x] Par de cor novo, se houver, entra em `theme/contrast.test.ts` (mínimo 4,5:1 nos dois temas). Nenhum par novo: a linha do preço por resposta usa `muted-foreground` sobre `card`, já coberto.
 
 **E3**
+
 - [x] `legal.test.ts`: `privacidade.md` tem `versao: 2`, `situacao: vigente`, nenhum marcador; o corpo contém "contato comercial", "art. 7º, V" e a linha de prazo da seção 9; a página gerada mostra "Versão 2". Cobertura: `frontend/src/legal/legal.test.ts`, "política versão 2 (spec 040, E3)" (verde); o `e2e/legal.spec.ts` passou a ler data e versão do cabeçalho de cada texto (verde).
 
 **E4**
+
 - [x] Sem `ACCOUNTS_ENABLED`, `GET /contact/sales/form-token` e `POST /contact/sales` respondem 404. Cobertura: `backend/src/presentation/contact/sales-contact.controller.test.ts` (verde).
 - [x] Inventário de rotas (`rate-limit.test.ts`): as duas rotas declaram perfil (`public` e `contact`); `contact` está em `FAIL_CLOSED_RATE_LIMIT_PROFILES`; nenhuma rota nova é de tenant nem precisa de `subscriptionExempt`. Cobertura: `backend/src/infrastructure/http/rate-limit/rate-limit.test.ts` (verde).
 - [x] `sales-contact.controller.test.ts` (`fastify.inject`, mailer falso, relógio injetado): sem `Origin` igual a `APP_ORIGIN` ou sem `X-Soprei-App: web` = 403 e nada enviado; corpo com campo a mais = 400; cada limite de tamanho (abaixo e acima) e cada enum inválido = 400 sem o valor na resposta; `privacyAck: false` = 400; token alterado ou com mais de 2 h = 400 `FORM_EXPIRED`; token com menos de 3 s = 202 e nada enviado; honeypot preenchido = 202 idêntico (mesmo corpo e mesmos cabeçalhos) e nada enviado; caso válido = 202 e exatamente um e-mail. Cobertura: `sales-contact.controller.test.ts` (verde; também JSON malformado, corpo acima de 16 KiB = 413 e a mesma resposta com ou sem cookie), `backend/src/application/contact/form-token.test.ts` e `sales-contact.service.test.ts` (verdes).
@@ -250,23 +255,23 @@ A ordem sugerida pelo pedido foi ajustada: o cartão Enterprise depende do formu
 ## Decisões (o dono decide; recomendação primeiro)
 
 - **D1 (DECIDIDA pelo dono, 2026-11-13; cotas trocadas no mesmo dia) Catálogo e preços.** Os valores da tabela "O catálogo novo": preços 47,90/119,90/349, anual = 10 x mensal, módulos com o mesmo preço mensal, **cotas de 2.500, 8.000 e 30.000 respostas** (a primeira versão tinha 3.000, 10.000 e 40.000; o dono reduziu depois de ver o pior caso do Escala anual), margem do pior caso aceita. O anual do Escala e dos módulos sobe 4,2% (tratado em D6).
-- **D2 Cota de tokens (proteção, fora da tela).** *Recomendação:* **6.000 tokens por resposta incluída: 15 M, 48 M e 180 M.** (A razão não depende do número de respostas, então a troca das cotas não muda a recomendação.) Justificativa: (a) é o maior teto que mantém o custo de IA no pior caso em ~R$ 0,006 por resposta, mesmo com a mistura mais cara que os limites permitem (saída máxima de 1.024 tokens por chamada e até 4 chamadas por turno: ~R$ 0,001 por mil tokens), então a tabela de margem continua valendo; (b) dá 60% de folga sobre os ~3.700 tokens típicos, de modo que a cota **escondida** quase nunca estoura antes da cota **visível** (turnos com ferramentas da agenda e o "Testar" gastam mais); (c) no teste gratuito, 100 respostas x 6.000 = 600 mil tokens. *Alternativas:* **4.000 por resposta (10 M, 32 M, 120 M, sugestão do dono)**: custo máximo menor (~R$ 0,004), mas só 8% acima do típico, e a IA pararia por um limite que o cliente não vê sempre que usar a agenda com ferramentas ou testar muito; **8.000 (20 M, 64 M, 240 M)**: igual ao `TOKENS_PER_EXTRA_REPLY`, mas com a mistura cara passa de R$ 0,006 por resposta.
-- **D3 Aviso de tokens.** *Recomendação:* o e-mail de **80%** sai (vira só sinal interno: métrica `quota_blocks_total{reason="tokens"}` e o log de bloqueio, que já existem; o dono acompanha e corrige a razão de D2 por versão de catálogo); o de **100%** continua, sem a palavra token (a IA parou e a pessoa precisa saber por quê); a faixa no painel continua, sem número. *Alternativa:* nenhum e-mail de tokens (a IA pararia e a pessoa só descobriria pelo painel).
-- **D4 Cotas novas para quem já assina.** *Recomendação:* **na hora, para todos**, pela regra do máximo no código (`effectiveQuotas`): sem `UPDATE` na migration, cobre pedidos antigos pagos depois e o teste gratuito, e uma redução futura nunca atinge o período pago. *Alternativa:* `UPDATE subscriptions SET plan_id = <linha nova do mesmo código>` na migration (menos código, mas é escrita em linha existente, não cobre o pedido antigo pago depois e deixa `price_id` apontando para um preço de outra linha de `Plan`).
-- **D5 Preço novo para quem já assina.** *Recomendação:* **a partir da próxima renovação**, sem reembolso proporcional (já é o comportamento do código); link aberto no deploy cobra o valor antigo (risco aceito). *Alternativa:* expirar os pedidos abertos na migration (é `UPDATE` de pedidos e não impede pagar o link, que vale na InfinitePay).
-- **D6 Anual pago a 12 x 0,8 em curso e o reajuste.** *Recomendação:* o período pago fica como está, **ganha as cotas mensais novas já** (D4) e renova ao preço novo; como o Escala anual e os módulos anuais **sobem**, os termos (seção 7) exigem aviso por e-mail com 30 dias: o **aviso automático `PRICE_CHANGE`** entre 45 e 30 dias antes da renovação (usa o enum, a trava e a tarefa da 031). *Alternativas:* e-mail manual do dono a cada assinante anual afetado (provavelmente zero ou poucos hoje, mas depende de lembrar daqui a um ano); ou manter o anual de Escala e dos módulos em 9,6 x (contraria D1).
+- **D2 Cota de tokens (proteção, fora da tela).** _Recomendação:_ **6.000 tokens por resposta incluída: 15 M, 48 M e 180 M.** (A razão não depende do número de respostas, então a troca das cotas não muda a recomendação.) Justificativa: (a) é o maior teto que mantém o custo de IA no pior caso em ~R$ 0,006 por resposta, mesmo com a mistura mais cara que os limites permitem (saída máxima de 1.024 tokens por chamada e até 4 chamadas por turno: ~R$ 0,001 por mil tokens), então a tabela de margem continua valendo; (b) dá 60% de folga sobre os ~3.700 tokens típicos, de modo que a cota **escondida** quase nunca estoura antes da cota **visível** (turnos com ferramentas da agenda e o "Testar" gastam mais); (c) no teste gratuito, 100 respostas x 6.000 = 600 mil tokens. _Alternativas:_ **4.000 por resposta (10 M, 32 M, 120 M, sugestão do dono)**: custo máximo menor (~R$ 0,004), mas só 8% acima do típico, e a IA pararia por um limite que o cliente não vê sempre que usar a agenda com ferramentas ou testar muito; **8.000 (20 M, 64 M, 240 M)**: igual ao `TOKENS_PER_EXTRA_REPLY`, mas com a mistura cara passa de R$ 0,006 por resposta.
+- **D3 Aviso de tokens.** _Recomendação:_ o e-mail de **80%** sai (vira só sinal interno: métrica `quota_blocks_total{reason="tokens"}` e o log de bloqueio, que já existem; o dono acompanha e corrige a razão de D2 por versão de catálogo); o de **100%** continua, sem a palavra token (a IA parou e a pessoa precisa saber por quê); a faixa no painel continua, sem número. _Alternativa:_ nenhum e-mail de tokens (a IA pararia e a pessoa só descobriria pelo painel).
+- **D4 Cotas novas para quem já assina.** _Recomendação:_ **na hora, para todos**, pela regra do máximo no código (`effectiveQuotas`): sem `UPDATE` na migration, cobre pedidos antigos pagos depois e o teste gratuito, e uma redução futura nunca atinge o período pago. _Alternativa:_ `UPDATE subscriptions SET plan_id = <linha nova do mesmo código>` na migration (menos código, mas é escrita em linha existente, não cobre o pedido antigo pago depois e deixa `price_id` apontando para um preço de outra linha de `Plan`).
+- **D5 Preço novo para quem já assina.** _Recomendação:_ **a partir da próxima renovação**, sem reembolso proporcional (já é o comportamento do código); link aberto no deploy cobra o valor antigo (risco aceito). _Alternativa:_ expirar os pedidos abertos na migration (é `UPDATE` de pedidos e não impede pagar o link, que vale na InfinitePay).
+- **D6 Anual pago a 12 x 0,8 em curso e o reajuste.** _Recomendação:_ o período pago fica como está, **ganha as cotas mensais novas já** (D4) e renova ao preço novo; como o Escala anual e os módulos anuais **sobem**, os termos (seção 7) exigem aviso por e-mail com 30 dias: o **aviso automático `PRICE_CHANGE`** entre 45 e 30 dias antes da renovação (usa o enum, a trava e a tarefa da 031). _Alternativas:_ e-mail manual do dono a cada assinante anual afetado (provavelmente zero ou poucos hoje, mas depende de lembrar daqui a um ano); ou manter o anual de Escala e dos módulos em 9,6 x (contraria D1).
 - **D7 (RESOLVIDA pela redução da cota; decisão do dono, 2026-11-13) Escala anual no pior caso.** Com 40 mil respostas o Escala anual dava -R$ 81,55 por ano (-2,3%) no pior caso. O dono manteve o preço (10 x) e reduziu a cota do Escala para 30 mil (e as do Essencial e do Profissional para 2.500 e 8.000); o pior caso do Escala anual passou a R$ 638,45 (18,3%) e nenhuma combinação do catálogo tem margem negativa.
-- **D8 Teste gratuito.** *Recomendação:* **100 respostas** (`BILLING_TRIAL_REPLIES`) e **600 mil tokens** (padrão de `BILLING_TRIAL_TOKENS`); custo de IA do teste no pior caso ~R$ 0,60. *Alternativa:* 50 respostas e 300 mil tokens (mantém o padrão atual da variável).
-- **D9 Preço por resposta na tela.** *Recomendação:* **mostrar** "equivale a R$ 0,0192 por resposta" (Essencial mensal) em cada cartão, com o valor calculado no servidor (deixa o "efeito batata" visível para quem compra). *Alternativa:* só na spec e no material de venda.
-- **D10 Onde o Enterprise aparece.** *Recomendação:* cartão na aba Planos da Assinatura, página pública `/fale-conosco` e link "Fale com a gente" na página inicial; **sem** página pública de preços nesta spec. *Alternativa:* só na Assinatura (quem ainda não tem conta não acha o contato).
-- **D11 Destinatário do e-mail.** O dono decidiu o remetente do SMTP. *Recomendação:* manter isso como **padrão** e acrescentar `SALES_CONTACT_EMAIL` **opcional**, porque o remetente costuma ser uma caixa `noreply` (é o exemplo do `.env.example`) que ninguém lê; `EMAIL_PROVIDER_FROM` já é só o endereço, sem nome a extrair. *Alternativa:* só `EMAIL_PROVIDER_FROM`, sem variável nova.
-- **D12 Rota pública ou autenticada.** *Recomendação:* **uma rota pública só**, que não lê o cookie: o mesmo formulário serve ao painel e ao site, com as mesmas proteções, e o pedido não fica ligado à conta (minimização). *Alternativa:* duas rotas (uma com cookie, preenchendo o e-mail da conta): mais código e mais dado.
-- **D13 Rate limit.** *Recomendação:* perfil novo **`contact`**, fail-closed, 5 por hora por IP, mais o teto global silencioso de 30 por dia. O `login` não serve: o contador por IP é compartilhado com cadastro e entrada, então quem pede contato perderia tentativas de login (e vice-versa). *Alternativa:* reaproveitar `login`.
-- **D14 Antispam sem CAPTCHA.** *Recomendação:* **honeypot + token de formulário assinado** (tempo mínimo de 3 s, validade de 2 h, sem estado) + perfil `contact` + teto diário. *Alternativa:* só honeypot e teto (sem a rota `GET`, mas sem tempo mínimo confiável: o tempo vindo do navegador é forjável).
-- **D15 Banco.** *Recomendação:* **nada no banco**, só o e-mail (menos dado guardado e nenhuma tabela nova para a política de retenção). *Alternativa:* tabela de leads (exigiria expurgo, tela e base para a 032).
-- **D16 `Reply-To` e resposta automática.** *Recomendação:* `Reply-To` com o e-mail do interessado (o dono responde direto), sem nome de exibição; **sem** confirmação automática ao interessado. *Alternativa:* sem `Reply-To` (o dono copia o endereço do corpo).
-- **D17 Campos.** *Recomendação:* os da tabela, com **telefone opcional** (minimização: o e-mail basta para responder) e faixas em vez de números livres para unidades e volume (validação simples, menos texto livre). *Alternativa:* telefone obrigatório.
-- **D18 Prazo de guarda na política.** *Recomendação:* **12 meses** depois do último contato, se não virar contrato. *Alternativa:* 6 meses.
+- **D8 Teste gratuito.** _Recomendação:_ **100 respostas** (`BILLING_TRIAL_REPLIES`) e **600 mil tokens** (padrão de `BILLING_TRIAL_TOKENS`); custo de IA do teste no pior caso ~R$ 0,60. _Alternativa:_ 50 respostas e 300 mil tokens (mantém o padrão atual da variável).
+- **D9 Preço por resposta na tela.** _Recomendação:_ **mostrar** "equivale a R$ 0,0192 por resposta" (Essencial mensal) em cada cartão, com o valor calculado no servidor (deixa o "efeito batata" visível para quem compra). _Alternativa:_ só na spec e no material de venda.
+- **D10 Onde o Enterprise aparece.** _Recomendação:_ cartão na aba Planos da Assinatura, página pública `/fale-conosco` e link "Fale com a gente" na página inicial; **sem** página pública de preços nesta spec. _Alternativa:_ só na Assinatura (quem ainda não tem conta não acha o contato).
+- **D11 Destinatário do e-mail.** O dono decidiu o remetente do SMTP. _Recomendação:_ manter isso como **padrão** e acrescentar `SALES_CONTACT_EMAIL` **opcional**, porque o remetente costuma ser uma caixa `noreply` (é o exemplo do `.env.example`) que ninguém lê; `EMAIL_PROVIDER_FROM` já é só o endereço, sem nome a extrair. _Alternativa:_ só `EMAIL_PROVIDER_FROM`, sem variável nova.
+- **D12 Rota pública ou autenticada.** _Recomendação:_ **uma rota pública só**, que não lê o cookie: o mesmo formulário serve ao painel e ao site, com as mesmas proteções, e o pedido não fica ligado à conta (minimização). _Alternativa:_ duas rotas (uma com cookie, preenchendo o e-mail da conta): mais código e mais dado.
+- **D13 Rate limit.** _Recomendação:_ perfil novo **`contact`**, fail-closed, 5 por hora por IP, mais o teto global silencioso de 30 por dia. O `login` não serve: o contador por IP é compartilhado com cadastro e entrada, então quem pede contato perderia tentativas de login (e vice-versa). _Alternativa:_ reaproveitar `login`.
+- **D14 Antispam sem CAPTCHA.** _Recomendação:_ **honeypot + token de formulário assinado** (tempo mínimo de 3 s, validade de 2 h, sem estado) + perfil `contact` + teto diário. _Alternativa:_ só honeypot e teto (sem a rota `GET`, mas sem tempo mínimo confiável: o tempo vindo do navegador é forjável).
+- **D15 Banco.** _Recomendação:_ **nada no banco**, só o e-mail (menos dado guardado e nenhuma tabela nova para a política de retenção). _Alternativa:_ tabela de leads (exigiria expurgo, tela e base para a 032).
+- **D16 `Reply-To` e resposta automática.** _Recomendação:_ `Reply-To` com o e-mail do interessado (o dono responde direto), sem nome de exibição; **sem** confirmação automática ao interessado. _Alternativa:_ sem `Reply-To` (o dono copia o endereço do corpo).
+- **D17 Campos.** _Recomendação:_ os da tabela, com **telefone opcional** (minimização: o e-mail basta para responder) e faixas em vez de números livres para unidades e volume (validação simples, menos texto livre). _Alternativa:_ telefone obrigatório.
+- **D18 Prazo de guarda na política.** _Recomendação:_ **12 meses** depois do último contato, se não virar contrato. _Alternativa:_ 6 meses.
 
 ## Dependências novas
 
@@ -276,7 +281,7 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 
 1. Registrar as decisões em `docs/context.md` (spec aprovada em 2026-11-13 com D1 a D18 como recomendadas, cotas de 2.500, 8.000 e 30.000 e D7 resolvida pela redução da cota).
 2. Antes do E1 em produção: **conferir no banco do servidor** se há pedidos `PENDING` abertos (serão cobrados pelo valor antigo se pagos) e quantas assinaturas `ANNUAL` existem com Escala ou módulos (receberão o aviso de reajuste perto do fim do período).
-2a. Antes do E1 em produção: **conferir que `BILLING_TRIAL_TOKENS` não está no `backend/.env` do servidor ou vale 600000** (300000 recriaria a parada perto de 81 respostas no teste gratuito).
+   2a. Antes do E1 em produção: **conferir que `BILLING_TRIAL_TOKENS` não está no `backend/.env` do servidor ou vale 600000** (300000 recriaria a parada perto de 81 respostas no teste gratuito).
 3. Depois do merge de cada etapa, o deploy automático aplica a migration (aditiva). Nenhuma variável é obrigatória; se quiser outra caixa para os pedidos comerciais, `SALES_CONTACT_EMAIL` no `backend/.env` e reiniciar.
 4. E3 antes ou junto do E4: revisar a redação da política (versão 2) e, se `SALES_CONTACT_EMAIL` apontar para outro provedor que não o Gmail, ajustar a linha do fornecedor na seção 7.
 5. Depois do E4: enviar um pedido de teste em `/fale-conosco` e conferir o e-mail (assunto, `Reply-To`, texto); acompanhar `sales_contact_requests_total` e `quota_blocks_total{reason="tokens"}` nas primeiras semanas.
@@ -298,6 +303,7 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 **Testes existentes que mudaram por causa do catálogo novo** (a migration roda no `soprei_test` do CI): valores do catálogo e cotas em `billing.integration.test.ts` (o gate do modo S e a estimativa da Meta passaram a usar a versão vigente do Essencial, não a versão 1 fixa); em `checkout.integration.test.ts`, os valores de pedido (Essencial 4.790, Profissional 11.990, anual 47.900 + 29.000), o upgrade proporcional (12.100 x 20/30 = 8.067, era 9.267) e a cota de tokens do Profissional (48 M); em `billing-notice.integration.test.ts`, o teste de cotas com 2.500 respostas e 15 M de tokens e o assunto novo do aviso de tokens. Com `trialReplies: 100` nos testes, a cota de respostas do teste gratuito passou de 800 para 100.
 
 **Decisões tomadas na implementação (não mudam a spec):**
+
 - O critério da migration pede `catalog(now)`; no schema temporário o repositório (Prisma) não alcança as tabelas, então o teste lê o catálogo por SQL com a mesma regra do `PrismaBillingRepository.catalog` (maior versão ativa por código; preço de maior versão com `valid_from <= now`, só modo C). A leitura real por `billing.catalog(now)` está em `billing.integration.test.ts`, inclusive com o relógio fixo de 2026-11-10.
 - `toSubscription` passou a exigir o mapa de cotas vigentes (o compilador obriga todo loader novo a aplicar a regra). Custa uma leitura pequena de `plans` por assinatura carregada (uma por lote nos avisos).
 - O aviso de reajuste (revisão da E1) compara a **mesma seleção**: renovação do mesmo plano e ciclo, os módulos da renovação ao preço da versão paga contra o vigente. Troca agendada para outro plano ou ciclo nunca gera aviso (a versão anterior desta implementação comparava totais do ciclo e avisava, por exemplo, um Essencial mensal com troca agendada para anual; corrigido, com teste). Preso ao preço de teste de R$ 1,00: recebe o aviso se chegar à janela (verdadeiro: a mesma seleção sobe para R$ 47,90).
@@ -308,6 +314,7 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 - `perReplyMilliCents` devolve 0 com cota ou preço inválido.
 
 **Riscos aceitos (revisão da E1, dono, 2026-11-13):**
+
 - Uma consulta pequena a mais em `plans` por assinatura carregada (`currentPlanQuotas`; uma por lote nos avisos).
 - Testes gratuitos em andamento passam de 800 para 100 respostas (`BILLING_TRIAL_REPLIES`); na prática os 300 mil tokens antigos já paravam o teste perto de 80 respostas.
 - Só na transição: quem já tinha estourado as 800 respostas na janela atual tem o `QUOTA_REPLIES_100` já marcado nessa janela (a chave é assinatura, tipo e início da janela), então não recebe novo aviso de 100% ao chegar às 2.500 nesta mesma janela; a partir da janela seguinte vale normalmente.
@@ -321,6 +328,7 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 **Validação local (Node 24, Windows):** `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes; `pnpm --filter soprei-frontend test` (224 verdes); `playwright test e2e/billing.spec.ts` (68 verdes, desktop e celular). Os outros arquivos e2e não foram rodados (nenhum usa a fixture da Assinatura).
 
 **Decisões tomadas na implementação (não mudam a spec):**
+
 - Com as duas cotas esgotadas vale o texto das respostas (é a cota que a pessoa enxerga).
 - O título da faixa por tokens é a própria frase da spec ("O limite de uso da inteligência artificial deste mês foi atingido"); o texto explicativo é o mesmo da cota de respostas (nada se perde, quando volta, como resolver). Na tela de Assinatura a data de volta continua sendo o fim da janela de uso (`usage.windowEnd`), como antes; a faixa do painel continua sem data ("início do próximo mês"), como antes (o `entitlements` não traz a janela).
 - O preço por resposta é só formatado no navegador (milésimos de centavo / 100.000, quatro casas, `Intl` BRL); o valor vem do servidor. Ausente (servidor anterior, rollback) ou 0 não mostra a linha.
@@ -340,14 +348,36 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 **Validação local (Node 24, Windows):** `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes. Backend, unitários dos arquivos tocados: `form-token.test.ts` (3), `sales-contact-mail.test.ts` (5), `sales-contact.service.test.ts` (10), `sales-contact.controller.test.ts` (14), as quatro suítes novas repetidas 4 vezes (32 verdes em cada), `rate-limit.test.ts` (10), `config.test.ts` (148), `smtp-verification-mailer.test.ts` (6), `smtp-wire.test.ts` (4), `smtp-password-reset-mailer.test.ts` (5), `logger.test.ts` (6), `metrics.test.ts` (26), `domain-vocabulary.test.ts` (5) e `boot.test.ts` (6). Frontend: `pnpm --filter soprei-frontend test` (235 verdes); `e2e/sales-contact.spec.ts` (28 verdes, rodado 3 vezes), `e2e/billing.spec.ts`, `e2e/legal.spec.ts` e `e2e/theme.spec.ts` (105 verdes, 9 pulados por projeto). **Não rodados localmente** (orientação desta sessão: a integração roda no CI): `redis-sales-contact-cap.integration.test.ts` e `sales-contact.integration.test.ts` (novos) e os quatro testes de integração que só ganharam o perfil `contact` no objeto de perfis (`auth`, `rbac`, `rate-limit` e `accounts-password-reset`). Também não rodei o `pnpm test` completo do backend nem o build e o smoke do processo compilado.
 
 **Decisões tomadas na implementação (não mudam a spec):**
+
 - O `drain()` do contato é chamado no `onClose` do servidor, junto com o das contas e dos convites (que o desligamento já espera antes do `closeInfrastructure`), e não dentro do `closeInfrastructure`.
 - O 400 de corpo inválido é montado no próprio controller, com **mensagens fixas por campo** (`SALES_CONTACT_FIELD_MESSAGES`, um item por campo e `path: ''` para campo desconhecido): o ZodError nunca vai a log (o handler central loga `{ err }`) e nem a mensagem do Zod nem o nome de um campo desconhecido voltam na resposta. O plugin tem parser de JSON próprio (encapsulado), porque o `SyntaxError` do V8 cita um trecho do corpo e iria ao log.
 - Ordem das checagens no serviço: honeypot (202, sem gastar o teto), token (400 `FORM_EXPIRED` ou 202 `too_fast`), fila de envios cheia (202 `capped`, sem gastar o teto) e só então o teto diário no Redis. Token "do futuro" além de 60 s também é `FORM_EXPIRED`.
-- A fila cheia conta como `capped` (o conjunto de resultados da spec não tem um rótulo próprio).
+- A fila cheia conta como `capped`; o teto diário, como `daily_cap` (revisão).
 - A chave do teto usa o `AUTH_REDIS_PREFIX` como está (sem o segmento de versão das sessões), como a spec escreveu.
 - O telefone vazio vale como "não informado" (o site não o envia; o servidor aceita `""`). Honeypot só com espaços não é robô.
 - O texto do e-mail tem uma linha a mais (`Para responder, use "Responder": o endereço de resposta é o e-mail informado.`) antes da linha de ciência; o `Reply-To` vai como `{ name: '', address }` do nodemailer (o SMTP falso confirma `Reply-To: <endereço>` sem nome).
-- No site, o formulário mostra a mensagem de sucesso do servidor só se for uma linha curta sem `<`, `>` nem quebra (senão a frase fixa igual); o link da ciência abre `/privacidade` em outra aba (`target="_blank"`), para o rascunho não se perder. No celular o menu do topo da página inicial fica escondido (como os demais itens dele); o link do rodapé vale nos dois.
+- No site, o formulário mostra sempre a frase fixa de sucesso (revisão: o texto do servidor não é lido); o link da ciência abre `/privacidade` em outra aba (`target="_blank"`), para o rascunho não se perder. No celular o menu do topo da página inicial fica escondido (como os demais itens dele); o link do rodapé vale nos dois.
 - O `Modal` existente ganhou o foco no elemento com `data-autofocus` depois do `showModal` (antes o foco ia ao botão "Fechar").
 
 **Pendente:** CI verde (inclusive as duas suítes de integração novas), revisão do `reviewer` (endpoint público que envia e-mail) e os passos 4 e 5 do dono (revisar a redação da política e enviar um pedido de teste em `/fale-conosco`).
+
+### Correções da revisão da E3/E4, 2026-11-13, Claude Code (Opus 5.5, implementer), branch `spec/040-e3-e4-contato`
+
+**Feito (o dono aprovou os achados):**
+
+1. **Pedido perdido depois de `FORM_EXPIRED` ou com preenchimento automático:** o site guarda o instante em que o token chegou e, se o envio vier antes de 3,5 s (`SUBMIT_MIN_TOKEN_AGE_MS`, `waitBeforeSubmit` em `frontend/src/contact/sales-contact-rules.ts`), espera a diferença antes do POST, com o botão em "Enviando…" (o servidor descartaria o token de menos de 3 s como `too_fast`). Se o formulário é desmontado durante a espera, nada é enviado. Testes: unitário de `waitBeforeSubmit` e e2e "depois de FORM_EXPIRED, o reenvio imediato espera..." e "envio imediato depois de abrir o Modal..." (o POST chega à rota falsa pelo menos 3,4 s depois do token).
+2. **Teto diário:** resultado próprio `daily_cap` em `sales_contact_requests_total` (`capped` fica só para a fila de envios cheia; conjunto fixo atualizado em `metrics.ts` e nos testes) e um `warn` só com o resultado quando o teto recusa, no máximo uma vez por dia (UTC) por processo.
+3. **Sucesso sempre com a frase fixa** (`ACCEPTED_MESSAGE`); `acceptedMessage` (leitura do texto do servidor) foi removida. O e2e responde outro texto na rota falsa e prova que ele não aparece.
+4. Ver "Riscos aceitos" abaixo.
+5. Os campos de uma linha do site recusam também U+2028 e U+2029 (como o servidor), com teste.
+6. **Versão da política no e-mail** numa constante (`SALES_CONTACT_PRIVACY_VERSION` em `backend/src/domain/sales-contact.ts`); `sales-contact-mail.test.ts` lê o `versao:` de `frontend/src/legal/privacidade.md` e compara.
+7. **Fechar o Modal com algo escrito** (Esc ou "Fechar") abre o `ConfirmDialog` "Descartar o que você escreveu?" (foco em "Cancelar", Esc cancela e o rascunho fica); vazio fecha direto (`isDraftDirty`, `onDirtyChange` do `SalesContactForm`). Teste e2e.
+8. Ver "Riscos aceitos": o passo 4 do dono já cobre a troca da linha do Google.
+
+**Riscos aceitos (dono, 2026-11-13; também em `docs/context.md`):**
+
+- O teto global de 30 e-mails por dia é silencioso: um atacante com vários IPs (ou um bloco IPv6, já que o limite por IP agrupa /64) pode esgotá-lo, e os pedidos legítimos do resto do dia se perdem com a mesma resposta "Recebemos". Mitigação: o resultado `daily_cap` da métrica (alerta) e o `warn` diário.
+- O token do formulário é reutilizável dentro das 2 h (sem estado, D14): quem segura repetição é o perfil `contact` (5 por hora por IP) e o teto diário.
+- A linha do Google (Gmail) na seção 7 da política vale porque o `EMAIL_PROVIDER_FROM` de produção é Gmail; se `SALES_CONTACT_EMAIL` apontar para outro provedor, a seção 7 muda junto (passo 4 do dono).
+
+**Validação local (Node 24, Windows):** `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes; backend `form-token.test.ts` (3), `sales-contact-mail.test.ts` (6), `sales-contact.service.test.ts` (10), `sales-contact.controller.test.ts` (14) e `metrics.test.ts` (26); frontend `pnpm --filter soprei-frontend test` (237); `e2e/sales-contact.spec.ts` (34, rodado 2 vezes). Integração não rodada localmente (o CI roda).

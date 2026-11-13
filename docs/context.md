@@ -12,14 +12,14 @@ O assistente não é um chatbot genérico: responde com base nos documentos da e
 
 ## 2. Stack decidida
 
-| Camada | Escolha |
-| --- | --- |
-| Runtime | Node.js 22 ou superior (mínimo 22; versões maiores aceitas) |
-| Linguagem | TypeScript (strict) |
-| HTTP | Fastify |
-| Validação | Zod |
-| ORM / migrations | Prisma |
-| Logs | Pino |
+| Camada           | Escolha                                                     |
+| ---------------- | ----------------------------------------------------------- |
+| Runtime          | Node.js 22 ou superior (mínimo 22; versões maiores aceitas) |
+| Linguagem        | TypeScript (strict)                                         |
+| HTTP             | Fastify                                                     |
+| Validação        | Zod                                                         |
+| ORM / migrations | Prisma                                                      |
+| Logs             | Pino                                                        |
 
 ### Decididas por consequência (avise se discordar)
 
@@ -31,12 +31,12 @@ O assistente não é um chatbot genérico: responde com base nos documentos da e
 
 Resolver cada uma por spec antes de implementar o que depende dela.
 
-| Tema | Opções conhecidas | Observação |
-| --- | --- | --- |
-| Fila de jobs | **BullMQ sobre Redis (decidido na spec 011)** | Fila `channel-inbound`, worker no mesmo processo com concorrência 1; fila por empresa e vários workers só quando a latência medida pedir. |
-| Provedor de LLM | Gemini, Claude, OpenAI | Seja qual for, fica atrás da interface `LLMProvider`. |
-| Canal | **WhatsApp Cloud API oficial (decidido)** | Estado da conta Meta (informado pelo dono em 2026-10-27): empresa com verificação de negócio concluída, app Business publicado (live), já é Tech Provider, número de teste da Meta para desenvolver, e quer o fluxo de onboarding de várias empresas (Embedded Signup). A confirmar: moeda e forma de pagamento da conta de cobrança (BRL), onde roda o webhook. Desde 01/10/2026 só as 1 000 primeiras mensagens de serviço por número ao mês são grátis. |
-| Hospedagem | VPS (protótipo: Hetzner) | — |
+| Tema            | Opções conhecidas                             | Observação                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fila de jobs    | **BullMQ sobre Redis (decidido na spec 011)** | Fila `channel-inbound`, worker no mesmo processo com concorrência 1; fila por empresa e vários workers só quando a latência medida pedir.                                                                                                                                                                                                                                                                                                                  |
+| Provedor de LLM | Gemini, Claude, OpenAI                        | Seja qual for, fica atrás da interface `LLMProvider`.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Canal           | **WhatsApp Cloud API oficial (decidido)**     | Estado da conta Meta (informado pelo dono em 2026-10-27): empresa com verificação de negócio concluída, app Business publicado (live), já é Tech Provider, número de teste da Meta para desenvolver, e quer o fluxo de onboarding de várias empresas (Embedded Signup). A confirmar: moeda e forma de pagamento da conta de cobrança (BRL), onde roda o webhook. Desde 01/10/2026 só as 1 000 primeiras mensagens de serviço por número ao mês são grátis. |
+| Hospedagem      | VPS (protótipo: Hetzner)                      | —                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## 3.1. Modelo de IA em desenvolvimento
 
@@ -54,15 +54,16 @@ Resolver cada uma por spec antes de implementar o que depende dela.
 
 ### Vocabulário do domínio (spec 022)
 
-| Termo | Nome no código e no banco | O que é |
-| --- | --- | --- |
-| Empresa | `Company`, `CompanyId`, `companyId`, tabela `companies`, coluna `company_id` | Quem contrata/usa o Soprei. É o **tenant**: todo dado de negócio pertence a uma empresa. |
-| Conta (pessoa) | `Account`, `AccountId`, tabela `accounts` | A pessoa que entra no site: e-mail e senha globais, confirmação de e-mail. |
-| Vínculo | `Membership`, `MembershipId`, tabela `memberships` | A participação de uma conta numa empresa, com papel (`OWNER`, `ADMIN`, `AGENT`, `VIEWER`) e estado. Model de tenant. |
-| Contato | `contact`, `contactRef` | Quem escreve no WhatsApp para a empresa. Não é usuário do sistema. |
-| Administrador da plataforma | `PlatformAdmin` | Operador do Soprei, global, fora de qualquer empresa. |
+| Termo                       | Nome no código e no banco                                                    | O que é                                                                                                              |
+| --------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Empresa                     | `Company`, `CompanyId`, `companyId`, tabela `companies`, coluna `company_id` | Quem contrata/usa o Soprei. É o **tenant**: todo dado de negócio pertence a uma empresa.                             |
+| Conta (pessoa)              | `Account`, `AccountId`, tabela `accounts`                                    | A pessoa que entra no site: e-mail e senha globais, confirmação de e-mail.                                           |
+| Vínculo                     | `Membership`, `MembershipId`, tabela `memberships`                           | A participação de uma conta numa empresa, com papel (`OWNER`, `ADMIN`, `AGENT`, `VIEWER`) e estado. Model de tenant. |
+| Contato                     | `contact`, `contactRef`                                                      | Quem escreve no WhatsApp para a empresa. Não é usuário do sistema.                                                   |
+| Administrador da plataforma | `PlatformAdmin`                                                              | Operador do Soprei, global, fora de qualquer empresa.                                                                |
 
 <!-- vocabulario-antigo:inicio -->
+
 Renomeado na spec 022: antes, a empresa se chamava `Client` e o vínculo `User`. As specs 001 a 021, a seção 6 e o histórico de decisões (seção 7) usam os nomes antigos, como foram escritos; a tabela antigo -> novo está no topo de `AGENTS.md`.
 <!-- vocabulario-antigo:fim -->
 
@@ -143,18 +144,21 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 9. 013 — Agrupamento de mensagens rápidas (janela de espera deslizante, lote respondido uma vez; mensagens gravadas no banco, `Message.answeredById`)
 10. 014 — Provedor real de LLM: `AnthropicLlmProvider` (Claude Haiku 5.5) atrás do `LlmProvider`, `AbortSignal` no prazo, erro sem texto do contato, `llm_tokens_total`; teste manual com a chave real ainda por fazer (limite de gasto na conta antes)11. 015 — Onboarding de empresas no canal WhatsApp (spec B): **aprovada** (2026-10-30); **015a e 015b implementadas** (credenciais por empresa cifradas, `PUT/GET/DELETE`, `TOKEN_INVALID`, envio com o token da empresa e Embedded Signup). Decisão do dono (2026-10-30): o Soprei registra o número (`/register`) com **PIN aleatório de 6 dígitos** que ele gera e guarda cifrado como o token; uma WABA = uma empresa até haver spec própria ([spec](specs/015-onboarding-whatsapp.md)). Credenciais por empresa cifradas (AES-256-GCM), `PUT/GET/DELETE .../channel` e `POST .../channel/embedded-signup` (troca do `code` pela Graph) por `OWNER`/`ADMIN`, estado `TOKEN_INVALID`, envio com o token da empresa. O dono decidiu em 2026-10-30 que o Embedded Signup entra na 015 (divisão em 015a/015b só se o PR passar de ~2 000 linhas); cadastro público da empresa é spec própria depois. Passa pelo `reviewer`
 
-12. 016 — Frontend base (site React/Vite/Tailwind em `frontend/`; backend movido para `backend/`).
-13. 017 — Contas globais e empresas ([spec](specs/017-contas-e-empresas.md)): **concluída e mergeada**. Cadastro/login por e-mail e senha, empresas dentro da conta, criação como `OWNER`, sessão com cookie HttpOnly e confirmação de e-mail. Riscos aceitos e pendências na spec (recuperação de senha, expurgo de não confirmadas, senha de 6 caracteres).
-14. 018 — Frontend com beUI e modo escuro ([spec](specs/018-frontend-beui-e-modo-escuro.md)): **concluída e mergeada** (CI verde em Node 22 e LTS). Pendências: código não usado dos componentes copiados, CSP, evento `storage` do tema e divisão de código do bundle.
-15. 019 — E-mail por SMTP genérico ([spec](specs/019-smtp-generico.md)): **concluída e mergeada**. `EMAIL_PROVIDER_*`, TLS exigido em produção, `GMAIL_*` removido.
-16. 020 — Código de confirmação de e-mail com 6 dígitos ([spec](specs/020-codigo-confirmacao-6-digitos.md)): **concluída e mergeada**. HMAC, 5 erros por código, teto de 25 erros por conta em 24 h, validade de 15 min, campo `code`.
-17. 021 — Recuperação de senha e expurgo de contas não confirmadas ([spec](specs/021-recuperacao-de-senha.md)): **concluída e mergeada** (CI verde em Node 22 e LTS). Código de 6 dígitos por e-mail com HMAC de finalidade própria, 5 erros por código e teto de 10 por conta em 24 h; revogação de todas as sessões por geração no Redis; aviso de senha alterada; expurgo em segundo plano das contas não confirmadas e sem vínculo (padrão 7 dias).
+11. 016 — Frontend base (site React/Vite/Tailwind em `frontend/`; backend movido para `backend/`).
+12. 017 — Contas globais e empresas ([spec](specs/017-contas-e-empresas.md)): **concluída e mergeada**. Cadastro/login por e-mail e senha, empresas dentro da conta, criação como `OWNER`, sessão com cookie HttpOnly e confirmação de e-mail. Riscos aceitos e pendências na spec (recuperação de senha, expurgo de não confirmadas, senha de 6 caracteres).
+13. 018 — Frontend com beUI e modo escuro ([spec](specs/018-frontend-beui-e-modo-escuro.md)): **concluída e mergeada** (CI verde em Node 22 e LTS). Pendências: código não usado dos componentes copiados, CSP, evento `storage` do tema e divisão de código do bundle.
+14. 019 — E-mail por SMTP genérico ([spec](specs/019-smtp-generico.md)): **concluída e mergeada**. `EMAIL_PROVIDER_*`, TLS exigido em produção, `GMAIL_*` removido.
+15. 020 — Código de confirmação de e-mail com 6 dígitos ([spec](specs/020-codigo-confirmacao-6-digitos.md)): **concluída e mergeada**. HMAC, 5 erros por código, teto de 25 erros por conta em 24 h, validade de 15 min, campo `code`.
+16. 021 — Recuperação de senha e expurgo de contas não confirmadas ([spec](specs/021-recuperacao-de-senha.md)): **concluída e mergeada** (CI verde em Node 22 e LTS). Código de 6 dígitos por e-mail com HMAC de finalidade própria, 5 erros por código e teto de 10 por conta em 24 h; revogação de todas as sessões por geração no Redis; aviso de senha alterada; expurgo em segundo plano das contas não confirmadas e sem vínculo (padrão 7 dias).
 
 **Próximas**
 
 <!-- vocabulario-antigo:inicio -->
+
 - **Spec 022 — renome do domínio** ([spec](specs/022-renome-do-dominio.md)): **concluída e mergeada** (CI verde em Node 22 e LTS; aprovada em 2026-11-03). `Client` -> `Company`, `User` (vínculo) -> `Membership`, `Account` fica; banco, API, sessões, fila, logs, site e documentação. Refatoração pura, com gate de restos.
+
 <!-- vocabulario-antigo:fim -->
+
 - **Spec 023 — conectar o WhatsApp pelo site** ([spec](specs/023-conectar-whatsapp-no-site.md)): **concluída e mergeada** (CI verde; aprovada em 2026-11-04; o Embedded Signup real com a Meta ainda não foi testado: depende do domínio no app da Meta). Área da empresa no site (`/painel/canal`, `/painel/persona`, `/painel/testar`): Embedded Signup da Meta com o SDK carregado sob demanda, estado, troca e desconexão do canal; persona editável pela própria empresa (permissão `persona:manage`); caixa "Testar o atendimento" sobre o simulador. Sem autorização nova: usa a ponte cookie -> rotas de tenant que já existia.
 - **Spec 024 — painel mínimo de conversas** ([spec](specs/024-painel-de-conversas.md)): **concluída e mergeada** (CI verde). Lista e histórico só de leitura no site; contato mascarado no servidor (as duas rotas deixam de devolver `contactRef` e `externalId`); lista por última atividade; histórico com `order=desc`.
 - **Spec 025 — convites por e-mail e gestão da equipe** ([spec](specs/025-convites-e-equipe.md)): **concluída e mergeada** (CI verde) (aprovada em 2026-11-04). Convite por link de uso único (256 bits no fragmento da URL, só o HMAC no banco), `/painel/equipe` (listar, convidar, reenviar, revogar, mudar papel, desativar e reativar) e a página `/convite` nos três casos de aceite; `OWNER` não é convidável; cotas anti-spam; expurgo do e-mail do convidado. Migration nova aditiva (`company_invitations`).
@@ -179,16 +183,15 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 - Pendências da spec 007 (revisão): teto do tamanho da fila de espera do hasher (`scrypt-password-hasher.ts`) e limpeza periódica de sessões expiradas no conjunto `usess` do Redis; incluir o IP na chave do bloqueio por conta se virar problema.
 - Pendências antes de dados reais: política de retenção e LGPD (inclui limpeza do Redis e dos jobs), RLS do Postgres, varredura de mensagens pendentes antigas, suporte a BSUID (contato sem telefone), confirmar que o túnel/proxy acrescenta ao `X-Forwarded-For`.
 
-
 **Sob demanda (esboço; entra quando o gatilho acontecer)**
 
-| Item | Spec | Gatilho |
-| --- | --- | --- |
-| Autenticação JWT + refresh | 007 | **concluída** (aprovada em 2026-10-29 com todas as recomendações; revisada, CI verde e mergeada). Pré-requisito do onboarding de várias empresas (spec B); substitui a `ADMIN_API_KEY`, que foi removida |
-| RBAC | 008 | **concluída** (aprovada em 2026-10-30 com todas as recomendações; revisada, CI verde e mergeada; quatro papéis, permissões por papel, usuários da empresa pela API, troca da própria senha, auditoria imutável e teto da fila do hasher). Detalhes em `AGENTS.md` ("Autorização por papéis (spec 008)") |
-| Cache L1/L2 | 006 | quando medição mostrar leitura repetida custosa |
-| Tempo real (SSE/WebSocket) | 009 | quando o painel precisar de eventos ao vivo |
-| Row Level Security do Postgres | a escrever | **antes de dados reais de empresas** (decisão do dono); revisão pelo `reviewer` |
+| Item                           | Spec       | Gatilho                                                                                                                                                                                                                                                                                                 |
+| ------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Autenticação JWT + refresh     | 007        | **concluída** (aprovada em 2026-10-29 com todas as recomendações; revisada, CI verde e mergeada). Pré-requisito do onboarding de várias empresas (spec B); substitui a `ADMIN_API_KEY`, que foi removida                                                                                                |
+| RBAC                           | 008        | **concluída** (aprovada em 2026-10-30 com todas as recomendações; revisada, CI verde e mergeada; quatro papéis, permissões por papel, usuários da empresa pela API, troca da própria senha, auditoria imutável e teto da fila do hasher). Detalhes em `AGENTS.md` ("Autorização por papéis (spec 008)") |
+| Cache L1/L2                    | 006        | quando medição mostrar leitura repetida custosa                                                                                                                                                                                                                                                         |
+| Tempo real (SSE/WebSocket)     | 009        | quando o painel precisar de eventos ao vivo                                                                                                                                                                                                                                                             |
+| Row Level Security do Postgres | a escrever | **antes de dados reais de empresas** (decisão do dono); revisão pelo `reviewer`                                                                                                                                                                                                                         |
 
 **Produto (esboço, depois da fatia vertical)**
 
@@ -205,6 +208,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 - **Spec 023 (conectar o WhatsApp pelo site): concluída e mergeada.** Backend: `persona:manage`, `GET/PUT .../persona`, `GET .../channel/setup`, `permissions` em `GET /account/companies`, config `WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` e `CHANNEL_MANUAL_CONNECT_ENABLED`, métrica `company_persona_updates_total{action}`. Frontend: `src/api.ts`, `src/company/` (Embedded Signup com máquina de estados pura, parser estrito do `postMessage` e SDK sob demanda). Detalhes e desvios no "Registro da implementação" da spec.
 
 <!-- vocabulario-antigo:inicio -->
+
 - **Spec 022 (renome do domínio): concluída e mergeada.** Banco (uma migration de renome, só metadado), schema, código, API, sessões (audiência e chaves `v3`), fila, logs, site e documentação passam de `Client`/`User` para `Company`/`Membership`; gate de restos em `backend/src/domain-vocabulary.test.ts`. Detalhes e desvios no "Registro da implementação" da spec.
 
 - **Spec 001 (bootstrap): concluída e mergeada**, CI verde em Node 22 e LTS. Já existem: Fastify com `GET /health`, config validada com Zod (fail-fast), Pino, hierarquia de erros com error handler central, `Brand` e `Result`, ESLint + Prettier, Prisma 7 sem models e CI. Camadas `shared`, `infrastructure` e `presentation`; `domain` e `application` nascem quando houver conteúdo.
@@ -225,6 +229,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 
 ## 7. Histórico de decisões
 
+- 2026-11-13: o dono aprovou as correções da revisão da **E3/E4 da spec 040** (contato comercial) e aceitou dois riscos: (1) o teto global de 30 e-mails por dia é silencioso, então um atacante com vários IPs (ou um bloco IPv6) pode esgotá-lo e os pedidos legítimos do resto do dia se perdem com a mesma resposta "Recebemos"; a mitigação é o alerta pelo resultado `daily_cap` de `sales_contact_requests_total` (separado de `capped`, a fila cheia) e um `warn` por dia por processo; (2) o token do formulário é reutilizável dentro das 2 h (sem estado, D14); quem segura é o perfil `contact` e o teto. A linha do Google na política (seção 7) vale porque o `EMAIL_PROVIDER_FROM` de produção é Gmail; se `SALES_CONTACT_EMAIL` apontar para outro provedor, a seção 7 muda junto.
 - 2026-11-12: o dono aprovou a revisão da **E3 da spec 037** (deploy automático) com todas as recomendações ("Aprovo todas"): fazer agora (D9); usuário `soprei-deploy` sem poderes, que só chama por `sudo` o programa de entrada, e o deploy segue como `root` (D10, opção A; mover a aplicação para um usuário próprio fica para depois); publica a cada merge na `main` com o CI daquele commit verde (D11), por um `deploy.yml` separado disparado por `workflow_run` (D13); sem aprovação manual, ambiente `production` restrito à `main` (D14); `--allow-unstaged` decidido no `entry.conf` do servidor até o staging existir, com o risco declarado (D15); migration aditiva segue, destrutiva nunca pelo automático (D16); `workflow_dispatch` só com `--dry-run` (D17).
 - 2026-11-12: o dono alterou a **D2 da spec 032**: aprovou os textos de política de privacidade, termos de uso e instruções de exclusão ("Aprovo os textos") e decidiu publicá-los como `vigente` sem revisão de advogado, que não consegue contratar agora (risco aceito). Os termos passam a ser publicados e linkados. Controlador: 67.176.856 LUCAS DE SOUZA FERRARI (MEI), CNPJ 67.176.856/0001-93, encarregado o próprio titular, foro de Guaratinguetá/SP. Obrigações manuais assumidas nos textos: pedidos em até 15 dias, refazer exclusões ao restaurar cópia, reembolso de arrependimento em 7 dias, logs em até 30 dias.
 
@@ -265,5 +270,7 @@ Convenções de pastas (fixadas na [spec 012](specs/012-reorganizacao-pastas.md)
 - O protótipo `customer-service` usava TypeORM; o Soprei usa Prisma. As regras de arquitetura do protótipo (isolamento por cliente, webhook rápido, LLM trocável) foram mantidas.
 - 2026-10-29: o dono aprovou a spec 007 com todas as recomendações da seção "Decisões" (scrypt do `node:crypto`, `jose`, login por `clientSlug` + e-mail, `PlatformAdmin` separado que só alcança o CRUD de clientes, `ADMIN_API_KEY` removida, primeiro usuário por comando local, refresh no corpo, Redis fora = 503, reuso estrito de refresh, bloqueio 5 falhas/15 min, papéis `OWNER`/`AGENT`, um PR, `:clientId` divergente = 404, `JWT_SECRET` obrigatória, access 15 min / refresh ocioso 7 dias / teto 30 dias).
 - 2026-10-30: o dono aprovou a spec 008 com todas as recomendações da seção "Decisões para o dono" (quatro papéis com mapa fixo e hook por permissão; auditoria em tabela imutável escrita na mesma transação; revogação das sessões do alvo a cada mudança; troca da própria senha derruba todas as sessões, inclusive a atual; a senha inicial é definida por quem cria; última pessoa `OWNER` protegida com bloqueio do cliente; `ADMIN` gerencia só `AGENT`/`VIEWER`; teto da fila do hasher em commit próprio; `POST /auth/password` no perfil `login`; um PR).
+
 <!-- vocabulario-antigo:fim -->
+
 - 2026-11-05: spec 029 aprovada pelo dono ("Aprovo tudo"): D1 a D10 como recomendadas e **D11 pela alternativa (a)** (aceitar dependências novas para o shell, só as que o código copiado importasse, versão fixa, sem rodar o shadcn CLI, licença obrigatória). No passo zero da E1 as páginas da Obsidian UI não traziam licença (primeiro foi feito um shell próprio); o dono confirmou depois a licença MIT no repositório da Obsidian UI e o Dashboard Shell foi copiado, com as dependências autorizadas. A última empresa usada vive no servidor (`accounts.last_company_id`), nunca no navegador: o `localStorage` continua guardando só o tema.
