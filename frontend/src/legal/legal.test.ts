@@ -305,6 +305,22 @@ describe('textos legais do repositório', () => {
     });
   }
 
+  it('política versão 2 (spec 040, E3): contato comercial, base legal e prazo de guarda', () => {
+    const doc = parseLegalDocument('privacidade.md', read('./privacidade.md'));
+    assert.equal(doc.versao, 2);
+    assert.equal(doc.situacao, 'vigente');
+    assert.doesNotMatch(doc.body, /\[(PREENCHER|CONFERIR)\b/);
+    assert.ok(doc.body.includes('contato comercial'));
+    assert.ok(doc.body.includes('art. 7º, V'));
+    assert.ok(doc.body.includes('### Interessados (contato comercial)'));
+    assert.match(
+      doc.body,
+      /\| Pedidos de contato comercial +\| guardados na nossa caixa de e-mail por até 12 meses depois do último contato/,
+    );
+    const html = renderLegalPage(doc, '/privacidade', ASSETS);
+    assert.ok(html.includes('Versão 2'));
+  });
+
   it('o script de tema vem do index.html e só lê soprei-theme', () => {
     const script = extractThemeScript(read('../../index.html'));
     assert.match(script, /localStorage\.getItem\('soprei-theme'\)/);

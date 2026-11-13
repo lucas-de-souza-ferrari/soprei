@@ -1,7 +1,7 @@
 ---
 titulo: Política de Privacidade
-versao: 1
-atualizado-em: 2026-11-12
+versao: 2
+atualizado-em: 2026-11-13
 situacao: vigente
 ---
 
@@ -20,6 +20,7 @@ Encarregado pelo tratamento de dados pessoais: Lucas de Souza Ferrari, pelo e-ma
 - **Visitantes** do site www.soprei.com.
 - **Usuários**: pessoas que criam uma conta no site para usar o Soprei em nome de uma empresa (donos, administradores e equipe).
 - **Contatos**: pessoas que conversam pelo WhatsApp com uma empresa que usa o Soprei.
+- **Interessados**: pessoas que pedem contato comercial pelo formulário do site (por exemplo, sobre o plano Enterprise).
 
 ## 3. Nosso papel
 
@@ -51,6 +52,10 @@ Encarregado pelo tratamento de dados pessoais: Lucas de Souza Ferrari, pelo e-ma
 
 As mensagens podem conter qualquer informação que o contato decidir escrever, inclusive dados sensíveis. Recomendamos não enviar dados de saúde, documentos ou senhas por esse canal.
 
+### Interessados (contato comercial)
+
+- Nome, e-mail, telefone ou WhatsApp (se informado), nome da empresa, quantidade aproximada de empresas ou unidades, volume estimado de mensagens e a mensagem que você escrever. Esses dados **não** ficam no banco de dados do Soprei: são enviados por e-mail para a nossa caixa de contato comercial. O endereço IP é usado por pouco tempo para limitar abusos, como nas outras páginas.
+
 ### Pagamento
 
 - Plano contratado, valores, datas, situação dos pedidos, a referência da transação e a forma de pagamento (Pix ou cartão). Os dados do cartão e do Pix são digitados na página da InfinitePay e **não** chegam ao Soprei.
@@ -61,10 +66,11 @@ As mensagens podem conter qualquer informação que o contato decidir escrever, 
 - Prestar o atendimento automatizado em nome da empresa: receber a mensagem do contato, gerar a resposta com inteligência artificial e enviá-la pelo WhatsApp.
 - Mostrar à equipe da empresa as conversas, os agendamentos e os pedidos de atendimento humano.
 - Cobrar a assinatura e avisar sobre vencimentos, uso do plano e pagamentos.
+- Responder pedidos de contato comercial e preparar uma proposta.
 - Prevenir abuso, fraude e acessos indevidos (limites de tentativas e de requisições).
 - Cumprir obrigações legais, como a guarda de registros de cobrança.
 
-Bases legais: para os dados de usuários, a execução do contrato (conta, assinatura e suporte), o cumprimento de obrigação legal (registros de cobrança) e o legítimo interesse (segurança e prevenção de abuso e fraude). Para os dados de contatos, a base legal é definida pela empresa controladora.
+Bases legais: para os dados de usuários, a execução do contrato (conta, assinatura e suporte), o cumprimento de obrigação legal (registros de cobrança) e o legítimo interesse (segurança e prevenção de abuso e fraude). Para os dados de interessados, os procedimentos preliminares relacionados a um contrato, a pedido do próprio titular (art. 7º, V, da LGPD). Para os dados de contatos, a base legal é definida pela empresa controladora.
 
 O Soprei **não** vende dados pessoais, **não** usa os dados para publicidade e **não** treina modelos de inteligência artificial com as conversas.
 
@@ -78,14 +84,14 @@ As respostas podem conter erros. A empresa pode pedir que a assistente encaminhe
 
 Só com os fornecedores necessários para o serviço funcionar:
 
-| Fornecedor                        | Para quê                                                                | Onde                           |
-| --------------------------------- | ----------------------------------------------------------------------- | ------------------------------ |
-| Anthropic                         | gerar as respostas automáticas                                          | Estados Unidos                 |
-| Meta (WhatsApp Business Platform) | receber e enviar as mensagens do WhatsApp; conectar o número da empresa | Estados Unidos e outros países |
-| InfinitePay                       | processar os pagamentos                                                 | Brasil                         |
-| Google (Gmail)                    | enviar códigos, convites e avisos por e-mail                            | Estados Unidos e outros países |
-| Hetzner                           | hospedar o servidor, o banco de dados e as cópias de segurança          | Finlândia (Helsinque)          |
-| Cloudflare                        | resolver o endereço do site (DNS); não recebe o conteúdo do site        | Estados Unidos e outros países |
+| Fornecedor                        | Para quê                                                                               | Onde                           |
+| --------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------ |
+| Anthropic                         | gerar as respostas automáticas                                                         | Estados Unidos                 |
+| Meta (WhatsApp Business Platform) | receber e enviar as mensagens do WhatsApp; conectar o número da empresa                | Estados Unidos e outros países |
+| InfinitePay                       | processar os pagamentos                                                                | Brasil                         |
+| Google (Gmail)                    | enviar códigos, convites e avisos por e-mail e receber os pedidos de contato comercial | Estados Unidos e outros países |
+| Hetzner                           | hospedar o servidor, o banco de dados e as cópias de segurança                         | Finlândia (Helsinque)          |
+| Cloudflare                        | resolver o endereço do site (DNS); não recebe o conteúdo do site                       | Estados Unidos e outros países |
 
 As fontes de letra do site são servidas pelo próprio Soprei; seu navegador não as busca em outro serviço.
 
@@ -110,6 +116,7 @@ A exclusão automática por prazo ainda está em implantação. Enquanto ela nã
 | E-mail de convite não aceito    | apagado 7 dias depois de o convite vencer                                                                                                                                              |
 | Conta excluída a pedido         | a pedido, feita manualmente pela nossa equipe; a remoção do e-mail e da senha, deixando o restante sem identificação, é o resultado pretendido                                         |
 | Empresa excluída a pedido       | sai do ar e o número do WhatsApp é desligado quando atendemos o pedido; a exclusão definitiva dos dados, 30 dias depois do pedido, está em implantação; os registros de cobrança ficam |
+| Pedidos de contato comercial    | guardados na nossa caixa de e-mail por até 12 meses depois do último contato, se não virarem contrato; se virarem, passam a seguir as regras de usuários e de cobrança                 |
 | Registros de cobrança           | 5 anos, prazo exigido pela legislação tributária                                                                                                                                       |
 | Logs técnicos                   | até 30 dias; não contêm o texto das mensagens nem telefones                                                                                                                            |
 | Cópias de segurança             | guardadas por tempo limitado e substituídas pelas mais novas; se uma cópia for restaurada, refazemos as exclusões pedidas depois dela                                                  |
