@@ -14,10 +14,8 @@ import {
   knowledgeApi,
   knowledgeMessageOf,
 } from './knowledge-api';
+import { type Extractor, FileReadController, readBlob } from './knowledge-file-reader';
 import {
-  checkFileName,
-  checkFileSize,
-  decodeTextFile,
   documentFormProblem,
   FILE_PROBLEM_MESSAGES,
   KNOWLEDGE_PRIVACY_NOTICE,
@@ -42,17 +40,19 @@ function Chip({ children }: { children: string }) {
   );
 }
 
-function readFile(file: File): Promise<ArrayBuffer> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (reader.result instanceof ArrayBuffer) resolve(reader.result);
-      else reject(new Error('leitura'));
-    };
-    reader.onerror = () => reject(new Error('leitura'));
-    reader.readAsArrayBuffer(file);
-  });
+/** Tipos aceitos no campo de arquivo (só conveniência: a conferência real é por extensão e conteúdo). */
+export const KNOWLEDGE_FILE_ACCEPT =
+  '.txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+/** Nota depois de ler um PDF ou DOCX (o número de caracteres, nunca o texto). */
+export function extractedNote(length: number): string {
+  return `Texto lido do arquivo: ${length.toLocaleString('pt-BR')} caracteres. Confira antes de adicionar: tabelas, colunas e cabeçalhos podem sair fora de ordem.`;
 }
+
+/** Leitores de PDF e DOCX: só carregados por `import()` quando um arquivo desses é escolhido. */
+const loadPdf = (): Promise<Extractor> =>
+  import('./pdf-text').then((module) => module.extractPdfText);
+const loadDocx = (): Promise<Extractor> => Promise.reject(new Error('indisponível'));
 
 /**
  * Base de conhecimento da IA (spec 026): documentos de texto da empresa. O título e o texto só vivem
@@ -75,12 +75,28 @@ export function KnowledgePage({
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [fileNote, setFileNote] = useState<string | undefined>(undefined);
+  const [readNote, setReadNote] = useState<string | undefined>(undefined);
+  const [reading, setReading] = useState(false);
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [pending, setPending] = useState<KnowledgeDocumentItem | null>(null);
   const generation = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Leitura de arquivo (spec 040): contador próprio, separado do `generation` da tela, para que
+  // "Carregar mais" ou apagar um documento não cancelem a leitura.
+  const fileRun = useRef(0);
+  const fileReader = useRef<FileReadController | null>(null);
+  fileReader.current ??= new FileReadController({ readBytes: readBlob, loadPdf, loadDocx });
+
+  // Desmontar a tela (troca de empresa, sair da aba, fechar o passo do assistente) cancela a leitura.
+  useEffect(
+    () => () => {
+      fileRun.current++;
+      fileReader.current?.cancel();
+    },
+    [],
+  );
 
   useEffect(() => {
     setLoadError(null);
@@ -136,6 +152,7 @@ export function KnowledgePage({
       setTitle('');
       setContent('');
       setFileNote(undefined);
+      setReadNote(undefined);
       if (fileInput.current !== null) fileInput.current.value = '';
       setNotice({ tone: 'success', text: 'Documento adicionado. A IA já pode usá-lo.' });
       onProgress?.();
@@ -203,26 +220,42 @@ export function KnowledgePage({
     }
   };
 
-  const onFile = async (file: File | undefined): Promise<void> => {
+  const clearFileInput = (): void => {
+    if (fileInput.current !== null) fileInput.current.value = '';
+  };
+
+  const cancelReading = (): void => {
+    fileRun.current++;
+    fileReader.current?.cancel();
+    setReading(false);
     setFileNote(undefined);
-    if (file === undefined) return;
-    const reject = (message: string): void => {
-      setFileNote(message);
-      if (fileInput.current !== null) fileInput.current.value = '';
-    };
-    const nameProblem = checkFileName(file.name);
-    if (nameProblem !== null) return reject(FILE_PROBLEM_MESSAGES[nameProblem]);
-    const sizeProblem = checkFileSize(file.size);
-    if (sizeProblem !== null) return reject(FILE_PROBLEM_MESSAGES[sizeProblem]);
-    try {
-      const decoded = decodeTextFile(await readFile(file));
-      if ('problem' in decoded) return reject(FILE_PROBLEM_MESSAGES[decoded.problem]);
-      setContent(decoded.text);
-      setFieldError(undefined);
-      if (title.trim().length === 0) setTitle(titleFromFileName(file.name));
-    } catch {
-      reject(FILE_PROBLEM_MESSAGES['not-utf8']);
+    setReadNote(undefined);
+    clearFileInput();
+  };
+
+  const onFile = async (file: File | undefined): Promise<void> => {
+    const run = ++fileRun.current;
+    setFileNote(undefined);
+    setReadNote(undefined);
+    setReading(false);
+    if (file === undefined) {
+      fileReader.current?.cancel();
+      return;
     }
+    const outcome = await (fileReader.current as FileReadController).read(file, () => {
+      if (run === fileRun.current) setReading(true);
+    });
+    if (run !== fileRun.current || outcome.status === 'cancelled') return;
+    setReading(false);
+    if (outcome.status === 'problem') {
+      setFileNote(FILE_PROBLEM_MESSAGES[outcome.problem]);
+      clearFileInput();
+      return;
+    }
+    setContent(outcome.text);
+    setFieldError(undefined);
+    if (outcome.kind !== 'text') setReadNote(extractedNote(outcome.text.length));
+    setTitle((current) => (current.trim().length === 0 ? titleFromFileName(file.name) : current));
   };
 
   if (loadError !== null) {
@@ -280,7 +313,7 @@ export function KnowledgePage({
         aria-label="Adicionar documento"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!busy) void add();
+          if (!busy && !reading) void add();
         }}
       >
         <h2 className="m-0 text-xl font-semibold">Adicionar documento</h2>
@@ -303,19 +336,19 @@ export function KnowledgePage({
           }}
           maxLength={KNOWLEDGE_CONTENT_MAX}
           rows={8}
-          hint="Cole o texto (política de trocas, horários, perguntas frequentes...) ou escolha um arquivo .txt ou .md de até 200 KB."
+          hint="Cole o texto (política de trocas, horários, perguntas frequentes...) ou escolha um arquivo .txt, .md, .pdf ou .docx. Arquivos de texto até 200 KB; PDF e Word até 10 MB."
           error={fieldError}
-          disabled={busy}
+          disabled={busy || reading}
         />
         <div className="grid gap-1">
           <label htmlFor="arquivo-do-documento" className="px-1 text-sm font-medium">
-            Ou escolha um arquivo de texto
+            Ou escolha um arquivo (texto, PDF ou Word)
           </label>
           <input
             ref={fileInput}
             id="arquivo-do-documento"
             type="file"
-            accept=".txt,.md,.markdown,text/plain,text/markdown"
+            accept={KNOWLEDGE_FILE_ACCEPT}
             aria-describedby={fileNote === undefined ? undefined : 'arquivo-do-documento-erro'}
             disabled={busy}
             onChange={(event) => void onFile(event.target.files?.[0])}
@@ -330,9 +363,27 @@ export function KnowledgePage({
               {fileNote}
             </p>
           )}
+          <div aria-live="polite" className="grid gap-2">
+            {reading && (
+              <div className="flex flex-wrap items-center gap-3 px-1 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-2">
+                  <Loader variant="spinner" size={18} label="Lendo arquivo" />
+                  <span aria-hidden="true">Lendo arquivo…</span>
+                </span>
+                <Button variant="outline" size="sm" onClick={cancelReading}>
+                  Cancelar leitura
+                </Button>
+              </div>
+            )}
+            {readNote !== undefined && (
+              <p className="m-0 px-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                {readNote}
+              </p>
+            )}
+          </div>
         </div>
         <div>
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy || reading}>
             {busy ? 'Aguarde…' : 'Adicionar'}
           </Button>
         </div>

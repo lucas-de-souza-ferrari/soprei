@@ -30,3 +30,20 @@ nenhum visitante enviar o IP a terceiros. O `@font-face` está no começo de `sr
   alterado. A OFL permite usar e redistribuir as fontes com software, desde que não sejam vendidas sozinhas.
 - **Para atualizar:** repita o pedido acima, baixe os novos `woff2`, troque os arquivos e os hashes desta tabela
   e confira o `unicode-range` do `src/style.css` contra a folha de estilo.
+
+## Leitor de PDF da base de conhecimento (spec 040)
+
+O texto de PDFs escolhidos na aba Conhecimento é extraído no navegador. A biblioteca só é carregada por
+`import()` quando um PDF é escolhido (arquivos `pdf-text-*.js` e `pdf.worker.min-*.mjs` do build, servidos
+pelo próprio site).
+
+| Pacote       | Versão exata | Licença    | Origem                                                                |
+| ------------ | ------------ | ---------- | --------------------------------------------------------------------- |
+| `pdfjs-dist` | 6.5.438      | Apache-2.0 | Mozilla (PDF.js), `https://github.com/mozilla/pdf.js`, build `legacy` |
+
+- O `pdfjs-dist` não tem dependências de execução; a dependência opcional `@napi-rs/canvas` (MIT) é só do
+  Node e não entra no build do site.
+- O texto da licença Apache-2.0 acompanha o pacote (`node_modules/pdfjs-dist/LICENSE`). O worker servido
+  (`pdf.worker.min-*.mjs`) é copiado sem alteração e mantém o aviso de licença da Mozilla no começo; o
+  pedaço minificado com o resto da biblioteca (`pdf-text-*.js`) perde o comentário, por isso a licença fica
+  registrada aqui.
