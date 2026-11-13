@@ -67,6 +67,12 @@ export function checkMagicBytes(kind: FileKind, head: Uint8Array): FileProblem |
   return 'not-docx';
 }
 
+export interface ZipEntry {
+  readonly method: number;
+  readonly compressedSize: number;
+  readonly localHeaderOffset: number;
+}
+
 export type ZipDirectory =
   | {
       readonly ok: true;
@@ -74,6 +80,8 @@ export type ZipDirectory =
       /** Soma do tamanho descompactado declarado das entradas. */
       readonly uncompressedTotal: number;
       readonly zip64: boolean;
+      /** Método, tamanho compactado e posição do cabeçalho local de cada entrada (na ordem). */
+      readonly entries: readonly ZipEntry[];
     }
   | { readonly ok: false };
 
@@ -112,22 +120,25 @@ export function readZipDirectory(bytes: Uint8Array): ZipDirectory {
       directorySize === 0xffffffff ||
       directoryOffset === 0xffffffff
     ) {
-      return { ok: true, names: [], uncompressedTotal: 0, zip64: true };
+      return { ok: true, names: [], uncompressedTotal: 0, zip64: true, entries: [] };
     }
     if (directoryOffset + directorySize > eocd) return { ok: false };
     const decoder = new TextDecoder('utf-8', { fatal: false });
     const names: string[] = [];
+    const zipEntries: ZipEntry[] = [];
     let uncompressedTotal = 0;
     let zip64 = false;
     let cursor = directoryOffset;
     for (let entry = 0; entry < entries; entry++) {
       if (cursor + CENTRAL_SIZE > eocd) return { ok: false };
       if (view.getUint32(cursor, true) !== CENTRAL_SIGNATURE) return { ok: false };
+      const method = view.getUint16(cursor + 10, true);
       const compressed = view.getUint32(cursor + 20, true);
       const uncompressed = view.getUint32(cursor + 24, true);
       const nameLength = view.getUint16(cursor + 28, true);
       const extraLength = view.getUint16(cursor + 30, true);
       const commentLength = view.getUint16(cursor + 32, true);
+      const localHeaderOffset = view.getUint32(cursor + 42, true);
       const next = cursor + CENTRAL_SIZE + nameLength + extraLength + commentLength;
       if (next > eocd) return { ok: false };
       if (compressed === 0xffffffff || uncompressed === 0xffffffff) zip64 = true;
@@ -135,9 +146,10 @@ export function readZipDirectory(bytes: Uint8Array): ZipDirectory {
         decoder.decode(bytes.subarray(cursor + CENTRAL_SIZE, cursor + CENTRAL_SIZE + nameLength)),
       );
       uncompressedTotal += uncompressed;
+      zipEntries.push({ method, compressedSize: compressed, localHeaderOffset });
       cursor = next;
     }
-    return { ok: true, names, uncompressedTotal, zip64 };
+    return { ok: true, names, uncompressedTotal, zip64, entries: zipEntries };
   } catch {
     return { ok: false };
   }

@@ -25,7 +25,7 @@ export type ExtractResult =
   | {
       readonly problem: Extract<
         FileProblem,
-        'pdf-password' | 'too-many-pages' | 'content-too-large' | 'unreadable'
+        'pdf-password' | 'too-many-pages' | 'content-too-large' | 'unreadable' | 'loader-failed'
       >;
     };
 

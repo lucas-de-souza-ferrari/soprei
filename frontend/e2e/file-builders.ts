@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { deflateRawSync } from 'node:zlib';
 
 /**
  * Geradores de arquivos de teste da spec 040 (D8): PDF e ZIP/DOCX mínimos escritos à mão, sem
@@ -173,25 +174,32 @@ function crc32(data: Uint8Array): number {
 export interface ZipEntry {
   name: string;
   data: string | Buffer;
+  /** Compacta com deflate (método 8); sem isso a entrada é "armazenada". */
+  deflate?: boolean;
+  /** Tamanho descompactado declarado (para simular a bomba que mente o tamanho). */
+  declaredSize?: number;
 }
 
-/** ZIP sem compressão, com CRC-32 e diretório central. */
+/** ZIP com CRC-32 e diretório central; entradas armazenadas ou compactadas com deflate. */
 export function buildZip(entries: readonly ZipEntry[]): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
   for (const entry of entries) {
     const name = Buffer.from(entry.name, 'utf8');
-    const data = typeof entry.data === 'string' ? Buffer.from(entry.data, 'utf8') : entry.data;
-    const crc = crc32(data);
+    const raw = typeof entry.data === 'string' ? Buffer.from(entry.data, 'utf8') : entry.data;
+    const crc = crc32(raw);
+    const method = entry.deflate === true ? 8 : 0;
+    const data = method === 8 ? deflateRawSync(raw) : raw;
+    const declared = entry.declaredSize ?? raw.length;
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
     local.writeUInt16LE(0x0800, 6); // nomes em UTF-8
-    local.writeUInt16LE(0, 8); // stored
+    local.writeUInt16LE(method, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
+    local.writeUInt32LE(declared, 22);
     local.writeUInt16LE(name.length, 26);
     locals.push(local, name, data);
     const central = Buffer.alloc(46);
@@ -199,10 +207,10 @@ export function buildZip(entries: readonly ZipEntry[]): Buffer {
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(0x0800, 8);
-    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
+    central.writeUInt32LE(declared, 24);
     central.writeUInt16LE(name.length, 28);
     central.writeUInt32LE(offset, 42);
     centrals.push(central, name);
