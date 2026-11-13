@@ -167,6 +167,25 @@ describe('deploy.sh (spec 037, E1)', () => {
     assert.match(code, /breaking-approved: \.\+/);
   });
 
+  it('a migration do catálogo novo (spec 040) passa limpa pela varredura do deploy', () => {
+    const declared = /^readonly BREAKING_PATTERN='([^']+)'$/m.exec(script)?.[1];
+    assert.ok(declared !== undefined, 'BREAKING_PATTERN ausente em deploy.sh');
+    // Mesmo padrão do grep -Ei do script, traduzido para o JavaScript (classe POSIX de espaço).
+    const pattern = new RegExp(declared.replaceAll('[[:space:]]', '\\s'), 'i');
+    const sql = read('backend/prisma/migrations/20261113100000_catalog_2026_11/migration.sql');
+    // Como o script: comentários de linha removidos e linhas juntadas.
+    const stripped = sql
+      .split('\n')
+      .map((line) => line.replace(/--.*$/, ''))
+      .join(' ');
+    assert.doesNotMatch(stripped, pattern);
+    // Prova de que a tradução do padrão funciona (senão o teste passaria vazio).
+    assert.match('ALTER TABLE x DROP COLUMN y', pattern);
+    assert.match('DELETE   FROM plans', pattern);
+    // E só acrescenta: nenhum UPDATE de linha antiga do catálogo.
+    assert.doesNotMatch(stripped, /\bUPDATE\b/i);
+  });
+
   it('o arquivo tem o bit executável no Git', () => {
     let listing: string;
     try {
