@@ -71,7 +71,7 @@ for (const theme of ['light', 'dark'] as const) {
       full: true,
       sub: { endsInDays: 20 },
       billing: {
-        usage: { replies: [680, 800], tokens: [600_000, 3_000_000], milliCents: 420_000 },
+        usage: { replies: [2125, 2500], tokens: [3_000_000, 15_000_000], milliCents: 420_000 },
       },
     });
     await expect(page.getByRole('heading', { level: 1, name: 'Assinatura' })).toBeVisible();
@@ -82,10 +82,13 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page_(page)).toContainText('Assinatura ativa');
     // Barras de uso com valor e porcentagem; 85% é atenção, em texto (não só cor).
     const replies = page.getByTestId('uso-respostas');
-    await expect(replies).toContainText('680 de 800 respostas (85%)');
-    await expect(replies.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '680');
+    await expect(replies).toContainText('2.125 de 2.500 respostas (85%)');
+    await expect(replies.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2125');
     await expect(page.getByTestId('alerta-respostas')).toContainText('80% ou mais');
-    await expect(page.getByTestId('uso-ia')).toContainText('600.000 de 3.000.000 tokens (20%)');
+    // Spec 040 (E2): só a barra de respostas; o limite de uso da IA (tokens) fica fora da tela.
+    await expect(page_(page)).toContainText('Respostas enviadas pelo WhatsApp neste mês');
+    await expect(page_(page).getByRole('progressbar')).toHaveCount(1);
+    await expect(page.getByTestId('uso-ia')).toHaveCount(0);
     // Estimativa da Meta marcada como estimativa e o aviso fixo do modo vigente.
     const estimate = page.getByTestId('estimativa-meta');
     await expect(estimate).toContainText('Estimativa de custo na Meta este mês');
@@ -166,12 +169,102 @@ test('cota esgotada: aviso de créditos esgotados com a data em que volta e o ca
   page,
 }) => {
   await open(page, {
-    billing: { usage: { replies: [800, 800], tokens: [10, 3_000_000], milliCents: 0 } },
+    billing: { usage: { replies: [2500, 2500], tokens: [10, 15_000_000], milliCents: 0 } },
   });
   await expect(page_(page)).toContainText('Cota do mês esgotada');
   await expect(page_(page)).toContainText('mensagens ficam guardadas e visíveis');
   await expect(page.getByTestId('alerta-respostas')).toContainText('cota deste mês acabou');
   await expect(page.getByTestId('uso-respostas')).toContainText('(100%)');
+});
+
+/** Texto visível da área de Assinatura nas três abas (a busca do "token" vale para tudo o que a tela mostra). */
+async function visibleTextOfAllTabs(page: Page): Promise<string> {
+  const texts: string[] = [];
+  for (const tab of ['Resumo', 'Planos', 'Pagamentos']) {
+    await page.getByRole('tab', { name: tab }).click();
+    texts.push(await page.locator('body').innerText());
+  }
+  return texts.join(' ');
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`spec 040 (E2): sem a palavra token, uma barra só, anual com 2 meses grátis e preço por resposta do servidor (tema ${theme})`, async ({
+    page,
+  }) => {
+    const { billing } = await open(page, { theme });
+    await expect(page_(page)).toContainText('Assinatura ativa');
+    await expect(page_(page).getByRole('progressbar')).toHaveCount(1);
+    expect(await visibleTextOfAllTabs(page)).not.toMatch(/token/i);
+
+    // Planos: o preço por resposta vem do catálogo do servidor (Essencial mensal = 1.916 milésimos de centavo).
+    await page.getByRole('tab', { name: 'Planos' }).click();
+    await expect(page.getByTestId('por-resposta-ESSENTIAL')).toHaveText(
+      'equivale a R$ 0,0192 por resposta',
+    );
+    await expect(page.getByTestId('por-resposta-SCALE')).toHaveText(
+      'equivale a R$ 0,0116 por resposta',
+    );
+    await expect(page.getByLabel(/Anual/)).toBeVisible();
+    await expect(page_(page)).toContainText('(um pagamento por ano: 2 meses grátis)');
+    await page.getByLabel(/Anual/).check();
+    await expect(page.getByTestId('por-resposta-ESSENTIAL')).toHaveText(
+      'equivale a R$ 0,0160 por resposta',
+    );
+    await expect(page.getByTestId('por-resposta-SCALE')).toHaveText(
+      'equivale a R$ 0,0097 por resposta',
+    );
+    await noHorizontalScroll(page);
+
+    // O "servidor" muda o valor e a tela acompanha: o navegador não calcula o preço por resposta.
+    billing.perReply = { ESSENTIAL: [1234, 987] };
+    await page.reload();
+    await page.getByRole('tab', { name: 'Planos' }).click();
+    await expect(page.getByTestId('por-resposta-ESSENTIAL')).toHaveText(
+      'equivale a R$ 0,0123 por resposta',
+    );
+    await page.getByLabel(/Anual/).check();
+    await expect(page.getByTestId('por-resposta-ESSENTIAL')).toHaveText(
+      'equivale a R$ 0,0099 por resposta',
+    );
+  });
+}
+
+test('spec 040 (E2): a 360 px os cartões com o preço por resposta não rolam na horizontal', async ({
+  page,
+}) => {
+  await open(page, { width: 360 });
+  await page.getByRole('tab', { name: 'Planos' }).click();
+  await expect(page.getByTestId('por-resposta-PROFESSIONAL')).toHaveText(
+    'equivale a R$ 0,0150 por resposta',
+  );
+  await noHorizontalScroll(page);
+});
+
+test('spec 040 (E2): o limite de uso da IA esgotado mostra a faixa genérica, sem número e sem a palavra token', async ({
+  page,
+}) => {
+  await open(page, {
+    billing: { usage: { replies: [100, 2500], tokens: [15_000_000, 15_000_000], milliCents: 0 } },
+  });
+  await expect(page_(page)).toContainText(
+    'O limite de uso da inteligência artificial deste mês foi atingido',
+  );
+  await expect(page_(page)).toContainText('nada é perdido');
+  await expect(page_(page)).not.toContainText('Cota do mês esgotada');
+  // A barra de respostas segue sem alerta (100 de 2.500); nenhum número de tokens aparece.
+  await expect(page.getByTestId('alerta-respostas')).toHaveCount(0);
+  const text = await visibleTextOfAllTabs(page);
+  expect(text).not.toMatch(/token/i);
+  expect(text).not.toContain('15.000.000');
+
+  // A faixa do painel (qualquer papel) usa o mesmo texto genérico.
+  await page.goto('/painel/conversas');
+  await expect(
+    page.getByText('O limite de uso da inteligência artificial deste mês foi atingido'),
+  ).toBeVisible();
+  const panel = await page.locator('body').innerText();
+  expect(panel).not.toMatch(/token/i);
+  expect(panel).not.toContain('15.000.000');
 });
 
 test('escolher plano e ciclo, ver o total do servidor, pagar (abre o link) e voltar: a query só dispara o "Já paguei"', async ({
@@ -186,8 +279,8 @@ test('escolher plano e ciclo, ver o total do servidor, pagar (abre o link) e vol
   await page.getByLabel(/Profissional/).check();
   await page.getByLabel(/Estoque/).uncheck();
   // O total sai da cotação do servidor (nada é calculado no navegador): Profissional anual + Agenda.
-  await expect(page.getByTestId('total')).toHaveText('R$ 1.708,80');
-  await expect(page.getByTestId('cotacao-texto')).toContainText('Você pagará R$ 1.708,80 agora');
+  await expect(page.getByTestId('total')).toHaveText('R$ 1.489,00');
+  await expect(page.getByTestId('cotacao-texto')).toContainText('Você pagará R$ 1.489,00 agora');
   await page.getByRole('button', { name: 'Pagar', exact: true }).click();
   await page.waitForURL(`${CHECKOUT_HOST}/pay/**`);
   const orders = writes(billing).filter((call) => call.path === '/account/billing/orders');

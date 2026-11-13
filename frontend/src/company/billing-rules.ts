@@ -71,6 +71,37 @@ export const QUOTA_TEXT: Readonly<Record<QuotaLevel, string>> = {
   full: 'A cota deste mês acabou: o atendente parou de responder.',
 };
 
+export type QuotaReason = 'replies' | 'ai';
+
+/**
+ * Qual cota parou o atendente neste mês, ou `null`. A cota de respostas é a que a tela mostra; o limite de uso
+ * da IA (tokens) é proteção de custo e fica fora da tela (spec 040, D3): quando ele para o atendente, o texto é
+ * genérico e sem números. Com as duas esgotadas vale a de respostas (a que a pessoa enxerga).
+ */
+export function quotaReason(
+  replies: { used: number; limit: number } | null,
+  ai: { used: number; limit: number } | null,
+): QuotaReason | null {
+  if (replies !== null && quotaLevel(replies.used, replies.limit) === 'full') return 'replies';
+  if (ai !== null && quotaLevel(ai.used, ai.limit) === 'full') return 'ai';
+  return null;
+}
+
+/** Título fixo quando o limite de uso da IA parou o atendente (sem número; spec 040, E2). */
+export const AI_LIMIT_TITLE = 'O limite de uso da inteligência artificial deste mês foi atingido';
+
+/** Faixa da tela de Assinatura com a cota do mês esgotada (respostas ou limite da IA), ou `null`. */
+export function exhaustedBanner(usage: Billing['usage']): Banner | null {
+  if (usage === null) return null;
+  const reason = quotaReason(usage.replies, usage.tokens);
+  if (reason === null) return null;
+  return {
+    tone: 'error',
+    title: reason === 'replies' ? 'Cota do mês esgotada' : AI_LIMIT_TITLE,
+    text: `O atendente parou de responder; as mensagens ficam guardadas e visíveis no painel e nada é perdido. Ele volta em ${formatDate(usage.windowEnd)} (início da próxima janela de uso) ou assim que você trocar para um plano maior.`,
+  };
+}
+
 /** Estimativa do custo na Meta (milésimos de centavo do servidor) em centavos para exibir. */
 export function metaEstimateCents(milliCents: number): number {
   return Math.round(Math.max(0, milliCents) / 1000);
@@ -201,6 +232,30 @@ export function samePlan(a: Selection, b: Selection): boolean {
 
 export function priceOf(plan: CatalogPlan, cycle: Cycle) {
   return plan.prices.find((price) => price.cycle === cycle);
+}
+
+/** Complemento do ciclo anual no seletor (o catálogo vigente tem anual = 10 x o mensal; spec 040). */
+export const CYCLE_NOTES: Readonly<Record<Cycle, string>> = {
+  MONTHLY: '',
+  ANNUAL: ' (um pagamento por ano: 2 meses grátis)',
+};
+
+const PER_REPLY = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 4,
+});
+
+/**
+ * Preço por resposta incluída, vindo do servidor em milésimos de centavo (spec 040, D9), formatado com quatro
+ * casas: 1.916 vira "equivale a R$ 0,0192 por resposta". Só formatação: o valor é do servidor. Ausente ou 0
+ * (servidor anterior, cota inválida) = `null`, e a linha não aparece.
+ */
+export function perReplyText(milliCents: number | undefined): string | null {
+  if (milliCents === undefined || !(milliCents > 0)) return null;
+  const money = PER_REPLY.format(milliCents / 100_000).replaceAll(String.fromCharCode(0xa0), ' ');
+  return `equivale a ${money} por resposta`;
 }
 
 /** O que a cotação do servidor significa para a tela: texto, botão e o que o botão faz. */
@@ -364,20 +419,14 @@ export function accessNotice(
       text: `Você está no período de carência: tudo continua funcionando por alguns dias, depois o atendente para de responder. ${how}`,
     };
   }
-  const repliesFull =
-    entitlements.replies !== null &&
-    quotaLevel(entitlements.replies.used, entitlements.replies.limit) === 'full';
-  const tokensFull =
-    entitlements.tokens !== null &&
-    quotaLevel(entitlements.tokens.used, entitlements.tokens.limit) === 'full';
-  if (repliesFull || tokensFull) {
-    return {
-      tone: 'error',
-      title: repliesFull ? 'Respostas do mês esgotadas' : 'Cota de IA do mês esgotada',
-      text: `O atendente parou de responder; as mensagens ficam guardadas e visíveis. Ele volta no início do próximo mês ou ao trocar de plano. ${how}`,
-    };
-  }
-  return null;
+  // O limite de uso da IA (tokens) não aparece em número em lugar nenhum do site (spec 040, D3).
+  const reason = quotaReason(entitlements.replies, entitlements.tokens);
+  if (reason === null) return null;
+  return {
+    tone: 'error',
+    title: reason === 'replies' ? 'Respostas do mês esgotadas' : AI_LIMIT_TITLE,
+    text: `O atendente parou de responder; as mensagens ficam guardadas e visíveis. Ele volta no início do próximo mês ou ao trocar de plano. ${how}`,
+  };
 }
 
 export type ContractModuleName = 'agenda' | 'stock';

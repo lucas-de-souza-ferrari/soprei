@@ -6,7 +6,8 @@ import { accessNotice, MODULE_LABELS, type ContractModuleName } from './billing-
 /**
  * Faixa de estado da assinatura para QUALQUER papel (spec 031, E4): carência, assinatura encerrada ou cota
  * esgotada. Leitura continua funcionando; o texto diz como resolver (o titular abre a Assinatura; os demais
- * falam com ele). Sem leitura do acesso (cobrança desligada) não aparece nada.
+ * falam com ele). Sem leitura do acesso (cobrança desligada) não aparece nada. O limite de uso da IA aparece
+ * só como texto genérico, sem números (spec 040, E2).
  */
 export function AccessNotice({
   entitlements,

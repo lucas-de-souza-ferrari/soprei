@@ -17,15 +17,18 @@ import {
   canReactivate,
   type CheckoutReturn,
   CYCLE_LABELS,
+  CYCLE_NOTES,
   daysLeft,
   defaultSelection,
   describeSelection,
+  exhaustedBanner,
   formatCount,
   formatDate,
   META_ESTIMATE_NOTE,
   metaEstimateCents,
   ORDER_KIND_LABELS,
   ORDER_STATUS_LABELS,
+  perReplyText,
   plural,
   priceOf,
   QUOTA_TEXT,
@@ -160,7 +163,7 @@ function UsageBar({
 }
 
 /**
- * Tela de Assinatura (spec 031, E4): visível só à conta titular e só com a cobrança ligada. Todo valor em
+ * Tela de Assinatura (spec 031, E4; spec 040, E2: só respostas, sem a cota de tokens): visível só à conta titular e só com a cobrança ligada. Todo valor em
  * dinheiro vem do servidor (catálogo e cotação); o navegador não calcula preço, desconto nem proporcional. A
  * query da volta do checkout só dispara o "Já paguei" (o servidor confirma com o provedor). Mensagens de erro
  * vêm do `status` e do `error.code`; nada de cobrança vai a `localStorage`, `sessionStorage`, URL ou `console`.
@@ -423,6 +426,8 @@ export function SubscriptionPage({
   }
 
   const banner = stateBanner(subscription, now);
+  // Cota esgotada: respostas, ou o limite de uso da IA em texto genérico e sem números (spec 040, D3).
+  const exhausted = exhaustedBanner(usage);
   const catalog = billing.catalog;
   const current = defaultSelection(billing);
   const choosing = selection ?? current;
@@ -443,15 +448,9 @@ export function SubscriptionPage({
         </div>
       )}
       <ToneAlert tone={banner.tone} title={banner.title} text={banner.text} />
-      {usage !== null &&
-        (quotaLevel(usage.replies.used, usage.replies.limit) === 'full' ||
-          quotaLevel(usage.tokens.used, usage.tokens.limit) === 'full') && (
-          <ToneAlert
-            tone="error"
-            title="Cota do mês esgotada"
-            text={`O atendente parou de responder; as mensagens ficam guardadas e visíveis no painel e nada é perdido. Ele volta em ${formatDate(usage.windowEnd)} (início da próxima janela de uso) ou assim que você trocar para um plano maior.`}
-          />
-        )}
+      {exhausted !== null && (
+        <ToneAlert tone={exhausted.tone} title={exhausted.title} text={exhausted.text} />
+      )}
 
       <SectionTabs
         label="Seções da assinatura"
@@ -563,22 +562,16 @@ export function SubscriptionPage({
                 {usage !== null && (
                   <Section id="sec-uso" title="Uso deste mês">
                     <p className="m-0 text-sm text-muted-foreground">
-                      Janela de uso de {formatDate(usage.windowStart)} até{' '}
-                      {formatDate(usage.windowEnd)}. Vale a cota que acabar primeiro.
+                      Respostas enviadas pelo WhatsApp neste mês (janela de uso de{' '}
+                      {formatDate(usage.windowStart)} até {formatDate(usage.windowEnd)}).
                     </p>
+                    {/* Só respostas: o limite de uso da IA é proteção de custo e fica fora da tela (spec 040). */}
                     <UsageBar
                       id="respostas"
                       label="Respostas enviadas"
                       used={usage.replies.used}
                       limit={usage.replies.limit}
                       unit="respostas"
-                    />
-                    <UsageBar
-                      id="ia"
-                      label="Uso da IA"
-                      used={usage.tokens.used}
-                      limit={usage.tokens.limit}
-                      unit="tokens"
                     />
                     <div
                       className="grid gap-1 rounded-xl bg-muted p-3 text-sm text-foreground"
@@ -626,7 +619,7 @@ export function SubscriptionPage({
                             />
                             <span>
                               {CYCLE_LABELS[cycle]}
-                              {cycle === 'ANNUAL' ? ' (um pagamento por ano, com desconto)' : ''}
+                              {CYCLE_NOTES[cycle]}
                             </span>
                           </label>
                         ))}
@@ -639,6 +632,7 @@ export function SubscriptionPage({
                         {catalog.map((plan) => {
                           const planPrice = price(plan);
                           const periodo = choosing.cycle === 'MONTHLY' ? 'por mês' : 'por ano';
+                          const perReply = perReplyText(planPrice?.perReplyMilliCents);
                           return (
                             <label
                               key={plan.code}
@@ -665,6 +659,14 @@ export function SubscriptionPage({
                                     ? 'Indisponível neste ciclo'
                                     : `${formatMoney(planPrice.baseCents)} ${periodo}`}
                                 </span>
+                                {perReply !== null && (
+                                  <span
+                                    className="text-muted-foreground"
+                                    data-testid={`por-resposta-${plan.code}`}
+                                  >
+                                    {perReply}
+                                  </span>
+                                )}
                               </span>
                             </label>
                           );

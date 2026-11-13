@@ -63,6 +63,11 @@ const priceSchema = z.object({
   agendaCents: cents,
   stockCents: cents,
   whatsappBillingMode: z.enum(['CUSTOMER_PAYS_META', 'SOPREI_PAYS_META']),
+  /**
+   * Preço por resposta incluída, em milésimos de centavo, calculado pelo servidor (spec 040, D9). Opcional
+   * (servidor anterior não o envia); 0 ou ausente = a linha não aparece. O navegador só formata.
+   */
+  perReplyMilliCents: z.number().int().min(0).optional(),
 });
 const catalogPlanSchema = z.object({
   code: z.enum(PLAN_CODES),
