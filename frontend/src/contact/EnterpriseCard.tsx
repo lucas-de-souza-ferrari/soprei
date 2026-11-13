@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ConfirmDialog } from '../company/ConfirmDialog';
 import { Button } from '../components/motion/button';
 import { Modal } from '../company/Modal';
 import { SalesContactForm } from './SalesContactForm';
@@ -9,6 +10,13 @@ import { SalesContactForm } from './SalesContactForm';
  */
 export function EnterpriseCard() {
   const [open, setOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  // Fechar com algo escrito pede confirmação (o rascunho só existe em memória e se perde).
+  const requestClose = () => {
+    if (dirty) setConfirming(true);
+    else setOpen(false);
+  };
   return (
     <section
       aria-labelledby="enterprise-titulo"
@@ -28,9 +36,27 @@ export function EnterpriseCard() {
           Falar com a gente
         </Button>
       </div>
-      <Modal open={open} title="Falar com a gente" onClose={() => setOpen(false)}>
-        <SalesContactForm autoFocus />
+      <Modal open={open} title="Falar com a gente" onClose={requestClose}>
+        <SalesContactForm autoFocus onDirtyChange={setDirty} />
       </Modal>
+      <ConfirmDialog
+        request={
+          confirming
+            ? {
+                title: 'Descartar o que você escreveu?',
+                text: 'O formulário será fechado e o texto não será enviado.',
+                confirmLabel: 'Descartar',
+              }
+            : null
+        }
+        busy={false}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          setDirty(false);
+          setOpen(false);
+        }}
+      />
     </section>
   );
 }

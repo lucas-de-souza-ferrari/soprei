@@ -81,10 +81,18 @@ export const FIELD_ERRORS: Readonly<Record<DraftField, string>> = {
 
 const CONTROL = /\p{Cc}/u;
 const FORMAT = /\p{Cf}/u;
+/** Separadores de linha Unicode (U+2028 e U+2029): o servidor os recusa nos campos de uma linha. */
+const LINE_SEPARATOR = new RegExp(`[${String.fromCharCode(0x2028, 0x2029)}]`);
 
 function singleLineOk(value: string, min: number, max: number): boolean {
   const text = value.normalize('NFC').trim();
-  return text.length >= min && text.length <= max && !CONTROL.test(text) && !FORMAT.test(text);
+  return (
+    text.length >= min &&
+    text.length <= max &&
+    !CONTROL.test(text) &&
+    !FORMAT.test(text) &&
+    !LINE_SEPARATOR.test(text)
+  );
 }
 
 function messageOk(value: string): boolean {
@@ -129,6 +137,20 @@ export function firstInvalid(errors: DraftErrors): DraftField | undefined {
   return FIELD_ORDER.find((field) => errors[field] !== undefined);
 }
 
+/** Há algo escrito ou escolhido (fechar o diálogo pede confirmação). O honeypot não conta. */
+export function isDraftDirty(draft: SalesContactDraft): boolean {
+  return (
+    draft.name.trim() !== '' ||
+    draft.email.trim() !== '' ||
+    draft.phone.trim() !== '' ||
+    draft.companyName.trim() !== '' ||
+    draft.units !== '' ||
+    draft.monthlyVolume !== '' ||
+    draft.message.trim() !== '' ||
+    draft.privacyAck
+  );
+}
+
 /** Corpo de `POST /contact/sales`. O telefone vazio não é enviado. */
 export function toPayload(draft: SalesContactDraft, formToken: string): Record<string, unknown> {
   const phone = draft.phone.trim();
@@ -146,19 +168,25 @@ export function toPayload(draft: SalesContactDraft, formToken: string): Record<s
   };
 }
 
-/** Texto do sucesso: a mensagem do servidor, se for o formato esperado (uma linha curta); senão a fixa. */
-export const ACCEPTED_FALLBACK = 'Recebemos o seu contato. Responderemos pelo e-mail informado.';
-const acceptedSchema = z.object({
-  message: z
-    .string()
-    .min(1)
-    .max(200)
-    .regex(/^[^\n\r<>]+$/),
-});
+/**
+ * Texto do sucesso: sempre esta frase fixa (o texto do servidor nunca é mostrado). É a mesma resposta do servidor
+ * em todo 202, inclusive nos descartes silenciosos.
+ */
+export const ACCEPTED_MESSAGE = 'Recebemos o seu contato. Responderemos pelo e-mail informado.';
 
-export function acceptedMessage(body: unknown): string {
-  const parsed = acceptedSchema.safeParse(body);
-  return parsed.success ? parsed.data.message : ACCEPTED_FALLBACK;
+/**
+ * Tempo mínimo entre receber o token do formulário e enviar (spec 040, revisão da E4). O servidor descarta em
+ * silêncio o envio com token de menos de 3 s (`too_fast`); com folga, o site espera a diferença antes do POST
+ * (reenvio logo depois de `FORM_EXPIRED`, preenchimento automático), em vez de perder o pedido.
+ */
+export const SUBMIT_MIN_TOKEN_AGE_MS = 3_500;
+
+/** Quanto esperar antes do POST, dado o instante em que o token chegou (ms, relógio do navegador). */
+export function waitBeforeSubmit(tokenReceivedAt: number, now: number): number {
+  return Math.max(
+    0,
+    Math.min(SUBMIT_MIN_TOKEN_AGE_MS, tokenReceivedAt + SUBMIT_MIN_TOKEN_AGE_MS - now),
+  );
 }
 
 const formTokenSchema = z.object({ formToken: z.string().min(1).max(200) });

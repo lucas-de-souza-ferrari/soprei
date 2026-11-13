@@ -7,12 +7,12 @@ import { ThemeProvider } from '../theme/theme-provider';
 import { ContactPage } from './ContactPage';
 import { EnterpriseCard } from './EnterpriseCard';
 import {
-  ACCEPTED_FALLBACK,
-  acceptedMessage,
+  ACCEPTED_MESSAGE,
   CONTACT_PATH,
   EMPTY_DRAFT,
   FIELD_ERRORS,
   firstInvalid,
+  isDraftDirty,
   parseFormToken,
   type SalesContactDraft,
   submitErrorMessage,
@@ -21,6 +21,8 @@ import {
   UNITS_OPTIONS,
   validateDraft,
   VOLUME_OPTIONS,
+  waitBeforeSubmit,
+  SUBMIT_MIN_TOKEN_AGE_MS,
 } from './sales-contact-rules';
 
 const VALID: SalesContactDraft = {
@@ -73,6 +75,11 @@ describe('regras do formulário de contato (spec 040, E4)', () => {
     assert.equal(errorOf({ name: 'Ab' }).name, undefined);
     assert.ok(errorOf({ name: 'Maria‮' }).name);
     assert.ok(errorOf({ companyName: 'E'.repeat(121) }).companyName);
+    // Separadores de linha Unicode (U+2028 e U+2029) são recusados como no servidor.
+    for (const separator of [String.fromCharCode(0x2028), String.fromCharCode(0x2029)]) {
+      assert.ok(errorOf({ name: `Maria${separator}Souza` }).name);
+      assert.ok(errorOf({ companyName: `Rede${separator}Exemplo` }).companyName);
+    }
     assert.ok(errorOf({ message: 'curta' }).message);
     assert.ok(errorOf({ message: 'M'.repeat(2_001) }).message);
     assert.ok(errorOf({ message: Array.from({ length: 41 }, () => 'linha').join('\n') }).message);
@@ -103,6 +110,25 @@ describe('regras do formulário de contato (spec 040, E4)', () => {
     assert.equal(toPayload({ ...VALID, phone: ' 11 98888-7777 ' }, 't').phone, '11 98888-7777');
   });
 
+  it('espera antes do POST até o token ter 3,5 s (o servidor descarta o de menos de 3 s)', () => {
+    assert.equal(SUBMIT_MIN_TOKEN_AGE_MS, 3_500);
+    assert.equal(waitBeforeSubmit(10_000, 10_000), 3_500);
+    assert.equal(waitBeforeSubmit(10_000, 11_000), 2_500);
+    assert.equal(waitBeforeSubmit(10_000, 13_500), 0);
+    assert.equal(waitBeforeSubmit(10_000, 60_000), 0);
+    // Relógio voltando: nunca mais que o mínimo.
+    assert.equal(waitBeforeSubmit(10_000, 5_000), 3_500);
+  });
+
+  it('rascunho com algo escrito ou escolhido conta como sujo; o honeypot não', () => {
+    assert.equal(isDraftDirty(EMPTY_DRAFT), false);
+    assert.equal(isDraftDirty({ ...EMPTY_DRAFT, website: 'x' }), false);
+    assert.equal(isDraftDirty({ ...EMPTY_DRAFT, name: '   ' }), false);
+    assert.equal(isDraftDirty({ ...EMPTY_DRAFT, message: 'oi' }), true);
+    assert.equal(isDraftDirty({ ...EMPTY_DRAFT, units: '1-10' }), true);
+    assert.equal(isDraftDirty({ ...EMPTY_DRAFT, privacyAck: true }), true);
+  });
+
   it('erros escolhidos só por status e error.code', () => {
     assert.match(submitErrorMessage(400, 'FORM_EXPIRED'), /aberto por muito tempo/);
     assert.match(submitErrorMessage(400, 'VALIDATION_ERROR'), /Confira os campos/);
@@ -115,11 +141,8 @@ describe('regras do formulário de contato (spec 040, E4)', () => {
     assert.match(tokenErrorMessage(500), /abrir o formulário/);
   });
 
-  it('mensagem do servidor só no formato esperado; token só como texto curto', () => {
-    assert.equal(acceptedMessage({ message: 'Recebido.' }), 'Recebido.');
-    assert.equal(acceptedMessage({ message: '<b>x</b>' }), ACCEPTED_FALLBACK);
-    assert.equal(acceptedMessage({ message: 'a\nb' }), ACCEPTED_FALLBACK);
-    assert.equal(acceptedMessage(null), ACCEPTED_FALLBACK);
+  it('sucesso sempre com a frase fixa; token só como texto curto', () => {
+    assert.equal(ACCEPTED_MESSAGE, 'Recebemos o seu contato. Responderemos pelo e-mail informado.');
     assert.equal(parseFormToken({ formToken: '1.abc' }), '1.abc');
     assert.equal(parseFormToken({}), null);
     assert.equal(parseFormToken({ formToken: 'x'.repeat(201) }), null);

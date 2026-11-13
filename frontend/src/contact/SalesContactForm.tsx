@@ -4,11 +4,12 @@ import { Button } from '../components/motion/button';
 import { Input } from '../components/motion/input';
 import { Textarea } from '../components/textarea';
 import {
-  acceptedMessage,
+  ACCEPTED_MESSAGE,
   type DraftErrors,
   type DraftField,
   EMPTY_DRAFT,
   firstInvalid,
+  isDraftDirty,
   parseFormToken,
   type SalesContactDraft,
   submitErrorMessage,
@@ -17,6 +18,7 @@ import {
   UNITS_OPTIONS,
   validateDraft,
   VOLUME_OPTIONS,
+  waitBeforeSubmit,
 } from './sales-contact-rules';
 
 const SELECT_CLASS =
@@ -25,6 +27,8 @@ const SELECT_CLASS =
 export interface SalesContactFormProps {
   /** Foco no primeiro campo ao abrir (o `Modal` procura `data-autofocus`). */
   readonly autoFocus?: boolean;
+  /** Avisado quando o rascunho passa a ter (ou deixa de ter) algo escrito. */
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -33,7 +37,7 @@ export interface SalesContactFormProps {
  * limpo depois do envio aceito; o token do formulário (assinado pelo servidor) é pedido ao montar e de novo
  * depois de cada envio.
  */
-export function SalesContactForm({ autoFocus = false }: SalesContactFormProps) {
+export function SalesContactForm({ autoFocus = false, onDirtyChange }: SalesContactFormProps) {
   const [draft, setDraft] = useState<SalesContactDraft>(EMPTY_DRAFT);
   const [errors, setErrors] = useState<DraftErrors>({});
   const [formToken, setFormToken] = useState<string | null>(null);
@@ -42,6 +46,9 @@ export function SalesContactForm({ autoFocus = false }: SalesContactFormProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const generation = useRef(0);
+  /** Instante (relógio do navegador) em que o token atual chegou. */
+  const tokenReceivedAt = useRef(0);
+  const mounted = useRef(true);
   const fields = useRef<Partial<Record<DraftField, HTMLElement | null>>>({});
   const prefix = useId();
   const id = (name: string) => `${prefix}-${name}`;
@@ -54,7 +61,10 @@ export function SalesContactForm({ autoFocus = false }: SalesContactFormProps) {
       const token = parseFormToken(await request('/contact/sales/form-token'));
       if (current !== generation.current) return;
       if (token === null) setTokenError(tokenErrorMessage(500));
-      else setFormToken(token);
+      else {
+        tokenReceivedAt.current = Date.now();
+        setFormToken(token);
+      }
     } catch (error) {
       if (current !== generation.current) return;
       setTokenError(tokenErrorMessage(error instanceof ApiError ? error.status : 0));
@@ -62,11 +72,18 @@ export function SalesContactForm({ autoFocus = false }: SalesContactFormProps) {
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void loadToken();
     return () => {
+      mounted.current = false;
       generation.current += 1;
     };
   }, [loadToken]);
+
+  const dirty = isDraftDirty(draft);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const update = <K extends keyof SalesContactDraft>(key: K, value: SalesContactDraft[K]) => {
     setDraft((previous) => ({ ...previous, [key]: value }));
@@ -87,13 +104,20 @@ export function SalesContactForm({ autoFocus = false }: SalesContactFormProps) {
     }
     setBusy(true);
     try {
-      const body = await request('/contact/sales', {
+      // Token recém-chegado (reenvio depois de FORM_EXPIRED, preenchimento automático): espera o tempo mínimo,
+      // senão o servidor descartaria o pedido em silêncio (`too_fast`).
+      const wait = waitBeforeSubmit(tokenReceivedAt.current, Date.now());
+      if (wait > 0) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (!mounted.current) return;
+      }
+      await request('/contact/sales', {
         method: 'POST',
         body: toPayload(draft, formToken),
       });
       setDraft(EMPTY_DRAFT);
       setErrors({});
-      setSuccess(acceptedMessage(body));
+      setSuccess(ACCEPTED_MESSAGE);
       void loadToken();
     } catch (error) {
       const status = error instanceof ApiError ? error.status : 0;

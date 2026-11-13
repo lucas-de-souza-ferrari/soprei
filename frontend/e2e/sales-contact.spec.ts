@@ -6,12 +6,18 @@ import { installApi, SENTINEL } from './company-fixture';
 // Assinatura). API falsa por `page.route`; nada sai para a internet nem envia e-mail.
 
 interface ContactApi {
-  readonly calls: { method: string; path: string; body: unknown }[];
+  /** `at`: instante (relógio do Node) em que a rota falsa recebeu o pedido. */
+  readonly calls: { method: string; path: string; body: unknown; at: number }[];
   /** Resposta do próximo POST: status e, no erro, o `error.code`. */
   next: { status: number; code?: string };
 }
 
-const SERVER_MESSAGE = 'Recebemos o seu contato. Responderemos pelo e-mail informado.';
+// O site mostra sempre a frase fixa; a rota falsa responde outro texto para provar que ele não é lido.
+const ACCEPTED = 'Recebemos o seu contato. Responderemos pelo e-mail informado.';
+
+// Os envios esperam o token ter 3,5 s antes do POST (o servidor descarta o de menos de 3 s).
+test.describe.configure({ timeout: 60_000 });
+const SEND = { timeout: 10_000 };
 
 async function installContactApi(page: Page): Promise<ContactApi> {
   const state: ContactApi = { calls: [], next: { status: 202 } };
@@ -24,6 +30,7 @@ async function installContactApi(page: Page): Promise<ContactApi> {
       method,
       path,
       body: method === 'GET' ? undefined : request.postDataJSON(),
+      at: Date.now(),
     });
     if (method === 'GET' && path === '/contact/sales/form-token') {
       tokens += 1;
@@ -40,7 +47,7 @@ async function installContactApi(page: Page): Promise<ContactApi> {
           json: { error: { code: 'FORBIDDEN', message: SENTINEL } },
         });
       const { status, code } = state.next;
-      if (status === 202) return route.fulfill({ status: 202, json: { message: SERVER_MESSAGE } });
+      if (status === 202) return route.fulfill({ status: 202, json: { message: SENTINEL } });
       return route.fulfill({
         status,
         json: { error: { code: code ?? 'X', message: SENTINEL, requestId: 'r' } },
@@ -123,7 +130,8 @@ for (const theme of ['light', 'dark'] as const) {
       api.calls.filter((call) => call.path === '/contact/sales/form-token').length;
     const issued = tokenCalls();
     await page.getByRole('button', { name: 'Enviar' }).click();
-    await expect(page.getByTestId('contato-enviado')).toHaveText(SERVER_MESSAGE);
+    await expect(page.getByTestId('contato-enviado')).toHaveText(ACCEPTED, SEND);
+    await expect(page.getByText(SENTINEL)).toHaveCount(0);
     // Formulário limpo.
     await expect(page.getByLabel('Seu nome')).toHaveValue('');
     await expect(page.getByLabel('Mensagem')).toHaveValue('');
@@ -220,7 +228,7 @@ test('erros escolhidos por status e error.code, nunca pelo texto do servidor', a
     await expect(page.getByRole('button', { name: 'Enviar' })).toBeEnabled();
     await fill(page);
     await page.getByRole('button', { name: 'Enviar' }).click();
-    await expect(page.getByRole('alert').filter({ hasText: item.text })).toBeVisible();
+    await expect(page.getByRole('alert').filter({ hasText: item.text })).toBeVisible(SEND);
     await expect(page.getByText(SENTINEL)).toHaveCount(0);
     // O rascunho continua (só o envio aceito limpa).
     await expect(page.getByLabel('Seu nome')).toHaveValue(FILLED.name);
@@ -281,7 +289,7 @@ for (const checkoutEnabled of [true, false]) {
       await expect(dialog.getByRole('button', { name: 'Enviar' })).toBeEnabled();
       await fill(page);
       await dialog.getByRole('button', { name: 'Enviar' }).click();
-      await expect(dialog.getByTestId('contato-enviado')).toHaveText(SERVER_MESSAGE);
+      await expect(dialog.getByTestId('contato-enviado')).toHaveText(ACCEPTED, SEND);
       expect(contact.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
       expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
       expect(await page.evaluate(() => Object.keys(localStorage))).toEqual(['soprei-theme']);
@@ -304,4 +312,103 @@ test('Assinatura a 360 px com o Modal do contato aberto: sem rolagem horizontal'
     .click();
   await expect(page.getByRole('dialog', { name: 'Falar com a gente' })).toBeVisible();
   await noHorizontalScroll(page);
+});
+
+/** Intervalo entre o último GET do token antes do POST e o POST, pela rota falsa. */
+function tokenAgeAtPost(api: ContactApi, postIndex: number): number {
+  const posts = api.calls.filter((call) => call.method === 'POST');
+  const post = posts[postIndex];
+  if (post === undefined) throw new Error('POST não encontrado');
+  const tokens = api.calls.filter(
+    (call) => call.path === '/contact/sales/form-token' && call.at <= post.at,
+  );
+  const last = tokens.at(-1);
+  if (last === undefined) throw new Error('token não encontrado');
+  return post.at - last.at;
+}
+
+test('depois de FORM_EXPIRED, o reenvio imediato espera o tempo mínimo e o pedido chega', async ({
+  page,
+}) => {
+  const { api } = await openContactPage(page);
+  await expect(page.getByRole('button', { name: 'Enviar' })).toBeEnabled();
+  await fill(page);
+  api.next = { status: 400, code: 'FORM_EXPIRED' };
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: /aberto por muito tempo/ })).toBeVisible(
+    SEND,
+  );
+  // O token novo chega e a pessoa reenvia na hora: o POST só sai depois de 3,5 s do token.
+  api.next = { status: 202 };
+  await expect(page.getByRole('button', { name: 'Enviar' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await expect(page.getByRole('button', { name: 'Enviando…' })).toBeVisible();
+  await expect(page.getByTestId('contato-enviado')).toHaveText(ACCEPTED, SEND);
+  const posts = api.calls.filter((call) => call.method === 'POST');
+  expect(posts).toHaveLength(2);
+  expect(tokenAgeAtPost(api, 1)).toBeGreaterThanOrEqual(3_400);
+  // O pedido chegou à rota com os dados do formulário e o token novo.
+  expect(posts[1]?.body).toMatchObject({ name: FILLED.name, email: FILLED.email });
+  expect((posts[1]?.body as { formToken: string }).formToken).not.toBe(
+    (posts[0]?.body as { formToken: string }).formToken,
+  );
+});
+
+async function openEnterpriseModal(page: Page): Promise<ContactApi> {
+  const api = await installApi(page, { role: 'OWNER' });
+  await installBillingApi(page, api, newBilling());
+  const contact = await installContactApi(page);
+  await page.goto('/painel/assinatura');
+  await page.getByRole('tab', { name: 'Planos' }).click();
+  await page
+    .getByTestId('cartao-enterprise')
+    .getByRole('button', { name: 'Falar com a gente' })
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Falar com a gente' })).toBeVisible();
+  return contact;
+}
+
+test('envio imediato depois de abrir o Modal: o POST espera o tempo mínimo e o pedido chega', async ({
+  page,
+}) => {
+  const contact = await openEnterpriseModal(page);
+  const dialog = page.getByRole('dialog', { name: 'Falar com a gente' });
+  await expect(dialog.getByRole('button', { name: 'Enviar' })).toBeEnabled();
+  await fill(page);
+  await dialog.getByRole('button', { name: 'Enviar' }).click();
+  await expect(dialog.getByTestId('contato-enviado')).toHaveText(ACCEPTED, SEND);
+  expect(contact.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  expect(tokenAgeAtPost(contact, 0)).toBeGreaterThanOrEqual(3_400);
+});
+
+test('fechar o Modal com algo escrito pede confirmação; vazio fecha direto', async ({ page }) => {
+  await openEnterpriseModal(page);
+  const dialog = page.getByRole('dialog', { name: 'Falar com a gente' });
+  const confirm = page.getByRole('dialog', { name: 'Descartar o que você escreveu?' });
+  await dialog.getByLabel('Seu nome').fill(FILLED.name);
+
+  // Esc abre a confirmação com o foco no botão seguro; Esc de novo cancela e o rascunho fica.
+  await page.keyboard.press('Escape');
+  await expect(confirm).toBeVisible();
+  await expect(confirm.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(confirm).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Seu nome')).toHaveValue(FILLED.name);
+
+  // "Fechar" também pergunta; "Descartar" fecha e apaga.
+  await dialog.getByRole('button', { name: 'Fechar' }).click();
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Descartar' }).click();
+  await expect(dialog).toBeHidden();
+  await page
+    .getByTestId('cartao-enterprise')
+    .getByRole('button', { name: 'Falar com a gente' })
+    .click();
+  await expect(dialog.getByLabel('Seu nome')).toHaveValue('');
+
+  // Vazio: Esc fecha direto, sem confirmação.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(confirm).toBeHidden();
 });
