@@ -19,6 +19,7 @@ export function App() {
           <a href="/entrar">Entrar</a>
           <a href="#como-funciona">Como funciona</a>
           <a href="#possibilidades">O que é possível</a>
+          <a href="/fale-conosco">Fale com a gente</a>
         </nav>
         <div className="header-actions">
           <ThemeToggle />
@@ -228,6 +229,7 @@ export function App() {
         <Logo alt="Soprei" />
         <span>Inteligência para conversas que importam.</span>
         <LegalLinks className="footer-legal" />
+        <a href="/fale-conosco">Fale com a gente</a>
         <a href="#inicio">Voltar ao topo ↑</a>
       </footer>
     </>

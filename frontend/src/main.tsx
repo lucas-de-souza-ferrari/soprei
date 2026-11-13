@@ -5,6 +5,8 @@ import { AccountApp } from './AccountApp';
 import { ACCOUNT_PATHS, pathForPage } from './account-flow';
 import { parseCheckoutReturn, SUBSCRIPTION_PATH } from './company/billing-rules';
 import { takeInviteToken } from './invite/invite-flow';
+import { ContactPage } from './contact/ContactPage';
+import { CONTACT_PATH } from './contact/sales-contact-rules';
 import { ThemeProvider } from './theme/theme-provider';
 import './style.css';
 
@@ -24,7 +26,10 @@ if (location.pathname === SUBSCRIPTION_PATH && location.search !== '') {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
-      {ACCOUNT_PATHS.includes(location.pathname) || location.pathname.startsWith('/painel') ? (
+      {/* Contato comercial (spec 040, E4): página pública, fora do AccountApp (não lê a sessão). */}
+      {location.pathname === CONTACT_PATH ? (
+        <ContactPage />
+      ) : ACCOUNT_PATHS.includes(location.pathname) || location.pathname.startsWith('/painel') ? (
         <AccountApp initialInviteToken={inviteToken} initialCheckoutReturn={checkoutReturn} />
       ) : (
         <App />

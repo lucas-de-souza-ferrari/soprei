@@ -9,8 +9,8 @@ export interface ModalProps {
 }
 
 /**
- * Diálogo modal com o `<dialog>` nativo (`showModal`): o foco entra no diálogo, Esc fecha e o
- * foco volta ao gatilho. Só tokens de cor. O conteúdo só é montado enquanto aberto, então nenhum
+ * Diálogo modal com o `<dialog>` nativo (`showModal`): o foco entra no diálogo (no elemento com
+ * `data-autofocus`, se houver), Esc fecha e o foco volta ao gatilho. Só tokens de cor. O conteúdo só é montado enquanto aberto, então nenhum
  * texto de formulário sobra na tela depois de fechar.
  */
 export function Modal({ open, title, onClose, children }: ModalProps) {
@@ -20,8 +20,12 @@ export function Modal({ open, title, onClose, children }: ModalProps) {
   useEffect(() => {
     const dialog = ref.current;
     if (dialog === null) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      // O `showModal` foca o primeiro elemento focável (o "Fechar"); quem precisar de outro marca o campo com
+      // `data-autofocus` (spec 040: o formulário de contato abre com o foco no primeiro campo).
+      dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
+    } else if (!open && dialog.open) dialog.close();
   }, [open]);
 
   return (
