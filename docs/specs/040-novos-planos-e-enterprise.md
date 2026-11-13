@@ -30,24 +30,26 @@ Modo `CUSTOMER_PAYS_META` (a empresa paga a Meta direto). Centavos no banco; rea
 
 | Plano | Empresas | Respostas por mês | Tokens por mês (proteção, D2) | Mensal | Anual | Agenda (mês / ano) | Estoque (mês / ano) |
 | --- | :-: | :-: | :-: | --: | --: | --: | --: |
-| Essencial | 1 | 3.000 | 18 M | R$ 47,90 | R$ 479,00 | R$ 29 / R$ 290 | R$ 19 / R$ 190 |
-| Profissional | 3 | 10.000 | 60 M | R$ 119,90 | R$ 1.199,00 | R$ 49 / R$ 490 | R$ 39 / R$ 390 |
-| Escala | 10 | 40.000 | 240 M | R$ 349,00 | R$ 3.490,00 | R$ 99 / R$ 990 | R$ 79 / R$ 790 |
+| Essencial | 1 | 2.500 | 15 M | R$ 47,90 | R$ 479,00 | R$ 29 / R$ 290 | R$ 19 / R$ 190 |
+| Profissional | 3 | 8.000 | 48 M | R$ 119,90 | R$ 1.199,00 | R$ 49 / R$ 490 | R$ 39 / R$ 390 |
+| Escala | 10 | 30.000 | 180 M | R$ 349,00 | R$ 3.490,00 | R$ 99 / R$ 990 | R$ 79 / R$ 790 |
 | Enterprise | sob consulta | sob consulta | — | — | — | — | — |
 
 Colunas que não mudam: `metaEstimateMilliCents` e `metaPerReplyMilliCents` = 3.500; `extraPackCents` = 5.900 e `extraPackReplies` = 500 (copiados; o pacote continua sem existir). O Enterprise **não** é linha do catálogo (ver D10).
 
 **Efeito "batata do McDonald's" (regra do catálogo, com teste):** o preço por resposta incluída **cai a cada degrau**, no mensal e no anual.
 
-| Plano | Mensal por resposta | Anual por resposta (12 meses de cota) |
+| Plano | Mensal por resposta (`perReplyMilliCents`) | Anual por resposta, 12 meses de cota (`perReplyMilliCents`) |
 | --- | --: | --: |
-| Essencial | R$ 0,0160 (47,90 / 3.000) | R$ 0,0133 (479 / 36.000) |
-| Profissional | R$ 0,0120 (119,90 / 10.000) | R$ 0,0100 (1.199 / 120.000) |
-| Escala | R$ 0,0087 (349 / 40.000) | R$ 0,0073 (3.490 / 480.000) |
+| Essencial | R$ 0,0192 (4.790 x 1.000 / 2.500 = 1.916) | R$ 0,0160 (47.900 x 1.000 / 30.000 = 1.596) |
+| Profissional | R$ 0,0150 (11.990 x 1.000 / 8.000 = 1.498) | R$ 0,0125 (119.900 x 1.000 / 96.000 = 1.248) |
+| Escala | R$ 0,0116 (34.900 x 1.000 / 30.000 = 1.163) | R$ 0,0097 (349.000 x 1.000 / 360.000 = 969) |
+
+(Milésimos de centavo, arredondados para baixo, como o servidor calcula em D9.)
 
 **O que muda em relação a hoje (para o dono conferir):** o mensal cai no Essencial (-18,8%) e no Profissional (-19,5%) e fica igual no Escala e nos módulos. **O anual não cai em tudo:** com 10 x em vez de 12 x 0,8 = 9,6 x, o **Escala anual sobe de R$ 3.350,40 para R$ 3.490,00 (+4,2%)** e **todos os módulos anuais sobem 4,2%** (Agenda 278,40 -> 290, 470,40 -> 490, 950,40 -> 990; Estoque 182,40 -> 190, 374,40 -> 390, 758,40 -> 790); Essencial anual cai de 566,40 para 479 e Profissional anual de 1.430,40 para 1.199. Isso aciona a cláusula de reajuste dos termos (ver D6).
 
-**Aviso registrado (decisão do dono):** essas cotas **só valem no modo C**. No modo S (`SOPREI_PAYS_META`, spec 031), com a Meta a ~R$ 0,035 por resposta, só a Meta custaria R$ 105, R$ 350 e R$ 1.400 por mês nos três planos (acima de todos os preços). O modo S continua desligado (`SOPREI_PAYS_META_ENABLED=false`) e, se um dia for ligado, precisa de **catálogo próprio** em spec própria. A migration desta spec **não** cria preço `SOPREI_PAYS_META`, e um teste garante que a versão nova do catálogo não tem linha nesse modo.
+**Aviso registrado (decisão do dono):** essas cotas **só valem no modo C**. No modo S (`SOPREI_PAYS_META`, spec 031), com a Meta a ~R$ 0,035 por resposta, só a Meta custaria R$ 87,50, R$ 280 e R$ 1.050 por mês nos três planos (acima de todos os preços). O modo S continua desligado (`SOPREI_PAYS_META_ENABLED=false`) e, se um dia for ligado, precisa de **catálogo próprio** em spec própria. A migration desta spec **não** cria preço `SOPREI_PAYS_META`, e um teste garante que a versão nova do catálogo não tem linha nesse modo.
 
 ## Margem (contas conferidas; premissas da 031)
 
@@ -57,30 +59,30 @@ Colunas que não mudam: `metaEstimateMilliCents` e `metaPerReplyMilliCents` = 3.
 
 | Plano (mensal) | Receita | IA (pior) | Cartão | Imposto | Infra | Custo | Margem pior caso | Margem esperada (IA a 0,0025) |
 | --- | --: | --: | --: | --: | --: | --: | --: | --: |
-| Essencial | 47,90 | 18,00 | 1,68 | 2,87 | 3 | 25,55 | **R$ 22,35 (46,7%)** | R$ 32,85 (68,6%) |
-| Essencial + Agenda + Estoque | 95,90 | 18,00 | 3,36 | 5,75 | 3 | 30,11 | R$ 65,79 (68,6%) | R$ 76,29 (79,6%) |
-| Profissional | 119,90 | 60,00 | 4,20 | 7,19 | 9 | 80,39 | **R$ 39,51 (33,0%)** | R$ 74,51 (62,1%) |
-| Profissional + Agenda + Estoque | 207,90 | 60,00 | 7,28 | 12,47 | 9 | 88,75 | R$ 119,15 (57,3%) | R$ 154,15 (74,1%) |
-| Escala | 349,00 | 240,00 | 12,22 | 20,94 | 30 | 303,16 | **R$ 45,85 (13,1%)** | R$ 185,85 (53,3%) |
-| Escala + Agenda + Estoque | 527,00 | 240,00 | 18,45 | 31,62 | 30 | 320,07 | R$ 206,94 (39,3%) | R$ 346,94 (65,8%) |
+| Essencial | 47,90 | 15,00 | 1,68 | 2,87 | 3 | 22,55 | **R$ 25,35 (52,9%)** | R$ 34,10 (71,2%) |
+| Essencial + Agenda + Estoque | 95,90 | 15,00 | 3,36 | 5,75 | 3 | 27,11 | R$ 68,79 (71,7%) | R$ 77,54 (80,9%) |
+| Profissional | 119,90 | 48,00 | 4,20 | 7,19 | 9 | 68,39 | **R$ 51,51 (43,0%)** | R$ 79,51 (66,3%) |
+| Profissional + Agenda + Estoque | 207,90 | 48,00 | 7,28 | 12,47 | 9 | 76,75 | R$ 131,15 (63,1%) | R$ 159,15 (76,6%) |
+| Escala | 349,00 | 180,00 | 12,22 | 20,94 | 30 | 243,16 | **R$ 105,85 (30,3%)** | R$ 210,85 (60,4%) |
+| Escala + Agenda + Estoque | 527,00 | 180,00 | 18,45 | 31,62 | 30 | 260,07 | R$ 266,94 (50,7%) | R$ 371,94 (70,6%) |
 
-(O Escala dá R$ 45,845 exatos; o dono anotou 45,84 e 185,84, diferença só de arredondamento.)
+(Valores exatos com meio centavo, arredondados para cima: o Escala dá R$ 105,845 e R$ 210,845.)
 
 **Anual** (receita = 10 x o mensal; custos de IA e infra x 12; taxa e imposto sobre o valor pago)
 
 | Plano (anual) | Receita | IA (pior) | Cartão | Imposto | Infra | Custo | Margem pior caso | Margem esperada (IA a 0,0025) |
 | --- | --: | --: | --: | --: | --: | --: | --: | --: |
-| Essencial | 479,00 | 216,00 | 16,77 | 28,74 | 36 | 297,51 | R$ 181,50 (37,9%) | R$ 307,50 (64,2%) |
-| Essencial + Agenda + Estoque | 959,00 | 216,00 | 33,57 | 57,54 | 36 | 343,11 | R$ 615,90 (64,2%) | R$ 741,90 (77,4%) |
-| Profissional | 1.199,00 | 720,00 | 41,97 | 71,94 | 108 | 941,91 | R$ 257,10 (21,4%) | R$ 677,10 (56,5%) |
-| Profissional + Agenda + Estoque | 2.079,00 | 720,00 | 72,77 | 124,74 | 108 | 1.025,51 | R$ 1.053,50 (50,7%) | R$ 1.473,50 (70,9%) |
-| Escala | 3.490,00 | 2.880,00 | 122,15 | 209,40 | 360 | 3.571,55 | **-R$ 81,55 (-2,3%)** | R$ 1.598,45 (45,8%) |
-| Escala + Agenda + Estoque | 5.270,00 | 2.880,00 | 184,45 | 316,20 | 360 | 3.740,65 | R$ 1.529,35 (29,0%) | R$ 3.209,35 (60,9%) |
+| Essencial | 479,00 | 180,00 | 16,77 | 28,74 | 36 | 261,51 | **R$ 217,50 (45,4%)** | R$ 322,50 (67,3%) |
+| Essencial + Agenda + Estoque | 959,00 | 180,00 | 33,57 | 57,54 | 36 | 307,11 | R$ 651,90 (68,0%) | R$ 756,90 (78,9%) |
+| Profissional | 1.199,00 | 576,00 | 41,97 | 71,94 | 108 | 797,91 | **R$ 401,10 (33,5%)** | R$ 737,10 (61,5%) |
+| Profissional + Agenda + Estoque | 2.079,00 | 576,00 | 72,77 | 124,74 | 108 | 881,51 | R$ 1.197,50 (57,6%) | R$ 1.533,50 (73,8%) |
+| Escala | 3.490,00 | 2.160,00 | 122,15 | 209,40 | 360 | 2.851,55 | **R$ 638,45 (18,3%)** | R$ 1.898,45 (54,4%) |
+| Escala + Agenda + Estoque | 5.270,00 | 2.160,00 | 184,45 | 316,20 | 360 | 3.020,65 | R$ 2.249,35 (42,7%) | R$ 3.509,35 (66,6%) |
 
-**Ponto de equilíbrio do custo de IA por resposta** (sem módulos, margem zero): mensal Essencial R$ 0,0135, Profissional R$ 0,0100, Escala R$ 0,0071; anual Essencial R$ 0,0110, Profissional R$ 0,0081, **Escala R$ 0,0058** (abaixo do R$ 0,006 do pior caso).
+**Ponto de equilíbrio do custo de IA por resposta** (sem módulos, margem zero): mensal Essencial R$ 0,0161, Profissional R$ 0,0124, Escala R$ 0,0095; anual Essencial R$ 0,0132, Profissional R$ 0,0102, Escala R$ 0,0078. Todos acima do R$ 0,006 do pior caso; o mais próximo é o Escala anual (1,3 x).
 
 **Riscos aceitos pelo dono (registrar em `docs/context.md` na aprovação):**
-1. **O Escala é o plano mais apertado** (13,1% no pior caso mensal) e o **Escala anual sem módulos dá prejuízo no pior caso** (-R$ 81,55 por ano), porque o anual recebe 10 meses e entrega 12 meses de cota. Esse ponto **não estava** nas contas que o dono aceitou e precisa de confirmação (D7). O caso esperado continua com 45,8%.
+1. **O Escala é o plano mais apertado** (30,3% no pior caso mensal e 18,3% no anual, porque o anual recebe 10 meses e entrega 12 meses de cota). Com as cotas da primeira versão desta spec (40 mil respostas), o Escala anual dava prejuízo no pior caso (-R$ 81,55 por ano); a redução da cota para 30 mil resolveu isso (D7).
 2. **A infra de R$ 3 por empresa é chute** (servidor próprio na Hetzner, sem medição por empresa); no Escala ela pesa R$ 30 por mês.
 3. O pior caso exige a cota inteira usada todo mês; o teto de tokens (D2) garante que o custo de IA por resposta não passe de ~R$ 0,006.
 
@@ -95,7 +97,7 @@ Colunas que não mudam: `metaEstimateMilliCents` e `metaPerReplyMilliCents` = 3.
 - As linhas antigas **não são tocadas** (continuam `active = true`; a leitura já escolhe a maior versão).
 - **Compatível com a versão anterior do código:** o código de antes lê a maior versão ativa e passa a vender o catálogo novo, com cotas novas para quem renovar; nada quebra num rollback.
 
-**Cotas novas valem na hora para todos (D4):** uma função pura no domínio, `effectiveQuotas(own, current)`, devolve, para respostas e para tokens, o **maior** valor entre a linha de `Plan` da assinatura e a **versão ativa mais nova do mesmo código**. Ela é aplicada **num ponto só** (o mapeamento `toSubscription` usado pelos três loaders, com um mapa `code -> versão vigente` lido do catálogo), para que IA, gate, `GET /account/billing`, `GET .../entitlements` e os avisos por e-mail vejam o mesmo número. Consequências: quem assina o Essencial antigo passa a 3.000 respostas na janela atual; um pedido criado antes da troca e pago depois (grava a linha antiga) **não** volta às cotas antigas; uma versão futura com cota **menor** não reduz a de quem já assina (só vale quando ele renovar, porque a concessão grava a linha nova). `maxCompanies` **não** entra na regra (não muda neste catálogo; fica para a spec que mudar). O uso já contado na janela permanece.
+**Cotas novas valem na hora para todos (D4):** uma função pura no domínio, `effectiveQuotas(own, current)`, devolve, para respostas e para tokens, o **maior** valor entre a linha de `Plan` da assinatura e a **versão ativa mais nova do mesmo código**. Ela é aplicada **num ponto só** (o mapeamento `toSubscription` usado pelos três loaders, com um mapa `code -> versão vigente` lido do catálogo), para que IA, gate, `GET /account/billing`, `GET .../entitlements` e os avisos por e-mail vejam o mesmo número. Consequências: quem assina o Essencial antigo passa a 2.500 respostas na janela atual; um pedido criado antes da troca e pago depois (grava a linha antiga) **não** volta às cotas antigas; uma versão futura com cota **menor** não reduz a de quem já assina (só vale quando ele renovar, porque a concessão grava a linha nova). `maxCompanies` **não** entra na regra (não muda neste catálogo; fica para a spec que mudar). O uso já contado na janela permanece.
 
 **Preço novo na próxima renovação (D5):** nenhuma mudança de código. A renovação, o pedido novo e a cotação já leem o catálogo vigente; o período pago não muda de preço e não há reembolso proporcional.
 
@@ -108,7 +110,7 @@ Colunas que não mudam: `metaEstimateMilliCents` e `metaPerReplyMilliCents` = 3.
 ### E2. Tela sem tokens (frontend)
 
 - `SubscriptionPage`: sai a barra "Uso da IA" e o texto "Vale a cota que acabar primeiro"; fica a barra **"Respostas enviadas"** com o texto "Respostas enviadas pelo WhatsApp neste mês". O alerta "Cota do mês esgotada" continua para respostas; quando o motivo é tokens, o texto é **"O limite de uso da inteligência artificial deste mês foi atingido"** (sem número), com a mesma explicação de que nada se perde e a data de volta. O mesmo em `billing-rules.ts` (`accessNotice`) e `AccessNotice.tsx`.
-- Cartões de plano: empresas, respostas por mês, preço e, **se D9 for aprovada**, a linha "equivale a R$ 0,016 por resposta" com o valor **vindo do servidor** (campo novo e aditivo `perReplyMilliCents` em cada preço do catálogo de `GET /account/billing`, calculado no servidor como `baseCents x 1000 / (respostas x meses do ciclo)`, arredondado para baixo). O navegador continua sem calcular preço.
+- Cartões de plano: empresas, respostas por mês, preço e, **se D9 for aprovada**, a linha "equivale a R$ 0,0192 por resposta" (Essencial mensal; 1.916 milésimos de centavo) com o valor **vindo do servidor** (campo novo e aditivo `perReplyMilliCents` em cada preço do catálogo de `GET /account/billing`, calculado no servidor como `baseCents x 1000 / (respostas x meses do ciclo)`, arredondado para baixo). O navegador continua sem calcular preço.
 - Ciclo anual: o texto "(um pagamento por ano, com desconto)" vira "(um pagamento por ano: 2 meses grátis)". A frase é fixa e o teste da migration garante que anual = 10 x mensal em toda a versão vigente; se um dia não for, a spec que mudar o catálogo muda a frase.
 - **A API não muda de forma:** `GET /account/billing` e `GET .../entitlements` continuam devolvendo `tokens` (aditivo, compatível com rollback e com o gate), só a tela deixa de mostrar. Nenhum texto do site contém "token" na área de Assinatura nem nas faixas.
 
@@ -125,7 +127,7 @@ Alteração de `frontend/src/legal/privacidade.md` (`versao: 2`, `atualizado-em:
 
 ### E4. Plano Enterprise e formulário de contato
 
-**Onde aparece (D10):** (1) na aba **Planos** de `/painel/assinatura`, um quarto cartão, **não selecionável** (não é rádio), "Enterprise — Sob consulta — Para redes, franquias e operações com mais de 10 empresas ou mais de 40 mil respostas por mês" com o botão **"Falar com a gente"**, que abre o formulário num `Modal` (componente existente); aparece também com o checkout desligado; (2) uma página pública **`/fale-conosco`** com o mesmo formulário (componente único `SalesContactForm`), montada pelo `main.tsx` fora do `AccountApp` (sem ler a sessão); (3) o link "Fale com a gente" no menu e no rodapé da página inicial (`App.tsx`). Não se cria página pública de preços (fora de escopo).
+**Onde aparece (D10):** (1) na aba **Planos** de `/painel/assinatura`, um quarto cartão, **não selecionável** (não é rádio), "Enterprise — Sob consulta — Para redes, franquias e operações com mais de 10 empresas ou mais de 30 mil respostas por mês" com o botão **"Falar com a gente"**, que abre o formulário num `Modal` (componente existente); aparece também com o checkout desligado; (2) uma página pública **`/fale-conosco`** com o mesmo formulário (componente único `SalesContactForm`), montada pelo `main.tsx` fora do `AccountApp` (sem ler a sessão); (3) o link "Fale com a gente" no menu e no rodapé da página inicial (`App.tsx`). Não se cria página pública de preços (fora de escopo).
 
 **Campos (D17):** Zod `strict`, NFC, sem caractere de controle (exceto quebra de linha na mensagem), sem caracteres invisíveis de formatação (categoria Cf), tamanhos medidos depois da normalização.
 
@@ -136,7 +138,7 @@ Alteração de `frontend/src/legal/privacidade.md` (`versao: 2`, `atualizado-em:
 | `phone` | 8 a 20 caracteres de dígitos, espaço, `+`, `(`, `)` e `-`, com 8 a 15 dígitos | não |
 | `companyName` | 2 a 120, uma linha | sim |
 | `units` | enum: `1-10`, `11-30`, `31-100`, `100+` | sim |
-| `monthlyVolume` | enum: `ate-40-mil`, `40-a-100-mil`, `100-a-500-mil`, `mais-de-500-mil`, `nao-sei` | sim |
+| `monthlyVolume` | enum: `ate-30-mil`, `30-a-100-mil`, `100-a-500-mil`, `mais-de-500-mil`, `nao-sei` | sim |
 | `message` | 10 a 2.000, até 40 linhas | sim |
 | `privacyAck` | literal `true` ("Li a Política de Privacidade", link para `/privacidade`; é ciência, a base legal é o art. 7º, V) | sim |
 | `website` | **honeypot**: campo escondido (fora da tela e do leitor de tela, `tabindex="-1"`, `autocomplete="off"`); só aceita vazio | — |
@@ -181,14 +183,14 @@ A ordem sugerida pelo pedido foi ajustada: o cartão Enterprise depende do formu
 **E1**
 - [ ] `catalog-2026-11-migration.integration.test.ts` (schema temporário com rollback, como os testes de migration da 031): depois da migration, `catalog(now)` devolve exatamente os valores de D1 e D2 (centavos e cotas) para os três códigos e os dois ciclos; toda linha antiga de `plans` e `plan_prices` está **idêntica** à de antes (comparação coluna a coluna); nenhuma linha nova tem `SOPREI_PAYS_META`.
 - [ ] A mesma migration aplicada sobre um catálogo com versões extras do Essencial (o caso da produção: `Plan` versões 2 e 3, e também `PlanPrice` versões 2 e 3 no plano 1) cria a versão `máx + 1` sem erro de unicidade, e o catálogo passa a ser o novo.
-- [ ] Regras do catálogo vigente, em teste: anual = 10 x mensal para base e módulos; preço por resposta estritamente decrescente Essencial > Profissional > Escala no mensal e no anual; tokens por resposta = 6.000 em todo plano (ou o valor de D2).
+- [ ] Regras do catálogo vigente, em teste: anual = 10 x mensal para base e módulos; `perReplyMilliCents` estritamente decrescente Essencial > Profissional > Escala no mensal (1.916 > 1.498 > 1.163) e no anual (1.596 > 1.248 > 969); `monthlyReplies` = 2.500, 8.000 e 30.000 e `monthlyTokens` = 6.000 x respostas (15 M, 48 M, 180 M).
 - [ ] A varredura de migrations do `deploy.sh` (teste existente em `deploy-scripts.test.ts`) não acusa nada no arquivo novo.
 - [ ] `effectiveQuotas` (unitário): devolve o maior por campo; com a versão vigente menor que a da assinatura, mantém a da assinatura; com a mesma linha, não muda nada.
-- [ ] Integração (Postgres real): assinatura ACTIVE no Essencial versão 1 (800 respostas) vê `replies.limit = 3000` em `GET .../entitlements`, em `GET /account/billing` e no cálculo de `dueNotices`, e a IA só é bloqueada a partir de 3.000 respostas; o `UsageCounter` da janela não muda.
-- [ ] Integração: pedido `RENEWAL` criado no catálogo antigo (R$ 59,00) e concedido depois da migration grava a linha antiga de `Plan`, **e a cota continua 3.000**; um pedido criado depois da migration cobra R$ 47,90 (`amountCents = 4790`).
+- [ ] Integração (Postgres real): assinatura ACTIVE no Essencial versão 1 (800 respostas) vê `replies.limit = 2500` (e `tokens.limit = 15000000`) em `GET .../entitlements`, em `GET /account/billing` e no cálculo de `dueNotices`, e a IA só é bloqueada a partir de 2.500 respostas; o `UsageCounter` da janela não muda.
+- [ ] Integração: pedido `RENEWAL` criado no catálogo antigo (R$ 59,00) e concedido depois da migration grava a linha antiga de `Plan`, **e a cota continua 2.500**; um pedido criado depois da migration cobra R$ 47,90 (`amountCents = 4790`).
 - [ ] Integração: renovação de assinatura mensal do Essencial depois da migration cobra 4.790; a cotação (`GET /account/billing/quote`) mostra 4.790; o período pago em curso não muda.
 - [ ] Unitário de `prorateUpgradeCents` com preço antigo na assinatura e preço novo no destino, para toda combinação "up" entre o catálogo antigo e o novo (planos, módulos e os dois ciclos): o valor é positivo e nenhuma combinação cai em `no_increase`.
-- [ ] Teste gratuito: assinatura `TRIAL` tem `replies.limit = min(BILLING_TRIAL_REPLIES, 3000)` e `tokens.limit = BILLING_TRIAL_TOKENS`; config recusa `BILLING_TRIAL_REPLIES` fora de 1 a 1.000; padrões 100 e 600.000.
+- [ ] Teste gratuito: assinatura `TRIAL` tem `replies.limit = min(BILLING_TRIAL_REPLIES, 2500)` e `tokens.limit = BILLING_TRIAL_TOKENS`; config recusa `BILLING_TRIAL_REPLIES` fora de 1 a 1.000; padrões 100 e 600.000.
 - [ ] `dueNotices` nunca devolve `QUOTA_TOKENS_80`; `QUOTA_TOKENS_100` sai uma vez por janela; o texto e o assunto de `QUOTA_TOKENS_100` não contêm "token" nem dígitos de contagem de tokens (`billing-mail.test.ts`).
 - [ ] `renewalPriceIncrease` (unitário): anual Escala antigo -> verdadeiro; anual Essencial antigo -> falso; mensal de todos os planos antigos sem módulos -> falso; mensal com módulos -> falso; troca agendada para plano mais caro -> verdadeiro.
 - [ ] `PRICE_CHANGE` (integração com mailer falso e relógio injetado): sai uma vez quando o fim do período está entre 30 e 45 dias e a renovação sobe; não sai a 46 dias, a 29 dias, com `cancelAtPeriodEnd`, para conta não confirmada ou desativada; duas execuções simultâneas enviam um só e-mail; o texto tem o valor do catálogo e nenhum dado de outra conta.
@@ -245,15 +247,15 @@ A ordem sugerida pelo pedido foi ajustada: o cartão Enterprise depende do formu
 
 ## Decisões (o dono decide; recomendação primeiro)
 
-- **D1 (DECIDIDA pelo dono, 2026-11-13) Catálogo e preços.** Os valores da tabela "O catálogo novo", anual = 10 x mensal, módulos com o mesmo preço mensal, margem do pior caso aceita. *A confirmar:* o efeito no anual (Escala e módulos sobem 4,2%; ver D6 e D7).
-- **D2 Cota de tokens (proteção, fora da tela).** *Recomendação:* **6.000 tokens por resposta incluída: 18 M, 60 M e 240 M.** Justificativa: (a) é o maior teto que mantém o custo de IA no pior caso em ~R$ 0,006 por resposta, mesmo com a mistura mais cara que os limites permitem (saída máxima de 1.024 tokens por chamada e até 4 chamadas por turno: ~R$ 0,001 por mil tokens), então a tabela de margem continua valendo; (b) dá 60% de folga sobre os ~3.700 tokens típicos, de modo que a cota **escondida** quase nunca estoura antes da cota **visível** (turnos com ferramentas da agenda e o "Testar" gastam mais); (c) no teste gratuito, 100 respostas x 6.000 = 600 mil tokens. *Alternativas:* **4.000 por resposta (12 M, 40 M, 160 M, sugestão do dono)**: custo máximo menor (~R$ 0,004), mas só 8% acima do típico, e a IA pararia por um limite que o cliente não vê sempre que usar a agenda com ferramentas ou testar muito; **8.000 (24 M, 80 M, 320 M)**: igual ao `TOKENS_PER_EXTRA_REPLY`, mas com a mistura cara passa de R$ 0,006 por resposta.
+- **D1 (DECIDIDA pelo dono, 2026-11-13; cotas trocadas no mesmo dia) Catálogo e preços.** Os valores da tabela "O catálogo novo": preços 47,90/119,90/349, anual = 10 x mensal, módulos com o mesmo preço mensal, **cotas de 2.500, 8.000 e 30.000 respostas** (a primeira versão tinha 3.000, 10.000 e 40.000; o dono reduziu depois de ver o pior caso do Escala anual), margem do pior caso aceita. O anual do Escala e dos módulos sobe 4,2% (tratado em D6).
+- **D2 Cota de tokens (proteção, fora da tela).** *Recomendação:* **6.000 tokens por resposta incluída: 15 M, 48 M e 180 M.** (A razão não depende do número de respostas, então a troca das cotas não muda a recomendação.) Justificativa: (a) é o maior teto que mantém o custo de IA no pior caso em ~R$ 0,006 por resposta, mesmo com a mistura mais cara que os limites permitem (saída máxima de 1.024 tokens por chamada e até 4 chamadas por turno: ~R$ 0,001 por mil tokens), então a tabela de margem continua valendo; (b) dá 60% de folga sobre os ~3.700 tokens típicos, de modo que a cota **escondida** quase nunca estoura antes da cota **visível** (turnos com ferramentas da agenda e o "Testar" gastam mais); (c) no teste gratuito, 100 respostas x 6.000 = 600 mil tokens. *Alternativas:* **4.000 por resposta (10 M, 32 M, 120 M, sugestão do dono)**: custo máximo menor (~R$ 0,004), mas só 8% acima do típico, e a IA pararia por um limite que o cliente não vê sempre que usar a agenda com ferramentas ou testar muito; **8.000 (20 M, 64 M, 240 M)**: igual ao `TOKENS_PER_EXTRA_REPLY`, mas com a mistura cara passa de R$ 0,006 por resposta.
 - **D3 Aviso de tokens.** *Recomendação:* o e-mail de **80%** sai (vira só sinal interno: métrica `quota_blocks_total{reason="tokens"}` e o log de bloqueio, que já existem; o dono acompanha e corrige a razão de D2 por versão de catálogo); o de **100%** continua, sem a palavra token (a IA parou e a pessoa precisa saber por quê); a faixa no painel continua, sem número. *Alternativa:* nenhum e-mail de tokens (a IA pararia e a pessoa só descobriria pelo painel).
 - **D4 Cotas novas para quem já assina.** *Recomendação:* **na hora, para todos**, pela regra do máximo no código (`effectiveQuotas`): sem `UPDATE` na migration, cobre pedidos antigos pagos depois e o teste gratuito, e uma redução futura nunca atinge o período pago. *Alternativa:* `UPDATE subscriptions SET plan_id = <linha nova do mesmo código>` na migration (menos código, mas é escrita em linha existente, não cobre o pedido antigo pago depois e deixa `price_id` apontando para um preço de outra linha de `Plan`).
 - **D5 Preço novo para quem já assina.** *Recomendação:* **a partir da próxima renovação**, sem reembolso proporcional (já é o comportamento do código); link aberto no deploy cobra o valor antigo (risco aceito). *Alternativa:* expirar os pedidos abertos na migration (é `UPDATE` de pedidos e não impede pagar o link, que vale na InfinitePay).
 - **D6 Anual pago a 12 x 0,8 em curso e o reajuste.** *Recomendação:* o período pago fica como está, **ganha as cotas mensais novas já** (D4) e renova ao preço novo; como o Escala anual e os módulos anuais **sobem**, os termos (seção 7) exigem aviso por e-mail com 30 dias: o **aviso automático `PRICE_CHANGE`** entre 45 e 30 dias antes da renovação (usa o enum, a trava e a tarefa da 031). *Alternativas:* e-mail manual do dono a cada assinante anual afetado (provavelmente zero ou poucos hoje, mas depende de lembrar daqui a um ano); ou manter o anual de Escala e dos módulos em 9,6 x (contraria D1).
-- **D7 Escala anual com prejuízo no pior caso (-R$ 81,55 por ano, -2,3%).** *Recomendação:* **manter 10 x (D1)** e registrar como risco aceito, porque o pior caso exige 40 mil respostas todo mês por 12 meses e o esperado tem 45,8%; o dono revê se um Escala anual passar de 85% da cota de respostas por dois meses seguidos. *Alternativas:* Escala anual a 11 x (R$ 3.839,00; pior caso +R$ 234,30, 6,1%); ou Escala anual sem desconto.
+- **D7 (RESOLVIDA pela redução da cota; decisão do dono, 2026-11-13) Escala anual no pior caso.** Com 40 mil respostas o Escala anual dava -R$ 81,55 por ano (-2,3%) no pior caso. O dono manteve o preço (10 x) e reduziu a cota do Escala para 30 mil (e as do Essencial e do Profissional para 2.500 e 8.000); o pior caso do Escala anual passou a R$ 638,45 (18,3%) e nenhuma combinação do catálogo tem margem negativa.
 - **D8 Teste gratuito.** *Recomendação:* **100 respostas** (`BILLING_TRIAL_REPLIES`) e **600 mil tokens** (padrão de `BILLING_TRIAL_TOKENS`); custo de IA do teste no pior caso ~R$ 0,60. *Alternativa:* 50 respostas e 300 mil tokens (mantém o padrão atual da variável).
-- **D9 Preço por resposta na tela.** *Recomendação:* **mostrar** "equivale a R$ 0,016 por resposta" em cada cartão, com o valor calculado no servidor (deixa o "efeito batata" visível para quem compra). *Alternativa:* só na spec e no material de venda.
+- **D9 Preço por resposta na tela.** *Recomendação:* **mostrar** "equivale a R$ 0,0192 por resposta" (Essencial mensal) em cada cartão, com o valor calculado no servidor (deixa o "efeito batata" visível para quem compra). *Alternativa:* só na spec e no material de venda.
 - **D10 Onde o Enterprise aparece.** *Recomendação:* cartão na aba Planos da Assinatura, página pública `/fale-conosco` e link "Fale com a gente" na página inicial; **sem** página pública de preços nesta spec. *Alternativa:* só na Assinatura (quem ainda não tem conta não acha o contato).
 - **D11 Destinatário do e-mail.** O dono decidiu o remetente do SMTP. *Recomendação:* manter isso como **padrão** e acrescentar `SALES_CONTACT_EMAIL` **opcional**, porque o remetente costuma ser uma caixa `noreply` (é o exemplo do `.env.example`) que ninguém lê; `EMAIL_PROVIDER_FROM` já é só o endereço, sem nome a extrair. *Alternativa:* só `EMAIL_PROVIDER_FROM`, sem variável nova.
 - **D12 Rota pública ou autenticada.** *Recomendação:* **uma rota pública só**, que não lê o cookie: o mesmo formulário serve ao painel e ao site, com as mesmas proteções, e o pedido não fica ligado à conta (minimização). *Alternativa:* duas rotas (uma com cookie, preenchendo o e-mail da conta): mais código e mais dado.
@@ -270,12 +272,17 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 
 ## Passos do dono
 
-1. Responder D2 a D18 (e confirmar D1 diante do efeito no anual e de D7); registrar as decisões em `docs/context.md`.
+1. Registrar as decisões em `docs/context.md` (spec aprovada em 2026-11-13 com D1 a D18 como recomendadas, cotas de 2.500, 8.000 e 30.000 e D7 resolvida pela redução da cota).
 2. Antes do E1 em produção: **conferir no banco do servidor** se há pedidos `PENDING` abertos (serão cobrados pelo valor antigo se pagos) e quantas assinaturas `ANNUAL` existem com Escala ou módulos (receberão o aviso de reajuste perto do fim do período).
 3. Depois do merge de cada etapa, o deploy automático aplica a migration (aditiva). Nenhuma variável é obrigatória; se quiser outra caixa para os pedidos comerciais, `SALES_CONTACT_EMAIL` no `backend/.env` e reiniciar.
 4. E3 antes ou junto do E4: revisar a redação da política (versão 2) e, se `SALES_CONTACT_EMAIL` apontar para outro provedor que não o Gmail, ajustar a linha do fornecedor na seção 7.
 5. Depois do E4: enviar um pedido de teste em `/fale-conosco` e conferir o e-mail (assunto, `Reply-To`, texto); acompanhar `sales_contact_requests_total` e `quota_blocks_total{reason="tokens"}` nas primeiras semanas.
 6. Material de venda e termos: a seção 7 dos termos já cobre o reajuste com aviso; nenhuma mudança nos termos é exigida por esta spec.
+
+## Histórico da spec
+
+- **2026-11-13, aprovação:** dono aprovou D1 a D18 como recomendadas, com o catálogo de 3.000, 10.000 e 40.000 respostas (18 M, 60 M e 240 M tokens).
+- **2026-11-13, troca das cotas (decisão do dono):** depois de ver que o Escala anual dava prejuízo no pior caso (-R$ 81,55 por ano), o dono reduziu as cotas para **2.500, 8.000 e 30.000 respostas** (tokens 15 M, 48 M e 180 M, mantendo 6.000 por resposta), sem mexer em preços, módulos nem no anual de 10 x. Margens, preço por resposta, pontos de equilíbrio, critérios de aceite e D7 foram refeitos; o preço por resposta continua caindo a cada degrau.
 
 ## Registro da implementação
 
