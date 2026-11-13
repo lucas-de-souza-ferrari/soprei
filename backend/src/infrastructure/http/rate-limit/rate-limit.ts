@@ -39,6 +39,8 @@ export type RateLimitProfileConfig = Pick<
   | 'RATE_LIMIT_LOGIN_WINDOW_SECONDS'
   | 'RATE_LIMIT_REFRESH_MAX'
   | 'RATE_LIMIT_REFRESH_WINDOW_SECONDS'
+  | 'RATE_LIMIT_CONTACT_MAX'
+  | 'RATE_LIMIT_CONTACT_WINDOW_SECONDS'
 >;
 
 /** Números de cada perfil, lidos da config (os perfis em si são só nomeados pelas rotas). */
@@ -63,6 +65,10 @@ export function rateLimitProfilesFromConfig(config: RateLimitProfileConfig): Rat
     refresh: {
       max: config.RATE_LIMIT_REFRESH_MAX,
       windowSeconds: config.RATE_LIMIT_REFRESH_WINDOW_SECONDS,
+    },
+    contact: {
+      max: config.RATE_LIMIT_CONTACT_MAX,
+      windowSeconds: config.RATE_LIMIT_CONTACT_WINDOW_SECONDS,
     },
   };
 }

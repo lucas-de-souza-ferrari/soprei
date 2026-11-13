@@ -113,6 +113,9 @@ export type InvitationMetricAction =
 export type InvitationMetricResult =
   'ok' | 'invalid' | 'forbidden' | 'limited' | 'conflict' | 'mismatch' | 'error';
 export type InvitationEmailResult = 'sent' | 'failed' | 'skipped';
+/** Pedido de contato comercial (spec 040, E4). Conjunto fixo; nunca nome, e-mail, telefone nem texto. */
+export type SalesContactResult =
+  'sent' | 'failed' | 'spam' | 'too_fast' | 'capped' | 'invalid' | 'expired';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {
@@ -368,6 +371,8 @@ export interface Metrics {
   countCompanyInvitation(action: InvitationMetricAction, result: InvitationMetricResult): void;
   /** O e-mail de convite foi enviado, falhou ou foi pulado pela cota (spec 025). */
   countCompanyInvitationEmail(result: InvitationEmailResult): void;
+  /** Um pedido de contato comercial terminou (spec 040, E4). */
+  countSalesContact(result: SalesContactResult): void;
   /** Liga os gauges do pool à fonte; eles são lidos só no momento da coleta (sem timers). */
   bindPool(source: () => PoolSnapshot): void;
   /**
@@ -779,6 +784,12 @@ export function createMetrics(): Metrics {
     labelNames: ['result'] as const,
     registers: [registry],
   });
+  const salesContactRequests = new Counter({
+    name: 'sales_contact_requests_total',
+    help: 'Pedidos de contato comercial por resultado (spec 040, conjunto fixo)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
 
   const queueJobDuration = new Histogram({
     name: 'queue_job_duration_seconds',
@@ -1035,6 +1046,9 @@ export function createMetrics(): Metrics {
     },
     countCompanyInvitationEmail(result) {
       companyInvitationEmails.inc({ result });
+    },
+    countSalesContact(result) {
+      salesContactRequests.inc({ result });
     },
     bindPool(source) {
       poolSource = source;

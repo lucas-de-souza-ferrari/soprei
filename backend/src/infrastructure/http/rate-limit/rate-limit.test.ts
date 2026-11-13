@@ -6,7 +6,11 @@ import type { AccountService } from '../../../application/auth/account.service.j
 import type { InvitationService } from '../../../application/invitations/invitation.service.js';
 import { CompanyService } from '../../../application/companies/company.service.js';
 import { Result } from '../../../shared/types/index.js';
-import { isRateLimitProfile } from '../../../shared/rate-limit/profiles.js';
+import {
+  FAIL_CLOSED_RATE_LIMIT_PROFILES,
+  isRateLimitProfile,
+} from '../../../shared/rate-limit/profiles.js';
+import type { SalesContactService } from '../../../application/contact/sales-contact.service.js';
 import {
   REQUIRED_AUTH_KIND,
   REQUIRED_PERMISSION,
@@ -42,6 +46,7 @@ const PROFILES: RateLimitProfiles = {
   webhook: { max: 1, windowSeconds: 60 },
   login: { max: 1, windowSeconds: 60 },
   refresh: { max: 1, windowSeconds: 60 },
+  contact: { max: 1, windowSeconds: 60 },
 };
 
 describe('sem o parâmetro rateLimit', () => {
@@ -206,6 +211,8 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         secure: false,
         // Convites (spec 025): as rotas autenticadas e as três públicas entram no inventário.
         invitations: { drain: () => Promise.resolve() } as unknown as InvitationService,
+        // Contato comercial (spec 040, E4): duas rotas públicas, nenhuma de tenant.
+        salesContact: { drain: () => Promise.resolve() } as unknown as SalesContactService,
       },
       admin: {
         companies: new CompanyService(companies),
@@ -363,6 +370,8 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/admin/companies/:companyId/invitations/:invitationId/resend',
       '/admin/companies/:companyId/invitations/:invitationId',
       '/webhooks/whatsapp',
+      '/contact/sales/form-token',
+      '/contact/sales',
     ]) {
       assert.ok(
         [...urls].some((url) => url.startsWith(expected)),
@@ -554,6 +563,17 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           // Spec 008: nenhuma rota de tenant sem permissão explícita (e a permissão existe).
           assert.equal(permissionProblem(route.permissions), undefined, label);
         }
+      } else if (route.url.startsWith('/contact/')) {
+        // Spec 040 (E4): o token do formulário é `public`; o envio é `contact` (fail-closed). Nenhuma é de tenant
+        // (sem hook de identidade nem de permissão) e nenhuma é isenta da política de assinatura.
+        const expected: Record<string, string> = {
+          '/contact/sales/form-token': 'public',
+          '/contact/sales': 'contact',
+        };
+        assert.equal(route.config.rateLimitProfile, expected[route.url], `${label} perfil`);
+        assert.deepEqual(route.authKinds.filter(Boolean), [], `${label} sem identidade`);
+        assert.deepEqual(route.permissions.filter(Boolean), [], `${label} sem permissão`);
+        assert.notEqual(route.config.subscriptionExempt, true, `${label} não é isenta`);
       } else if (route.url.startsWith('/auth/')) {
         const expected: Record<string, string> = {
           '/auth/login': 'login',
@@ -585,6 +605,13 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
   });
 });
 
+describe('perfil contact (spec 040, E4)', () => {
+  it('é fail-closed, como login e refresh', () => {
+    assert.ok(FAIL_CLOSED_RATE_LIMIT_PROFILES.includes('contact'));
+    assert.ok(isRateLimitProfile('contact'));
+  });
+});
+
 describe('registerRateLimit', () => {
   it('recusa perfil com max ou janela inválidos (nunca registra limite sem sentido)', () => {
     const app = buildServer({ logger, readiness: ALL_UP });
@@ -613,6 +640,8 @@ describe('registerRateLimit', () => {
         RATE_LIMIT_LOGIN_WINDOW_SECONDS: 8,
         RATE_LIMIT_REFRESH_MAX: 9,
         RATE_LIMIT_REFRESH_WINDOW_SECONDS: 10,
+        RATE_LIMIT_CONTACT_MAX: 11,
+        RATE_LIMIT_CONTACT_WINDOW_SECONDS: 12,
       }),
       {
         public: { max: 1, windowSeconds: 2 },
@@ -620,6 +649,7 @@ describe('registerRateLimit', () => {
         webhook: { max: 5, windowSeconds: 6 },
         login: { max: 7, windowSeconds: 8 },
         refresh: { max: 9, windowSeconds: 10 },
+        contact: { max: 11, windowSeconds: 12 },
       },
     );
   });

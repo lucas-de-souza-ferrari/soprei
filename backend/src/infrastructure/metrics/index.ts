@@ -23,6 +23,7 @@ export type {
   ScheduleActionResult,
   ScheduleContextResult,
   InvitationEmailResult,
+  SalesContactResult,
   InvitationMetricAction,
   InvitationMetricResult,
   PasswordResetAttemptResult,

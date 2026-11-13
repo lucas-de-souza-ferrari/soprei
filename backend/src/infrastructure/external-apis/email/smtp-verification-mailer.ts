@@ -8,6 +8,10 @@ import type {
   BillingNoticeMail,
 } from '../../../application/ports/billing-mailer.js';
 import type {
+  SalesContactMail,
+  SalesContactMailer,
+} from '../../../application/ports/sales-contact.js';
+import type {
   CompanyInvitationMail,
   InvitationMailer,
   PasswordResetMailer,
@@ -47,7 +51,12 @@ export function buildTransportOptions(options: SmtpMailerOptions): Record<string
 }
 
 export class SmtpVerificationMailer
-  implements VerificationMailer, PasswordResetMailer, InvitationMailer, BillingMailer
+  implements
+    VerificationMailer,
+    PasswordResetMailer,
+    InvitationMailer,
+    BillingMailer,
+    SalesContactMailer
 {
   private readonly transport: MailTransport;
   private readonly from: string;
@@ -124,6 +133,25 @@ export class SmtpVerificationMailer
       [mail.text],
       'Não foi possível enviar o aviso de cobrança.',
     );
+  }
+
+  /**
+   * Contato comercial (spec 040, E4): para a caixa comercial, com `Reply-To` só com o endereço do interessado
+   * (objeto do nodemailer, sem nome de exibição). Nenhum outro cabeçalho recebe dado do formulário.
+   */
+  async sendSalesContact(to: string, mail: SalesContactMail): Promise<void> {
+    try {
+      await this.transport.sendMail({
+        from: { name: 'Soprei', address: this.from },
+        to,
+        replyTo: { name: '', address: mail.replyTo },
+        subject: mail.subject,
+        text: mail.text,
+      });
+    } catch {
+      // Falha fixa: nunca ecoa destinatário, texto nem o endereço de resposta.
+      throw new ServiceUnavailableError('Não foi possível enviar o contato comercial.');
+    }
   }
 
   sendPasswordChanged(email: string): Promise<void> {

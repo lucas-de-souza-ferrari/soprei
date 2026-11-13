@@ -500,6 +500,15 @@ async function main(): Promise<void> {
               loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
               appOrigin: config.APP_ORIGIN ?? '',
             }),
+            // Contato comercial (spec 040, E4): nada no banco; e-mail em segundo plano para a caixa comercial.
+            salesContact: new SalesContactService({
+              mailer: accountMailer,
+              cap: new RedisSalesContactCap(authRedis.client, config.AUTH_REDIS_PREFIX),
+              formKey: deriveSalesContactKey(config.JWT_SECRET),
+              recipient: salesContactRecipient(config),
+              logger,
+              metrics,
+            }),
             origin: config.APP_ORIGIN ?? '',
             secure: cookieIsSecure(config.NODE_ENV, config.APP_ORIGIN ?? ''),
           },
@@ -668,6 +677,12 @@ import {
 } from './infrastructure/database/index.js';
 import { InvitationExpiryPurger } from './application/invitations/invitation-expiry-purger.js';
 import { InvitationService } from './application/invitations/invitation.service.js';
+import {
+  SalesContactService,
+  salesContactRecipient,
+} from './application/contact/sales-contact.service.js';
+import { deriveSalesContactKey } from './application/contact/form-token.js';
+import { RedisSalesContactCap } from './infrastructure/auth/redis-sales-contact-cap.js';
 import { RedisInvitationQuotaStore } from './infrastructure/auth/redis-invitation-quota.js';
 import { startPurgeTimer } from './application/auth/purge-timer.js';
 import { UnverifiedAccountPurger } from './application/auth/unverified-account-purger.js';

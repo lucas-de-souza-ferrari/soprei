@@ -208,7 +208,12 @@ describe('createMetrics', () => {
     assert.match(body, /channel_send_duration_seconds_count{channel="whatsapp"} 2/);
     assert.match(body, /queue_jobs_total{queue="channel-inbound",result="completed"} 1/);
     assert.match(body, /queue_jobs_total{queue="channel-inbound",result="retried"} 1/);
-    assert.doesNotMatch(body, /companyId|membershipId|phone|contact|text=/i);
+    // O nome da métrica do contato comercial (spec 040) tem "contact" de propósito; os labels dela são fixos.
+    const channelLines = body
+      .split('\n')
+      .filter((line) => !/^(# (HELP|TYPE) )?sales_contact_requests_total/.test(line))
+      .join('\n');
+    assert.doesNotMatch(channelLines, /companyId|membershipId|phone|contact|text=/i);
   });
 
   it('métricas de conexão do canal (spec 015): conjuntos fixos de labels, sem ids nem token', async () => {
@@ -474,5 +479,31 @@ describe('métricas da fila e do processo (spec 034)', () => {
         }
       }
     }
+  });
+});
+
+describe('sales_contact_requests_total (spec 040, E4)', () => {
+  it('conta só pelo resultado, de um conjunto fixo', async () => {
+    const metrics = createMetrics();
+    for (const result of [
+      'sent',
+      'failed',
+      'spam',
+      'too_fast',
+      'capped',
+      'invalid',
+      'expired',
+    ] as const) {
+      metrics.countSalesContact(result);
+    }
+    const body = await metrics.render();
+    assert.match(body, /sales_contact_requests_total\{result="sent"\} 1/);
+    assert.match(body, /sales_contact_requests_total\{result="expired"\} 1/);
+    const labels = body
+      .split('\n')
+      .filter((line) => line.startsWith('sales_contact_requests_total{'))
+      .map((line) => /^sales_contact_requests_total\{([^}]*)\}/.exec(line)?.[1] ?? '');
+    assert.equal(labels.length, 7);
+    for (const label of labels) assert.match(label, /^result="[a-z_]+"$/);
   });
 });

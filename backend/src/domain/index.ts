@@ -214,3 +214,17 @@ export type {
   NotificationStatusFilter,
   OpenHandoff,
 } from './notifications.js';
+export {
+  SALES_CONTACT_CAP_TTL_SECONDS,
+  SALES_CONTACT_DAILY_CAP,
+  SALES_CONTACT_FORM_MAX_AGE_MS,
+  SALES_CONTACT_FORM_MIN_AGE_MS,
+  SALES_CONTACT_MAX_IN_FLIGHT,
+  SALES_CONTACT_UNITS,
+  SALES_CONTACT_VOLUMES,
+} from './sales-contact.js';
+export type {
+  SalesContactRequest,
+  SalesContactUnits,
+  SalesContactVolume,
+} from './sales-contact.js';

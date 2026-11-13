@@ -366,6 +366,7 @@ test('limiter fora do ar (Redis): as duas rotas de recuperação respondem 503 s
         webhook: { max: 100, windowSeconds: 60 },
         login: { max: 100, windowSeconds: 60 },
         refresh: { max: 100, windowSeconds: 60 },
+        contact: { max: 100, windowSeconds: 60 },
       },
     },
   });
