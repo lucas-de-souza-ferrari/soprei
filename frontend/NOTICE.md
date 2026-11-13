@@ -42,8 +42,15 @@ carregadas quando um arquivo desses é escolhido (`import()` e Web Worker; arqui
 | `pdfjs-dist` | 6.5.438      | Apache-2.0   | Mozilla (PDF.js), `https://github.com/mozilla/pdf.js`, build `legacy`                  |
 | `mammoth`    | 1.13.0       | BSD-2-Clause | Michael Williamson, `https://github.com/mwilliamson/mammoth.js` (build para navegador) |
 
-- O `pdfjs-dist` não tem dependências de execução; a dependência opcional `@napi-rs/canvas` (MIT) é só do
-  Node e não entra no build do site.
+- O `pdfjs-dist` não declara dependências de execução (a opcional `@napi-rs/canvas`, MIT, é só do Node e
+  não entra no build do site), mas o build `legacy` traz **embutidos** trechos do `core-js` (MIT, "© 2014-2025 Denis
+  Pushkarev (zloirock.ru), 2025–2026 CoreJS Company (core-js.io)", `https://github.com/zloirock/core-js`) como polyfills para navegadores
+  antigos; eles vão no `pdf-text-*.js` e no `pdf.worker.min-*.mjs` do build.
+- **CSP (nota para quando ela existir):** o pacote do worker do DOCX (`docx-text.worker-*.js`) contém um
+  `new Function` vindo do polyfill de `setImmediate` que o `mammoth` leva para o navegador. Ele só é
+  alcançado onde `setImmediate` não existe e não executa texto do arquivo, mas uma CSP com `script-src` sem
+  `'unsafe-eval'` pode bloqueá-lo: ao escrever a CSP, teste a leitura de um DOCX (o worker do pdf.js 6.x não
+  usa `eval` nem `new Function`).
 - O texto da licença Apache-2.0 acompanha o pacote (`node_modules/pdfjs-dist/LICENSE`). O worker servido
   (`pdf.worker.min-*.mjs`) é copiado sem alteração e mantém o aviso de licença da Mozilla no começo; o
   pedaço minificado com o resto da biblioteca (`pdf-text-*.js`) perde o comentário, por isso a licença fica

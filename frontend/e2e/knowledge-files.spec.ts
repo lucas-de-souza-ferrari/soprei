@@ -286,6 +286,48 @@ test('ZIP sem document.xml, cabeçalho OLE, DOCX sem texto, .doc e .odt têm men
   expectNoForeign(knowledge);
 });
 
+test('DOCX que mente o tamanho (bomba de compressão) é recusado sem chegar ao fim do arquivo', async ({
+  page,
+}) => {
+  const { knowledge } = await openKnowledge(page);
+  await ready(page);
+  // 80 MiB de zeros compactados (~80 KB no arquivo), declarando 1 KB: só a contagem real pega.
+  const bomb = buildZip([
+    ...docxEntries(['Texto que nunca deve aparecer']),
+    {
+      name: 'word/media/bomba.bin',
+      data: Buffer.alloc(80 * 1024 * 1024),
+      deflate: true,
+      declaredSize: 1024,
+    },
+  ]);
+  await choose(page, 'bomba.docx', bomb, DOCX_MIME);
+  await expect(fileError(page)).toContainText(MESSAGES.unreadable);
+  await expect(textArea(page)).toHaveValue('');
+  expect(knowledge.posts).toEqual([]);
+  expectNoForeign(knowledge);
+});
+
+test('worker do DOCX que não carrega (aba antiga depois de um deploy) pede para recarregar', async ({
+  page,
+}) => {
+  await openKnowledge(page);
+  await ready(page);
+  await page.route(/docx-text\.worker/, (route) => route.fulfill({ status: 404, body: '' }));
+  await choose(page, 'politica.docx', buildDocx(['Entregamos em todo o bairro.']), DOCX_MIME);
+  await expect(fileError(page)).toContainText(MESSAGES.loader);
+  await expect(textArea(page)).toHaveValue('');
+});
+
+test('worker do PDF que não carrega pede para recarregar', async ({ page }) => {
+  await openKnowledge(page);
+  await ready(page);
+  await page.route(/pdf\.worker/, (route) => route.fulfill({ status: 404, body: '' }));
+  await choose(page, 'politica.pdf', twoPages());
+  await expect(fileError(page)).toContainText(MESSAGES.loader);
+  await expect(textArea(page)).toHaveValue('');
+});
+
 test('trocar de arquivo durante a leitura de um DOCX faz valer só o segundo', async ({ page }) => {
   const { knowledge } = await openKnowledge(page);
   await ready(page);

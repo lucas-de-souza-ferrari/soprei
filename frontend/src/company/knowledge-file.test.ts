@@ -24,6 +24,7 @@ import {
   readZipDirectory,
 } from './knowledge-file-rules';
 import { FILE_PROBLEM_MESSAGES, titleFromFileName } from './knowledge-rules';
+import { canInflateRaw, inflatedSizeWithin } from './zip-inflate-guard';
 
 /** Lê o `Blob` de verdade do arquivo falso (ou o pedaço já cortado). */
 const readFake = (input: Blob | FileLike): Promise<ArrayBuffer> =>
@@ -451,6 +452,46 @@ test('readZipDirectory: soma acima do teto, ZIP64, truncado e sem fim de diretó
   const outside = Buffer.from(docx);
   outside.writeUInt32LE(docx.length * 2, outside.length - 22 + 16);
   assert.equal(readZipDirectory(u8(outside)).ok, false);
+});
+
+test('inflatedSizeWithin: conta os bytes reais descompactados, não o tamanho declarado (revisão I-1)', async () => {
+  assert.equal(canInflateRaw(), true);
+  const entriesOf = (zip: Buffer) => {
+    const directory = readZipDirectory(u8(zip));
+    assert.equal(directory.ok, true);
+    return directory.ok ? directory.entries : [];
+  };
+  // DOCX normal, armazenado e compactado: cabe.
+  const stored = buildZip(docxEntries(['Olá']));
+  assert.equal(await inflatedSizeWithin(u8(stored), entriesOf(stored), 1024 * 1024), true);
+  const deflated = buildZip(docxEntries(['Olá']).map((entry) => ({ ...entry, deflate: true })));
+  assert.equal(await inflatedSizeWithin(u8(deflated), entriesOf(deflated), 1024 * 1024), true);
+
+  // Bomba: 2 MiB de zeros compactados, declarando 1 KB. A soma declarada passa no diretório...
+  const bomb = buildZip([
+    ...docxEntries(['x']),
+    {
+      name: 'word/media/bomba.bin',
+      data: Buffer.alloc(2 * 1024 * 1024),
+      deflate: true,
+      declaredSize: 1024,
+    },
+  ]);
+  assert.ok(bomb.length < 64 * 1024);
+  assert.equal(docxZipProblem(u8(bomb), 1024 * 1024), null);
+  // ...mas a contagem real para assim que passa do teto.
+  assert.equal(await inflatedSizeWithin(u8(bomb), entriesOf(bomb), 1024 * 1024), false);
+  assert.equal(await inflatedSizeWithin(u8(bomb), entriesOf(bomb), 4 * 1024 * 1024), true);
+
+  // Método desconhecido, entrada fora do arquivo e deflate corrompido recusam sem lançar.
+  const [first] = entriesOf(stored);
+  assert.ok(first);
+  assert.equal(await inflatedSizeWithin(u8(stored), [{ ...first, method: 12 }], 1024), false);
+  assert.equal(
+    await inflatedSizeWithin(u8(stored), [{ ...first, localHeaderOffset: stored.length }], 1024),
+    false,
+  );
+  assert.equal(await inflatedSizeWithin(u8(stored), [{ ...first, method: 8 }], 1024 * 1024), false);
 });
 
 test('orquestração: DOCX que não é Word recusa antes de carregar o leitor', async () => {

@@ -59,13 +59,14 @@ export async function extractPdfText(
 ): Promise<ExtractResult> {
   const task = getDocument(documentParameters(new Uint8Array(bytes)));
   let passwordRequired = false;
+  const destroy = (): void => {
+    // `destroy()` pode rejeitar; o erro não importa (a leitura já acabou) e não pode ficar solto.
+    task.destroy().catch(() => undefined);
+  };
   // Não pede senha: cancela a leitura e a tela mostra "protegido por senha".
   task.onPassword = () => {
     passwordRequired = true;
-    void task.destroy();
-  };
-  const destroy = (): void => {
-    void task.destroy();
+    destroy();
   };
   signal.addEventListener('abort', destroy, { once: true });
   try {
@@ -84,9 +85,14 @@ export async function extractPdfText(
     if (passwordRequired || (error instanceof Error && error.name === 'PasswordException')) {
       return { problem: 'pdf-password' };
     }
+    // O worker do pdf.js não carregou (aba aberta antes de um deploy: o arquivo com o hash antigo não
+    // existe mais) e o pdf.js tentou o "fake worker", que também falha. Só a categoria é usada.
+    if (error instanceof Error && error.message.startsWith('Setting up fake worker failed')) {
+      return { problem: 'loader-failed' };
+    }
     throw error;
   } finally {
     signal.removeEventListener('abort', destroy);
-    void task.destroy();
+    destroy();
   }
 }

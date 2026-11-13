@@ -308,3 +308,15 @@ O navegador extrai e o servidor continua recebendo só texto pela rota existente
 - O CSP pendente (023) precisa de `worker-src 'self'` para os dois workers.
 - Rodar o servidor de desenvolvimento dos testes reotimizou o cache de dependências do Vite (`frontend/node_modules/.vite`), compartilhado com o servidor do dono na 5173: ele pode ter recarregado a página uma vez.
 - Passos do dono: os da seção "Passos do dono" (teste manual em computador, iPhone e Android) e a conferência do `.mjs`.
+
+### Revisão (reviewer, 2026-11-12) e correções aplicadas (2026-11-13)
+
+Veredito: **aprovada com ressalvas, sem bloqueantes**. Todas as ressalvas foram aplicadas (decisão do dono: "Aplicar todas"):
+
+- **I-1 (bomba de compressão no DOCX):** o tamanho declarado no diretório do ZIP pode mentir. Agora o worker do DOCX descompacta cada entrada em fluxo (`DecompressionStream('deflate-raw')`, `zip-inflate-guard.ts`), conta os bytes reais e para ao passar de 50 MB, **antes** do `mammoth`; método diferente de 0/8, entrada fora do arquivo ou deflate corrompido recusam. Navegador sem `deflate-raw` fica só com a soma declarada (documentado no worker). Testes: unitário com uma bomba de 2 MiB que declara 1 KB e e2e com 80 MiB que declara 1 KB ("não foi possível ler").
+- **S-1:** worker que não carrega (aba antiga depois de um deploy) agora mostra "Recarregue a página": o worker do DOCX avisa `ready` ao carregar (erro antes disso = `loader-failed`) e o pdf.js que falha no "fake worker" também vira `loader-failed`. Dois testes e2e (404 no worker do DOCX e no do PDF).
+- **S-2:** os exemplos de nginx (`deploy/nginx/*.conf.example`) ganharam `location ~* \.mjs$ { types { text/javascript mjs; } ... }`, travado por `deploy-scripts.test.ts`; `docs/ops/deploy.md` ganhou o passo do checklist (ler um PDF e um DOCX no staging e conferir o `Content-Type` do `.mjs`). Conferido localmente: PDF, DOCX e a bomba passam também contra `vite build` + `vite preview` (não entrou no CI).
+- **S-3 e S-4:** `frontend/NOTICE.md` registra o `core-js` (MIT) embutido no build `legacy` do pdf.js e o `new Function` do polyfill de `setImmediate` no worker do DOCX (nota para a CSP futura).
+- **S-5:** `task.destroy()` do pdf.js com `.catch(() => undefined)`.
+
+Verificação local: `typecheck`, `lint`, `format:check`, 242 testes unitários do site, `deploy-scripts.test.ts` (57) e `knowledge-files.spec.ts` 30/30 (desktop e celular).
