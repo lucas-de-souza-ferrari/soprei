@@ -16,7 +16,7 @@ interface ContactApi {
 const ACCEPTED = 'Recebemos o seu contato. Responderemos pelo e-mail informado.';
 
 // Os envios esperam o token ter 3,5 s antes do POST (o servidor descarta o de menos de 3 s).
-test.describe.configure({ timeout: 60_000 });
+test.describe.configure({ timeout: 30_000 });
 const SEND = { timeout: 10_000 };
 
 async function installContactApi(page: Page): Promise<ContactApi> {
@@ -116,7 +116,7 @@ async function noHorizontalScroll(page: Page): Promise<void> {
 }
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`/fale-conosco sem sessão: envia, mostra a mensagem do servidor e limpa o formulário (tema ${theme})`, async ({
+  test(`/fale-conosco sem sessão: envia, mostra a frase fixa (nunca o texto do servidor) e limpa o formulário (tema ${theme})`, async ({
     page,
   }) => {
     const { api, sessionCalls } = await openContactPage(page, theme);
@@ -379,6 +379,26 @@ test('envio imediato depois de abrir o Modal: o POST espera o tempo mínimo e o 
   await expect(dialog.getByTestId('contato-enviado')).toHaveText(ACCEPTED, SEND);
   expect(contact.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
   expect(tokenAgeAtPost(contact, 0)).toBeGreaterThanOrEqual(3_400);
+});
+
+test('fechar o Modal durante a espera do envio descarta e nada é enviado; os campos ficam travados', async ({
+  page,
+}) => {
+  const contact = await openEnterpriseModal(page);
+  const dialog = page.getByRole('dialog', { name: 'Falar com a gente' });
+  const confirm = page.getByRole('dialog', { name: 'Descartar o que você escreveu?' });
+  await expect(dialog.getByRole('button', { name: 'Enviar' })).toBeEnabled();
+  await fill(page);
+  await dialog.getByRole('button', { name: 'Enviar' }).click();
+  await expect(dialog.getByRole('button', { name: 'Enviando…' })).toBeVisible();
+  await expect(dialog.getByLabel('Seu nome')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Descartar' }).click();
+  await expect(dialog).toBeHidden();
+  // Passa o tempo mínimo do token com folga: o POST não pode ter saído.
+  await page.waitForTimeout(4_500);
+  expect(contact.calls.filter((call) => call.method === 'POST')).toHaveLength(0);
 });
 
 test('fechar o Modal com algo escrito pede confirmação; vazio fecha direto', async ({ page }) => {
