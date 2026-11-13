@@ -368,7 +368,7 @@ describe('rotas de contato comercial (spec 040, E4)', () => {
       await w.service.drain();
     }
     assert.equal(w.mailer.sent.length, 30);
-    assert.match(await w.metricsText(), /sales_contact_requests_total\{result="capped"\} 1/);
+    assert.match(await w.metricsText(), /sales_contact_requests_total\{result="daily_cap"\} 1/);
     w.setNow(T0 + 24 * 3_600_000);
     assert.equal((await w.post(validBody(w))).statusCode, 202);
     await w.service.drain();

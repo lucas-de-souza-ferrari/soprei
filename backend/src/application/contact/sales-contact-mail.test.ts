@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import type { SalesContactRequest } from '../../domain/index.js';
+import { SALES_CONTACT_PRIVACY_VERSION, type SalesContactRequest } from '../../domain/index.js';
 import {
   SALES_CONTACT_MAIL_SUBJECT,
   salesContactMailText,
@@ -67,5 +68,19 @@ describe('e-mail de contato comercial (spec 040, E4)', () => {
     assert.equal(sanitizeLine('  a\tb\n\nc  '), 'a b c');
     assert.equal(sanitizeLine('x‮y⁦z'), 'xyz');
     assert.equal(sanitizeMessage('a\r\nb\rc\u0000d'), 'a\nb\ncd');
+  });
+
+  it('a versão da política citada no e-mail é a de frontend/src/legal/privacidade.md', () => {
+    const policy = readFileSync(
+      new URL('../../../../frontend/src/legal/privacidade.md', import.meta.url),
+      'utf8',
+    );
+    const version = /^versao: (\d+)$/m.exec(policy)?.[1];
+    assert.equal(version, String(SALES_CONTACT_PRIVACY_VERSION));
+    assert.ok(
+      salesContactMailText(REQUEST).includes(
+        `Ciência da Política de Privacidade (versão ${String(SALES_CONTACT_PRIVACY_VERSION)}): sim`,
+      ),
+    );
   });
 });

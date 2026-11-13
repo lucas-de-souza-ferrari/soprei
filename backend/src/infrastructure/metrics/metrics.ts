@@ -113,9 +113,12 @@ export type InvitationMetricAction =
 export type InvitationMetricResult =
   'ok' | 'invalid' | 'forbidden' | 'limited' | 'conflict' | 'mismatch' | 'error';
 export type InvitationEmailResult = 'sent' | 'failed' | 'skipped';
-/** Pedido de contato comercial (spec 040, E4). Conjunto fixo; nunca nome, e-mail, telefone nem texto. */
+/**
+ * Pedido de contato comercial (spec 040, E4). Conjunto fixo; nunca nome, e-mail, telefone nem texto. `capped` é a
+ * fila de envios cheia; `daily_cap` é o teto global diário (o alerta do dono para pedidos perdidos).
+ */
 export type SalesContactResult =
-  'sent' | 'failed' | 'spam' | 'too_fast' | 'capped' | 'invalid' | 'expired';
+  'sent' | 'failed' | 'spam' | 'too_fast' | 'capped' | 'daily_cap' | 'invalid' | 'expired';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {

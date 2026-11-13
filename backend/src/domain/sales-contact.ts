@@ -15,6 +15,12 @@ export const SALES_CONTACT_FORM_MIN_AGE_MS = 3_000;
 /** Validade do token do formulário. */
 export const SALES_CONTACT_FORM_MAX_AGE_MS = 2 * 3_600_000;
 
+/**
+ * Versão da Política de Privacidade citada no e-mail ("Ciência da Política de Privacidade (versão N)"). Um teste a
+ * compara com o `versao:` de `frontend/src/legal/privacidade.md`: mudou a política, muda aqui.
+ */
+export const SALES_CONTACT_PRIVACY_VERSION = 2;
+
 /** Faixas de empresas ou unidades (enum fechado; o texto do e-mail vem de uma tabela fixa). */
 export const SALES_CONTACT_UNITS = ['1-10', '11-30', '31-100', '100+'] as const;
 export type SalesContactUnits = (typeof SALES_CONTACT_UNITS)[number];

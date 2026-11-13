@@ -45,6 +45,8 @@ export interface SalesContactSubmission {
  */
 export class SalesContactService {
   private readonly pending = new Set<Promise<void>>();
+  /** Dia (UTC) do último `warn` do teto diário. */
+  private capWarnedDay: string | undefined;
   private readonly now: () => Date;
 
   constructor(private readonly deps: SalesContactServiceDeps) {
@@ -85,8 +87,15 @@ export class SalesContactService {
       return;
     }
     // Redis fora: o ServiceUnavailableError sobe (503) antes de qualquer envio.
-    if (!(await this.deps.cap.take(now.toISOString().slice(0, 10)))) {
-      this.settle('capped');
+    const day = now.toISOString().slice(0, 10);
+    if (!(await this.deps.cap.take(day))) {
+      this.settle('daily_cap');
+      // Alerta do dono (pedidos legítimos do dia passam a ser descartados): no máximo um `warn` por dia por
+      // processo, só com o resultado.
+      if (this.capWarnedDay !== day) {
+        this.capWarnedDay = day;
+        this.deps.logger.warn({ result: 'daily_cap' }, 'teto diário do contato comercial atingido');
+      }
       return;
     }
     this.send(submission.request);

@@ -1,7 +1,8 @@
-import type {
-  SalesContactRequest,
-  SalesContactUnits,
-  SalesContactVolume,
+import {
+  SALES_CONTACT_PRIVACY_VERSION,
+  type SalesContactRequest,
+  type SalesContactUnits,
+  type SalesContactVolume,
 } from '../../domain/index.js';
 
 /** Assunto fixo (spec 040, D16): nada do formulário no assunto. */
@@ -63,6 +64,6 @@ export function salesContactMailText(request: SalesContactRequest): string {
     sanitizeMessage(request.message),
     '',
     'Para responder, use "Responder": o endereço de resposta é o e-mail informado.',
-    'Ciência da Política de Privacidade (versão 2): sim',
+    `Ciência da Política de Privacidade (versão ${String(SALES_CONTACT_PRIVACY_VERSION)}): sim`,
   ].join('\n');
 }

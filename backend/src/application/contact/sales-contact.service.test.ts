@@ -51,11 +51,15 @@ function world(options: { cap?: number } = {}) {
   let now = DAY1;
   const results: SalesContactResult[] = [];
   const logs: unknown[] = [];
+  const warns: unknown[] = [];
   const mailer = new FakeMailer();
   const cap = new MemoryCap(options.cap);
   const logger = {
     info: (obj: unknown) => logs.push(obj),
-    warn: (obj: unknown) => logs.push(obj),
+    warn: (obj: unknown) => {
+      logs.push(obj);
+      warns.push(obj);
+    },
   } as never;
   const service = new SalesContactService({
     mailer,
@@ -72,6 +76,7 @@ function world(options: { cap?: number } = {}) {
     cap,
     results,
     logs,
+    warns,
     setNow: (ms: number) => {
       now = ms;
     },
@@ -138,7 +143,12 @@ describe('SalesContactService (spec 040, E4)', () => {
       await w.service.drain();
     }
     assert.equal(w.mailer.sent.length, 30);
-    assert.equal(w.results.at(-1), 'capped');
+    assert.equal(w.results.at(-1), 'daily_cap');
+    // Mais um recusado no mesmo dia: um único warn por dia, só com o resultado.
+    await w.service.submit({ request: REQUEST, formToken: w.token() });
+    assert.equal(w.results.at(-1), 'daily_cap');
+    assert.equal(w.warns.length, 1);
+    assert.deepEqual(w.warns[0], { result: 'daily_cap' });
     assert.equal(w.results.filter((r) => r === 'sent').length, 30);
     w.setNow(DAY1 + 2 * 3_600_000); // 01:00 UTC do dia seguinte
     await w.service.submit({ request: REQUEST, formToken: w.token() });

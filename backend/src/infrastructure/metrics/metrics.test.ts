@@ -491,6 +491,7 @@ describe('sales_contact_requests_total (spec 040, E4)', () => {
       'spam',
       'too_fast',
       'capped',
+      'daily_cap',
       'invalid',
       'expired',
     ] as const) {
@@ -503,7 +504,7 @@ describe('sales_contact_requests_total (spec 040, E4)', () => {
       .split('\n')
       .filter((line) => line.startsWith('sales_contact_requests_total{'))
       .map((line) => /^sales_contact_requests_total\{([^}]*)\}/.exec(line)?.[1] ?? '');
-    assert.equal(labels.length, 7);
+    assert.equal(labels.length, 8);
     for (const label of labels) assert.match(label, /^result="[a-z_]+"$/);
   });
 });
