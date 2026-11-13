@@ -31,15 +31,16 @@ nenhum visitante enviar o IP a terceiros. O `@font-face` está no começo de `sr
 - **Para atualizar:** repita o pedido acima, baixe os novos `woff2`, troque os arquivos e os hashes desta tabela
   e confira o `unicode-range` do `src/style.css` contra a folha de estilo.
 
-## Leitor de PDF da base de conhecimento (spec 040)
+## Leitores de PDF e DOCX da base de conhecimento (spec 040)
 
-O texto de PDFs escolhidos na aba Conhecimento é extraído no navegador. A biblioteca só é carregada por
-`import()` quando um PDF é escolhido (arquivos `pdf-text-*.js` e `pdf.worker.min-*.mjs` do build, servidos
-pelo próprio site).
+O texto de PDFs e DOCX escolhidos na aba Conhecimento é extraído no navegador. As bibliotecas só são
+carregadas quando um arquivo desses é escolhido (`import()` e Web Worker; arquivos `pdf-text-*.js`,
+`pdf.worker.min-*.mjs`, `docx-text-*.js` e `docx-text.worker-*.js` do build, servidos pelo próprio site).
 
-| Pacote       | Versão exata | Licença    | Origem                                                                |
-| ------------ | ------------ | ---------- | --------------------------------------------------------------------- |
-| `pdfjs-dist` | 6.5.438      | Apache-2.0 | Mozilla (PDF.js), `https://github.com/mozilla/pdf.js`, build `legacy` |
+| Pacote       | Versão exata | Licença      | Origem                                                                                 |
+| ------------ | ------------ | ------------ | -------------------------------------------------------------------------------------- |
+| `pdfjs-dist` | 6.5.438      | Apache-2.0   | Mozilla (PDF.js), `https://github.com/mozilla/pdf.js`, build `legacy`                  |
+| `mammoth`    | 1.13.0       | BSD-2-Clause | Michael Williamson, `https://github.com/mwilliamson/mammoth.js` (build para navegador) |
 
 - O `pdfjs-dist` não tem dependências de execução; a dependência opcional `@napi-rs/canvas` (MIT) é só do
   Node e não entra no build do site.
@@ -47,3 +48,26 @@ pelo próprio site).
   (`pdf.worker.min-*.mjs`) é copiado sem alteração e mantém o aviso de licença da Mozilla no começo; o
   pedaço minificado com o resto da biblioteca (`pdf-text-*.js`) perde o comentário, por isso a licença fica
   registrada aqui.
+
+Dependências de execução do `mammoth` (o worker do DOCX empacota as que o caminho do navegador usa; o
+`readable-stream` do `jszip`, por exemplo, é trocado pela versão de navegador e não entra). Licenças conferidas
+no `package.json` de cada pacote instalado, em 2026-11-12:
+
+| Pacote                                        | Versão               | Licença                                   |
+| --------------------------------------------- | -------------------- | ----------------------------------------- |
+| `jszip`                                       | 3.10.2               | MIT ou GPL-3.0-or-later (usado sob a MIT) |
+| `pako` (do `jszip`)                           | 1.0.11               | MIT e Zlib                                |
+| `lie`, `immediate` (do `jszip`)               | 3.3.0, 3.0.6         | MIT                                       |
+| `setimmediate` (do `jszip`)                   | 1.0.5                | MIT                                       |
+| `readable-stream` e dependências (do `jszip`) | 2.3.8                | MIT (`inherits`: ISC)                     |
+| `@xmldom/xmldom`                              | 0.8.15               | MIT                                       |
+| `underscore`                                  | 1.13.8               | MIT                                       |
+| `base64-js`                                   | 1.5.1                | MIT                                       |
+| `xmlbuilder`                                  | 10.1.1               | MIT                                       |
+| `lop`, `option`, `duck`                       | 0.4.2, 0.2.4, 0.1.12 | BSD-2-Clause                              |
+| `dingbat-to-unicode`                          | 1.0.2                | BSD-2-Clause                              |
+
+- `argparse` (MIT) e `sprintf-js` (BSD-3-Clause) são só do comando de linha do `mammoth` e não entram no build.
+- As licenças BSD-2-Clause do `mammoth`, `lop`, `option`, `duck` e `dingbat-to-unicode` pedem que o aviso de
+  copyright acompanhe a redistribuição: os textos estão no arquivo `LICENSE` de cada pacote
+  (`node_modules/<pacote>/LICENSE`; "Copyright (c) 2013, Michael Williamson" no `mammoth`, `lop` e `duck`).

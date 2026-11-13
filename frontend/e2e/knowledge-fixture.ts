@@ -74,9 +74,10 @@ export async function openKnowledge(
   return { api, knowledge };
 }
 
-/** Segura o worker do pdf.js (só o primeiro pedido) até `release()`. */
-export async function holdPdfWorker(
+/** Segura o primeiro pedido do worker que casa com `pattern` até `release()`. */
+async function holdWorker(
   page: Page,
+  pattern: RegExp,
 ): Promise<{ release: () => void; held: () => boolean }> {
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => {
@@ -84,7 +85,7 @@ export async function holdPdfWorker(
   });
   let count = 0;
   let held = false;
-  await page.route(/pdf\.worker/, async (route) => {
+  await page.route(pattern, async (route) => {
     count++;
     if (count === 1) {
       held = true;
@@ -94,3 +95,9 @@ export async function holdPdfWorker(
   });
   return { release: () => release(), held: () => held };
 }
+
+/** Segura o worker do pdf.js (só o primeiro pedido) até `release()`. */
+export const holdPdfWorker = (page: Page) => holdWorker(page, /pdf\.worker/);
+
+/** Segura o worker do leitor de DOCX (só o primeiro pedido) até `release()`. */
+export const holdDocxWorker = (page: Page) => holdWorker(page, /docx-text\.worker/);

@@ -22,7 +22,7 @@ const AUTHORIZED = [
 ] as const;
 
 /** Leitores de arquivo da base de conhecimento, autorizados pela spec 040 (versão exata). */
-const KNOWLEDGE_READERS = ['pdfjs-dist'] as const;
+const KNOWLEDGE_READERS = ['mammoth', 'pdfjs-dist'] as const;
 
 test('spec 029 E1: só as dependências autorizadas entraram, em versão exata, e o CLI do shadcn não rodou', () => {
   const pkg = JSON.parse(readFileSync(new URL('package.json', frontend), 'utf8')) as {
@@ -32,8 +32,9 @@ test('spec 029 E1: só as dependências autorizadas entraram, em versão exata, 
     ...AUTHORIZED,
     'clsx',
     'lucide-react',
+    'mammoth',
     'motion',
-    ...KNOWLEDGE_READERS,
+    'pdfjs-dist',
     'react',
     'react-dom',
     'tailwind-merge',

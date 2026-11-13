@@ -52,7 +52,8 @@ export function extractedNote(length: number): string {
 /** Leitores de PDF e DOCX: só carregados por `import()` quando um arquivo desses é escolhido. */
 const loadPdf = (): Promise<Extractor> =>
   import('./pdf-text').then((module) => module.extractPdfText);
-const loadDocx = (): Promise<Extractor> => Promise.reject(new Error('indisponível'));
+const loadDocx = (): Promise<Extractor> =>
+  import('./docx-text').then((module) => module.extractDocxText);
 
 /**
  * Base de conhecimento da IA (spec 026): documentos de texto da empresa. O título e o texto só vivem
