@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { buildZip, docxEntries } from '../../e2e/file-builders';
 import { KNOWLEDGE_FILE_MAX_BYTES } from './knowledge-api';
 import {
   type ExtractResult,
@@ -13,11 +14,14 @@ import {
   checkFileSizeFor,
   checkMagicBytes,
   detectFileKind,
+  docxZipProblem,
   extractedTextProblem,
   joinPdfTextItems,
   KNOWLEDGE_BINARY_FILE_MAX_BYTES,
+  KNOWLEDGE_DOCX_MAX_UNCOMPRESSED_BYTES,
   normalizeExtractedText,
   type PdfTextItem,
+  readZipDirectory,
 } from './knowledge-file-rules';
 import { FILE_PROBLEM_MESSAGES, titleFromFileName } from './knowledge-rules';
 
@@ -380,5 +384,127 @@ test('código: pdf-text só por import(), sem URLs de recursos e com as opções
       readFileSync(new URL(`./${file}`, dir), 'utf8'),
       /console\.|localStorage|sessionStorage|history\.(push|replace)State/,
     );
+  }
+});
+
+// --- E2: DOCX ---
+
+const u8 = (buffer: Buffer): Uint8Array =>
+  new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+test('readZipDirectory: nomes e tamanhos de um ZIP gerado; DOCX precisa das duas partes', () => {
+  const docx = buildZip(docxEntries(['Olá']));
+  const directory = readZipDirectory(u8(docx));
+  assert.equal(directory.ok, true);
+  if (!directory.ok) return;
+  assert.deepEqual(directory.names, ['[Content_Types].xml', '_rels/.rels', 'word/document.xml']);
+  const sizes = docxEntries(['Olá']).reduce(
+    (total, entry) => total + Buffer.byteLength(entry.data as string, 'utf8'),
+    0,
+  );
+  assert.equal(directory.uncompressedTotal, sizes);
+  assert.equal(directory.zip64, false);
+  assert.equal(docxZipProblem(u8(docx)), null);
+
+  const withoutDocument = buildZip(
+    docxEntries(['x']).filter((entry) => entry.name !== 'word/document.xml'),
+  );
+  assert.equal(docxZipProblem(u8(withoutDocument)), 'not-docx');
+  const withoutTypes = buildZip(
+    docxEntries(['x']).filter((entry) => entry.name !== '[Content_Types].xml'),
+  );
+  assert.equal(docxZipProblem(u8(withoutTypes)), 'not-docx');
+});
+
+test('readZipDirectory: soma acima do teto, ZIP64, truncado e sem fim de diretório recusam sem lançar', () => {
+  const docx = buildZip(docxEntries(['texto']));
+  assert.equal(docxZipProblem(u8(docx), 10), 'unreadable');
+  assert.equal(KNOWLEDGE_DOCX_MAX_UNCOMPRESSED_BYTES, 50 * 1024 * 1024);
+
+  // Tamanho descompactado declarado gigante (bomba de compressão): só o diretório conta.
+  const bomb = Buffer.from(docx);
+  const central = bomb.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  bomb.writeUInt32LE(KNOWLEDGE_DOCX_MAX_UNCOMPRESSED_BYTES, central + 24);
+  assert.equal(docxZipProblem(u8(bomb)), 'unreadable');
+
+  // ZIP64: tamanho 0xFFFFFFFF na entrada ou no fim do diretório.
+  const zip64 = Buffer.from(docx);
+  zip64.writeUInt32LE(0xffffffff, central + 24);
+  const marked = readZipDirectory(u8(zip64));
+  assert.equal(marked.ok && marked.zip64, true);
+  assert.equal(docxZipProblem(u8(zip64)), 'unreadable');
+  const zip64End = Buffer.from(docx);
+  zip64End.writeUInt16LE(0xffff, zip64End.length - 22 + 10);
+  assert.equal(docxZipProblem(u8(zip64End)), 'unreadable');
+
+  for (const broken of [
+    docx.subarray(0, docx.length - 30), // truncado: sem o fim do diretório
+    docx.subarray(0, 100),
+    Buffer.alloc(0),
+    Buffer.from('PK\x03\x04 qualquer coisa'),
+  ]) {
+    assert.doesNotThrow(() => readZipDirectory(u8(broken)));
+    assert.equal(readZipDirectory(u8(broken)).ok, false);
+    assert.equal(docxZipProblem(u8(broken)), 'unreadable');
+  }
+  // Diretório que aponta para fora do arquivo.
+  const outside = Buffer.from(docx);
+  outside.writeUInt32LE(docx.length * 2, outside.length - 22 + 16);
+  assert.equal(readZipDirectory(u8(outside)).ok, false);
+});
+
+test('orquestração: DOCX que não é Word recusa antes de carregar o leitor', async () => {
+  let loads = 0;
+  const controller = new FileReadController({
+    readBytes: readFake,
+    loadPdf: () => Promise.reject(new Error('x')),
+    loadDocx: () => {
+      loads++;
+      return Promise.resolve(() => Promise.resolve({ text: 'nunca' }));
+    },
+  });
+  const zip = buildZip([{ name: 'xl/workbook.xml', data: '<x/>' }]);
+  assert.deepEqual(await controller.read(fakeFile('planilha.docx', u8(zip))), {
+    status: 'problem',
+    problem: 'not-docx',
+  });
+  assert.equal(loads, 0);
+  assert.deepEqual(await controller.read(fakeFile('ok.docx', u8(buildZip(docxEntries(['a']))))), {
+    status: 'text',
+    kind: 'docx',
+    text: 'nunca',
+  });
+  assert.equal(loads, 1);
+});
+
+test('código: o worker do DOCX só é criado por new Worker(new URL(...)) e usa só extractRawText', () => {
+  const dir = new URL('./', import.meta.url);
+  const strip = (text: string): string =>
+    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const worker = strip(readFileSync(new URL('./docx-text.worker.ts', dir), 'utf8'));
+  assert.match(worker, /import mammoth from 'mammoth';/);
+  const calls = [...worker.matchAll(/mammoth\s*\.\s*(\w+)/g)].map((match) => match[1]);
+  assert.deepEqual(calls, ['extractRawText']);
+  assert.doesNotMatch(worker, /console\.|convertToHtml|convertToMarkdown|images|messages/);
+
+  const reader = strip(readFileSync(new URL('./docx-text.ts', dir), 'utf8'));
+  assert.match(
+    reader,
+    /new Worker\(new URL\('\.\/docx-text\.worker\.ts', import\.meta\.url\), \{\s*type: 'module',?\s*\}\)/,
+  );
+  assert.match(reader, /worker\.terminate\(\)/);
+  assert.doesNotMatch(reader, /from 'mammoth'|console\./);
+
+  const sources = readdirSync(new URL('../', dir), { recursive: true, encoding: 'utf8' }).filter(
+    (file) => /\.(ts|tsx)$/.test(file) && !file.endsWith('.test.ts'),
+  );
+  for (const file of sources) {
+    const text = readFileSync(new URL(`../${file}`, dir), 'utf8');
+    if (!file.endsWith('docx-text.worker.ts')) {
+      assert.doesNotMatch(text, /from 'mammoth/, file);
+    }
+    for (const line of text.split('\n').filter((item) => /['"]\.\/docx-text['"]/.test(item))) {
+      assert.match(line, /import\('\.\/docx-text'\)/, `${file}: ${line}`);
+    }
   }
 });

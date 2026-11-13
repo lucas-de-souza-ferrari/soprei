@@ -1,8 +1,21 @@
 import { expect, test, type Page } from '@playwright/test';
-import { buildPdf, DRAWING_ONLY, textContent } from './file-builders';
-import { holdPdfWorker, openKnowledge, type FakeKnowledge } from './knowledge-fixture';
+import {
+  buildDocx,
+  buildPdf,
+  buildZip,
+  docxEntries,
+  DRAWING_ONLY,
+  oleFile,
+  textContent,
+} from './file-builders';
+import {
+  holdDocxWorker,
+  holdPdfWorker,
+  openKnowledge,
+  type FakeKnowledge,
+} from './knowledge-fixture';
 
-/** Spec 040: ler PDF (e DOCX, na E2) no navegador, na aba Conhecimento. */
+/** Spec 040: ler PDF e DOCX no navegador, na aba Conhecimento. */
 
 const MESSAGES = {
   noText: 'Não encontramos texto neste arquivo.',
@@ -11,7 +24,12 @@ const MESSAGES = {
   notPdf: 'Este arquivo não é um PDF válido.',
   tooBig: 'O arquivo passa de 10 MB.',
   loader: 'Não foi possível carregar o leitor de arquivos.',
+  notDocx: 'Este arquivo não é um documento do Word (.docx) válido.',
+  docxProtected: 'Este documento do Word está protegido por senha ou em formato antigo.',
+  docLegacy: 'Arquivos .doc antigos não são aceitos.',
+  odt: 'Arquivos .odt não são aceitos.',
 };
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const READER_REQUEST = /pdf-text|pdfjs|pdf\.worker/;
 
 const fileInput = (page: Page) => page.getByLabel('Ou escolha um arquivo (texto, PDF ou Word)');
@@ -213,4 +231,100 @@ test('.txt continua como antes e a tela a 360 px não rola na horizontal', async
   worker.release();
   await expect(page.getByText(/Texto lido do arquivo/)).toBeVisible();
   await noHorizontalScroll(page);
+});
+
+// --- E2: DOCX ---
+
+test('DOCX com dois parágrafos preenche o texto com linha em branco e sugere o título sem .docx', async ({
+  page,
+}) => {
+  const { knowledge } = await openKnowledge(page);
+  await ready(page);
+  await choose(
+    page,
+    'Perguntas_frequentes.docx',
+    buildDocx(['Entregamos em todo o bairro.', 'Pagamento por Pix ou cartão.']),
+    DOCX_MIME,
+  );
+  await expect(textArea(page)).toHaveValue(
+    'Entregamos em todo o bairro.\n\nPagamento por Pix ou cartão.',
+  );
+  await expect(titleInput(page)).toHaveValue('Perguntas frequentes');
+  await expect(page.getByText(/Texto lido do arquivo: 58 caracteres\./)).toBeVisible();
+  await page.getByRole('button', { name: 'Adicionar', exact: true }).click();
+  await expect(page.getByText('Documento adicionado. A IA já pode usá-lo.')).toBeVisible();
+  expect(knowledge.posts).toEqual([
+    {
+      title: 'Perguntas frequentes',
+      content: 'Entregamos em todo o bairro.\n\nPagamento por Pix ou cartão.',
+    },
+  ]);
+  expectNoForeign(knowledge);
+});
+
+test('ZIP sem document.xml, cabeçalho OLE, DOCX sem texto, .doc e .odt têm mensagens próprias', async ({
+  page,
+}) => {
+  const { knowledge } = await openKnowledge(page);
+  await ready(page);
+  const withoutDocument = buildZip(
+    docxEntries(['x']).filter((entry) => entry.name !== 'word/document.xml'),
+  );
+  await choose(page, 'planilha.docx', withoutDocument, DOCX_MIME);
+  await expect(fileError(page)).toContainText(MESSAGES.notDocx);
+  await choose(page, 'protegido.docx', oleFile(), DOCX_MIME);
+  await expect(fileError(page)).toContainText(MESSAGES.docxProtected);
+  // Até aqui nada carregou o leitor de DOCX.
+  expect(knowledge.requested.filter((url) => /docx-text|mammoth/.test(url))).toEqual([]);
+  await choose(page, 'vazio.docx', buildDocx([]), DOCX_MIME);
+  await expect(fileError(page)).toContainText(MESSAGES.noText);
+  await choose(page, 'antigo.doc', oleFile(), 'application/msword');
+  await expect(fileError(page)).toContainText(MESSAGES.docLegacy);
+  await choose(page, 'libre.odt', buildZip([{ name: 'mimetype', data: 'x' }]), 'application/zip');
+  await expect(fileError(page)).toContainText(MESSAGES.odt);
+  await expect(textArea(page)).toHaveValue('');
+  expectNoForeign(knowledge);
+});
+
+test('trocar de arquivo durante a leitura de um DOCX faz valer só o segundo', async ({ page }) => {
+  const { knowledge } = await openKnowledge(page);
+  await ready(page);
+  const worker = await holdDocxWorker(page);
+  await choose(page, 'primeiro.docx', buildDocx(['PRIMEIRO-ARQUIVO']), DOCX_MIME);
+  await expect(page.getByText('Lendo arquivo…')).toBeVisible();
+  await expect.poll(worker.held).toBe(true);
+  await choose(page, 'segundo.docx', buildDocx(['Segundo arquivo']), DOCX_MIME);
+  await expect(textArea(page)).toHaveValue('Segundo arquivo');
+  await expect(titleInput(page)).toHaveValue('segundo');
+  worker.release();
+  await page.waitForTimeout(500);
+  await expect(textArea(page)).toHaveValue('Segundo arquivo');
+  await expect(page.getByText('Lendo arquivo…')).toHaveCount(0);
+  expectNoForeign(knowledge);
+});
+
+test('privacidade do DOCX: a frase secreta não vai ao console, ao armazenamento, à URL nem a outro host', async ({
+  page,
+}) => {
+  const secret = 'FRASE-SECRETA-DO-DOCX-040';
+  const { knowledge } = await openKnowledge(page);
+  await ready(page);
+  const url = page.url();
+  const title = await page.title();
+  await choose(page, 'segredo.docx', buildDocx([`Código do cofre ${secret}`]), DOCX_MIME);
+  await expect(textArea(page)).toHaveValue(new RegExp(secret));
+  await page.getByRole('button', { name: 'Adicionar', exact: true }).click();
+  await expect(page.getByText('Documento adicionado. A IA já pode usá-lo.')).toBeVisible();
+
+  expect(knowledge.console.filter((line) => line.includes(secret))).toEqual([]);
+  const storage = await page.evaluate(() => ({
+    local: Object.keys(localStorage),
+    session: sessionStorage.length,
+  }));
+  expect(storage.local).toEqual(['soprei-theme']);
+  expect(storage.session).toBe(0);
+  expect(page.url()).toBe(url);
+  expect(await page.title()).toBe(title);
+  expect(knowledge.requested.filter((item) => item.includes(secret))).toEqual([]);
+  expectNoForeign(knowledge);
 });
