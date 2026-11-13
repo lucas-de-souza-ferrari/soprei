@@ -67,6 +67,13 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Worker do pdf.js (spec 041): o .mjs precisa sair como JavaScript (o mime.types de versões antigas
+    # do nginx não conhece a extensão e o navegador recusa o worker servido como octet-stream).
+    location ~* \.mjs$ {
+        types { text/javascript mjs; }
+        try_files $uri =404;
+    }
+
     # Páginas legais estáticas (spec 032, E1): /privacidade serve privacidade.html; o resto cai no SPA.
     location / {
         try_files $uri $uri.html /index.html;

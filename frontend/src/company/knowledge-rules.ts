@@ -8,8 +8,30 @@ import {
 export const KNOWLEDGE_PRIVACY_NOTICE =
   'Não coloque dados pessoais das pessoas que escrevem para a empresa nem segredos aqui: a IA pode citar o que está nos documentos. Os trechos usados são enviados ao provedor de IA.';
 
-export type FileProblem = 'too-large' | 'empty' | 'not-utf8' | 'content-too-large' | 'wrong-type';
+export type FileProblem =
+  | 'too-large'
+  | 'empty'
+  | 'not-utf8'
+  | 'content-too-large'
+  | 'wrong-type'
+  // Spec 041: PDF e DOCX lidos no navegador.
+  | 'doc-legacy'
+  | 'odt'
+  | 'binary-too-large'
+  | 'not-pdf'
+  | 'not-docx'
+  | 'docx-protected'
+  | 'pdf-password'
+  | 'no-text'
+  | 'too-many-pages'
+  | 'unreadable'
+  | 'timeout'
+  | 'loader-failed';
 
+/**
+ * Mensagens fixas (spec 026 e 041). Nunca interpolam texto do arquivo nem a mensagem de erro do
+ * pdf.js, do mammoth ou do navegador.
+ */
 export const FILE_PROBLEM_MESSAGES: Readonly<Record<FileProblem, string>> = {
   'too-large': 'O arquivo passa de 200 KB. Divida o texto em arquivos menores.',
   empty: 'O arquivo está vazio.',
@@ -17,15 +39,33 @@ export const FILE_PROBLEM_MESSAGES: Readonly<Record<FileProblem, string>> = {
     'Não foi possível ler o arquivo como texto UTF-8. Salve-o como texto simples (UTF-8).',
   'content-too-large':
     'O texto do arquivo passa de 100.000 caracteres. Divida em arquivos menores.',
-  'wrong-type': 'Use um arquivo de texto (.txt ou .md).',
+  'wrong-type': 'Use um arquivo .txt, .md, .pdf ou .docx.',
+  'doc-legacy': 'Arquivos .doc antigos não são aceitos. Salve como .docx ou PDF, ou cole o texto.',
+  odt: 'Arquivos .odt não são aceitos. Salve como .docx ou PDF, ou cole o texto.',
+  'binary-too-large': 'O arquivo passa de 10 MB. Envie um arquivo menor ou cole só o texto.',
+  'not-pdf': 'Este arquivo não é um PDF válido.',
+  'not-docx': 'Este arquivo não é um documento do Word (.docx) válido.',
+  'docx-protected':
+    'Este documento do Word está protegido por senha ou em formato antigo. Remova a senha ou salve como .docx de novo, ou cole o texto.',
+  'pdf-password':
+    'Este PDF está protegido por senha. Remova a senha e tente de novo, ou cole o texto.',
+  'no-text':
+    'Não encontramos texto neste arquivo. Se for um PDF escaneado (uma imagem), o Soprei ainda não consegue lê-lo: cole o texto no campo acima.',
+  'too-many-pages':
+    'O PDF tem mais de 500 páginas. Divida o arquivo ou cole só a parte que interessa.',
+  unreadable:
+    'Não foi possível ler este arquivo. Ele pode estar corrompido: tente salvá-lo de novo ou cole o texto.',
+  timeout: 'A leitura do arquivo demorou demais. Tente um arquivo menor ou cole o texto.',
+  'loader-failed':
+    'Não foi possível carregar o leitor de arquivos. Recarregue a página e tente de novo.',
 };
 
-/** Tipo aceito: `.txt` ou `.md` (o navegador nem sempre informa o tipo MIME). */
+/** Tipo aceito: `.txt`, `.md`, `.pdf` ou `.docx` (o navegador nem sempre informa o tipo MIME). */
 export function checkFileName(name: string): FileProblem | null {
-  return /\.(txt|md|markdown)$/i.test(name) ? null : 'wrong-type';
+  return /\.(txt|md|markdown|pdf|docx)$/i.test(name) ? null : 'wrong-type';
 }
 
-/** Tamanho em bytes, antes de ler o arquivo. */
+/** Tamanho em bytes de um arquivo de texto, antes de ler o arquivo. */
 export function checkFileSize(size: number): FileProblem | null {
   if (size === 0) return 'empty';
   return size > KNOWLEDGE_FILE_MAX_BYTES ? 'too-large' : null;
@@ -49,7 +89,7 @@ export function decodeTextFile(buffer: ArrayBuffer): { text: string } | { proble
 /** Título sugerido a partir do nome do arquivo (sem a extensão), no limite do servidor. */
 export function titleFromFileName(name: string): string {
   return name
-    .replace(/\.(txt|md|markdown)$/i, '')
+    .replace(/\.(txt|md|markdown|pdf|docx)$/i, '')
     .replace(/[_-]+/g, ' ')
     .trim()
     .slice(0, KNOWLEDGE_TITLE_MAX);

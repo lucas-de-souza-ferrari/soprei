@@ -7,6 +7,10 @@
 # spec 032). Não leva senha em argumento nem em variável: o pg_dump roda como o usuário postgres por
 # autenticação local. Guarda só as 3 últimas cópias. O dump é gravado em .tmp e só ganha o nome final
 # se terminar bem: um dump interrompido nunca conta entre as cópias boas.
+#
+# Caminhos completos: o deploy automático chama este programa com PATH=/usr/local/bin:/usr/bin:/bin
+# (programa de entrada, spec 037), sem /usr/sbin, onde fica o runuser. Testar como o deploy chama:
+#   /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/sbin/soprei-predeploy-backup
 set -euo pipefail
 umask 077
 
@@ -16,7 +20,7 @@ chmod 700 "$dest"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 tmp="$dest/soprei-$stamp.dump.tmp"
 trap 'rm -f "$tmp"' EXIT
-runuser -u postgres -- pg_dump -Fc soprei >"$tmp"
+/usr/sbin/runuser -u postgres -- pg_dump -Fc soprei >"$tmp"
 mv "$tmp" "$dest/soprei-$stamp.dump"
 
 # Mantém só as 3 últimas cópias boas (os .tmp sobrantes de execuções mortas também saem).

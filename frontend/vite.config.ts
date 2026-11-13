@@ -99,6 +99,10 @@ export default defineConfig(({ mode }) => {
     throw new Error('BACKEND_PROXY_TARGET inválido');
   return {
     plugins: [react(), tailwindcss(), legalPages()],
+    // Spec 041: o mammoth só é importado pelo worker do DOCX, que a varredura inicial do Vite não
+    // alcança; sem isto o servidor de desenvolvimento descobre a dependência no primeiro DOCX e
+    // recarrega a página. Não muda o build.
+    optimizeDeps: { include: ['mammoth'] },
     server: { proxy: { '/api': { target, rewrite: (path) => path.replace(/^\/api/, '') } } },
   };
 });
