@@ -12,7 +12,8 @@
 - **Correções durante a configuração:** `sudoers` sem `!requiretty` por causa do `sudo-rs` (PR #4); `--` antes do destino no `ssh` do `deploy.yml` (PR #5); e2e instável do celular corrigido com `openMenu` repetindo até o menu abrir (PR #6).
 - **Primeiro deploy automático:** `53f06f2 -> 4234312`, saída 0, 50 s, indisponibilidade de 3,16 s.
 - **Recusas confirmadas:** SHA antigo e SHA de branch saem com 1; CI vermelho não publica; PR com CI verde não publica.
-- **Falta:** provar o desligamento (`DEPLOY_ENABLED=false` e `ENABLED=false` no `entry.conf`) e montar o staging (E2). Até lá, `ALLOW_UNSTAGED=true` no `entry.conf` do servidor.
+- **Desligamento de emergência:** testado pelo dono em 2026-11-13 (`DEPLOY_ENABLED=false` e `ENABLED=false` no `entry.conf`).
+- **Falta:** montar o staging (E2). Até lá, `ALLOW_UNSTAGED=true` no `entry.conf` do servidor.
 - **Armadilhas:**
   - um merge não reinstala o programa de entrada: o dono reinstala à mão quando `deploy/soprei-deploy-entry.sh` mudar;
   - a conta `lucas-ferrari-led` (o `gh` ativo e a chave SSH desta máquina) não tem acesso ao repositório; push e `gh` usam o token da conta dona.
