@@ -21,6 +21,9 @@ const AUTHORIZED = [
   'class-variance-authority',
 ] as const;
 
+/** Leitores de arquivo da base de conhecimento, autorizados pela spec 040 (versão exata). */
+const KNOWLEDGE_READERS = ['pdfjs-dist'] as const;
+
 test('spec 029 E1: só as dependências autorizadas entraram, em versão exata, e o CLI do shadcn não rodou', () => {
   const pkg = JSON.parse(readFileSync(new URL('package.json', frontend), 'utf8')) as {
     dependencies: Record<string, string>;
@@ -30,12 +33,13 @@ test('spec 029 E1: só as dependências autorizadas entraram, em versão exata, 
     'clsx',
     'lucide-react',
     'motion',
+    ...KNOWLEDGE_READERS,
     'react',
     'react-dom',
     'tailwind-merge',
     'zod',
   ]);
-  for (const name of AUTHORIZED)
+  for (const name of [...AUTHORIZED, ...KNOWLEDGE_READERS])
     assert.match(pkg.dependencies[name] ?? '', /^\d+\.\d+\.\d+$/, name);
   for (const forbidden of ['next', 'next-themes'])
     assert.equal(forbidden in pkg.dependencies, false, forbidden);
