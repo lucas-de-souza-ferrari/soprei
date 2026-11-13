@@ -72,6 +72,8 @@ const PLANS = [
     maxCompanies: 1,
     replies: 2500,
     base: [4790, 47900],
+    agenda: [2900, 29000],
+    stock: [1900, 19000],
     perReply: [1916, 1596],
   },
   {
@@ -80,6 +82,8 @@ const PLANS = [
     maxCompanies: 3,
     replies: 8000,
     base: [11990, 119900],
+    agenda: [4900, 49000],
+    stock: [3900, 39000],
     perReply: [1498, 1248],
   },
   {
@@ -88,11 +92,11 @@ const PLANS = [
     maxCompanies: 10,
     replies: 30000,
     base: [34900, 349000],
+    agenda: [9900, 99000],
+    stock: [7900, 79000],
     perReply: [1163, 969],
   },
 ] as const;
-const AGENDA = [2900, 29000] as const;
-const STOCK = [1900, 19000] as const;
 const RANK = { ESSENTIAL: 1, PROFESSIONAL: 2, SCALE: 3 } as const;
 export const CHECKOUT_HOST = 'https://checkout.exemplo.test';
 const DAY = 86_400_000;
@@ -133,7 +137,9 @@ function total(selection: {
 }): number {
   const plan = PLANS.find((item) => item.code === selection.planCode) ?? PLANS[0];
   const i = index(selection.cycle);
-  return plan.base[i] + (selection.agenda ? AGENDA[i] : 0) + (selection.stock ? STOCK[i] : 0);
+  return (
+    plan.base[i] + (selection.agenda ? plan.agenda[i] : 0) + (selection.stock ? plan.stock[i] : 0)
+  );
 }
 
 const iso = (offsetDays: number): string => new Date(Date.now() + offsetDays * DAY).toISOString();
@@ -231,8 +237,8 @@ export async function installBillingApi(
           prices: (['MONTHLY', 'ANNUAL'] as const).map((cycle) => ({
             cycle,
             baseCents: plan.base[index(cycle)],
-            agendaCents: AGENDA[index(cycle)],
-            stockCents: STOCK[index(cycle)],
+            agendaCents: plan.agenda[index(cycle)],
+            stockCents: plan.stock[index(cycle)],
             whatsappBillingMode: 'CUSTOMER_PAYS_META',
             perReplyMilliCents: (state.perReply?.[plan.code] ?? plan.perReply)[index(cycle)],
           })),

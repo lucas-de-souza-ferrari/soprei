@@ -324,7 +324,7 @@ Nenhuma. `nodemailer`, Zod, Redis, `node:crypto` e o `Modal` já existem. Migrat
 - Com as duas cotas esgotadas vale o texto das respostas (é a cota que a pessoa enxerga).
 - O título da faixa por tokens é a própria frase da spec ("O limite de uso da inteligência artificial deste mês foi atingido"); o texto explicativo é o mesmo da cota de respostas (nada se perde, quando volta, como resolver). Na tela de Assinatura a data de volta continua sendo o fim da janela de uso (`usage.windowEnd`), como antes; a faixa do painel continua sem data ("início do próximo mês"), como antes (o `entitlements` não traz a janela).
 - O preço por resposta é só formatado no navegador (milésimos de centavo / 100.000, quatro casas, `Intl` BRL); o valor vem do servidor. Ausente (servidor anterior, rollback) ou 0 não mostra a linha.
-- A fixture do e2e passou ao catálogo novo (2.500/8.000/30.000 respostas, 47,90/119,90/349,00, anual = 10 x); por isso o total do teste de pagamento mudou de R$ 1.708,80 para R$ 1.489,00.
+- A fixture do e2e passou ao catálogo novo (2.500/8.000/30.000 respostas, 47,90/119,90/349,00, anual = 10 x); por isso o total do teste de pagamento mudou de R$ 1.708,80 para R$ 1.689,00 (com o preço dos módulos de cada plano na fixture: Profissional anual 1.199,00 + Agenda 490,00).
 - Nenhum par de cor novo.
 
 **Pendente:** CI verde, revisão do `reviewer` junto com a E1 (se o dono revisar as duas no mesmo PR). E3 e E4 não foram feitas.

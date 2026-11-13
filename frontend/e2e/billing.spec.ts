@@ -279,8 +279,8 @@ test('escolher plano e ciclo, ver o total do servidor, pagar (abre o link) e vol
   await page.getByLabel(/Profissional/).check();
   await page.getByLabel(/Estoque/).uncheck();
   // O total sai da cotação do servidor (nada é calculado no navegador): Profissional anual + Agenda.
-  await expect(page.getByTestId('total')).toHaveText('R$ 1.489,00');
-  await expect(page.getByTestId('cotacao-texto')).toContainText('Você pagará R$ 1.489,00 agora');
+  await expect(page.getByTestId('total')).toHaveText('R$ 1.689,00');
+  await expect(page.getByTestId('cotacao-texto')).toContainText('Você pagará R$ 1.689,00 agora');
   await page.getByRole('button', { name: 'Pagar', exact: true }).click();
   await page.waitForURL(`${CHECKOUT_HOST}/pay/**`);
   const orders = writes(billing).filter((call) => call.path === '/account/billing/orders');

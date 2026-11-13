@@ -90,6 +90,10 @@ export function quotaReason(
 /** Título fixo quando o limite de uso da IA parou o atendente (sem número; spec 040, E2). */
 export const AI_LIMIT_TITLE = 'O limite de uso da inteligência artificial deste mês foi atingido';
 
+/** Explica por que o limite da IA pode chegar antes da cota de respostas (sem número; spec 040, revisão da E2). */
+export const AI_LIMIT_NOTE =
+  'Isso pode acontecer antes de acabar a cota de respostas, quando as conversas são longas.';
+
 /** Faixa da tela de Assinatura com a cota do mês esgotada (respostas ou limite da IA), ou `null`. */
 export function exhaustedBanner(usage: Billing['usage']): Banner | null {
   if (usage === null) return null;
@@ -98,7 +102,7 @@ export function exhaustedBanner(usage: Billing['usage']): Banner | null {
   return {
     tone: 'error',
     title: reason === 'replies' ? 'Cota do mês esgotada' : AI_LIMIT_TITLE,
-    text: `O atendente parou de responder; as mensagens ficam guardadas e visíveis no painel e nada é perdido. Ele volta em ${formatDate(usage.windowEnd)} (início da próxima janela de uso) ou assim que você trocar para um plano maior.`,
+    text: `${reason === 'ai' ? `${AI_LIMIT_NOTE} ` : ''}O atendente parou de responder; as mensagens ficam guardadas e visíveis no painel e nada é perdido. Ele volta em ${formatDate(usage.windowEnd)} (início da próxima janela de uso) ou assim que você trocar para um plano maior.`,
   };
 }
 
@@ -425,7 +429,7 @@ export function accessNotice(
   return {
     tone: 'error',
     title: reason === 'replies' ? 'Respostas do mês esgotadas' : AI_LIMIT_TITLE,
-    text: `O atendente parou de responder; as mensagens ficam guardadas e visíveis. Ele volta no início do próximo mês ou ao trocar de plano. ${how}`,
+    text: `${reason === 'ai' ? `${AI_LIMIT_NOTE} ` : ''}O atendente parou de responder; as mensagens ficam guardadas e visíveis. Ele volta no início do próximo mês ou ao trocar de plano. ${how}`,
   };
 }
 

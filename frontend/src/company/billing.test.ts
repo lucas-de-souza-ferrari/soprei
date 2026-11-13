@@ -13,6 +13,7 @@ import {
 } from './billing-api';
 import {
   accessNotice,
+  AI_LIMIT_NOTE,
   AI_LIMIT_TITLE,
   canCancel,
   canCheckOrder,
@@ -413,10 +414,12 @@ test('spec 040 (E2): o limite de uso da IA esgotado tem texto genérico, sem nú
     assert.ok(!/token/i.test(all), all);
     assert.match(all, /mensagens ficam guardadas/);
     assert.match(all, /próximo mês/);
+    assert.ok(all.includes(AI_LIMIT_NOTE), all);
   }
   // Por respostas: mantém o texto das respostas (e vale ele se as duas acabaram).
   const replies = accessNotice({ ...ok, replies: { used: 2_500, limit: 2_500 } }, true);
   assert.equal(replies?.title, 'Respostas do mês esgotadas');
+  assert.ok(!(replies?.text ?? '').includes(AI_LIMIT_NOTE));
   const both = accessNotice(
     {
       ...ok,
@@ -445,6 +448,8 @@ test('spec 040 (E2): a faixa da tela de Assinatura com a cota esgotada traz a da
   const ai = exhaustedBanner(usage(10, 15_000_000));
   assert.equal(ai?.title, AI_LIMIT_TITLE);
   assert.match(ai?.text ?? '', /nada é perdido/);
+  assert.ok((ai?.text ?? '').startsWith(AI_LIMIT_NOTE));
+  assert.ok(!(replies?.text ?? '').includes(AI_LIMIT_NOTE));
   assert.match(ai?.text ?? '', /01\/12\/2026/);
   const all = `${ai?.title ?? ''} ${ai?.text ?? ''}`;
   assert.ok(!/token/i.test(all));
