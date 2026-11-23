@@ -907,3 +907,98 @@ describe('fila de entrada: worker concorrente e métricas (spec 034)', () => {
     assert.ok(body.includes('process_cpu_user_seconds_total'));
   });
 });
+
+describe('fila de entrada: limpeza por idade (spec 035, E3)', () => {
+  const CLEANED_TEXT = 'texto-secreto-que-a-limpeza-apaga-7c1';
+  const KEEP = { ...SETTINGS, keepCompletedSeconds: 2, keepFailedSeconds: 2 };
+
+  /** Chaves do hash de um job no Redis (`<prefixo>:<fila>:<id>`). */
+  const jobKey = (prefix: string, id: string): string => `${prefix}:${INBOUND_QUEUE_NAME}:${id}`;
+
+  it('apaga o concluído e o falho mais velhos que os prazos sem nenhum outro job terminar; o recente fica', async () => {
+    const h = setup({ settings: KEEP });
+    const old = textJob({ text: CLEANED_TEXT });
+    const failing = textJob({ text: CLEANED_TEXT });
+    const { handler } = recordingHandler((job) => {
+      if (job.kind === 'text' && job.externalId === failing.externalId) {
+        throw new NonRetryableJobError('permanente');
+      }
+      return 'done';
+    });
+    h.handle.startWorker(handler);
+
+    assert.ok((await h.handle.queue.enqueue(old)).ok);
+    assert.ok((await h.handle.queue.enqueue(failing)).ok);
+    await waitFor(async () => {
+      const counts = await h.handle.jobCounts();
+      return counts.completed === 1 && counts.failed === 1;
+    }, 'um concluído e um falho');
+    // Passa do prazo (2 s) sem nenhum outro job terminar: a retenção do BullMQ sozinha não apagaria.
+    await sleep(2_600);
+    const fresh = textJob();
+    assert.ok((await h.handle.queue.enqueue(fresh)).ok);
+    await waitFor(
+      async () => ((await h.handle.jobCounts()).completed ?? 0) >= 1,
+      'o recente concluído',
+    );
+
+    const cleaned = await h.handle.cleaner.cleanOldJobs();
+    assert.ok(cleaned.ok);
+    assert.deepEqual(cleaned.value, { completed: 1, failed: 1 });
+
+    const counts = await h.handle.jobCounts();
+    assert.equal(counts.completed, 1, 'o recente fica');
+    assert.equal(counts.failed, 0);
+    assert.equal(await cleanupRedis.exists(jobKey(h.prefix, inboundJobId(old))), 0);
+    assert.equal(await cleanupRedis.exists(jobKey(h.prefix, inboundJobId(failing))), 0);
+    assert.equal(await cleanupRedis.exists(jobKey(h.prefix, inboundJobId(fresh))), 1);
+
+    // Nenhum hash sob o prefixo da fila guarda mais o texto dos jobs apagados.
+    for (const key of await keyspace.keysUnder(cleanupRedis, `${h.prefix}:`)) {
+      if ((await cleanupRedis.type(key)) !== 'hash') continue;
+      const values = Object.values(await cleanupRedis.hgetall(key));
+      assert.ok(!values.some((value) => value.includes(CLEANED_TEXT)), `texto em ${key}`);
+    }
+  });
+
+  it('nunca toca job ativo, em espera ou atrasado', async () => {
+    const h = setup({ settings: KEEP });
+    let release: () => void = () => undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { handler } = recordingHandler(async (_job, _context, call): Promise<'done'> => {
+      if (call === 1) await blocked;
+      return 'done';
+    });
+    h.handle.startWorker(handler);
+    try {
+      assert.ok((await h.handle.queue.enqueue(textJob())).ok);
+      await waitFor(async () => (await h.handle.jobCounts()).active === 1, 'um ativo');
+      assert.ok((await h.handle.queue.enqueue(textJob())).ok);
+      assert.ok(
+        (await h.handle.queue.scheduleFlush(flushJob(), { delayMs: 60_000, mode: 'ensure' })).ok,
+      );
+      await sleep(2_600);
+
+      const cleaned = await h.handle.cleaner.cleanOldJobs();
+      assert.ok(cleaned.ok);
+      assert.deepEqual(cleaned.value, { completed: 0, failed: 0 });
+      const counts = await h.handle.jobCounts();
+      assert.equal(counts.active, 1);
+      assert.equal(counts.waiting, 1);
+      assert.equal(counts.delayed, 1);
+    } finally {
+      release();
+    }
+  });
+
+  it('Redis fora: a limpeza devolve erro, sem lançar e sem o erro do driver como causa', async () => {
+    const port = await getClosedPort();
+    const h = setup({ redisUrl: withPort(config.REDIS_URL, port), enqueueTimeoutMs: 300 });
+    const cleaned = await h.handle.cleaner.cleanOldJobs();
+    assert.ok(!cleaned.ok);
+    assert.ok(cleaned.error instanceof ExternalServiceError);
+    assert.equal(cleaned.error.cause, undefined);
+  });
+});

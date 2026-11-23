@@ -508,3 +508,27 @@ describe('sales_contact_requests_total (spec 040, E4)', () => {
     for (const label of labels) assert.match(label, /^result="[a-z_]+"$/);
   });
 });
+
+describe('métricas da retomada do atendimento (spec 035)', () => {
+  it('conjuntos fixos de labels, sem empresa nem contato; a limpeza soma os jobs apagados', async () => {
+    const metrics = createMetrics();
+    metrics.countResumeRun('ok');
+    metrics.countResumeRun('error');
+    metrics.countResumeContact('pending', 'scheduled');
+    metrics.countResumeContact('unsent', 'skipped_limit');
+    metrics.countQueueCleaned('completed', 3);
+    metrics.countQueueCleaned('failed', 0);
+    const body = await metrics.render();
+    assert.match(body, /attendance_resume_runs_total\{result="ok"\} 1/);
+    assert.match(body, /attendance_resume_runs_total\{result="error"\} 1/);
+    assert.match(body, /attendance_resume_targets_total\{kind="pending",result="scheduled"\} 1/);
+    assert.match(body, /attendance_resume_targets_total\{kind="unsent",result="skipped_limit"\} 1/);
+    assert.match(body, /queue_cleaned_jobs_total\{state="completed"\} 3/);
+    assert.doesNotMatch(body, /queue_cleaned_jobs_total\{state="failed"\}/);
+    const lines = body
+      .split('\n')
+      .filter((line) => /attendance_resume|queue_cleaned/.test(line))
+      .join('\n');
+    assert.doesNotMatch(lines, /companyId|membershipId|phone|contact|text=/i);
+  });
+});

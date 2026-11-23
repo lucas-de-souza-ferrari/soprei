@@ -500,8 +500,8 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
   const resumeContacts = new Counter({
-    name: 'attendance_resume_contacts_total',
-    help: 'Contatos tratados pela retomada, por tipo (pending, unsent) e resultado (scheduled, skipped_limit, failed) (spec 035)',
+    name: 'attendance_resume_targets_total',
+    help: 'Conversas tratadas pela retomada, por tipo (pending, unsent) e resultado (scheduled, skipped_limit, failed) (spec 035)',
     labelNames: ['kind', 'result'] as const,
     registers: [registry],
   });

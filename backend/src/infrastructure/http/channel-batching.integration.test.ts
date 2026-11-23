@@ -10,11 +10,12 @@ import {
   type ChannelBatchSettings,
   ChannelInboundProcessor,
 } from '../../application/channel/channel-inbound.processor.js';
+import { AttendanceResumer } from '../../application/channel/attendance-resumer.js';
 import { ChannelIntakeService } from '../../application/channel/channel-intake.service.js';
 import { CHANNEL_NOTICE_TEXTS } from '../../application/channel/channel-texts.js';
 import type { Company } from '../../domain/index.js';
 import { Result } from '../../shared/types/index.js';
-import { FakeGraphApi } from '../../test-support/fake-graph-api.js';
+import { FakeGraphApi, graphError } from '../../test-support/fake-graph-api.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { keepEventLoopAlive } from '../../test-support/keep-alive.js';
 import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
@@ -26,6 +27,7 @@ import {
   signWebhookBody,
   webhookPayload,
 } from '../../test-support/whatsapp-payloads.js';
+import { RedisResumeAttemptStore } from '../auth/redis-resume-attempts.js';
 import { createRedis } from '../cache/redis.client.js';
 import {
   createDatabase,
@@ -34,6 +36,7 @@ import {
   PrismaCompanyRepository,
   PrismaConversationRepository,
   PrismaMessageRepository,
+  PrismaResumeTargetReader,
 } from '../database/index.js';
 import { MockLlmProvider } from '../external-apis/llm/mock-llm.provider.js';
 import { WhatsappCloudApiClient } from '../external-apis/whatsapp/whatsapp-cloud-api.client.js';
@@ -849,5 +852,135 @@ describe('worker concorrente no canal (spec 034)', () => {
       },
       CONCURRENT_QUEUE,
     );
+  });
+});
+
+describe('retomada do atendimento no canal (spec 035)', () => {
+  const MINUTE = 60_000;
+
+  /** Varredura sobre a fila e o banco reais; o relógio dela pode andar à frente (idade mínima de 5 min). */
+  function resumerOf(h: Harness, aheadMs = 0) {
+    return new AttendanceResumer({
+      reader: new PrismaResumeTargetReader(fixturesDb.prisma),
+      attempts: new RedisResumeAttemptStore(cleanupRedis, keyspace.scopedPrefix('resume')),
+      queue: h.queue.queue,
+      cleaner: h.queue.cleaner,
+      logger: h.logs.logger,
+      now: () => new Date(Date.now() + aheadMs),
+    });
+  }
+
+  /** Mensagem do contato parada há `ageMs`, gravada direto no banco: não existe job para ela. */
+  async function strandedMessage(company: Company, contact: string, ageMs: number): Promise<void> {
+    const conversation = await fixturesDb.prisma.conversation.create({
+      data: { companyId: company.id, contactRef: contact },
+    });
+    await fixturesDb.prisma.message.create({
+      data: {
+        companyId: company.id,
+        conversationId: conversation.id,
+        role: 'USER',
+        content: SECRET_TEXT,
+        externalId: fakeWamid(contact, `-${randomUUID()}`),
+        createdAt: new Date(Date.now() - ageMs),
+      },
+    });
+  }
+
+  it('mensagem pendente sem job (o job se perdeu) é respondida depois de uma execução, uma única vez', async () => {
+    await withHarness({ windowMs: 300 }, async (h) => {
+      const number = phoneNumberId();
+      const company = await newCompany('resume-perdida', number);
+      const contact = contactNumber();
+      await strandedMessage(company, contact, 10 * MINUTE);
+
+      const summary = await resumerOf(h).runOnce();
+      assert.ok(summary.scheduled >= 1);
+      await waitFor(async () => (await sentCount(company, contact)) === 1, 'resposta enviada');
+      await sleep(300);
+
+      const sent = graph.requests.filter((request) => request.phoneNumberId === number);
+      assert.equal(sent.length, 1, 'uma única resposta');
+      assert.equal((sent[0]?.body as { to: string }).to, contact);
+      assert.equal(h.llm.calls.length, 1);
+      const raw = h.logs.raw();
+      for (const secret of [SECRET_TEXT, contact, PERSONA]) {
+        assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
+      }
+    });
+  });
+
+  it('isolamento: duas empresas com o mesmo contato parado; cada resposta sai pelo número da própria empresa', async () => {
+    await withHarness({ windowMs: 300 }, async (h) => {
+      const numberA = phoneNumberId();
+      const numberB = phoneNumberId();
+      const companyA = await newCompany('resume-iso-a', numberA);
+      const companyB = await newCompany('resume-iso-b', numberB);
+      const contact = contactNumber();
+      await strandedMessage(companyA, contact, 10 * MINUTE);
+      await strandedMessage(companyB, contact, 10 * MINUTE);
+
+      await resumerOf(h).runOnce();
+      await waitFor(
+        async () =>
+          (await sentCount(companyA, contact)) === 1 && (await sentCount(companyB, contact)) === 1,
+        'as duas respostas',
+      );
+
+      assert.equal(graph.requests.filter((r) => r.phoneNumberId === numberA).length, 1);
+      assert.equal(graph.requests.filter((r) => r.phoneNumberId === numberB).length, 1);
+      // A persona de cada empresa foi para o modelo da própria empresa.
+      const prompts = h.llm.calls.map((call) => call.systemPrompt);
+      assert.ok(prompts.some((prompt) => prompt.includes(`${PERSONA} resume-iso-a`)));
+      assert.ok(prompts.some((prompt) => prompt.includes(`${PERSONA} resume-iso-b`)));
+    });
+  });
+
+  it('resposta gravada e não enviada (envio recusado de vez) é reenviada pela varredura, sem nova chamada ao modelo', async () => {
+    await withHarness({ windowMs: 300 }, async (h) => {
+      const number = phoneNumberId();
+      const company = await newCompany('resume-unsent', number);
+      const contact = contactNumber();
+      graph.always(graphError(400, 131047));
+
+      await send(h, number, contact, 'pergunta');
+      await waitFor(
+        async () => (await stored(company, contact)).some((m) => m.role === 'ASSISTANT'),
+        'resposta gravada',
+      );
+      await waitFor(async () => ((await h.queue.jobCounts()).failed ?? 0) >= 1, 'envio recusado');
+      const llmCalls = h.llm.calls.length;
+      graph.reset();
+
+      // A varredura enxerga a resposta como parada (relógio dela 10 min à frente).
+      const summary = await resumerOf(h, 10 * MINUTE).runOnce();
+      assert.ok(summary.scheduled >= 1);
+      await waitFor(async () => (await sentCount(company, contact)) === 1, 'resposta reenviada');
+
+      assert.equal(h.llm.calls.length, llmCalls, 'sem nova chamada ao modelo');
+      const [reply] = (await stored(company, contact)).filter((m) => m.role === 'ASSISTANT');
+      assert.equal(textsSent().at(-1), reply?.content);
+      assert.notEqual(reply?.channelMessageId, null);
+    });
+  });
+
+  it('não retoma o que é recente demais nem conversa com a IA pausada', async () => {
+    await withHarness({ windowMs: 300 }, async (h) => {
+      const number = phoneNumberId();
+      const company = await newCompany('resume-nao', number);
+      const recent = contactNumber();
+      const paused = contactNumber();
+      await strandedMessage(company, recent, MINUTE);
+      await strandedMessage(company, paused, 10 * MINUTE);
+      await fixturesDb.prisma.conversation.updateMany({
+        where: { companyId: company.id, contactRef: paused },
+        data: { aiPausedUntil: new Date(Date.now() + 60 * MINUTE) },
+      });
+
+      await resumerOf(h).runOnce();
+      await sleep(800);
+      assert.equal(graph.requests.filter((r) => r.phoneNumberId === number).length, 0);
+      assert.equal(h.llm.calls.length, 0);
+    });
   });
 });

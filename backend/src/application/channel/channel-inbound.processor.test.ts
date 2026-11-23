@@ -1442,3 +1442,112 @@ describe('ChannelInboundProcessor: ordem por instante de recebimento (spec 034)'
     assert.equal(h.sender.calls.length, 1);
   });
 });
+
+describe('ChannelInboundProcessor: flush de retomada (spec 035)', () => {
+  const resumeFlush = (companyId: string): FlushJob => ({
+    ...flushOf(textJob(companyId)),
+    resume: true,
+  });
+  const textOf = (h: Harness, companyId: string, text: string, id: string) =>
+    h.processor.process(textJob(companyId, { text, externalId: id }), MORE);
+
+  it('falha do atendimento na última tentativa: não repete o texto padrão e relança', async () => {
+    const error = new DatabaseError('indisponível');
+    const h = setup({ attendance: { respondToPending: () => Promise.reject(error) } });
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(
+      h.processor.process(resumeFlush(company.id), LAST),
+      (e: unknown) => e === error,
+    );
+    assert.equal(h.sender.calls.length, 0, 'nada ao contato');
+    const line = h.logs
+      .lines()
+      .find((entry) => String(entry.msg).includes('o texto padrão não é repetido'));
+    assert.equal(line?.level, 50);
+    assert.equal(line.companyId, company.id);
+    assert.ok(!h.logs.raw().includes(CONTACT), 'sem o contato no log');
+  });
+
+  it('erro permanente na retomada: sem retentativa e sem texto padrão', async () => {
+    const h = setup({
+      attendance: { respondToPending: () => Promise.reject(new ValidationError('inválido')) },
+    });
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(
+      h.processor.process(resumeFlush(company.id), MORE),
+      (e: unknown) => e instanceof NonRetryableJobError,
+    );
+    assert.equal(h.sender.calls.length, 0);
+  });
+
+  it('o mesmo flush sem a marca de retomada continua mandando o texto padrão', async () => {
+    const error = new DatabaseError('indisponível');
+    const h = setup({ attendance: { respondToPending: () => Promise.reject(error) } });
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), LAST),
+      (e: unknown) => e === error,
+    );
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
+  });
+
+  it('job de retomada que falhou fora do handler: sem texto padrão', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.r1');
+    await h.processor.handleUnprocessedFailure(resumeFlush(company.id));
+    assert.equal(h.sender.calls.length, 0);
+    const line = h.logs
+      .lines()
+      .find((entry) => String(entry.msg).includes('job de retomada falhou'));
+    assert.equal(line?.level, 50);
+  });
+
+  it('flush de retomada com resposta gravada e não enviada: reenvia sem nova chamada ao LLM e marca o envio', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa', '555001');
+    await textOf(h, company.id, 'um', 'wamid.r2');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    assert.equal(h.llm.calls.length, 1);
+
+    assert.equal(await h.processor.process(resumeFlush(company.id), MORE), 'done');
+    assert.equal(h.llm.calls.length, 1, 'sem nova chamada ao LLM');
+    assert.equal(h.sender.calls.length, 2);
+    assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.notEqual(reply?.sentAt, null);
+  });
+
+  it('spec 035 (D6): flush NOVO (primeira tentativa) reenvia antes a resposta que não saiu, depois responde a mensagem nova', async () => {
+    const h = setup({ batch: { maxMessages: 10 } });
+    const company = await newCompany(h, 'alfa', '555001');
+    await textOf(h, company.id, 'um', 'wamid.r3');
+    h.sender.script(Result.err(retryable()));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), { attempt: 1, finalAttempt: false }),
+    );
+    await textOf(h, company.id, 'dois', 'wamid.r4');
+
+    // O job em retentativa foi trocado por um novo (primeira tentativa).
+    h.scheduler.calls.length = 0;
+    await h.processor.process(flushOf(textJob(company.id)), { attempt: 1, finalAttempt: false });
+    assert.equal(h.llm.calls.length, 1, 'a resposta antiga sai sem nova chamada ao LLM');
+    assert.equal(h.sender.calls.length, 2);
+    assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+    assert.deepEqual(
+      h.scheduler.calls.map((call) => call.schedule.mode),
+      ['ensure'],
+      'a mensagem nova fica para o turno seguinte',
+    );
+
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
+    assert.equal(h.llm.calls.length, 2);
+    assert.equal(h.llm.calls[1]?.userMessage, 'dois');
+    assert.equal(h.sender.calls.length, 3);
+  });
+});
