@@ -6,7 +6,6 @@
 - `concluída` quer dizer código na `main` com o CI verde, **não** que está publicado: em 2026-11-23 não há servidor de produção. Passos que só o dono faz aparecem em "Pendente".
 - Quem cria ou muda o status de uma spec atualiza a linha dela aqui.
 - Os títulos das specs 001 a 021 usam o vocabulário anterior à spec 022 (ver a tabela no topo do `AGENTS.md`).
-- **Número reservado, sem arquivo:** 035 (eficiência do turno: retomada de respostas não enviadas, limpeza dos jobs no Redis, leituras repetidas por job, prompt caching).
 
 | Spec | Título | Status | Pendente |
 | --- | --- | --- | --- |
@@ -44,6 +43,7 @@
 | [032](032-lgpd-e-retencao.md) | LGPD e retenção de dados | em implementação | E2 em diante (aceite dos termos, retenção, exclusão) |
 | [033](033-producao-deploy-e-operacao.md) | Produção, deploy e operação | rascunho | não aprovada |
 | [034](034-capacidade-do-canal.md) | Capacidade do canal (worker concorrente e processo robusto) | em implementação | E4 (`PROCESS_ROLE`) e E5 (limite do webhook) |
+| [035](035-resiliencia-do-atendimento.md) | Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila | rascunho | decisões D1 a D9 (dono) |
 | [036](036-ci-mais-rapido.md) | CI mais rápido | concluída | — |
 | [037](037-deploy-e-staging.md) | Deploy com rollback e staging | concluída | servidor de produção e de staging (dono) |
 | [038](038-notificacoes-atendimento-humano.md) | Notificações no painel: a IA pede atendimento humano | concluída | — |
