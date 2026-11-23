@@ -348,6 +348,14 @@ export interface PendingResponse {
   readonly hasMorePending: boolean;
 }
 
+export interface RespondToPendingOptions {
+  /**
+   * Revisão da 035 (B1): o reenvio da resposta anterior já falhou de vez neste contato; o turno não a
+   * tenta de novo (fica só gravada, com aviso e métrica) e responde as pendentes.
+   */
+  readonly skipUnsent?: boolean;
+}
+
 type ExistingState =
   | { readonly kind: 'none' }
   | { readonly kind: 'replied'; readonly message: Message; readonly reply: Message }
@@ -488,6 +496,7 @@ export class AttendanceService {
     companyId: CompanyId,
     rawContactRef: string,
     rawLimits: BatchLimits,
+    options: RespondToPendingOptions = {},
   ): Promise<PendingResponse> {
     const contactRef = contactRefSchema.parse(rawContactRef);
     const limits = batchLimitsSchema.parse(rawLimits);
@@ -523,18 +532,21 @@ export class AttendanceService {
       // Spec 035: a resposta gravada e não enviada só sai se ainda for reenviável (dentro da janela
       // e não segurada pela equipe ao assumir a conversa).
       const unsent = await this.findUnsentTail(companyId, conversation.id);
-      return unsent === null || !isReplyResendable(unsent, conversation, this.now())
+      return unsent === null ||
+        options.skipUnsent === true ||
+        !isReplyResendable(unsent, conversation, this.now())
         ? this.emptyResponse(conversation.id)
-        : this.resendResponse(conversation.id, unsent, false);
+        : this.resendOrBlocked(company, conversation.id, unsent, false);
     }
     const [previous] = await this.deps.messages.listBefore(companyId, conversation.id, first.id, 1);
     if (previous?.role === 'ASSISTANT' && previous.sentAt === null) {
       // Spec 035 (D6): a resposta anterior que não saiu (envio recusado, ou o job em retentativa foi
       // trocado por este) vai ANTES das novas, em qualquer tentativa, para a ordem ficar a certa.
-      if (isReplyResendable(previous, conversation, this.now())) {
-        return this.resendResponse(conversation.id, previous, true);
+      if (options.skipUnsent !== true && isReplyResendable(previous, conversation, this.now())) {
+        return this.resendOrBlocked(company, conversation.id, previous, true);
       }
-      // Fora da janela, ou segurada pela equipe (spec 039): fica só gravada. Avisa, sem conteúdo.
+      // Fora da janela, segurada pela equipe (spec 039), texto padrão ou reenvio que já falhou de vez
+      // (revisão da 035): fica só gravada. Avisa, sem conteúdo.
       this.deps.logger.warn(
         {
           companyId,
@@ -1061,6 +1073,30 @@ export class AttendanceService {
       batchSize: 0,
       hasMorePending: false,
     };
+  }
+
+  /**
+   * Revisão da 035 (I2): o reenvio também respeita cota e assinatura (spec 031). Bloqueado, nada sai ao
+   * contato e o provedor não é chamado, como no turno normal.
+   */
+  private async resendOrBlocked(
+    company: Company,
+    conversationId: string,
+    reply: Message,
+    hasMorePending: boolean,
+  ): Promise<PendingResponse> {
+    const subject = { conversationId, messageId: reply.id };
+    const entitlements = await this.readEntitlements(company, subject);
+    if (this.blockedBy(company, subject, entitlements) !== null) {
+      return {
+        outcome: 'blocked',
+        conversationId,
+        reply: null,
+        batchSize: 0,
+        hasMorePending: false,
+      };
+    }
+    return this.resendResponse(conversationId, reply, hasMorePending);
   }
 
   private resendResponse(

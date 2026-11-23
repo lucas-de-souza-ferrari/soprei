@@ -910,7 +910,7 @@ describe('fila de entrada: worker concorrente e métricas (spec 034)', () => {
 
 describe('fila de entrada: limpeza por idade (spec 035, E3)', () => {
   const CLEANED_TEXT = 'texto-secreto-que-a-limpeza-apaga-7c1';
-  const KEEP = { ...SETTINGS, keepCompletedSeconds: 2, keepFailedSeconds: 2 };
+  const KEEP = { ...SETTINGS, keepCompletedSeconds: 3, keepFailedSeconds: 3 };
 
   /** Chaves do hash de um job no Redis (`<prefixo>:<fila>:<id>`). */
   const jobKey = (prefix: string, id: string): string => `${prefix}:${INBOUND_QUEUE_NAME}:${id}`;
@@ -933,14 +933,14 @@ describe('fila de entrada: limpeza por idade (spec 035, E3)', () => {
       const counts = await h.handle.jobCounts();
       return counts.completed === 1 && counts.failed === 1;
     }, 'um concluído e um falho');
-    // Passa do prazo (2 s) sem nenhum outro job terminar: a retenção do BullMQ sozinha não apagaria.
-    await sleep(2_600);
+    // O recente termina ANTES de o antigo passar do prazo (3 s): a conclusão de um job faz o BullMQ
+    // apagar os concluídos vencidos (removeOnComplete por idade), e isso não pode acontecer aqui.
+    await sleep(1_200);
     const fresh = textJob();
     assert.ok((await h.handle.queue.enqueue(fresh)).ok);
-    await waitFor(
-      async () => ((await h.handle.jobCounts()).completed ?? 0) >= 1,
-      'o recente concluído',
-    );
+    await waitFor(async () => (await h.handle.jobCounts()).completed === 2, 'o recente concluído');
+    // Agora o antigo passa do prazo sem nenhum outro job terminar: só a limpeza o apaga.
+    await sleep(2_300);
 
     const cleaned = await h.handle.cleaner.cleanOldJobs();
     assert.ok(cleaned.ok);
@@ -979,7 +979,7 @@ describe('fila de entrada: limpeza por idade (spec 035, E3)', () => {
       assert.ok(
         (await h.handle.queue.scheduleFlush(flushJob(), { delayMs: 60_000, mode: 'ensure' })).ok,
       );
-      await sleep(2_600);
+      await sleep(3_400);
 
       const cleaned = await h.handle.cleaner.cleanOldJobs();
       assert.ok(cleaned.ok);

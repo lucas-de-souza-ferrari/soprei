@@ -86,12 +86,15 @@ export type InboundJob = z.infer<typeof inboundJobSchema>;
  * vive no banco. Leva só a empresa, o número do negócio (para descartar o job se o número da empresa
  * mudou), o contato e o `requestId`. `resume` (spec 035, opcional: job antigo sem o campo continua
  * válido) marca o `flush` agendado pela varredura de retomada: reenvia a resposta gravada e não enviada
- * e, se falhar, não manda o texto padrão ao contato.
+ * e, se falhar, não manda o texto padrão ao contato. `skipUnsent` (spec 035, revisão B1, opcional) é
+ * posto no `flush` agendado depois que o REENVIO de uma resposta falhou de vez: esse turno não tenta a
+ * resposta antiga de novo e responde as pendentes, o que encerra a cadeia.
  */
 export const flushJobSchema = z.object({
   kind: z.literal('flush'),
   ...identityFields,
   resume: z.boolean().optional(),
+  skipUnsent: z.boolean().optional(),
 });
 
 export type FlushJob = z.infer<typeof flushJobSchema>;

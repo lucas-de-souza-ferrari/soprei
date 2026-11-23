@@ -22,6 +22,7 @@ import type {
   HumanEchoInput,
   HumanEchoResult,
   PendingResponse,
+  RespondToPendingOptions,
 } from '../attendance/attendance.service.js';
 import { ATTENDANCE_FALLBACK_TEXT } from '../attendance/attendance.service.js';
 import type { BatchLimits, InboundMessage } from '../attendance/attendance.schemas.js';
@@ -57,6 +58,7 @@ export interface InboundAttendance {
     companyId: CompanyId,
     contactRef: string,
     limits: BatchLimits,
+    options?: RespondToPendingOptions,
   ): Promise<PendingResponse>;
   hasPendingMessages(companyId: CompanyId, contactRef: string): Promise<boolean>;
   /** Spec 039: grava o eco da equipe e pausa a IA. Opcional só para os testes antigos. */
@@ -288,10 +290,12 @@ export class ChannelInboundProcessor {
     }
     let response: PendingResponse;
     try {
-      response = await this.deps.attendance.respondToPending(companyId, job.contactRef, {
-        maxMessages: this.deps.batch.maxMessages,
-        maxChars: this.deps.batch.maxChars,
-      });
+      response = await this.deps.attendance.respondToPending(
+        companyId,
+        job.contactRef,
+        { maxMessages: this.deps.batch.maxMessages, maxChars: this.deps.batch.maxChars },
+        job.skipUnsent === true ? { skipUnsent: true } : {},
+      );
     } catch (error) {
       if (error instanceof ForbiddenError) {
         this.logSuspended(companyId, job);
@@ -347,7 +351,13 @@ export class ChannelInboundProcessor {
       // Se o job não vai ser retentado (erro permanente ou última tentativa), o excedente do lote
       // não pode ficar sem `flush`; se vai, a retentativa o encontra.
       const willRetry = !(error instanceof NonRetryableJobError) && !context.finalAttempt;
-      if (response.hasMorePending && !willRetry) await this.scheduleNextQuietly(companyId, job);
+      if (response.hasMorePending && !willRetry) {
+        // Revisão da 035 (B1): se o que falhou de vez foi o REENVIO da resposta anterior, o próximo
+        // turno não a tenta de novo (senão a mesma falha se repetiria em cadeia, sem espera, e as
+        // mensagens novas do contato nunca seriam respondidas).
+        const next = response.outcome === 'resend' ? { ...job, skipUnsent: true } : job;
+        await this.scheduleNextQuietly(companyId, next);
+      }
       throw error;
     }
     if (outcome === 'discarded') return outcome;

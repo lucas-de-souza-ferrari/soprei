@@ -50,6 +50,7 @@ const OPTIONS: Omit<ResumeScanOptions, 'afterCompanyId'> = {
   windowMs: 23 * HOUR,
   maxCompanies: 1_000,
   maxContactsPerCompany: 50,
+  includeLegacy: true,
 };
 
 /** Varre tudo e devolve só os alvos das empresas deste teste (o banco de testes pode ter outras). */
@@ -184,6 +185,59 @@ describe('PrismaResumeTargetReader (spec 035)', () => {
     });
     await userMessage(company, pausedId, at(10 * MINUTE));
     assert.deepEqual(await scanFor([company]), []);
+  });
+
+  it('revisão (I3): pendente que a equipe já tratou (até o aiIgnoreBefore) não entra; mensagem nova depois dele entra', async () => {
+    const company = await newCompany('resume-tratada');
+    const handled = contact();
+    const wroteAgain = contact();
+    const handledId = await conversation(company, handled, { aiIgnoreBefore: at(5 * MINUTE) });
+    await userMessage(company, handledId, at(10 * MINUTE));
+    const againId = await conversation(company, wroteAgain, { aiIgnoreBefore: at(30 * MINUTE) });
+    await userMessage(company, againId, at(40 * MINUTE));
+    await userMessage(company, againId, at(10 * MINUTE));
+    assert.deepEqual(
+      (await scanFor([company])).map((target) => target.contactRef),
+      [wroteAgain],
+    );
+  });
+
+  it('revisão (S5): o texto padrão de falha gravado e não enviado nunca entra como unsent', async () => {
+    const company = await newCompany('resume-fallback');
+    const ref = contact();
+    const { assistant } = await answered(
+      company,
+      await conversation(company, ref),
+      at(30 * MINUTE),
+      {
+        at: at(29 * MINUTE),
+        sent: false,
+      },
+    );
+    await db().message.updateMany({
+      where: { companyId: company.id, id: assistant.id },
+      data: { isFallback: true },
+    });
+    assert.deepEqual(await scanFor([company]), []);
+  });
+
+  it('revisão (S6): sem token global, empresa sem conexão própria (modo legado) não entra; com conexão, entra', async () => {
+    const legacy = await newCompany('resume-legado');
+    const connected = await newCompany('resume-conectada');
+    await db().channelConnection.create({
+      data: { companyId: connected.id, wabaId: '1', tokenCiphertext: 'v1.k.iv.tag.ct' },
+    });
+    for (const company of [legacy, connected]) {
+      await userMessage(company, await conversation(company, contact()), at(10 * MINUTE));
+    }
+    const ids = new Set<string>([legacy.id, connected.id]);
+    const result = await reader.scan({ ...OPTIONS, includeLegacy: false, afterCompanyId: null });
+    assert.deepEqual(
+      result.targets
+        .filter((target) => ids.has(target.companyId))
+        .map((target) => target.companyId),
+      [connected.id],
+    );
   });
 
   it('o contato fixo do teste do site não entra', async () => {

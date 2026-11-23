@@ -36,6 +36,8 @@ export interface AttendanceResumerDeps {
   readonly cleaner: InboundQueueCleaner;
   readonly logger: AttendanceResumeLogger;
   readonly metrics?: AttendanceResumeMetrics | undefined;
+  /** Há token global configurado (empresas sem conexão própria podem ser retomadas). */
+  readonly legacyTokenConfigured: boolean;
   /** Relógio injetável, para os testes. */
   readonly now?: () => Date;
 }
@@ -112,11 +114,25 @@ export class AttendanceResumer {
         maxCompanies: RESUME_MAX_COMPANIES_PER_RUN,
         maxContactsPerCompany: RESUME_MAX_CONTACTS_PER_COMPANY,
         afterCompanyId: this.afterCompanyId,
+        includeLegacy: this.deps.legacyTokenConfigured,
       });
+      const startedAfter = this.afterCompanyId;
       this.afterCompanyId = scan.nextCompanyId;
       const runId = randomUUID();
+      // Os alvos vêm agrupados por empresa, em ordem de id: ao mudar de empresa, a anterior terminou.
+      let lastCompanyDone: string | null = startedAfter;
+      let currentCompany: string | null = null;
       for (const target of scan.targets) {
-        if (scheduled >= RESUME_MAX_CONTACTS_PER_RUN) break;
+        if (currentCompany !== null && target.companyId !== currentCompany) {
+          lastCompanyDone = currentCompany;
+        }
+        currentCompany = target.companyId;
+        if (scheduled >= RESUME_MAX_CONTACTS_PER_RUN) {
+          // Teto atingido (revisão da 035, S3): a próxima execução recomeça na empresa que ficou pela
+          // metade, sem pular as que nem foram lidas. As já agendadas dela são deduplicadas na fila.
+          this.afterCompanyId = lastCompanyDone;
+          break;
+        }
         // Conversa do simulador nunca vai ao canal (nela `sentAt` é sempre nulo).
         if (!isPhoneContactRef(target.contactRef)) continue;
         if (!(await attempts.take(target.companyId, target.contactRef))) {

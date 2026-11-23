@@ -397,6 +397,7 @@ async function main(): Promise<void> {
     channelResumer = new AttendanceResumer({
       reader: new PrismaResumeTargetReader(prisma),
       attempts: new RedisResumeAttemptStore(authRedis.client, config.AUTH_REDIS_PREFIX),
+      legacyTokenConfigured: whatsapp.legacyAccessToken !== undefined,
       queue: inboundQueue.queue,
       cleaner: inboundQueue.cleaner,
       logger,

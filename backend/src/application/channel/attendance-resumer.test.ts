@@ -105,7 +105,11 @@ class FakeMetrics implements AttendanceResumeMetrics {
   }
 }
 
-function setup(pages: (ResumeScan | Error)[], attempts = new FakeAttempts()) {
+function setup(
+  pages: (ResumeScan | Error)[],
+  attempts = new FakeAttempts(),
+  legacyTokenConfigured = true,
+) {
   const reader = new FakeReader(pages);
   const queue = new FakeQueue();
   const cleaner = new FakeCleaner();
@@ -118,6 +122,7 @@ function setup(pages: (ResumeScan | Error)[], attempts = new FakeAttempts()) {
     cleaner,
     logger: logs.logger,
     metrics,
+    legacyTokenConfigured,
     now: () => NOW,
   });
   return { reader, attempts, queue, cleaner, metrics, logs, resumer };
@@ -178,8 +183,13 @@ describe('AttendanceResumer (spec 035)', () => {
       maxCompanies: RESUME_MAX_COMPANIES_PER_RUN,
       maxContactsPerCompany: RESUME_MAX_CONTACTS_PER_COMPANY,
       afterCompanyId: null,
+      includeLegacy: true,
     });
     assert.equal(RESUME_MIN_AGE_MS, 5 * 60_000);
+    // Sem token global, empresas sem conexão própria ficam de fora (revisão, S6).
+    const noLegacy = setup([{ targets: [], nextCompanyId: null }], new FakeAttempts(), false);
+    await noLegacy.resumer.runOnce();
+    assert.equal(noLegacy.reader.calls[0]?.includeLegacy, false);
     assert.equal(RESUME_WINDOW_MS, 23 * 3_600_000);
   });
 
@@ -231,14 +241,23 @@ describe('AttendanceResumer (spec 035)', () => {
     assert.deepEqual(h.metrics.contacts.slice(-1), ['pending:skipped_limit']);
   });
 
-  it('para no teto de contatos por execução', async () => {
-    const many = Array.from({ length: RESUME_MAX_CONTACTS_PER_RUN + 25 }, (_, index) =>
+  it('para no teto de contatos por execução e a seguinte recomeça na empresa que ficou pela metade (revisão, S3)', async () => {
+    const ofA = Array.from({ length: 150 }, (_, index) =>
       target(COMPANY_A, `55119${String(index).padStart(8, '0')}`),
     );
-    const h = setup([{ targets: many, nextCompanyId: null }]);
+    const ofB = Array.from({ length: 80 }, (_, index) =>
+      target(COMPANY_B, `55118${String(index).padStart(8, '0')}`),
+    );
+    const h = setup([
+      { targets: [...ofA, ...ofB], nextCompanyId: COMPANY_B },
+      { targets: [], nextCompanyId: null },
+    ]);
     const summary = await h.resumer.runOnce();
     assert.equal(summary.scheduled, RESUME_MAX_CONTACTS_PER_RUN);
     assert.equal(h.queue.calls.length, RESUME_MAX_CONTACTS_PER_RUN);
+    await h.resumer.runOnce();
+    // A empresa A terminou; a B ficou pela metade: a próxima leitura começa depois da A, não da B.
+    assert.equal(h.reader.calls[1]?.afterCompanyId, COMPANY_A);
   });
 
   it('falha ao agendar um contato conta failed, segue com os outros e a execução termina com error', async () => {

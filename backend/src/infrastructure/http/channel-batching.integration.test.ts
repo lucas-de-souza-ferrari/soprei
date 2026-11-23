@@ -858,6 +858,13 @@ describe('worker concorrente no canal (spec 034)', () => {
 describe('retomada do atendimento no canal (spec 035)', () => {
   const MINUTE = 60_000;
 
+  /**
+   * Chamadas ao modelo de uma empresa deste arquivo (pela persona, que leva o rótulo). A varredura lê
+   * o banco inteiro e pode atender empresas de outros testes; as asserções olham só a do teste.
+   */
+  const callsOf = (h: Harness, label: string) =>
+    h.llm.calls.filter((call) => call.systemPrompt.includes(`${PERSONA} ${label}`));
+
   /** Varredura sobre a fila e o banco reais; o relógio dela pode andar à frente (idade mínima de 5 min). */
   function resumerOf(h: Harness, aheadMs = 0) {
     return new AttendanceResumer({
@@ -866,6 +873,7 @@ describe('retomada do atendimento no canal (spec 035)', () => {
       queue: h.queue.queue,
       cleaner: h.queue.cleaner,
       logger: h.logs.logger,
+      legacyTokenConfigured: true,
       now: () => new Date(Date.now() + aheadMs),
     });
   }
@@ -902,7 +910,7 @@ describe('retomada do atendimento no canal (spec 035)', () => {
       const sent = graph.requests.filter((request) => request.phoneNumberId === number);
       assert.equal(sent.length, 1, 'uma única resposta');
       assert.equal((sent[0]?.body as { to: string }).to, contact);
-      assert.equal(h.llm.calls.length, 1);
+      assert.equal(callsOf(h, 'resume-perdida').length, 1);
       const raw = h.logs.raw();
       for (const secret of [SECRET_TEXT, contact, PERSONA]) {
         assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);
@@ -949,7 +957,7 @@ describe('retomada do atendimento no canal (spec 035)', () => {
         'resposta gravada',
       );
       await waitFor(async () => ((await h.queue.jobCounts()).failed ?? 0) >= 1, 'envio recusado');
-      const llmCalls = h.llm.calls.length;
+      const llmCalls = callsOf(h, 'resume-unsent').length;
       graph.reset();
 
       // A varredura enxerga a resposta como parada (relógio dela 10 min à frente).
@@ -957,9 +965,11 @@ describe('retomada do atendimento no canal (spec 035)', () => {
       assert.ok(summary.scheduled >= 1);
       await waitFor(async () => (await sentCount(company, contact)) === 1, 'resposta reenviada');
 
-      assert.equal(h.llm.calls.length, llmCalls, 'sem nova chamada ao modelo');
+      assert.equal(callsOf(h, 'resume-unsent').length, llmCalls, 'sem nova chamada ao modelo');
       const [reply] = (await stored(company, contact)).filter((m) => m.role === 'ASSISTANT');
-      assert.equal(textsSent().at(-1), reply?.content);
+      const ours = graph.requests.filter((request) => request.phoneNumberId === number);
+      assert.equal(ours.length, 1);
+      assert.equal((ours[0]?.body as { text: { body: string } }).text.body, reply?.content);
       assert.notEqual(reply?.channelMessageId, null);
     });
   });
@@ -980,7 +990,7 @@ describe('retomada do atendimento no canal (spec 035)', () => {
       await resumerOf(h).runOnce();
       await sleep(800);
       assert.equal(graph.requests.filter((r) => r.phoneNumberId === number).length, 0);
-      assert.equal(h.llm.calls.length, 0);
+      assert.equal(callsOf(h, 'resume-nao').length, 0);
     });
   });
 });

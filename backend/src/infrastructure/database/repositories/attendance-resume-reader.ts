@@ -40,8 +40,12 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
           deletedAt: null,
           status: 'ACTIVE',
           whatsappPhoneNumberId: { not: null },
-          // Sem conexão é o modo legado (token global); com conexão, só a que a Meta ainda aceita.
-          OR: [{ channelConnection: null }, { channelConnection: { status: 'CONNECTED' } }],
+          // Sem conexão é o modo legado (token global, só se configurado); com conexão, só a que a Meta
+          // ainda aceita (revisão da 035, S6: sem token global, o `flush` chamaria o modelo e não enviaria).
+          OR: [
+            ...(options.includeLegacy ? [{ channelConnection: null }] : []),
+            { channelConnection: { status: 'CONNECTED' as const } },
+          ],
           ...(after === null ? {} : { id: { gt: after } }),
         },
         select: { id: true, whatsappPhoneNumberId: true },
@@ -56,9 +60,12 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
         const companyId = company.id;
         // Comum aos dois tipos: IA não pausada, não é o teste do site, e o contato escreveu dentro da
         // janela de atendimento do canal.
+        // `updatedAt` acompanha a última mensagem (spec 024): o filtro é exato e usa o índice
+        // `(company_id, updated_at, id)` (revisão da 035, S2).
         const eligible = {
           companyId,
           contactRef: { not: SITE_TEST_CONTACT_REF },
+          updatedAt: { gt: windowStart },
           OR: [{ aiPausedUntil: null }, { aiPausedUntil: { lte: now } }],
         };
         const contactInWindow = {
@@ -83,12 +90,33 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
               },
             ],
           },
-          select: { id: true, contactRef: true },
+          select: {
+            id: true,
+            contactRef: true,
+            aiIgnoreBefore: true,
+            // A pendente mais nova: se a equipe já tratou até ela, nada do contato está realmente pendente.
+            messages: {
+              where: { companyId, role: 'USER', answeredById: null, replies: { none: {} } },
+              select: { createdAt: true },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              take: 1,
+            },
+          },
           orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
           take: maxContactsPerCompany,
         });
         const seen = new Set<string>();
         for (const conversation of pending) {
+          // Revisão da 035 (I3): o que a equipe tratou pelo celular (`aiIgnoreBefore`, spec 039) nunca é
+          // respondido pela IA; sem isto o contato gastaria as tentativas do dia à toa.
+          const [newest] = conversation.messages;
+          if (
+            newest === undefined ||
+            (conversation.aiIgnoreBefore !== null &&
+              newest.createdAt.getTime() <= conversation.aiIgnoreBefore.getTime())
+          ) {
+            continue;
+          }
           seen.add(conversation.id);
           targets.push({
             companyId,
@@ -123,7 +151,7 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
             aiIgnoreBefore: true,
             messages: {
               where: { companyId },
-              select: { role: true, sentAt: true, createdAt: true },
+              select: { role: true, sentAt: true, createdAt: true, isFallback: true },
               orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               take: 1,
             },
@@ -135,6 +163,8 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
           if (seen.has(conversation.id)) continue;
           const [last] = conversation.messages;
           if (last === undefined || last.role !== 'ASSISTANT' || last.sentAt !== null) continue;
+          // O texto padrão de falha nunca é reenviado (D4; revisão da 035, S5).
+          if (last.isFallback) continue;
           if (last.createdAt.getTime() > stalledBefore.getTime()) continue;
           if (
             conversation.aiIgnoreBefore !== null &&

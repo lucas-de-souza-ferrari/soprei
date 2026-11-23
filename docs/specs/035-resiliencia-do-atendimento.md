@@ -89,7 +89,7 @@ E1 (integração com Postgres, BullMQ e Graph falso reais, relógio injetado, so
 - [ ] Não são retomados: empresa suspensa, empresa removida, conversa com a IA pausada, conversa do simulador, pendente com menos de `RESUME_MIN_AGE`, contato cuja mensagem mais recente passou de `RESUME_WINDOW`. *(simulador e teste do site: unitário passando; os demais: integração escrita, só no CI)*
 - [ ] O mesmo contato é retomado no máximo `RESUME_MAX_ATTEMPTS` vezes em 24 horas; a tentativa seguinte conta `skipped_limit` e não agenda. *(a varredura com contador falso: unitário passando; o contador no Redis: integração escrita, só no CI)*
 - [ ] **Isolamento:** com duas empresas com pendentes, cada `flush` agendado leva o `companyId` e o número da própria empresa; a resposta de uma nunca sai pelo número da outra; a consulta de cada empresa não devolve contato da outra. *(teste de integração escrito; só roda no CI)*
-- [x] Mais contatos que `RESUME_MAX_CONTACTS_PER_RUN`: a execução agenda só o limite e a seguinte continua de onde parou (rodízio). *(teste unitário passando)*
+- [x] Mais contatos que `RESUME_MAX_CONTACTS_PER_RUN`: a execução agenda só o limite e a seguinte continua de onde parou (rodízio). *(teste unitário passando; corrigido na revisão, S3: a seguinte recomeça na empresa que ficou pela metade)*
 - [ ] Duas execuções seguidas sem o `flush` ter rodado não criam dois jobs para o mesmo contato (deduplicação da fila). *(sem teste novo: é a deduplicação do modo `ensure`, já coberta em `inbound-queue.integration.test.ts`, spec 013)*
 - [x] Job de `flush` sem o campo `resume` (formato antigo) continua válido. *(teste unitário passando)*
 - [x] O texto das mensagens, o `contactRef` e o telefone não aparecem em log nem em `/metrics` (captura de log com sentinelas). *(log da varredura e `/metrics`: unitário passando; o fluxo completo: integração, só no CI)*
@@ -173,4 +173,26 @@ A conferir na implementação (não muda o desenho): se a consulta de pendentes 
 - **Verificado localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check`; **todos os unitários do backend** (1.922 testes: 1.911 verdes, 11 pulados, 0 falhas); as três suítes mais tocadas repetidas 3 vezes (118 verdes em cada).
 - **Não rodado (não há Postgres nem Redis de teste nesta máquina):** os testes de integração novos ou alterados: `attendance-resume-reader.integration.test.ts` (10), `redis-resume-attempts.integration.test.ts` (3), a limpeza em `inbound-queue.integration.test.ts` (3), os 4 cenários de ponta a ponta em `channel-batching.integration.test.ts` e o cenário reescrito da limitação da 013 (agora prova o reenvio antes da resposta nova). O CI decide.
 - **E4 (fatiar `attendance.service.ts`) não foi feita.** Pela D8 ela é um PR só de movimentação, depois deste.
+
+### Revisão (2026-11-23, `reviewer`; correções aplicadas no mesmo dia)
+
+O `reviewer` não aprovou a primeira versão: três bloqueantes e quatro importantes. Verificou e achou correto: a barreira de tenant da leitura, o contador no Redis, a D4 nos dois caminhos, a semântica do `queue.clean` do BullMQ 6.4.2, o timer e o desligamento, a privacidade e a relação entre a pausa da 039 e o `aiIgnoreBefore`.
+
+- **B1 (aplicado): laço sem fim de reenvio.** Com a D6, um reenvio que falhava de vez (131042, 368, 131026, 190 em empresa `LEGACY`, número trocado) reagendava o turno seguinte, que reenviava de novo, sem espera, por até 23 h, e as mensagens novas do contato nunca eram respondidas (o `reviewer` provou com 50 voltas). Correção: quando o que falhou de vez foi o **reenvio** e há pendentes, o próximo `flush` leva `skipUnsent: true` (campo opcional do job; `RespondToPendingOptions.skipUnsent`) e responde as pendentes sem tentar a resposta antiga. Custo residual: cada mensagem nova do contato tenta o reenvio uma vez. Testes unitários novos.
+- **B2 (aplicado):** o teste de limpeza deixava o job recente terminar depois de o antigo vencer, e a própria conclusão do BullMQ apagaria o antigo. Agora o recente termina antes do prazo do antigo.
+- **B3 (aplicado):** `channel-credentials.integration.test.ts` (190, reconexão e lote) foi ajustado à D6: o primeiro `flush` depois do token novo reenvia a resposta da primeira mensagem, e o seguinte responde o lote.
+- **I2 (aplicado): o reenvio ignorava cota e assinatura (031).** Agora passa pela mesma checagem (`resendOrBlocked`): bloqueado, nada sai.
+- **I3 (aplicado):** pendentes já tratadas pela equipe (até o `aiIgnoreBefore`) não entram mais na varredura (antes gastavam as 3 tentativas do contato e ocupavam as vagas por empresa).
+- **S1 (aplicado):** `isPhoneContactRef` contava caracteres não numéricos (`/D/` no lugar de `/\D/`).
+- **S2 (aplicado):** as consultas filtram `updatedAt` dentro da janela (usa o índice da 024; plano de consulta não verificado, sem banco).
+- **S3 (aplicado):** no teto de 200, a execução seguinte recomeça na empresa que ficou pela metade (as já agendadas dela são deduplicadas na fila; podem gastar uma tentativa a mais do contador, risco aceito).
+- **S4 (aplicado):** os testes de ponta a ponta filtram chamadas ao modelo e envios pela empresa do teste.
+- **S5 (aplicado): o texto padrão de falha (`isFallback`) nunca é reenviado** (coerente com a D4). Um teste unitário antigo de privacidade foi ajustado: o envio bem-sucedido vem da mensagem seguinte.
+- **S6 (aplicado):** sem `WHATSAPP_ACCESS_TOKEN`, empresas sem conexão própria (`LEGACY`) ficam fora da varredura (`includeLegacy`).
+- **S7 (aplicado):** a área do canal não descreve mais a regra antiga da retentativa.
+- **S8 (registrado):** a marca `resume` passa para os `flush` de continuação do mesmo contato, que também não mandam o texto padrão.
+- **Para o dono decidir (não aplicados):**
+  - **I1:** o simulador (`POST /admin/companies/:id/messages`, que OWNER, ADMIN e AGENT usam) aceita qualquer `contactRef`. Se alguém simular com o telefone de um contato real que escreveu nas últimas 23 h, a resposta simulada (sem `sentAt`) passa a ser enviada a esse contato pela varredura ou pelo próximo turno dele. Antes da 035 isso nunca acontecia.
+  - **I4:** o envio que a Meta aceitou mas cuja resposta veio sem id legível é tratado como permanente de propósito (spec 011: "retentar poderia duplicar"). Com a D6 e a varredura, essa resposta passa a ser reenviada: provável duplicata. A D5 aprovada fala de outro caso (banco fora logo depois do envio).
+- **Não verificado:** os testes de integração (só no CI), planos de consulta, o efeito da D6 nos testes de privacidade e de coexistência de `whatsapp-channel.integration.test.ts` (que passam por um reenvio a mais).
 

@@ -23,6 +23,11 @@ export interface ResumeScanOptions {
   readonly maxContactsPerCompany: number;
   /** Id da última empresa lida na chamada anterior; `null` começa do início. */
   readonly afterCompanyId: string | null;
+  /**
+   * Inclui empresas sem conexão própria (modo legado, token global). Só faz sentido com o token global
+   * configurado: sem ele o `flush` chamaria o modelo e não teria como enviar.
+   */
+  readonly includeLegacy: boolean;
 }
 
 export interface ResumeScan {
