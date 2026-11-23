@@ -56,7 +56,7 @@ Este arquivo guarda só o que vale para qualquer tarefa. As regras de cada área
 - Pino (logs estruturados) + `prom-client` (métricas)
 - JWT (`jose`, HS256, só atrás de `AccessTokenService`) + refresh token opaco com rotação, hash de senha `scrypt` do `node:crypto` (spec 007, pronta); RBAC por permissões, gestão de usuários e auditoria (spec 008, pronta); SSE e Socket.IO (spec 009)
 
-Ainda não decididos: hospedagem. O onboarding de empresas no canal (spec 015: credencial própria cifrada e Embedded Signup) já existe. Ver "Decisões em aberto" em `docs/context.md`. Não assuma o que não está decidido; proponha em uma spec.
+Hospedagem: servidor próprio (PM2 + nginx; spec 037, `docs/ops/deploy.md`). O que ainda não foi decidido está em "Decisões em aberto" de `docs/context.md`. Não assuma o que não está decidido; proponha em uma spec.
 
 A ordem de execução das specs é a do **roadmap em `docs/context.md` (seção 5)**, não a numeração dos arquivos. Só a próxima spec é detalhada; specs com status `esboço` (hoje 005 a 009) **não são implementadas** até serem relidas contra o código real, reescritas se preciso, e aprovadas. Specs de segurança (autenticação, autorização, isolamento, RLS) passam pelo agente `reviewer` antes do merge.
 

@@ -1,6 +1,6 @@
 # 042 — Organização da documentação
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D8 como recomendadas; E1 implementada, aguardando CI; E2 em branch própria)
+- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D8 como recomendadas; E1 e E2 implementadas, cada uma na sua branch, aguardando CI, revisão e merge)
 - **Branch:** `spec/042-organizacao-da-documentacao`
 - **Depende de:** nenhuma (só documentação; convém não haver outra branch aberta que mexa em `AGENTS.md`)
 
@@ -80,13 +80,13 @@ E1:
 
 E2:
 
-- [ ] `docs/handoff.md` tem no máximo 20.000 bytes e contém as oito seções fixas (`docs-structure.test.ts`).
-- [ ] A linha de status de toda spec `docs/specs/NNN-*.md` começa por uma das cinco palavras do template (`docs-structure.test.ts`).
-- [ ] `docs/specs/README.md` tem uma linha para cada arquivo de spec e nenhuma para arquivo inexistente (`docs-structure.test.ts`).
-- [ ] `.tmp-onb.txt` e `lab/` não estão mais versionados (`docs-structure.test.ts`: `git ls-files` não os lista).
-- [ ] Todo link relativo do `README.md` aponta para arquivo existente (`docs-structure.test.ts`).
+- [x] `docs/handoff.md` tem no máximo 20.000 bytes e contém as oito seções fixas (`docs-structure.test.ts`).
+- [x] A linha de status de toda spec `docs/specs/NNN-*.md` começa por uma das cinco palavras do template (`docs-structure.test.ts`).
+- [x] `docs/specs/README.md` tem uma linha para cada arquivo de spec e nenhuma para arquivo inexistente (`docs-structure.test.ts`).
+- [x] `.tmp-onb.txt` e `lab/` não estão mais versionados (`docs-structure.test.ts`: `git ls-files` não os lista).
+- [x] Todo link relativo do `README.md` aponta para arquivo existente (`docs-structure.test.ts`).
 - [ ] O diff das specs existentes só toca a linha de status (conferido pelo `reviewer` no PR).
-- [ ] `ci-workflow.test.ts`, `deploy-workflow.test.ts` e `domain-vocabulary.test.ts` continuam verdes.
+- [x] `ci-workflow.test.ts`, `deploy-workflow.test.ts` e `domain-vocabulary.test.ts` continuam verdes.
 
 ## Casos de borda e erros
 
@@ -134,3 +134,16 @@ Nenhuma dependência nova. Decisões para o dono:
 - **Desvio aceito (D2):** como o texto não foi reescrito, o núcleo ainda cita seções movidas por expressões como "abaixo", "acima" e `ver "Autenticação"`; a seção "Áreas" avisa que essas seções estão nos arquivos da tabela. Dentro de um arquivo de área, "acima"/"abaixo" podem apontar para seção de outro arquivo (por exemplo, o painel cita a ponte do cookie da 023, que está em `canal-whatsapp.md`).
 - **Outros arquivos:** `backend/src/docs-structure.test.ts` (novo, 4 testes), `domain-vocabulary.test.ts` (varre `docs/areas`; nenhuma exceção da allowlist apontava para o `AGENTS.md`), os três roteiros de `docs/agents/`, `CLAUDE.md` (aviso de que as áreas não são carregadas sozinhas) e duas referências do `backend/.env.example` (uma dizia `CLAUDE.md` para "Ambiente local"; a outra aponta agora para a área de autenticação).
 - **Ambiente desta sessão:** máquina sem `node_modules`, sem `backend/.env` e com Node 26.13.1 no `PATH` (não o 24 do `.nvmrc`). Foram feitos `pnpm install --frozen-lockfile` e `pnpm db:generate` com uma `DATABASE_URL` fictícia só no ambiente do comando (nenhum `.env` criado, nenhuma conexão).
+
+### E2 (2026-11-23, Claude Code, Fable 5.2, branch `spec/042-e2-handoff-e-specs`, empilhada sobre a E1)
+
+- **`docs/handoff.md`:** de 76 KB para 19 KB. "Última sessão", "Onde estamos", "Passos do dono pendentes" e "Próximo passo" são novas; "Decisões do dono que não são óbvias no código", "Armadilhas", "O que não vem pelo git" e "Pendências abertas" foram mantidas **com o texto de antes** (só o título encurtado e a "decisão de hospedagem" retirada das pendências).
+- **Removido do handoff, para o dono conferir (D3):** os 25 parágrafos "Atualização anterior"; a seção antiga "Onde estamos" (resumos das specs 027, 028 e 029, ajustes da revisão da 023 e pendências aceitas da 029, que continuam no Registro de cada spec); e a lista antiga "Passos do dono" (aplicar migrations e reiniciar depois de cada merge das specs 020 a 031, variáveis do `.env` de desenvolvimento, troca da spec 022 na máquina do dono, testes manuais das specs 014 e 015 com a API real, stash do GitHub Desktop). Critério: o sistema está em produção com essas specs, e o deploy aplica as migrations. O que não deu para confirmar foi mantido em "Passos do dono pendentes" com a marca "conferir". O texto completo está no git (`git show adf0b4a:docs/handoff.md`).
+- **`docs/context.md`:** seção 3 só com o que está em aberto, mais a lista "Decididas depois" (fila, LLM, canal, hospedagem, cobrança, e-mail); seção 3.1 corrigida (dois provedores, ferramentas); seção 6 trocada por um resumo que aponta para o índice. O marcador de vocabulário antigo que abria dentro da seção 6 passou a abrir no início da seção 7. **Não tocado:** a seção 5 (roadmap), que ainda tem linhas de estado antigas (por exemplo a da spec 036); fica como histórico do roadmap, e o índice de specs é a fonte do estado.
+- **`AGENTS.md`:** uma frase da seção "Stack" trocada (dizia que a hospedagem não estava decidida; D6).
+- **Specs:** 14 linhas de status mudaram (015, 016, 017, 028, 030, 031, 032, 034, 036, 037, 038, 039, 040, 041), sempre no formato "palavra (resumo; status normalizado em 2026-11-23, spec 042). Antes: texto anterior inteiro". As specs 018 a 027 e 029 já começavam por "concluída" e não foram tocadas. Nenhuma outra linha de spec mudou.
+- **Índice:** `docs/specs/README.md`, 41 linhas, com a coluna "Pendente"; o teste confere que o status do índice é o da spec.
+- **Sobras:** `git rm` de `.tmp-onb.txt` e de `lab/e0/` (4 arquivos). As branches remotas ficam com o dono.
+- **Teste:** `docs-structure.test.ts` passou a ter 9 testes (os 5 novos são da E2).
+- **Verificado localmente (Node 26.13.1):** `typecheck`, `lint`, `format:check`, `docs-structure` (9), `domain-vocabulary` (5), `ci-workflow` (9) e `deploy-workflow` (11). **Não rodado:** `pnpm test` completo, integração, Playwright e build (nenhum código de produção mudou); o CI decide.
+- **Critério ainda aberto:** "o diff das specs existentes só toca a linha de status" é do `reviewer`.

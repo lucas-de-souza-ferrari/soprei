@@ -1,6 +1,6 @@
 # 032 — LGPD e retenção de dados
 
-- **Status:** aprovada (2026-11-12, pelo dono: "Aprovo todas", **D1 a D15 como recomendadas**; revisada no mesmo dia contra a `main` em `efa2e89`). Os textos dos Anexos A a C continuam rascunho até a revisão do advogado (D2).
+- **Status:** em implementação (E1 concluída, textos vigentes; E2 em diante não feitas; status normalizado em 2026-11-23, spec 042). Antes: aprovada (2026-11-12, pelo dono: "Aprovo todas", **D1 a D15 como recomendadas**; revisada no mesmo dia contra a `main` em `efa2e89`). Os textos dos Anexos A a C continuam rascunho até a revisão do advogado (D2).
 - **Branch:** uma por etapa, `spec/032-e<N>-<nome>` (cada etapa é um PR próprio; ver "Etapas")
 - **Depende de:** 011, 013 e 034 (fila e jobs com texto e `contactRef`), 015 (credencial do canal), 017, 020 e 021 (contas e expurgo), 024 (rótulo mascarado do contato), 025 (convites), 026 e 027 (conhecimento, agenda), 028 (a IA escreve na agenda), 031 (planos e pagamentos), 037 (deploy, cópias antes de migration), 038 (`Notification`), 039 (mensagem `HUMAN`, job `echo`, pausa da IA). Conversa com a **033** (backup externo, restauração e monitoramento continuam lá).
 - **Observação de numeração:** conferido em `docs/specs/` em 2026-11-12: existem 001 a 034 e 036 a 039 (a 035 está reservada para "eficiência do turno", sem arquivo). Esta continua sendo a **032**.

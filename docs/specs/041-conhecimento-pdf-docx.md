@@ -1,6 +1,6 @@
 # 041 — Conhecimento: ler PDF e DOCX no navegador
 
-- **Status:** aprovada pelo dono em 2026-11-12 ("Aprovo todas": D1 decidida antes; D2 a D13 como recomendadas); E1 e E2 implementadas em 2026-11-12 (aguardando CI, `reviewer` e merge)
+- **Status:** concluída (mergeada; status normalizado em 2026-11-23, spec 042). Antes: aprovada pelo dono em 2026-11-12 ("Aprovo todas": D1 decidida antes; D2 a D13 como recomendadas); E1 e E2 implementadas em 2026-11-12 (aguardando CI, `reviewer` e merge)
 - **Branch:** `spec/041-conhecimento-pdf-docx`
 - **Depende de:** 026 (base de conhecimento, aba Conhecimento), 018 (interface e tokens de cor), 030 (o passo "Documentos" dos Primeiros passos reaproveita a mesma tela)
 

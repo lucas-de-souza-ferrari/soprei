@@ -1,6 +1,6 @@
 # 038 — Notificações no painel: a IA pede atendimento humano
 
-- **Status:** aprovada (2026-11-11, dono: "Aprovo tudo", D1 a D10 como recomendadas)
+- **Status:** concluída (em produção; status normalizado em 2026-11-23, spec 042). Antes: aprovada (2026-11-11, dono: "Aprovo tudo", D1 a D10 como recomendadas)
 - **Branch:** `spec/030-notificacoes`
 - **Depende de:** 010 e 013 (atendimento e lote), 014 (provedor Anthropic), 023 e 029 (área da empresa e Dashboard Shell), 024 (painel de conversas e `describeContact`), 008 (permissões)
 - **Numeração:** escrita como 030; renumerada para **038** ao integrar com a `main` (lá a 030 é o assistente de primeiros passos, a 035 está reservada e a 036 e a 037 estão em uso). A branch continua `spec/030-notificacoes`.

@@ -1,6 +1,6 @@
 # 017 — Conta da pessoa e empresas dentro da conta
 
-- **Status:** aprovada pelo dono em 2026-11-03; em implementação
+- **Status:** concluída (em produção; status normalizado em 2026-11-23, spec 042). Antes: aprovada pelo dono em 2026-11-03; em implementação
 - **Branch:** `spec/017-contas-e-empresas`
 - **Depende de:** 007, 008 e 016; preserva o isolamento das specs 010, 011 e 015
 

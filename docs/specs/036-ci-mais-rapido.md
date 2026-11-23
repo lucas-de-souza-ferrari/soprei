@@ -1,6 +1,6 @@
 # 036 — CI mais rápido
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-11 com D1 a D6 como recomendadas; implementada na branch, falta a medição no CI)
+- **Status:** concluída (em uso no CI; status normalizado em 2026-11-23, spec 042). Antes: em implementação (aprovada pelo dono em 2026-11-11 com D1 a D6 como recomendadas; implementada na branch, falta a medição no CI)
 - **Branch:** `spec/036-ci-mais-rapido`
 - **Depende de:** 001 (CI), 018 (testes de navegador). Não depende da 034 nem a toca.
 - **Observação de numeração:** conferido em `docs/specs/` e `docs/context.md` em 2026-11-11: existem 001 a 034 em arquivo. A **035** foi reservada em conversa com o dono para "eficiência do turno" (ainda sem arquivo); por isso esta é a **036**.
