@@ -14,7 +14,7 @@
 
 ## Onde estamos
 
-- **Em produção** (`www.soprei.com`, servidor próprio Hetzner, PM2 + nginx, Postgres e Redis locais): IA real (`LLM_PROVIDER=anthropic`), WhatsApp com coexistência ligada, cobrança e checkout ligados (teste real da InfinitePay feito em 2026-11-11), deploy automático a cada merge na `main` com CI verde (`DEPLOY_ENABLED=true`).
+- **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
 - **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
@@ -22,6 +22,7 @@
 
 Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sido feitos.
 
+0. **Sem servidor:** conferir no GitHub se `DEPLOY_ENABLED` está `false`; ligado e sem servidor, o workflow de deploy falha a cada merge na `main`.
 1. **Spec 042:** push da E1, CI, merge; depois a E2. Apagar, se quiser, as branches remotas já mergeadas (`spec/040-e2-tela`, `spec/041-conhecimento-pdf-docx`, `fix/backup-runuser`, `docs/registro-desligamento`) e a `dev`.
 2. **Staging (spec 037, E2):** montar conforme `docs/ops/staging.md`; até lá a produção roda com `ALLOW_UNSTAGED=true` no `entry.conf`. Quando `deploy/soprei-deploy-entry.sh` mudar, reinstalar o programa de entrada à mão.
 3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): depois do merge da [spec 043](specs/043-backup-externo.md), os passos de `docs/ops/backup.md` (chaves, bucket do R2, instalar, primeiro backup, aviso, teste de restauração).
@@ -36,7 +37,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Fechar a 042 (E1, depois E2). Em seguida, por ordem de risco: staging e backup externo (passos 2 e 3); spec 035 (eficiência do turno: retomada de respostas não enviadas e de pendentes antigas, limpeza dos jobs com texto no Redis, leituras repetidas por job, prompt caching), junto com o fatiamento de `attendance.service.ts` (1.986 linhas) e de `frontend/src/AccountApp.tsx`; as etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
+Prioridade do dono (2026-11-23): **resiliência do atendimento**, spec 035 (retomada de respostas gravadas e não enviadas e de mensagens pendentes antigas, limpeza dos jobs com texto no Redis; o fatiamento de `attendance.service.ts` entra onde a spec pedir). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
 
 ## Decisões do dono que não são óbvias no código
 

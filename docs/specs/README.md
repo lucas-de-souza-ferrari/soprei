@@ -3,7 +3,7 @@
 Índice das specs (spec 042). Uma linha por arquivo; um teste (`backend/src/docs-structure.test.ts`) falha se uma spec ficar fora daqui ou se a linha de status dela não começar por uma das cinco palavras do [modelo](_template.md): `esboço`, `rascunho`, `aprovada`, `em implementação`, `concluída`.
 
 - A ordem de execução é a do roadmap em [docs/context.md](../context.md), não a numeração.
-- `concluída` quer dizer código na `main` com o CI verde; passos que só o dono faz aparecem em "Pendente".
+- `concluída` quer dizer código na `main` com o CI verde, **não** que está publicado: em 2026-11-23 não há servidor de produção. Passos que só o dono faz aparecem em "Pendente".
 - Quem cria ou muda o status de uma spec atualiza a linha dela aqui.
 - Os títulos das specs 001 a 021 usam o vocabulário anterior à spec 022 (ver a tabela no topo do `AGENTS.md`).
 - **Número reservado, sem arquivo:** 035 (eficiência do turno: retomada de respostas não enviadas, limpeza dos jobs no Redis, leituras repetidas por job, prompt caching).
@@ -45,10 +45,10 @@
 | [033](033-producao-deploy-e-operacao.md) | Produção, deploy e operação | rascunho | não aprovada |
 | [034](034-capacidade-do-canal.md) | Capacidade do canal (worker concorrente e processo robusto) | em implementação | E4 (`PROCESS_ROLE`) e E5 (limite do webhook) |
 | [036](036-ci-mais-rapido.md) | CI mais rápido | concluída | — |
-| [037](037-deploy-e-staging.md) | Deploy com rollback e staging | concluída | montar o staging (dono) |
+| [037](037-deploy-e-staging.md) | Deploy com rollback e staging | concluída | servidor de produção e de staging (dono) |
 | [038](038-notificacoes-atendimento-humano.md) | Notificações no painel: a IA pede atendimento humano | concluída | — |
 | [039](039-conexao-por-coexistencia.md) | Conexão do WhatsApp por coexistência (o cliente continua usando o aplicativo WhatsApp Business no celular) | concluída | — |
 | [040](040-novos-planos-e-enterprise.md) | Novo catálogo de planos, cota de tokens fora da tela e plano Enterprise por contato | concluída | — |
 | [041](041-conhecimento-pdf-docx.md) | Conhecimento: ler PDF e DOCX no navegador | concluída | `location` do `.mjs` no nginx e teste manual (dono, conferir) |
 | [042](042-organizacao-da-documentacao.md) | Organização da documentação | em implementação | CI e merge da E1 e da E2 |
-| [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | CI, `reviewer` e os passos do dono (instalar, primeiro backup, restauração) |
+| [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | CI; confirmação da D3; passos do dono parados até existir servidor |

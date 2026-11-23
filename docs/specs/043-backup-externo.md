@@ -1,12 +1,14 @@
 # 043 — Backup externo do banco e teste de restauração
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 implementada, aguardando CI, `reviewer` e os passos do dono)
+- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 implementada e revisada, aguardando CI; **os passos do dono estão parados: em 2026-11-23 não há servidor de produção**)
 - **Branch:** `spec/043-backup-externo`
 - **Depende de:** 037 (deploy, programa de cópia antes de migration, padrão dos scripts de `deploy/`), 032 (prazo de 35 dias das cópias, D8). Substitui a etapa **E5 da spec 033** (rascunho, escrita antes de a produção existir); o resto da 033 não é tocado.
 - **Esta spec passa pelo `reviewer`** antes do merge: o banco inteiro (dados pessoais de todas as empresas) sai do servidor, e há chave e credencial novas.
 - **Fatos externos** (preço, franquia e permissões do armazenamento, opções das ferramentas) **não foram lidos na fonte nesta sessão**: o que está marcado **(S#)** é suposição e é conferido no E0, antes de qualquer código.
 
 ## Objetivo
+
+> **Nota de 2026-11-23:** esta spec foi escrita a partir do handoff anterior, que registrava a produção num servidor próprio. O dono informou depois que **hoje não há servidor de produção**. O código e os testes valem como estão; "Estado atual" e os passos do dono descrevem o servidor que existir quando o backup for instalado.
 
 A produção roda num único servidor e **não existe nenhuma cópia do banco fora dele**. Hoje há só duas cópias locais: a de antes de migration (`/usr/local/sbin/soprei-predeploy-backup`, as 3 últimas) e a diária em `/root/backups`, feita por um `soprei-backup.sh` que **não está no repositório** (horário, retenção e criptografia não conferidos). Se o servidor ou o disco se perder, perdem-se todas as empresas, conversas, assinaturas e as credenciais cifradas do WhatsApp. Esta spec põe no repositório um backup diário, cifrado antes de sair, enviado para fora do provedor do servidor, com aviso quando ele para e com restauração testada.
 

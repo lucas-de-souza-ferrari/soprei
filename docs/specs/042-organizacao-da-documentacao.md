@@ -160,3 +160,4 @@ O `reviewer` refez a conferência linha a linha por conta própria e chegou ao m
 - **Teste:** `docs-structure.test.ts` passou a ter 10 testes (5 da E1, 5 da E2).
 - **Verificado localmente (Node 26.13.1):** `typecheck`, `lint`, `format:check`, `docs-structure` (10), `domain-vocabulary` (5), `ci-workflow` (9) e `deploy-workflow` (11). **Não rodado:** `pnpm test` completo, integração, Playwright e build (nenhum código de produção mudou); o CI decide.
 - **Critério ainda aberto:** "o diff das specs existentes só toca a linha de status" é do `reviewer`.
+- **Correção (2026-11-23, mesmo dia):** o dono informou que **não há servidor de produção hoje**. A D6 e os resumos "em produção" tinham sido escritos a partir do handoff anterior. Corrigidos: as linhas de status normalizadas (agora dizem "na `main`"), as seções 3 e 6 e a entrada da 042 no `docs/context.md`, o `docs/handoff.md`, o README e o índice de specs.

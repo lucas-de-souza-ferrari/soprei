@@ -37,4 +37,4 @@ O cadastro, o login e o painel exigem `ACCOUNTS_ENABLED=true`, `APP_ORIGIN` com 
 - `pnpm test`: testes unitários. `pnpm test:integration`: integração do backend (exige PostgreSQL e Redis locais; só toca `soprei_test` e o Redis `/15`).
 - `pnpm --filter soprei-frontend test:browser`: Playwright.
 
-O CI do GitHub Actions é a palavra final. Cada merge na `main` com o CI verde é publicado na produção pelo deploy automático (`.github/workflows/deploy.yml`).
+O CI do GitHub Actions é a palavra final. Com um servidor configurado (`docs/ops/deploy.md`) e o interruptor `DEPLOY_ENABLED` ligado, cada merge na `main` com o CI verde é publicado pelo deploy automático (`.github/workflows/deploy.yml`).
