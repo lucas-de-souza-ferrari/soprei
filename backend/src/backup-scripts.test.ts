@@ -82,7 +82,7 @@ describe('scripts de backup (spec 043)', () => {
     for (const line of deletions) {
       assert.match(
         line,
-        /find "\$LOCAL_DIR" -maxdepth 1|-mtime "\+\$LOCAL_KEEP_DAYS" -delete|rm -f "\$tmp"/,
+        /find "\$LOCAL_DIR" -maxdepth 1|-mmin "\+\$\(\(LOCAL_KEEP_DAYS \* 1440\)\)" -delete|rm -f "\$tmp"/,
       );
     }
   });
@@ -90,7 +90,7 @@ describe('scripts de backup (spec 043)', () => {
   it('a saída de pg_dump, age, rclone e curl vai só para o registro privado da execução', () => {
     const lines = codeLinesOf('deploy/backup/soprei-backup.sh');
     const invocations = lines.filter((line) =>
-      /("\$RUNUSER" -u postgres|^\s*age -r|rclone --config|curl -fsS)/.test(line),
+      /("\$RUNUSER" -u postgres|^\s*age -r|rclone --config|curl -q -fsS)/.test(line),
     );
     assert.equal(invocations.length, 5);
     for (const line of invocations) {
@@ -121,7 +121,7 @@ describe('scripts de backup (spec 043)', () => {
     );
     const calls = lines.filter((line) => /curl -/.test(line));
     assert.equal(calls.length, 1);
-    assert.match(calls[0] ?? '', /curl -fsS -m 10 --retry 2 -o \/dev\/null "\$PING_URL" /);
+    assert.match(calls[0] ?? '', /curl -q -fsS -m 10 -o \/dev\/null "\$PING_URL" /);
   });
 
   it('o teste de restauração só usa o banco de nome fixo e sempre limpa ao sair', () => {
@@ -143,6 +143,39 @@ describe('scripts de backup (spec 043)', () => {
     assert.equal(queries.length, 2);
     assert.match(queries.join('\n'), /SELECT 1 FROM pg_database/);
     assert.match(queries.join('\n'), /SELECT count\(\*\) FROM \$table/);
+  });
+});
+
+describe('robustez do backup (revisão da spec 043)', () => {
+  const code = codeLinesOf('deploy/backup/soprei-backup.sh').join('\n');
+
+  it('a trava padrão fica em /run, onde só o root escreve', () => {
+    assert.match(code, /^LOCK_FILE=\$\{SOPREI_BACKUP_LOCK_FILE:-\/run\/soprei-backup\.lock\}$/m);
+    assert.doesNotMatch(code, /\/var\/lock/);
+  });
+
+  it('depois da trava, uma falha inesperada passa por fail (estado gravado, saída 2)', () => {
+    const main = code.slice(code.indexOf('\nmain() {'));
+    const lock = main.indexOf('acquire_lock');
+    const trap = main.indexOf(`trap 'fail "erro inesperado na linha $LINENO"' ERR`);
+    const prepare = main.indexOf('prepare_dirs');
+    assert.ok(
+      lock >= 0 && trap > lock && prepare > trap,
+      'trava, depois o trap, depois o trabalho',
+    );
+    assert.match(code, /^fail\(\) \{\n {2}trap - ERR$/m);
+  });
+
+  it('pastas e registro do backup ficam fechados mesmo se já existiam', () => {
+    assert.match(code, /chmod 700 "\$LOCAL_DIR" "\$\{STATUS_FILE%\/\*\}"/);
+    assert.match(code, /chmod 600 "\$RUN_LOG"/);
+  });
+
+  it('o teste de restauração tem a exceção do shellcheck na função chamada só pelo trap', () => {
+    const lines = read('deploy/backup/soprei-restore-check.sh').split('\n');
+    const at = lines.indexOf('cleanup() {');
+    assert.ok(at > 0);
+    assert.equal(lines[at - 1], '# shellcheck disable=SC2329');
   });
 });
 

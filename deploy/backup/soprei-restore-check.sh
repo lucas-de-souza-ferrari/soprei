@@ -47,6 +47,8 @@ pg() {
   fi
 }
 
+# Chamada só pelo `trap ... EXIT` do main (o shellcheck não enxerga essa chamada).
+# shellcheck disable=SC2329
 cleanup() {
   if [[ $CREATED_DB == true ]]; then
     pg dropdb --if-exists "$CHECK_DB" >/dev/null 2>&1 || log "ATENÇÃO: apague à mão o banco $CHECK_DB" >&2

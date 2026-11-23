@@ -92,6 +92,7 @@ const STUB_PG_DUMP = `#!/usr/bin/env bash
 echo "pg_dump $*" >> "$STUB_DIR/events.log"
 echo "${TOOL_SENTINEL} pg_dump" >&2
 if [ -f "$STUB_DIR/pgdump_fail" ]; then printf 'parcial'; exit 1; fi
+if [ -f "$STUB_DIR/pgdump_empty" ]; then exit 0; fi
 printf 'DUMP %s\\n' "$*"
 `;
 
@@ -225,8 +226,8 @@ function makeWorld(overrides: Record<string, string | null> = {}): World {
     root,
     stubDir: join(root, 'stub'),
     remoteDir: join(root, 'stub', 'remote'),
-    localDir: join(root, 'var', 'backups'),
-    statusFile: join(root, 'state', 'status'),
+    localDir: join(root, 'var', 'backups', 'soprei'),
+    statusFile: join(root, 'state', 'soprei-backup', 'status'),
     confFile: join(root, 'etc', 'backup.conf'),
     rcloneConf: join(root, 'etc', 'rclone.conf'),
     lockFile: join(root, 'backup.lock'),
@@ -384,6 +385,28 @@ describe('soprei-backup.sh (spec 043)', { skip: BASH_SKIP }, () => {
       String(statSync(join(world.remoteDir, remote[0] ?? '')).size),
     );
     assert.equal(statusField(result, 'ping'), 'none');
+
+    // A listagem vai exatamente como o programa a interpreta (tamanho;nome, só arquivos).
+    const listing = commands(result, 'rclone').filter((line) => line.split(' ')[3] === 'lsf');
+    for (const line of listing) {
+      assert.equal(
+        line,
+        `rclone --config ${toPosix(world.rcloneConf)} lsf --files-only --format sp --separator ; r2:soprei-backup/postgres/`,
+      );
+    }
+    // A saída das ferramentas (inclusive a configuração que o dublê do rclone imprime) fica no
+    // registro privado, e só lá.
+    const runLog = readFileSync(join(world.statusFile, '..', 'last-run.log'), 'utf8');
+    assert.ok(runLog.includes(TOOL_SENTINEL));
+    assert.ok(runLog.includes(STORAGE_SENTINEL));
+    if (HAS_MODES) {
+      const mode = (path: string): string => (statSync(path).mode & 0o777).toString(8);
+      assert.equal(mode(world.localDir), '700');
+      assert.equal(mode(join(world.statusFile, '..')), '700');
+      assert.equal(mode(world.statusFile), '600');
+      assert.equal(mode(join(world.statusFile, '..', 'last-run.log')), '600');
+      for (const name of localFiles(world)) assert.equal(mode(join(world.localDir, name)), '600');
+    }
     assert.equal(commands(result, 'curl').length, 0, 'sem PING_URL não há aviso');
   });
 
@@ -453,11 +476,49 @@ describe('soprei-backup.sh (spec 043)', { skip: BASH_SKIP }, () => {
 
   it('tamanho diferente no destino: sai com 2 no passo de conferência', () => {
     const world = makeWorld();
+    const old = seedLocal(world, 'soprei-20200101T000000Z.dump', 30);
     setStub(world, 'copy_truncate');
     const result = backup(world);
     assert.equal(result.status, 2, result.out);
     assert.equal(statusField(result, 'step'), 'conferir');
+    assert.ok(existsSync(old), 'a cópia antiga continua lá');
     assert.equal(localFiles(world).filter((name) => name.endsWith('.dump.age')).length, 1);
+  });
+
+  it('nome igual com outro tamanho no destino: envia os demais e falha no fim, sem apagar nada', () => {
+    const world = makeWorld();
+    const stuck = seedLocal(world, 'soprei-20200101T000000Z.dump.age', 30, 'AGE:inteiro');
+    writeFileSync(join(world.remoteDir, 'soprei-20200101T000000Z.dump.age'), 'AGE:int');
+    const result = backup(world);
+    assert.equal(result.status, 2, result.out);
+    assert.equal(statusField(result, 'step'), 'conferir');
+    assert.equal(remoteFiles(world).length, 2, 'o backup de hoje foi enviado mesmo assim');
+    assert.equal(
+      readFileSync(join(world.remoteDir, 'soprei-20200101T000000Z.dump.age'), 'utf8'),
+      'AGE:int',
+    );
+    assert.ok(existsSync(stuck), 'nada antigo é apagado numa execução que falha');
+  });
+
+  it('pg_dump que termina bem com saída vazia: sai com 2 no passo do dump', () => {
+    const world = makeWorld();
+    setStub(world, 'pgdump_empty');
+    const result = backup(world);
+    assert.equal(result.status, 2, result.out);
+    assert.equal(statusField(result, 'step'), 'dump');
+    assert.equal(commands(result, 'age').length, 0);
+    assert.deepEqual(localFiles(world), []);
+  });
+
+  it('falha inesperada depois da trava: sai com 2 e grava o estado, nunca deixa o ok antigo', () => {
+    const world = makeWorld();
+    // Um arquivo no lugar da pasta pai: o mkdir da preparação falha fora de qualquer `|| fail`.
+    write(join(world.root, 'var', 'backups'), 'não é pasta');
+    const result = backup(world);
+    assert.equal(result.status, 2, result.out);
+    assert.equal(statusField(result, 'result'), 'failed');
+    assert.equal(statusField(result, 'step'), 'preparar');
+    assert.deepEqual(result.events, []);
   });
 
   it('listagem do destino que falha: sai com 2 sem enviar', () => {
@@ -504,7 +565,7 @@ describe('soprei-backup.sh (spec 043)', { skip: BASH_SKIP }, () => {
     const recent = seedLocal(world, 'soprei-20991231T000000Z.dump', 2);
     const stranger = seedLocal(world, 'outro.dump', 30);
     const notes = seedLocal(world, 'soprei-notas.txt', 30);
-    const outside = join(world.root, 'var', 'soprei-20200101T000000Z.dump');
+    const outside = join(world.root, 'var', 'backups', 'soprei-20200101T000000Z.dump');
     write(outside, 'fora');
     const longAgo = new Date(Date.now() - 30 * DAY_MS);
     utimesSync(outside, longAgo, longAgo);
@@ -527,7 +588,7 @@ describe('soprei-backup.sh (spec 043)', { skip: BASH_SKIP }, () => {
       const world = makeWorld();
       const holder = spawn(
         'bash',
-        ['-c', `exec 9>"${toPosix(world.lockFile)}"; flock 9; echo pronto; sleep 5`],
+        ['-c', `exec 9>"${toPosix(world.lockFile)}"; flock 9; echo pronto; exec sleep 30`],
         { stdio: ['ignore', 'pipe', 'ignore'] },
       );
       try {
@@ -571,10 +632,16 @@ describe('soprei-backup.sh (spec 043)', { skip: BASH_SKIP }, () => {
       ['AGE_RECIPIENT ausente', { AGE_RECIPIENT: null }],
       ['REMOTE sem bucket', { REMOTE: 'r2' }],
       ['REMOTE com ..', { REMOTE: 'r2:bucket/../outro' }],
+      ['REMOTE começando com hífen', { REMOTE: '-x:bucket/pasta' }],
+      ['bucket começando com hífen', { REMOTE: 'r2:-bucket/pasta' }],
       ['REMOTE ausente', { REMOTE: null }],
       ['valor com substituição de comando', { DB_NAME: '$(id)' }],
       ['DB_NAME com hífen inicial', { DB_NAME: '-x' }],
       ['LOCAL_KEEP_DAYS zero', { LOCAL_KEEP_DAYS: '0' }],
+      ['LOCAL_KEEP_DAYS acima de 35', { LOCAL_KEEP_DAYS: '36' }],
+      ['LOCAL_DIR sem soprei no nome', { LOCAL_DIR: '/var/backups/outra' }],
+      ['STATUS_FILE direto numa pasta do sistema', { STATUS_FILE: '/var/lib/status' }],
+      ['STATUS_FILE em pasta sem soprei no nome', { STATUS_FILE: '/var/lib/outra/status' }],
       ['LOCAL_DIR relativo', { LOCAL_DIR: 'backups/soprei' }],
       ['LOCAL_DIR raso', { LOCAL_DIR: '/backups' }],
       ['PING_URL sem https', { PING_URL: 'http://sinal.exemplo.invalid/x' }],
@@ -647,6 +714,8 @@ describe('soprei-backup.sh (spec 043)', { skip: BASH_SKIP }, () => {
     assert.equal(calls.length, 1);
     const args = (calls[0] ?? '').split(' ').slice(1);
     assert.equal(args.at(-1), url, 'a URL vai exatamente como configurada');
+    assert.ok(!args.some((arg) => arg.startsWith('--retry')), 'um único pedido');
+    assert.equal(args[0], '-q', 'sem o .curlrc do root');
     assert.equal(args.filter((arg) => arg.startsWith('http')).length, 1);
     for (const arg of args) {
       assert.doesNotMatch(

@@ -29,7 +29,7 @@ O dono escolhe o destino (D1), cria o bucket e a credencial, gera o par de chave
 
 1. **`deploy/backup/soprei-backup.sh`** (versionado; instalado à mão pelo dono como `/usr/local/sbin/soprei-backup`, root, 755, como o programa de entrada da 037; um merge não o reinstala). Sem argumentos obrigatórios; `--dry-run` mostra o que faria sem gerar, enviar nem apagar nada.
 2. **Configuração** em `/etc/soprei-backup/backup.conf` (root, modo 600; exemplo em `deploy/backup/backup.conf.example`), lida linha a linha **sem `source`**, com chaves fixas e valores validados por formato:
-   - `DB_NAME` (padrão `soprei`), `LOCAL_DIR` (padrão `/var/backups/soprei`), `LOCAL_KEEP_DAYS` (padrão 7), `REMOTE_KEEP_DAYS` (padrão 35);
+   - `DB_NAME` (padrão `soprei`), `LOCAL_DIR` (padrão `/var/backups/soprei`), `LOCAL_KEEP_DAYS` (padrão 7, no máximo 35); a expiração no destino é regra do bucket (ver o Registro: `REMOTE_KEEP_DAYS` não existe);
    - `AGE_RECIPIENT`: a chave **pública** de cifra (`age1...`). A chave privada **nunca** fica no servidor;
    - `REMOTE`: destino do `rclone` no formato `nome:bucket/pasta`. A credencial do armazenamento fica só no arquivo de configuração do `rclone` (root, 600), nunca neste arquivo, em argumento ou em log;
    - `PING_URL` (opcional): endereço do serviço de aviso (D4);
@@ -135,7 +135,7 @@ Suposições a conferir no E0:
 - **Arquivos:** `deploy/backup/soprei-backup.sh`, `soprei-restore-check.sh`, `backup.conf.example`, `rclone.conf.example`, `soprei-backup.service.example`, `soprei-backup.timer.example`; `docs/ops/backup.md`; `backend/src/backup-script.behavior.test.ts` (23 cenários) e `backup-scripts.test.ts` (13 testes de texto); passo `shellcheck deploy/backup/*.sh` no job `static` (e em `ci-workflow.test.ts`); um parágrafo no `AGENTS.md` (seção do deploy), link no README, índice de specs.
 - **Códigos de saída do backup:** 0 concluído; 1 recusado antes de começar; 2 um passo falhou (o `STATUS_FILE` diz qual: `dump`, `cifrar`, `listar`, `enviar`, `conferir`, `expirar`); 3 outra execução em andamento.
 - **Desvios da spec, com o motivo:**
-  1. **D3 por trava do bucket**, não por credencial sem permissão de apagar (S2). O objetivo é o mesmo: quem toma o servidor não destrói os backups. O programa não apaga nada no destino e nunca reenvia um arquivo que já está lá (com a trava, sobrescrever dá erro); nome igual com tamanho diferente é falha no passo `conferir`.
+  1. **D3 por trava do bucket**, não por credencial sem permissão de apagar (S2). **Aguarda a confirmação explícita do dono** (registrado como proposta em `docs/context.md`). O objetivo é o mesmo: quem toma o servidor não destrói os backups. O programa não apaga nada no destino e nunca reenvia um arquivo que já está lá (com a trava, sobrescrever dá erro); nome igual com tamanho diferente é falha no passo `conferir`.
   2. **Conferência do envio por `rclone lsf`** (tamanho e nome em texto), não por `lsjson` (ver acima).
   3. **Chave nova `RCLONE_CONFIG_FILE`** no `backup.conf` (padrão `/etc/soprei-backup/rclone.conf`): o arquivo da credencial é passado explicitamente ao `rclone` e também precisa ser do root com modo 600. `REMOTE_KEEP_DAYS` **não existe** (a expiração remota é só do bucket).
   4. **Saída das ferramentas** (`pg_dump`, `age`, `rclone`, `curl`) vai só para `last-run.log`, ao lado do `STATUS_FILE` (somente root), nunca para a saída do programa; é assim que o critério das sentinelas é cumprido mesmo com uma ferramenta que imprima a própria configuração.
@@ -146,13 +146,27 @@ Suposições a conferir no E0:
 - **Não verificado por ninguém:** `shellcheck` (não existe nesta máquina; só no CI); os dois cenários pulados; `pnpm test` completo, integração e Playwright (nenhum código da aplicação mudou); **nenhuma execução real** dos programas, nenhum acesso ao servidor, ao R2 ou a um PostgreSQL de verdade (o `pg_restore` lendo o dump pela entrada padrão e o `rclone lsf` contra o R2 só são provados nos passos do dono).
 - **Critérios ainda abertos:** trava (duas execuções) e modo 600, que dependem do CI; os três **[dono]**.
 
+### Revisão da E1 (2026-11-23, `reviewer`; correções aplicadas na mesma data)
+
+Sem falha de segurança grave: o `reviewer` não achou caminho que saia com 0 sem backup, que envie arquivo em claro, que apague cifrado não enviado nem que toque outro banco. Achados e o que foi feito:
+
+- **B1 (aplicado):** `cleanup()` do teste de restauração é chamada só pelo `trap` e o `shellcheck` do CI a reprovaria (SC2329, o mesmo caso da 037); ganhou a exceção com comentário. Continua **não confirmado com a ferramenta**.
+- **I1 (aplicado):** a trava saiu de `/var/lock` (qualquer usuário local poderia segurá-la e parar o backup em silêncio) para `/run/soprei-backup.lock`.
+- **I2 (aplicado):** depois da trava há um `trap ... ERR`: toda falha, também a inesperada (`mkdir`, `mv`, gravação do estado), passa por `fail`, grava o estado e sai com 2. A abertura da trava que falha também grava o estado. Teste novo ("falha inesperada depois da trava").
+- **I3 (aplicado no runbook):** o comando de restauração da produção ganhou `--exit-on-error`, a conferência da saída, a ordem de apagar dump e chave mesmo se falhar, a nota do `btree_gist` e o caminho pela cópia local em claro (a razão da D2). **Passo novo do dono:** ensaiar esse comando exato numa máquina temporária.
+- **I4 (aplicado em parte):** o desvio da D3 foi separado no `docs/context.md` como proposta aguardando o dono, e o runbook manda **provar a trava** tentando apagar um objeto com a credencial do servidor. **Falta a confirmação do dono.**
+- **S1:** a expiração local usa minutos (`-mmin`), então `LOCAL_KEEP_DAYS=7` são 7 dias, não 8. **S2:** `REMOTE` e o bucket não podem começar com hífen. **S3:** `LOCAL_KEEP_DAYS` vai de 1 a 35. **S5:** nome igual com outro tamanho no destino não impede o envio dos demais; a execução falha no fim. **S6:** `chmod 700` também na pasta do estado e `chmod 600` no registro; `LOCAL_DIR` e a pasta do estado precisam ter "soprei" no nome (o programa nunca fecha uma pasta do sistema por engano). **S7:** um único `GET` (sem `--retry`), com `curl -q`; o runbook trata o endereço do sinal de vida como reservado. **S8:** testes novos ou mais estritos (linha inteira do `lsf`, saída das ferramentas no registro privado, modos no Linux, dump vazio, hífen, cópia antiga no cenário de tamanho, trava com `exec sleep`). **S9, S10 (parte), S11:** textos do runbook e da spec.
+- **Não aplicado:** S4 (conferir espaço livre antes do dump; ficou só o aviso no runbook) e o endurecimento do `systemd` da S10 (`PrivateTmp`, `ProtectSystem`...), que o próprio `reviewer` recomenda só depois de testado num servidor; o runbook passou a mandar testar pela unidade (`systemctl start`).
+- **Verificado localmente depois das correções (Windows, Node 26.13.1):** `typecheck`, `lint`, `format:check`; `backup-script.behavior` 24 verdes e 2 pulados; `backup-scripts` 17; `ci-workflow`, `deploy-scripts`, `deploy-workflow`, `docs-structure` e `domain-vocabulary` verdes. `shellcheck` segue não rodado.
+
 ### Passos do dono (em ordem; detalhe em `docs/ops/backup.md`)
 
+0. Confirmar (ou recusar) o desvio da D3: trava do bucket no lugar da credencial sem permissão de apagar.
 1. Push, CI verde (conferir o job `static` por causa do `shellcheck` e os dois cenários que só rodam em Linux) e o `reviewer`.
 2. Gerar o par de chaves do `age` no próprio computador e guardar a privada em duas cópias.
 3. Criar o bucket no R2 com a regra de 35 dias, a trava de 30 dias e o token restrito ao bucket.
-4. Instalar no servidor (`apt install age rclone`, programa, configuração), rodar o `--dry-run`, depois o primeiro backup real; registrar aqui tamanho e tempo (S5).
+4. Instalar no servidor (`apt install age rclone`, programa, configuração), rodar o `--dry-run`, depois o primeiro backup real; registrar aqui tamanho e tempo (S5). **Provar a trava do bucket** (tentar apagar o objeto com a credencial do servidor e ver a recusa) e registrar o resultado.
 5. Ligar o timer; criar a verificação de sinal de vida e testar o aviso.
-6. Primeiro teste de restauração fora do servidor; registrar aqui o tempo (RTO real).
+6. Primeiro teste de restauração fora do servidor; registrar aqui o tempo (RTO real). Na mesma máquina, ensaiar uma vez o comando exato de "Restaurar a produção do zero".
 7. Desligar o `soprei-backup.sh` antigo e, depois de 7 dias, apagar `/root/backups`.
 8. Guardar no gerenciador de senhas a cópia do `backend/.env` da produção.

@@ -26,7 +26,8 @@ IFS=$' \t\n'
 
 # Ganchos de teste (o padrão é o caminho de produção); definidos só por quem já controla o ambiente.
 CONF_FILE=${SOPREI_BACKUP_CONF:-/etc/soprei-backup/backup.conf}
-LOCK_FILE=${SOPREI_BACKUP_LOCK_FILE:-/var/lock/soprei-backup.lock}
+# A trava fica em /run (só o root escreve): em /var/lock qualquer usuário local poderia segurá-la.
+LOCK_FILE=${SOPREI_BACKUP_LOCK_FILE:-/run/soprei-backup.lock}
 RUNUSER=${SOPREI_BACKUP_RUNUSER:-/usr/sbin/runuser}
 
 # Configuração (backup.conf).
@@ -60,7 +61,7 @@ die_config() {
 write_status() {
   local result=$1 dir tmp
   dir=${STATUS_FILE%/*}
-  mkdir -p "$dir" || return 0
+  mkdir -p "$dir"
   tmp="$STATUS_FILE.tmp"
   if {
     printf 'time=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -76,11 +77,15 @@ write_status() {
   fi
 }
 
+# Depois da trava, toda falha passa por aqui (também a inesperada, pelo `trap ... ERR` do main): o
+# estado nunca fica com o "ok" de ontem. A gravação do estado é melhor esforço: se ela mesma falhar,
+# a saída continua sendo 2.
 fail() {
+  trap - ERR
   log "FALHOU no passo \"$STEP\": $*" >&2
   if [[ $DRY_RUN == false ]]; then
     log "detalhe das ferramentas em $RUN_LOG (somente root)" >&2
-    write_status failed
+    write_status failed || log 'aviso: não foi possível gravar o arquivo de estado' >&2
   fi
   exit 2
 }
@@ -135,9 +140,11 @@ load_conf() {
   done <"$CONF_FILE"
 
   [[ $DB_NAME =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || die_config 'DB_NAME inválido'
-  [[ $LOCAL_KEEP_DAYS =~ ^[1-9][0-9]{0,3}$ ]] || die_config 'LOCAL_KEEP_DAYS inválido'
+  # No máximo 35 dias: é o prazo das cópias (spec 032) e o da expiração no destino; acima disso o
+  # programa reenviaria arquivos que o destino já expirou.
+  [[ $LOCAL_KEEP_DAYS =~ ^([1-9]|[12][0-9]|3[0-5])$ ]] || die_config 'LOCAL_KEEP_DAYS inválido (1 a 35)'
   [[ $AGE_RECIPIENT =~ ^age1[0-9a-z]{20,}$ ]] || die_config 'AGE_RECIPIENT precisa ser a chave pública do age (age1...)'
-  [[ $REMOTE =~ ^[A-Za-z0-9_-]+:[A-Za-z0-9_-][A-Za-z0-9_./-]*$ ]] || die_config 'REMOTE fora do formato nome:bucket/pasta'
+  [[ $REMOTE =~ ^[A-Za-z0-9][A-Za-z0-9_-]*:[A-Za-z0-9][A-Za-z0-9_./-]*$ ]] || die_config 'REMOTE fora do formato nome:bucket/pasta'
   [[ $PING_URL == '' || $PING_URL =~ ^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)?$ ]] || die_config 'PING_URL inválida'
   local path_key
   for path_key in LOCAL_DIR RCLONE_CONFIG_FILE STATUS_FILE; do
@@ -146,6 +153,12 @@ load_conf() {
   done
   [[ $REMOTE != *..* ]] || die_config "REMOTE com '..'"
   REMOTE=${REMOTE%/}
+  # As duas pastas recebem chmod 700: precisam ser pastas do próprio backup, nunca uma do sistema.
+  local dir_name
+  for dir_name in "${LOCAL_DIR##*/}" "$(basename "${STATUS_FILE%/*}")"; do
+    [[ $dir_name == *soprei* ]] || die_config 'LOCAL_DIR e a pasta do STATUS_FILE precisam ter "soprei" no nome'
+  done
+  [[ $STATUS_FILE =~ ^/[^/]+/[^/]+/[^/]+ ]] || die_config 'STATUS_FILE precisa ficar numa pasta própria'
   check_private_file "$RCLONE_CONFIG_FILE"
   RUN_LOG="${STATUS_FILE%/*}/last-run.log"
 }
@@ -163,7 +176,8 @@ require_tools() {
 
 acquire_lock() {
   command -v flock >/dev/null 2>&1 || die_config 'flock não encontrado'
-  exec 9>"$LOCK_FILE"
+  STEP=trava
+  exec 9>"$LOCK_FILE" || fail 'não foi possível abrir o arquivo de trava'
   if ! flock -n 9; then
     log 'há outra execução do backup em andamento; nada foi feito' >&2
     exit 3
@@ -171,9 +185,11 @@ acquire_lock() {
 }
 
 prepare_dirs() {
+  STEP=preparar
   mkdir -p "$LOCAL_DIR" "${STATUS_FILE%/*}"
-  chmod 700 "$LOCAL_DIR"
+  chmod 700 "$LOCAL_DIR" "${STATUS_FILE%/*}"
   : >"$RUN_LOG"
+  chmod 600 "$RUN_LOG"
   # Sobras de uma execução morta nunca contam como cópia boa.
   find "$LOCAL_DIR" -maxdepth 1 -type f -name 'soprei-*.tmp' -delete
 }
@@ -236,7 +252,7 @@ remote_size_of() {
 # Envia todo arquivo cifrado local que ainda não está no destino (o de hoje e os que ficaram
 # pendentes de uma falha anterior) e confere o tamanho de cada um. Só arquivos .dump.age saem.
 upload_pending() {
-  local file name size remote_size pending=()
+  local file name size remote_size mismatch='' pending=()
   STEP=listar
   list_remote
   for file in "$LOCAL_DIR"/soprei-*.dump.age; do
@@ -247,13 +263,14 @@ upload_pending() {
     if [[ -z $remote_size ]]; then
       pending+=("$file")
     elif [[ $remote_size != "$size" ]]; then
-      STEP=conferir
-      fail "o arquivo $name existe no destino com outro tamanho"
+      # Não impede o envio dos outros (o de hoje incluído); a execução falha no fim.
+      mismatch=$name
     fi
   done
 
   if [[ $DRY_RUN == true ]]; then
     log "simulação: ${#pending[@]} arquivo(s) cifrado(s) local(is) ainda não estão no destino"
+    if [[ -n $mismatch ]]; then log "simulação: $mismatch está no destino com outro tamanho"; fi
     return 0
   fi
 
@@ -274,6 +291,7 @@ upload_pending() {
     remote_size=$(remote_size_of "$name")
     [[ $remote_size == "$size" ]] || fail "o arquivo $name não está no destino com o tamanho esperado"
   done
+  [[ -z $mismatch ]] || fail "o arquivo $mismatch existe no destino com outro tamanho (os demais foram enviados)"
 }
 
 prune_local() {
@@ -282,15 +300,17 @@ prune_local() {
     log "simulação: cópias locais com mais de $LOCAL_KEEP_DAYS dia(s) seriam apagadas"
     return 0
   fi
+  # Em minutos: `-mtime +N` arredonda para dias inteiros e guardaria N + 1 dias.
   find "$LOCAL_DIR" -maxdepth 1 -type f \( -name 'soprei-*.dump' -o -name 'soprei-*.dump.age' \) \
-    -mtime "+$LOCAL_KEEP_DAYS" -delete 2>>"$RUN_LOG" || fail 'não foi possível apagar as cópias locais antigas'
+    -mmin "+$((LOCAL_KEEP_DAYS * 1440))" -delete 2>>"$RUN_LOG" || fail 'não foi possível apagar as cópias locais antigas'
 }
 
-# Um GET sem corpo e sem parâmetro: nenhum dado sai. Falha do aviso não desfaz o backup.
+# Um único GET sem corpo e sem parâmetro (`-q`: sem o .curlrc do root): nenhum dado sai. Falha do
+# aviso não desfaz o backup.
 ping_success() {
   [[ -n $PING_URL ]] || return 0
   STEP=avisar
-  if curl -fsS -m 10 --retry 2 -o /dev/null "$PING_URL" >>"$RUN_LOG" 2>&1; then
+  if curl -q -fsS -m 10 -o /dev/null "$PING_URL" >>"$RUN_LOG" 2>&1; then
     PING_RESULT=ok
   else
     PING_RESULT=failed
@@ -313,6 +333,7 @@ main() {
   fi
 
   acquire_lock
+  trap 'fail "erro inesperado na linha $LINENO"' ERR
   prepare_dirs
   local stamp
   stamp=$(date -u +%Y%m%dT%H%M%SZ)

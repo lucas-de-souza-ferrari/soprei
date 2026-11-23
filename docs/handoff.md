@@ -8,9 +8,9 @@
 
 - **E1**, branch `spec/042-organizacao-da-documentacao`: `AGENTS.md` de 180 KB para 44 KB; as regras de cada área foram movidas **sem reescrita** para `docs/areas/` (dez arquivos; a seção "Áreas" do `AGENTS.md` diz quando ler cada um); `backend/src/docs-structure.test.ts` novo; o gate de vocabulário varre `docs/areas`; roteiros de `docs/agents/` mandam ler a área tocada. O `reviewer` passou sem bloqueante e as correções estão aplicadas ("Revisão da E1" na spec).
 - **E2**, branch `spec/042-e2-handoff-e-specs` (empilhada sobre a E1): este arquivo enxuto, `docs/context.md` (seções 3 e 6), README novo, linha de status de todas as specs normalizada, índice `docs/specs/README.md`, `.tmp-onb.txt` e `lab/e0/` removidos.
-- **Spec 043 (backup externo do banco), aprovada com D1 a D9; E1 implementada** na branch `spec/043-backup-externo` (empilhada sobre a E2 da 042): `deploy/backup/soprei-backup.sh` e `soprei-restore-check.sh`, exemplos, `docs/ops/backup.md`, testes com dublês e `shellcheck` no CI. Desvio: a proteção contra apagar é a trava do bucket do R2 (não existe credencial "sem apagar"). Nenhuma execução real.
+- **Spec 043 (backup externo do banco), aprovada com D1 a D9; E1 implementada** na branch `spec/043-backup-externo` (empilhada sobre a E2 da 042): `deploy/backup/soprei-backup.sh` e `soprei-restore-check.sh`, exemplos, `docs/ops/backup.md`, testes com dublês e `shellcheck` no CI. O `reviewer` passou sem falha grave e as correções estão aplicadas ("Revisão da E1" na spec). **Aguarda o dono:** confirmar o desvio da D3 (trava do bucket do R2 no lugar da credencial "sem apagar"). Nenhuma execução real.
 - **Verde localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check` e os testes de documentação, de workflows e do backup (2 cenários pulados: `flock` real e modo 600). **Não rodado:** `shellcheck` e o resto das suítes.
-- **Falta:** push e PR na ordem E1 da 042, E2 da 042, 043 (rebase se entrarem por squash); CI; `reviewer` na 043 (obrigatório: dados pessoais saem do servidor; olhar o gancho `SOPREI_BACKUP_TEST_NO_MODE_CHECK`).
+- **Falta:** push e PR na ordem E1 da 042, E2 da 042, 043 (rebase se entrarem por squash); CI; na 043, conferir no CI o `shellcheck` e os dois cenários que só rodam em Linux.
 
 ## Onde estamos
 
