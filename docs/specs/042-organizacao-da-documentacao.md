@@ -135,6 +135,19 @@ Nenhuma dependência nova. Decisões para o dono:
 - **Outros arquivos:** `backend/src/docs-structure.test.ts` (novo, 4 testes), `domain-vocabulary.test.ts` (varre `docs/areas`; nenhuma exceção da allowlist apontava para o `AGENTS.md`), os três roteiros de `docs/agents/`, `CLAUDE.md` (aviso de que as áreas não são carregadas sozinhas) e duas referências do `backend/.env.example` (uma dizia `CLAUDE.md` para "Ambiente local"; a outra aponta agora para a área de autenticação).
 - **Ambiente desta sessão:** máquina sem `node_modules`, sem `backend/.env` e com Node 26.13.1 no `PATH` (não o 24 do `.nvmrc`). Foram feitos `pnpm install --frozen-lockfile` e `pnpm db:generate` com uma `DATABASE_URL` fictícia só no ambiente do comando (nenhum `.env` criado, nenhuma conexão).
 
+### Revisão da E1 (2026-11-23, `reviewer`, sem bloqueante; correções aplicadas na mesma data)
+
+O `reviewer` refez a conferência linha a linha por conta própria e chegou ao mesmo resultado (379 linhas, 19 ausentes, todas títulos; 53 linhas novas, só cabeçalhos, a seção "Áreas" e títulos; nenhuma duplicada, ordem preservada). Achados e o que foi feito:
+
+- **I1 (aplicado):** a seção "Áreas" passou a citar o número das specs de cada seção, e o parágrafo dela cobre as citações por número, por "abaixo"/"acima" e as feitas a partir de um arquivo de área; o caso "(seção abaixo)" dos limites por perfil e IP é dito explicitamente.
+- **I2 (aplicado):** gatilhos de leitura completados (`application/auth/` e `presentation/auth/` na autenticação; persona, `api.ts`, cifra, guarda do processo e config no canal; `presentation/billing/`, `entitlements`, `application/companies/` e `privacidade.md` na cobrança; `application/inventory/` e `application/notifications/` nas áreas certas) e o aviso de que `attendance.service.ts` cruza seis áreas.
+- **I3 (aplicado, sem promover regra ao núcleo):** dois itens novos na seção "Áreas" mandam ler `http-base.md` e os itens "Privacidade" de autenticação e canal para qualquer log, métrica ou uso de Redis novo, e "Painel de conversas" para qualquer resposta com dado de contato. Mover essas regras para "Regras invariantes" seria reescrita e fica para decisão do dono.
+- **I4 (aplicado):** `docs/handoff.md` desta branch atualizado para a E1.
+- **S1 a S3 (aplicados):** o teste confere BOM em toda a documentação versionada (constante montada por código; a ferramenta de escrita tinha gravado o caractere literal), exige item completo (arquivo, seções com número de spec e gatilho) em vez de qualquer link, não fixa mais a contagem de áreas e normaliza fim de linha.
+- **S4 (aplicado):** a tabela virou lista (o alinhamento do Prettier custava cerca de 3,5 KB); o `AGENTS.md` ficou com 44 KB mesmo com os gatilhos novos. A spec e os critérios falam em "tabela"; vale a lista.
+- **S6 (aplicado):** cabeçalho de `docs/areas/frontend.md` sem a frase sobre `backend/`; roteiros e `CLAUDE.md` citam a seção "Áreas".
+- **S5 (parte na E2, parte em aberto):** a frase da hospedagem no `AGENTS.md` e a referência do handoff a "Provedor de LLM real" são tratadas na E2. **Em aberto, para o dono:** o bullet "Atendimento" do núcleo diz que o `PATCH /admin/companies/:id` aceita `whatsappPhoneNumberId`, e a área do canal (spec 015) diz que não aceita mais (400). A contradição já existia na `main`; corrigir é alterar texto de regra, fora da D2.
+
 ### E2 (2026-11-23, Claude Code, Fable 5.2, branch `spec/042-e2-handoff-e-specs`, empilhada sobre a E1)
 
 - **`docs/handoff.md`:** de 76 KB para 19 KB. "Última sessão", "Onde estamos", "Passos do dono pendentes" e "Próximo passo" são novas; "Decisões do dono que não são óbvias no código", "Armadilhas", "O que não vem pelo git" e "Pendências abertas" foram mantidas **com o texto de antes** (só o título encurtado e a "decisão de hospedagem" retirada das pendências).
@@ -144,6 +157,6 @@ Nenhuma dependência nova. Decisões para o dono:
 - **Specs:** 14 linhas de status mudaram (015, 016, 017, 028, 030, 031, 032, 034, 036, 037, 038, 039, 040, 041), sempre no formato "palavra (resumo; status normalizado em 2026-11-23, spec 042). Antes: texto anterior inteiro". As specs 018 a 027 e 029 já começavam por "concluída" e não foram tocadas. Nenhuma outra linha de spec mudou.
 - **Índice:** `docs/specs/README.md`, 41 linhas, com a coluna "Pendente"; o teste confere que o status do índice é o da spec.
 - **Sobras:** `git rm` de `.tmp-onb.txt` e de `lab/e0/` (4 arquivos). As branches remotas ficam com o dono.
-- **Teste:** `docs-structure.test.ts` passou a ter 9 testes (os 5 novos são da E2).
-- **Verificado localmente (Node 26.13.1):** `typecheck`, `lint`, `format:check`, `docs-structure` (9), `domain-vocabulary` (5), `ci-workflow` (9) e `deploy-workflow` (11). **Não rodado:** `pnpm test` completo, integração, Playwright e build (nenhum código de produção mudou); o CI decide.
+- **Teste:** `docs-structure.test.ts` passou a ter 10 testes (5 da E1, 5 da E2).
+- **Verificado localmente (Node 26.13.1):** `typecheck`, `lint`, `format:check`, `docs-structure` (10), `domain-vocabulary` (5), `ci-workflow` (9) e `deploy-workflow` (11). **Não rodado:** `pnpm test` completo, integração, Playwright e build (nenhum código de produção mudou); o CI decide.
 - **Critério ainda aberto:** "o diff das specs existentes só toca a linha de status" é do `reviewer`.

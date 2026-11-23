@@ -6,10 +6,10 @@
 
 2026-11-23, Claude Code (Fable 5.2, spec-writer e implementer). **Spec 042 (organização da documentação)**, aprovada pelo dono com D1 a D8, só documentação e testes de texto; **sem push**.
 
-- **E1**, branch `spec/042-organizacao-da-documentacao`: `AGENTS.md` de 180 KB para 45 KB; as regras de cada área foram movidas **sem reescrita** para `docs/areas/` (dez arquivos, tabela "Áreas" no `AGENTS.md`); `backend/src/docs-structure.test.ts` novo; o gate de vocabulário varre `docs/areas`; roteiros de `docs/agents/` mandam ler a área tocada.
+- **E1**, branch `spec/042-organizacao-da-documentacao`: `AGENTS.md` de 180 KB para 44 KB; as regras de cada área foram movidas **sem reescrita** para `docs/areas/` (dez arquivos; a seção "Áreas" do `AGENTS.md` diz quando ler cada um); `backend/src/docs-structure.test.ts` novo; o gate de vocabulário varre `docs/areas`; roteiros de `docs/agents/` mandam ler a área tocada. O `reviewer` passou sem bloqueante e as correções estão aplicadas ("Revisão da E1" na spec).
 - **E2**, branch `spec/042-e2-handoff-e-specs` (empilhada sobre a E1): este arquivo enxuto, `docs/context.md` (seções 3 e 6), README novo, linha de status de todas as specs normalizada, índice `docs/specs/README.md`, `.tmp-onb.txt` e `lab/e0/` removidos.
 - **Verde localmente (Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check`, `docs-structure`, `domain-vocabulary`, `ci-workflow` e `deploy-workflow`. **Não rodado:** o resto das suítes (nenhum código de produção mudou).
-- **Falta:** push e PR da E1; CI; `reviewer` na E1 (foco: nenhuma regra se perdeu); depois do merge da E1, PR da E2 (se a E1 entrar por squash, rebase da E2 na `main`).
+- **Falta:** push e PR da E1; CI; depois do merge da E1, PR da E2 (se a E1 entrar por squash, rebase da E2 na `main`).
 
 ## Onde estamos
 
@@ -35,7 +35,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Fechar a 042 (E1, depois E2). Em seguida, por ordem de risco: staging e backup externo (passos 2 e 3); spec 035 (eficiência do turno: retomada de respostas não enviadas e de pendentes antigas, limpeza dos jobs com texto no Redis, leituras repetidas por job, prompt caching), junto com o fatiamento de `attendance.service.ts` (1.986 linhas) e de `frontend/src/AccountApp.tsx`; as etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
+Fechar a 042 (E1, depois E2). Em seguida, por ordem de risco: staging e backup externo (passos 2 e 3); spec 035 (eficiência do turno: retomada de respostas não enviadas e de pendentes antigas, limpeza dos jobs com texto no Redis, leituras repetidas por job, prompt caching), junto com o fatiamento de `attendance.service.ts` (1.986 linhas) e de `frontend/src/AccountApp.tsx`; as etapas restantes da 032 antes de empresas reais. **Para o dono decidir:** o bullet "Atendimento" do `AGENTS.md` ainda diz que o `PATCH /admin/companies/:id` aceita `whatsappPhoneNumberId`, e a área do canal (015) diz que não aceita mais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
 
 ## Decisões do dono que não são óbvias no código
 

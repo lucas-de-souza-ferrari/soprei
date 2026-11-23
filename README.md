@@ -14,7 +14,7 @@ Atendimento por inteligência artificial no WhatsApp para várias empresas. Cada
 ## Documentação
 
 - [AGENTS.md](AGENTS.md): regras que valem para qualquer tarefa (stack, fluxo de trabalho, comandos, regras invariantes, arquitetura, isolamento entre empresas). Leitura obrigatória para pessoas e agentes.
-- [docs/areas/](docs/areas/): regras de cada área (canal WhatsApp, cobrança, agenda, painel...). A tabela "Áreas" do `AGENTS.md` diz qual ler.
+- [docs/areas/](docs/areas/): regras de cada área (canal WhatsApp, cobrança, agenda, painel...). A seção "Áreas" do `AGENTS.md` diz qual ler.
 - [docs/context.md](docs/context.md): objetivo, decisões, roadmap e histórico de decisões.
 - [docs/specs/README.md](docs/specs/README.md): índice das specs e o estado de cada uma. Nada é implementado sem spec aprovada.
 - [docs/handoff.md](docs/handoff.md): estado da última sessão de trabalho e passos pendentes.
