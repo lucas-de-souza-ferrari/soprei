@@ -35,7 +35,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Fechar a 042 (E1, depois E2). Em seguida, por ordem de risco: staging e backup externo (passos 2 e 3); spec 035 (eficiência do turno: retomada de respostas não enviadas e de pendentes antigas, limpeza dos jobs com texto no Redis, leituras repetidas por job, prompt caching), junto com o fatiamento de `attendance.service.ts` (1.986 linhas) e de `frontend/src/AccountApp.tsx`; as etapas restantes da 032 antes de empresas reais. **Para o dono decidir:** o bullet "Atendimento" do `AGENTS.md` ainda diz que o `PATCH /admin/companies/:id` aceita `whatsappPhoneNumberId`, e a área do canal (015) diz que não aceita mais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
+Fechar a 042 (E1, depois E2). Em seguida, por ordem de risco: staging e backup externo (passos 2 e 3); spec 035 (eficiência do turno: retomada de respostas não enviadas e de pendentes antigas, limpeza dos jobs com texto no Redis, leituras repetidas por job, prompt caching), junto com o fatiamento de `attendance.service.ts` (1.986 linhas) e de `frontend/src/AccountApp.tsx`; as etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
 
 ## Decisões do dono que não são óbvias no código
 
