@@ -13,7 +13,7 @@
 
 ## Onde estamos
 
-- **Em produção** (`www.soprei.com`, servidor próprio Hetzner, PM2 + nginx, Postgres e Redis locais): IA real (`LLM_PROVIDER=anthropic`), WhatsApp com coexistência ligada, cobrança e checkout ligados (teste real da InfinitePay feito em 2026-11-11), deploy automático a cada merge na `main` com CI verde (`DEPLOY_ENABLED=true`).
+- **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
 - **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
@@ -21,6 +21,7 @@
 
 Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sido feitos.
 
+0. **Sem servidor:** conferir no GitHub se `DEPLOY_ENABLED` está `false`; ligado e sem servidor, o workflow de deploy falha a cada merge na `main`.
 1. **Spec 042:** push da E1, CI, merge; depois a E2. Apagar, se quiser, as branches remotas já mergeadas (`spec/040-e2-tela`, `spec/041-conhecimento-pdf-docx`, `fix/backup-runuser`, `docs/registro-desligamento`) e a `dev`.
 2. **Staging (spec 037, E2):** montar conforme `docs/ops/staging.md`; até lá a produção roda com `ALLOW_UNSTAGED=true` no `entry.conf`. Quando `deploy/soprei-deploy-entry.sh` mudar, reinstalar o programa de entrada à mão.
 3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`).

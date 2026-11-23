@@ -1,6 +1,6 @@
 # 040 — Novo catálogo de planos, cota de tokens fora da tela e plano Enterprise por contato
 
-- **Status:** concluída (E1 a E4 em produção; status normalizado em 2026-11-23, spec 042). Antes: aprovada (dono, 2026-11-13: todas as recomendações D1 a D18)
+- **Status:** concluída (E1 a E4 na `main`; status normalizado em 2026-11-23, spec 042). Antes: aprovada (dono, 2026-11-13: todas as recomendações D1 a D18)
 - **Branch:** `spec/040-novos-planos` (uma branch por etapa, se o dono preferir PRs menores: `spec/040-e1-catalogo`, `spec/040-e2-tela`, `spec/040-e3-politica`, `spec/040-e4-contato`)
 - **Depende de:** 031 (planos e assinaturas, E1 a E5 em produção), 017 e 019 (contas e SMTP), 005 (rate limit), 032 (páginas legais), 037 (deploy: migration aditiva e compatível com a versão anterior)
 - **Revisão:** passa pelo `reviewer` antes do merge (dinheiro, transição de assinaturas pagas e **endpoint público novo** que envia e-mail).

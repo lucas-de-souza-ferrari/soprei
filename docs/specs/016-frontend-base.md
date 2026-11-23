@@ -1,6 +1,6 @@
 # 016 — Estrutura do repositório e site de apresentação
 
-- **Status:** concluída (em produção; status normalizado em 2026-11-23, spec 042). Antes: aprovada pelo dono em 2026-10-30; em implementação
+- **Status:** concluída (na `main`; status normalizado em 2026-11-23, spec 042). Antes: aprovada pelo dono em 2026-10-30; em implementação
 - **Branch:** `spec/016-frontend-base`
 - **Depende de:** backend atual para a reorganização de arquivos
 

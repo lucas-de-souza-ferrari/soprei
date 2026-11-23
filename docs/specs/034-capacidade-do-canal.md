@@ -1,6 +1,6 @@
 # 034 — Capacidade do canal (worker concorrente e processo robusto)
 
-- **Status:** em implementação (E1 a E3 concluídas e em produção; E4 e E5 não feitas; status normalizado em 2026-11-23, spec 042). Antes: em implementação (E1 a E3 escritas em 2026-11-11, aguardando o CI; E4 e E5 não feitas). Aprovada (2026-11-11, dono: "Aprovo as recomendações"; D1 a D5 como recomendadas)
+- **Status:** em implementação (E1 a E3 concluídas, na `main`; E4 e E5 não feitas; status normalizado em 2026-11-23, spec 042). Antes: em implementação (E1 a E3 escritas em 2026-11-11, aguardando o CI; E4 e E5 não feitas). Aprovada (2026-11-11, dono: "Aprovo as recomendações"; D1 a D5 como recomendadas)
 - **Branch:** `spec/034-capacidade-do-canal` (uma branch por etapa, se o dono preferir PRs menores; ver "Etapas")
 - **Depende de:** 011 (fila e worker), 013 (agrupamento e `flush`), 005 (rate limit e `TRUST_PROXY`), 004 (métricas). Conversa com a **033** (deploy): esta spec entrega o que a 033 precisa para dimensionar e separar processos; não decide hospedagem.
 - **Esta spec passa pelo `reviewer`** antes do merge (mexe em endpoint público, no limite do webhook e no caminho que carrega o `CompanyId` do job).

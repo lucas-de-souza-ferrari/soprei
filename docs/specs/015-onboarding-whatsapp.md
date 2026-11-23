@@ -1,6 +1,6 @@
 # 015 — Onboarding de clientes no canal WhatsApp (credenciais por cliente e Embedded Signup)
 
-- **Status:** concluída (015a e 015b em produção; status normalizado em 2026-11-23, spec 042). Antes: aprovada; **015a e 015b (Embedded Signup) implementadas** (2026-10-30; a 015b depois da decisão do dono sobre o `/register`, ver "Decididas pelo dono"). Aprovada em 2026-10-30 ( com todas as recomendações da seção "Decisões para o dono"; "spec B" do canal WhatsApp; o dono decidiu em 2026-10-30 que o Embedded Signup entra nesta spec; passa pelo `reviewer` antes do merge)
+- **Status:** concluída (015a e 015b na `main`; status normalizado em 2026-11-23, spec 042). Antes: aprovada; **015a e 015b (Embedded Signup) implementadas** (2026-10-30; a 015b depois da decisão do dono sobre o `/register`, ver "Decididas pelo dono"). Aprovada em 2026-10-30 ( com todas as recomendações da seção "Decisões para o dono"; "spec B" do canal WhatsApp; o dono decidiu em 2026-10-30 que o Embedded Signup entra nesta spec; passa pelo `reviewer` antes do merge)
 - **Branch:** `spec/015-onboarding-whatsapp`
 - **Depende de:** 011 (canal), 013 (agrupamento), 007 (autenticação), 008 (papéis, permissões, auditoria)
 - **Segurança:** guarda segredo de terceiros, toca isolamento e endpoint de administração: **passa pelo `reviewer` antes do merge** (foco: criptografia e uso do token, isolamento entre clientes, posse do número).
