@@ -1,6 +1,6 @@
 # 035 — Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila
 
-- **Status:** rascunho
+- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 a E3 implementadas, aguardando CI e `reviewer`; E4 não feita)
 - **Branch:** `spec/035-resiliencia-do-atendimento` (uma branch por etapa, se o dono preferir PRs menores)
 - **Depende de:** 011 (canal e fila), 013 (agrupamento, `flush`), 015 (credencial por empresa, `TOKEN_INVALID`), 031 (retomada depois do pagamento), 034 (concorrência e guarda do processo), 039 (pausa da IA).
 - **Numeração:** o número 035 estava reservado para "eficiência do turno". O dono priorizou em 2026-11-23 a parte de **resiliência**; a parte de eficiência (leituras repetidas por job, prompt caching, índice de busca) fica em "Fora de escopo" e ganha número novo quando for a vez.
@@ -76,44 +76,44 @@ Depois de E1 a E3, num PR só de movimentação, no molde da 012: nenhuma asser�
 ### Configuração e métricas
 
 - `CHANNEL_RESUME_INTERVAL_MINUTES` (0 a 1.440, padrão 5; `0` desliga a retomada **e** a limpeza), validada no módulo de config e documentada em `.env.example`. Os demais limites são constantes nomeadas em `domain/` (D2 a D4), como nas specs 025 a 028.
-- `attendance_resume_runs_total{result}` (`ok`, `error`), `attendance_resume_contacts_total{kind,result}` (`kind`: `pending`, `unsent`; `result`: `scheduled`, `skipped_limit`, `failed`), `queue_cleaned_jobs_total{state}` (`completed`, `failed`). Nenhum label com empresa, contato ou id.
+- `attendance_resume_runs_total{result}` (`ok`, `error`), `attendance_resume_targets_total{kind,result}` (`kind`: `pending`, `unsent`; `result`: `scheduled`, `skipped_limit`, `failed`), `queue_cleaned_jobs_total{state}` (`completed`, `failed`). Nenhum label com empresa, contato ou id.
 - Log só com contagens e o resultado da execução; por contato, nada (o `contactRef` existe só dentro do job, como hoje).
 
 ## Critérios de aceite
 
 E1 (integração com Postgres, BullMQ e Graph falso reais, relógio injetado, sondagem com prazo; padrão de `channel-batching.integration.test.ts`):
 
-- [ ] Mensagem pendente sem job na fila (job apagado à mão) é respondida depois de uma execução da varredura; a resposta chega ao Graph falso uma única vez.
-- [ ] Depois de uma falha final do `flush` (modelo falhando), a varredura retoma; com o modelo de volta, o contato recebe a resposta. Com o modelo ainda falhando, o `flush` de retomada **não** envia o texto padrão (o Graph falso recebe o texto padrão uma única vez, o da falha original).
-- [ ] Empresa em `TOKEN_INVALID` não é retomada; depois de reconectar (`PUT` do canal), a execução seguinte retoma.
-- [ ] Não são retomados: empresa suspensa, empresa removida, conversa com a IA pausada, conversa do simulador, pendente com menos de `RESUME_MIN_AGE`, contato cuja mensagem mais recente passou de `RESUME_WINDOW`.
-- [ ] O mesmo contato é retomado no máximo `RESUME_MAX_ATTEMPTS` vezes em 24 horas; a tentativa seguinte conta `skipped_limit` e não agenda.
-- [ ] **Isolamento:** com duas empresas com pendentes, cada `flush` agendado leva o `companyId` e o número da própria empresa; a resposta de uma nunca sai pelo número da outra; a consulta de cada empresa não devolve contato da outra.
-- [ ] Mais contatos que `RESUME_MAX_CONTACTS_PER_RUN`: a execução agenda só o limite e a seguinte continua de onde parou (rodízio).
-- [ ] Duas execuções seguidas sem o `flush` ter rodado não criam dois jobs para o mesmo contato (deduplicação da fila).
-- [ ] Job de `flush` sem o campo `resume` (formato antigo) continua válido.
-- [ ] O texto das mensagens, o `contactRef` e o telefone não aparecem em log nem em `/metrics` (captura de log com sentinelas).
-- [ ] Com `CHANNEL_RESUME_INTERVAL_MINUTES=0` ou com o canal desligado, o timer não existe; o `closeInfrastructure` para o timer e espera a execução ativa.
+- [ ] Mensagem pendente sem job na fila (job apagado à mão) é respondida depois de uma execução da varredura; a resposta chega ao Graph falso uma única vez. *(teste de integração escrito; só roda no CI)*
+- [x] Depois de uma falha final do `flush` (modelo falhando), a varredura retoma; com o modelo de volta, o contato recebe a resposta. Com o modelo ainda falhando, o `flush` de retomada **não** envia o texto padrão (o Graph falso recebe o texto padrão uma única vez, o da falha original). *(unitário passando; ver o desvio 3 no Registro: falha do modelo já vira resposta de fallback, então o caso real é erro de banco ou Redis)*
+- [ ] Empresa em `TOKEN_INVALID` não é retomada; depois de reconectar (`PUT` do canal), a execução seguinte retoma. *(teste de integração escrito; só roda no CI)*
+- [ ] Não são retomados: empresa suspensa, empresa removida, conversa com a IA pausada, conversa do simulador, pendente com menos de `RESUME_MIN_AGE`, contato cuja mensagem mais recente passou de `RESUME_WINDOW`. *(simulador e teste do site: unitário passando; os demais: integração escrita, só no CI)*
+- [ ] O mesmo contato é retomado no máximo `RESUME_MAX_ATTEMPTS` vezes em 24 horas; a tentativa seguinte conta `skipped_limit` e não agenda. *(a varredura com contador falso: unitário passando; o contador no Redis: integração escrita, só no CI)*
+- [ ] **Isolamento:** com duas empresas com pendentes, cada `flush` agendado leva o `companyId` e o número da própria empresa; a resposta de uma nunca sai pelo número da outra; a consulta de cada empresa não devolve contato da outra. *(teste de integração escrito; só roda no CI)*
+- [x] Mais contatos que `RESUME_MAX_CONTACTS_PER_RUN`: a execução agenda só o limite e a seguinte continua de onde parou (rodízio). *(teste unitário passando)*
+- [ ] Duas execuções seguidas sem o `flush` ter rodado não criam dois jobs para o mesmo contato (deduplicação da fila). *(sem teste novo: é a deduplicação do modo `ensure`, já coberta em `inbound-queue.integration.test.ts`, spec 013)*
+- [x] Job de `flush` sem o campo `resume` (formato antigo) continua válido. *(teste unitário passando)*
+- [x] O texto das mensagens, o `contactRef` e o telefone não aparecem em log nem em `/metrics` (captura de log com sentinelas). *(log da varredura e `/metrics`: unitário passando; o fluxo completo: integração, só no CI)*
+- [ ] Com `CHANNEL_RESUME_INTERVAL_MINUTES=0` ou com o canal desligado, o timer não existe; o `closeInfrastructure` para o timer e espera a execução ativa. *(sem teste novo: a ligação no `index.ts` não tem teste; `0` desligar é o comportamento de `startPurgeTimer`, já testado; a variável tem teste de config)*
 
 E2:
 
-- [ ] Resposta gravada sem `sentAt` (envio recusado de forma permanente) é reenviada pela varredura sem nova chamada ao modelo (o contador de chamadas do provedor de teste não muda) e ganha `sentAt`.
-- [ ] Resposta segurada pela pausa da 039 **nunca** é reenviada, nem depois de a pausa vencer.
-- [ ] `flush` novo com resposta anterior sem `sentAt`: a anterior chega ao Graph falso **antes** da nova, e as duas ganham `sentAt`.
-- [ ] Resposta sem `sentAt` de conversa do simulador nunca é enviada ao canal.
-- [ ] Envio que deu certo com gravação de `sentAt` falha: a retomada reenvia uma vez (duplicata aceita, D5) e para.
+- [x] Resposta gravada sem `sentAt` (envio recusado de forma permanente) é reenviada pela varredura sem nova chamada ao modelo (o contador de chamadas do provedor de teste não muda) e ganha `sentAt`. *(unitário passando; o fluxo completo: integração, só no CI)*
+- [x] Resposta segurada pela pausa da 039 **nunca** é reenviada, nem depois de a pausa vencer. *(unitário do atendimento passando; a leitura: integração, só no CI)*
+- [x] `flush` novo com resposta anterior sem `sentAt`: a anterior chega ao Graph falso **antes** da nova, e as duas ganham `sentAt`. *(unitários do processador e do atendimento passando; a ordem no Graph falso: integração reescrita, só no CI)*
+- [x] Resposta sem `sentAt` de conversa do simulador nunca é enviada ao canal. *(teste unitário passando)*
+- [ ] Envio que deu certo com gravação de `sentAt` falha: a retomada reenvia uma vez (duplicata aceita, D5) e para. *(sem teste: decorre de `sentAt` nulo virar reenvio; risco aceito na D5)*
 
 E3:
 
-- [ ] Job concluído mais velho que o prazo é apagado por uma execução sem nenhum outro job ter terminado; o mais novo que o prazo fica.
-- [ ] Job falho idem, com o prazo dos falhos.
-- [ ] Jobs ativos, em espera e atrasados nunca são apagados.
-- [ ] Depois da limpeza, nenhuma chave do Redis sob o prefixo da fila de teste contém o texto ou o `contactRef` dos jobs apagados.
+- [ ] Job concluído mais velho que o prazo é apagado por uma execução sem nenhum outro job ter terminado; o mais novo que o prazo fica. *(teste de integração escrito; só roda no CI)*
+- [ ] Job falho idem, com o prazo dos falhos. *(teste de integração escrito; só roda no CI)*
+- [ ] Jobs ativos, em espera e atrasados nunca são apagados. *(teste de integração escrito; só roda no CI)*
+- [ ] Depois da limpeza, nenhuma chave do Redis sob o prefixo da fila de teste contém o texto ou o `contactRef` dos jobs apagados. *(teste de integração escrito; só roda no CI)*
 
 E4:
 
-- [ ] `attendance.service.ts` tem menos de 900 linhas e as mesmas assinaturas públicas (teste de texto).
-- [ ] `pnpm test` e `pnpm test:integration` no CI com as mesmas contagens de antes da E4; nenhum arquivo de teste alterado além de imports.
+- [ ] `attendance.service.ts` tem menos de 900 linhas e as mesmas assinaturas públicas (teste de texto). *(E4 não feita)*
+- [ ] `pnpm test` e `pnpm test:integration` no CI com as mesmas contagens de antes da E4; nenhum arquivo de teste alterado além de imports. *(E4 não feita)*
 
 Todas: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`; inventário de variáveis em `.env.example`; `docs/areas/canal-whatsapp.md` atualizado.
 
@@ -156,3 +156,21 @@ Nenhuma dependência nova. Com a D3 recomendada, **nenhuma migration**. Decisõe
 - **D9 — Reconexão do canal não dispara retomada imediata**; a varredura pega em até 5 minutos. Recomendado (menos código). Alternativa: o `PUT` do canal acorda as pendentes na hora, como o pagamento faz.
 
 A conferir na implementação (não muda o desenho): se a consulta de pendentes por empresa usa o índice parcial `messages_pending_idx` da 013; se a limpeza por idade do BullMQ 6.4 remove também as chaves de deduplicação dos jobs apagados.
+
+## Registro da implementação
+
+### E1 a E3 (2026-11-23, Claude Code, branch `spec/035-resiliencia-do-atendimento`, empilhada sobre a 043)
+
+- **Arquivos novos:** `domain/attendance-resume.ts` (limites e `isReplyResendable`), `application/ports/attendance-resume.ts` (`ResumeTargetReader`, `ResumeAttemptStore`), `application/channel/attendance-resumer.ts` (a varredura), `infrastructure/database/repositories/attendance-resume-reader.ts` (`PrismaResumeTargetReader`), `infrastructure/auth/redis-resume-attempts.ts` (`RedisResumeAttemptStore`). **Alterados:** `InboundJobQueue` (campo `resume` opcional no `flush`; porta nova `InboundQueueCleaner`), `createInboundQueue` (`cleaner`), `AttendanceService.respondToPending`, `ChannelInboundProcessor`, `contact-label.ts` (`isPhoneContactRef`), `env.schema.ts` e `.env.example` (`CHANNEL_RESUME_INTERVAL_MINUTES`), `metrics.ts`, `index.ts`. **Sem migration e sem dependência nova.**
+- **Desvios, com o motivo:**
+  1. **Métrica `attendance_resume_targets_total`** em vez de `attendance_resume_contacts_total`: o teste de métricas do canal proíbe a palavra "contact" no corpo de `/metrics` (é a mesma proteção que obrigou a exceção do contato comercial da 040).
+  2. **`RespondToPendingOptions.resumeUnsent` saiu:** com a D6 a resposta anterior não enviada sai em qualquer tentativa, então a opção perdeu o sentido; o processador não a passa mais. A regra única é `isReplyResendable` (dentro da janela de 23 h e não segurada pelo `aiIgnoreBefore`), aplicada também quando não há pendentes.
+  3. **O critério "falha do modelo"** estava errado na spec: falha do modelo no lote já grava a resposta de fallback (spec 013), então nada fica pendente. O caso real de "falha final antes de existir resposta" é erro de banco ou de Redis; ele é provado por teste unitário (o `flush` de retomada não repete o texto padrão, nem pelo handler nem pela falha fora dele).
+  4. **Limites em `domain/`:** além dos da spec, `RESUME_MAX_COMPANIES_PER_RUN` (50) e `RESUME_MAX_CONTACTS_PER_COMPANY` (50) limitam a leitura por execução; `QUEUE_CLEAN_BATCH` (1.000) a limpeza.
+  5. **Empresa sem conexão própria (`LEGACY`, token global) também é retomada**; com conexão, só a `CONNECTED`.
+  6. **Contador de tentativas** no Redis da autenticação, com o prefixo `AUTH_REDIS_PREFIX` e a mesma identidade do `flush` (`flushKey`: `companyId` e hash do contato, sem o telefone).
+  7. **A varredura e a limpeza rodam no mesmo timer próprio**, parado junto com os outros timers no `closeInfrastructure`, antes de a fila fechar.
+- **Verificado localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check`; **todos os unitários do backend** (1.922 testes: 1.911 verdes, 11 pulados, 0 falhas); as três suítes mais tocadas repetidas 3 vezes (118 verdes em cada).
+- **Não rodado (não há Postgres nem Redis de teste nesta máquina):** os testes de integração novos ou alterados: `attendance-resume-reader.integration.test.ts` (10), `redis-resume-attempts.integration.test.ts` (3), a limpeza em `inbound-queue.integration.test.ts` (3), os 4 cenários de ponta a ponta em `channel-batching.integration.test.ts` e o cenário reescrito da limitação da 013 (agora prova o reenvio antes da resposta nova). O CI decide.
+- **E4 (fatiar `attendance.service.ts`) não foi feita.** Pela D8 ela é um PR só de movimentação, depois deste.
+

@@ -9,9 +9,9 @@
 - **`spec/042-organizacao-da-documentacao` (042, E1):** `AGENTS.md` de 180 KB para 44 KB; regras de cada área movidas sem reescrita para `docs/areas/` (a seção "Áreas" do `AGENTS.md` diz quando ler cada uma); `docs-structure.test.ts`. Revisada pelo `reviewer`, correções aplicadas.
 - **`spec/042-e2-handoff-e-specs` (042, E2):** este arquivo enxuto, `docs/context.md`, README, status das specs, índice `docs/specs/README.md`, remoção de `.tmp-onb.txt` e `lab/e0/`.
 - **`spec/043-backup-externo` (043, E1):** `deploy/backup/` (backup diário cifrado, teste de restauração, exemplos), `docs/ops/backup.md`, testes com dublês, `shellcheck` no CI. Revisada, correções aplicadas. **Aguarda o dono:** confirmar o desvio da D3 (trava do bucket do R2). Passos de servidor parados.
-- **`spec/035-resiliencia-do-atendimento` (035):** só a spec, **rascunho**; espera as decisões D1 a D9. Nada implementado.
+- **`spec/035-resiliencia-do-atendimento` (035), aprovada com D1 a D9; E1 a E3 implementadas:** varredura a cada 5 min que reagenda quem ficou sem resposta no canal (no máximo 3 vezes por contato por dia), o turno novo reenvia antes a resposta não enviada, o `flush` de retomada não repete o texto padrão, limpeza de verdade da fila; variável nova `CHANNEL_RESUME_INTERVAL_MINUTES` (padrão 5). Sem migration. **E4 (fatiar `attendance.service.ts`) não foi feita.** Todos os unitários do backend verdes; **os testes de integração novos não rodaram** (só no CI).
 - **Verde localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check` e os testes de documentação, de workflows e do backup (2 cenários pulados: `flock` real e modo 600). **Não rodado:** `shellcheck` e o resto das suítes.
-- **Falta:** push e PR na ordem acima (rebase se entrarem por squash); CI (na 043, o `shellcheck` e os dois cenários que só rodam em Linux).
+- **Falta:** push e PR na ordem acima (rebase se entrarem por squash); CI (na 043, o `shellcheck` e os dois cenários que só rodam em Linux; na 035, os testes de integração novos); `reviewer` na 035.
 
 ## Onde estamos
 
@@ -38,7 +38,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md) (rascunho: decidir D1 a D9; depois implementar E1 a E4). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
+Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E3 prontas na branch (falta CI e `reviewer`); depois a E4 (fatiar `attendance.service.ts`), em PR só de movimentação. Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
 
 ## Decisões do dono que não são óbvias no código
 

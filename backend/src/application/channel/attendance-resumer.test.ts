@@ -25,6 +25,7 @@ import type {
   InboundQueueCleaner,
   QueueCleanResult,
 } from '../ports/inbound-job-queue.js';
+import { channelJobSchema } from '../ports/inbound-job-queue.js';
 import {
   type AttendanceResumeMetrics,
   AttendanceResumer,
@@ -307,5 +308,20 @@ describe('AttendanceResumer (spec 035)', () => {
       .lines()
       .find((entry) => String(entry.msg).includes('retomada do atendimento e limpeza'));
     assert.equal(line?.scheduled, 2);
+  });
+});
+
+describe('formato do job de flush (spec 035)', () => {
+  it('o campo resume é opcional: job antigo sem ele continua válido; com ele, só booleano', () => {
+    const base = {
+      kind: 'flush',
+      companyId: COMPANY_A,
+      phoneNumberId: '106540352242922',
+      contactRef: PHONE_A,
+      requestId: 'req-12345678',
+    };
+    assert.ok(channelJobSchema.safeParse(base).success, 'formato antigo');
+    assert.ok(channelJobSchema.safeParse({ ...base, resume: true }).success);
+    assert.equal(channelJobSchema.safeParse({ ...base, resume: 'sim' }).success, false);
   });
 });
