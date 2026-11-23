@@ -1,6 +1,6 @@
 # 042 — Organização da documentação
 
-- **Status:** rascunho
+- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D8 como recomendadas; E1 implementada, aguardando CI; E2 em branch própria)
 - **Branch:** `spec/042-organizacao-da-documentacao`
 - **Depende de:** nenhuma (só documentação; convém não haver outra branch aberta que mexa em `AGENTS.md`)
 
@@ -70,13 +70,13 @@ Novo `backend/src/docs-structure.test.ts` (unitário, roda no `pnpm test`, só l
 
 E1:
 
-- [ ] `AGENTS.md` tem no máximo 50.000 bytes (`docs-structure.test.ts`).
-- [ ] Todo arquivo de `docs/areas/*.md` aparece na tabela "Áreas" do `AGENTS.md` e todo caminho da tabela existe (`docs-structure.test.ts`).
-- [ ] Nenhum arquivo de `docs/areas/` passa de 60.000 bytes (`docs-structure.test.ts`).
-- [ ] Os três roteiros de `docs/agents/` citam `docs/areas/` (`docs-structure.test.ts`).
-- [ ] O gate de vocabulário varre `docs/areas` e continua verde, sem exceção sem uso (`domain-vocabulary.test.ts`).
-- [ ] **Verificação única, registrada na spec:** toda linha não vazia do `AGENTS.md` da `main` de partida existe, idêntica, no `AGENTS.md` novo ou em algum `docs/areas/*.md` (script de uma linha rodado pelo implementer; a saída vai ao "Registro da implementação"). As únicas diferenças aceitas são títulos de seção e a tabela "Áreas".
-- [ ] `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes.
+- [x] `AGENTS.md` tem no máximo 50.000 bytes (`docs-structure.test.ts`).
+- [x] Todo arquivo de `docs/areas/*.md` aparece na tabela "Áreas" do `AGENTS.md` e todo caminho da tabela existe (`docs-structure.test.ts`).
+- [x] Nenhum arquivo de `docs/areas/` passa de 60.000 bytes (`docs-structure.test.ts`).
+- [x] Os três roteiros de `docs/agents/` citam `docs/areas/` (`docs-structure.test.ts`).
+- [x] O gate de vocabulário varre `docs/areas` e continua verde, sem exceção sem uso (`domain-vocabulary.test.ts`).
+- [x] **Verificação única, registrada na spec:** toda linha não vazia do `AGENTS.md` da `main` de partida existe, idêntica, no `AGENTS.md` novo ou em algum `docs/areas/*.md` (script de uma linha rodado pelo implementer; a saída vai ao "Registro da implementação"). As únicas diferenças aceitas são títulos de seção e a tabela "Áreas".
+- [x] `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes.
 
 E2:
 
@@ -123,3 +123,14 @@ Nenhuma dependência nova. Decisões para o dono:
 - **D7 — Dois PRs (E1, depois E2), na mesma numeração.** Recomendado: a E1 é a parte de risco e fica isolada. Alternativa: um PR só.
 - **D8 — Limites do teste:** 50 KB para o `AGENTS.md`, 60 KB por área, 20 KB para o handoff. A estimativa do `AGENTS.md` depois da E1 é de cerca de 40 KB.
 - **Revisão:** não é spec de segurança, mas o `AGENTS.md` carrega as regras de segurança; recomenda-se o `reviewer` na E1, com foco em "nada se perdeu".
+
+## Registro da implementação
+
+### E1 (2026-11-23, Claude Code, Fable 5.2, branch `spec/042-organizacao-da-documentacao`)
+
+- **Divisão:** feita por script descartável (fora do repositório), por título de seção e pelos parágrafos em negrito do preâmbulo. `AGENTS.md`: de 180.623 para 45.022 bytes (41 KB de texto mais o alinhamento da tabela "Áreas" feito pelo Prettier). Áreas: `canal-whatsapp` 36 KB, `cobranca` 30 KB, `painel` 18 KB, `autenticacao-e-papeis` 16 KB, `agenda` 14 KB, `conhecimento-e-estoque` 8 KB, `http-base` 8 KB, `contas` 7 KB, `llm` 5 KB, `frontend` 4 KB.
+- **Verificação única (linha a linha contra a `main` `adf0b4a`):** 379 linhas não vazias no `AGENTS.md` antigo; ausentes no conjunto novo: 19, **todas títulos de seção** (`### X` virou `## X` no arquivo de área). Nenhuma linha de conteúdo se perdeu ou mudou.
+- **Ficou no `AGENTS.md`:** vocabulário, organização do workspace, stack, como trabalhamos, turnos, comandos e ambiente local, regras invariantes, arquitetura e padrões, deploy (037), acesso a dados e isolamento (003) e "Nunca faça sem perguntar". A seção nova "Áreas" fica antes de "Stack".
+- **Desvio aceito (D2):** como o texto não foi reescrito, o núcleo ainda cita seções movidas por expressões como "abaixo", "acima" e `ver "Autenticação"`; a seção "Áreas" avisa que essas seções estão nos arquivos da tabela. Dentro de um arquivo de área, "acima"/"abaixo" podem apontar para seção de outro arquivo (por exemplo, o painel cita a ponte do cookie da 023, que está em `canal-whatsapp.md`).
+- **Outros arquivos:** `backend/src/docs-structure.test.ts` (novo, 4 testes), `domain-vocabulary.test.ts` (varre `docs/areas`; nenhuma exceção da allowlist apontava para o `AGENTS.md`), os três roteiros de `docs/agents/`, `CLAUDE.md` (aviso de que as áreas não são carregadas sozinhas) e duas referências do `backend/.env.example` (uma dizia `CLAUDE.md` para "Ambiente local"; a outra aponta agora para a área de autenticação).
+- **Ambiente desta sessão:** máquina sem `node_modules`, sem `backend/.env` e com Node 26.13.1 no `PATH` (não o 24 do `.nvmrc`). Foram feitos `pnpm install --frozen-lockfile` e `pnpm db:generate` com uma `DATABASE_URL` fictícia só no ambiente do comando (nenhum `.env` criado, nenhuma conexão).

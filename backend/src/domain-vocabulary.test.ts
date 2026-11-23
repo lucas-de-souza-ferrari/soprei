@@ -27,6 +27,7 @@ const SCANNED = [
   'docs/context.md',
   'docs/handoff.md',
   'docs/agents',
+  'docs/areas',
 ] as const;
 const TEXT_FILE = /\.(ts|tsx|js|cjs|mjs|json|css|html|md|prisma|example)$/;
 
