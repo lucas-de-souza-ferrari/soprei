@@ -3,7 +3,7 @@
 Implementa uma spec **já aprovada** (status `aprovada`) em uma branch própria. Se a spec não está aprovada, pare e avise.
 
 Antes de começar:
-1. Leia `AGENTS.md`, os arquivos de `docs/areas/` das áreas que a spec toca (tabela "Áreas" do `AGENTS.md`), `docs/context.md`, `docs/handoff.md` e a spec inteira (inclusive "Decisões" e o Registro de specs vizinhas que ela cita).
+1. Leia `AGENTS.md`, os arquivos de `docs/areas/` das áreas que a spec toca (seção "Áreas" do `AGENTS.md`), `docs/context.md`, `docs/handoff.md` e a spec inteira (inclusive "Decisões" e o Registro de specs vizinhas que ela cita).
 2. Confira `git status`. Crie a branch `spec/NNN-nome` a partir da `main` atualizada; se houver mudanças de docs não commitadas, o primeiro commit da branch leva só elas.
 
 Execução:

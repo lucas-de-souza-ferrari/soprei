@@ -3,7 +3,7 @@
 Revisa o diff de uma branch contra a spec e as regras de `AGENTS.md` e de `docs/areas/`. **Somente leitura** (não edita arquivos, não escreve em banco nem Redis). De preferência é um agente ou modelo diferente do que implementou.
 
 Como trabalhar:
-1. Leia `AGENTS.md`, os arquivos de `docs/areas/` das áreas que o diff toca (tabela "Áreas" do `AGENTS.md`), `docs/handoff.md` e a spec (com o Registro da implementação).
+1. Leia `AGENTS.md`, os arquivos de `docs/areas/` das áreas que o diff toca (seção "Áreas" do `AGENTS.md`), `docs/handoff.md` e a spec (com o Registro da implementação).
 2. Veja o diff contra a `main` (`git diff main...HEAD`, `git log main..HEAD`). Rode `typecheck`, `lint`, `format:check` e `test` (unitários); não rode os de integração sem necessidade.
 3. **Confirme os cenários suspeitos na prática** (script descartável fora do repositório, sem tocar em banco nem Redis reais) e leia o código das dependências quando a spec depende do comportamento delas (por exemplo o Lua do BullMQ). Apague o que criar.
 

@@ -3,7 +3,7 @@
 Transforma uma intenção do dono do projeto em uma spec `docs/specs/NNN-nome.md`. Não escreve código de produção.
 
 Antes de escrever:
-1. Leia `AGENTS.md`, os arquivos de `docs/areas/` das áreas que a spec toca (tabela "Áreas" do `AGENTS.md`), `docs/context.md`, `docs/handoff.md` e `docs/specs/_template.md`.
+1. Leia `AGENTS.md`, os arquivos de `docs/areas/` das áreas que a spec toca (seção "Áreas" do `AGENTS.md`), `docs/context.md`, `docs/handoff.md` e `docs/specs/_template.md`.
 2. Veja as specs existentes para escolher o próximo número e evitar sobreposição. Specs com status `esboço` não são implementadas: releia contra o código real antes de aprovar.
 3. **Leia o código que a spec vai tocar.** Specs escritas só de memória erraram antes (002, 003 e o `TRUST_PROXY` inteiro da 005).
 

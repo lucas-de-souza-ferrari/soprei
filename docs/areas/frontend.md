@@ -1,6 +1,6 @@
 # Frontend
 
-> Parte das instruções do projeto (spec 042): vale o mesmo que o [AGENTS.md](../../AGENTS.md), que continua sendo leitura obrigatória. Componentes, tema, páginas legais e o shell do painel. Os caminhos `src/` e `prisma/` são relativos a `backend/`.
+> Parte das instruções do projeto (spec 042): vale o mesmo que o [AGENTS.md](../../AGENTS.md), que continua sendo leitura obrigatória. Componentes, tema, páginas legais e o shell do painel.
 
 **Interface do frontend (spec 018):** o site e as telas de conta usam componentes do beUI (MIT) copiados em `frontend/src/components/motion/` e `frontend/src/lib/` (origem e adaptações em `NOTICE.md`; sem aliases, imports relativos; copiar do registro `https://beui.dev/r/{slug}`, não instalar pacote). Dependências: só `motion`, `clsx`, `tailwind-merge` e `lucide-react` (versões fixas; **sem `next-themes`**). Modo escuro: `useTheme` próprio (`frontend/src/theme/`), escolha Claro/Escuro/Sistema na chave `soprei-theme` do `localStorage` (a única coisa que o site guarda no navegador), classe `dark` no `<html>` aplicada por script do `index.html` antes da primeira pintura. Cores vêm só dos tokens (`:root` e `.dark` em `style.css`, nomes do shadcn); cor fixa nova é proibida, e todo par texto/fundo novo entra em `src/theme/contrast.test.ts` (mínimo 4,5:1 nos dois temas). Testes: `pnpm --filter soprei-frontend test` (unitários) e `pnpm --filter soprei-frontend test:browser` (Playwright, desktop e celular, claro e escuro).
 
