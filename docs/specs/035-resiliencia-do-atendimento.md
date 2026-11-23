@@ -192,7 +192,7 @@ O `reviewer` não aprovou a primeira versão: três bloqueantes e quatro importa
 - **S7 (aplicado):** a área do canal não descreve mais a regra antiga da retentativa.
 - **S8 (registrado):** a marca `resume` passa para os `flush` de continuação do mesmo contato, que também não mandam o texto padrão.
 - **Para o dono decidir (não aplicados):**
-  - **I1:** o simulador (`POST /admin/companies/:id/messages`, que OWNER, ADMIN e AGENT usam) aceita qualquer `contactRef`. Se alguém simular com o telefone de um contato real que escreveu nas últimas 23 h, a resposta simulada (sem `sentAt`) passa a ser enviada a esse contato pela varredura ou pelo próximo turno dele. Antes da 035 isso nunca acontecia.
+  - **I1 (decisão do dono, 2026-11-23: risco aceito, nada muda no código):** o simulador (`POST /admin/companies/:id/messages`, que OWNER, ADMIN e AGENT usam) aceita qualquer `contactRef`. Se alguém simular com o telefone de um contato real que escreveu nas últimas 23 h, a resposta simulada (sem `sentAt`) passa a ser enviada a esse contato pela varredura ou pelo próximo turno dele. Antes da 035 isso nunca acontecia.
   - **I4:** o envio que a Meta aceitou mas cuja resposta veio sem id legível é tratado como permanente de propósito (spec 011: "retentar poderia duplicar"). Com a D6 e a varredura, essa resposta passa a ser reenviada: provável duplicata. A D5 aprovada fala de outro caso (banco fora logo depois do envio).
 - **Não verificado:** os testes de integração (só no CI), planos de consulta, o efeito da D6 nos testes de privacidade e de coexistência de `whatsapp-channel.integration.test.ts` (que passam por um reenvio a mais).
 
