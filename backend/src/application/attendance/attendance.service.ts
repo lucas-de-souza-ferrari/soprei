@@ -19,6 +19,7 @@ import {
   AI_TAKEOVER_PAUSE_MS,
   HUMAN_MEDIA_PLACEHOLDER,
   isAiPaused,
+  isReplyResendable,
   KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
   MESSAGE_CONTENT_MAX_LENGTH,
   NOTIFICATION_MAX_OPEN,
@@ -347,14 +348,6 @@ export interface PendingResponse {
   readonly hasMorePending: boolean;
 }
 
-export interface RespondToPendingOptions {
-  /**
-   * Retentativa de um job que já falhou: se a resposta do turno anterior foi gravada mas não
-   * enviada, ela sai primeiro (antes de responder as pendentes), para não ficar perdida.
-   */
-  readonly resumeUnsent?: boolean;
-}
-
 type ExistingState =
   | { readonly kind: 'none' }
   | { readonly kind: 'replied'; readonly message: Message; readonly reply: Message }
@@ -495,7 +488,6 @@ export class AttendanceService {
     companyId: CompanyId,
     rawContactRef: string,
     rawLimits: BatchLimits,
-    options: RespondToPendingOptions = {},
   ): Promise<PendingResponse> {
     const contactRef = contactRefSchema.parse(rawContactRef);
     const limits = batchLimitsSchema.parse(rawLimits);
@@ -528,18 +520,21 @@ export class AttendanceService {
     );
     const first = fetched[0];
     if (first === undefined) {
+      // Spec 035: a resposta gravada e não enviada só sai se ainda for reenviável (dentro da janela
+      // e não segurada pela equipe ao assumir a conversa).
       const unsent = await this.findUnsentTail(companyId, conversation.id);
-      return unsent === null
+      return unsent === null || !isReplyResendable(unsent, conversation, this.now())
         ? this.emptyResponse(conversation.id)
         : this.resendResponse(conversation.id, unsent, false);
     }
     const [previous] = await this.deps.messages.listBefore(companyId, conversation.id, first.id, 1);
     if (previous?.role === 'ASSISTANT' && previous.sentAt === null) {
-      if (options.resumeUnsent === true) {
+      // Spec 035 (D6): a resposta anterior que não saiu (envio recusado, ou o job em retentativa foi
+      // trocado por este) vai ANTES das novas, em qualquer tentativa, para a ordem ficar a certa.
+      if (isReplyResendable(previous, conversation, this.now())) {
         return this.resendResponse(conversation.id, previous, true);
       }
-      // Não é retentativa: a resposta anterior não saiu (envio recusado de vez, ou o job em
-      // retentativa foi trocado por este) e não será reenviada. Fica só gravada: avisa, sem conteúdo.
+      // Fora da janela, ou segurada pela equipe (spec 039): fica só gravada. Avisa, sem conteúdo.
       this.deps.logger.warn(
         {
           companyId,

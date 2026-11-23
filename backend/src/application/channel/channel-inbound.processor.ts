@@ -22,7 +22,6 @@ import type {
   HumanEchoInput,
   HumanEchoResult,
   PendingResponse,
-  RespondToPendingOptions,
 } from '../attendance/attendance.service.js';
 import { ATTENDANCE_FALLBACK_TEXT } from '../attendance/attendance.service.js';
 import type { BatchLimits, InboundMessage } from '../attendance/attendance.schemas.js';
@@ -58,7 +57,6 @@ export interface InboundAttendance {
     companyId: CompanyId,
     contactRef: string,
     limits: BatchLimits,
-    options?: RespondToPendingOptions,
   ): Promise<PendingResponse>;
   hasPendingMessages(companyId: CompanyId, contactRef: string): Promise<boolean>;
   /** Spec 039: grava o eco da equipe e pausa a IA. Opcional só para os testes antigos. */
@@ -186,6 +184,14 @@ export class ChannelInboundProcessor {
         );
         return;
       }
+      if (job.kind === 'flush' && job.resume === true) {
+        // Spec 035 (D4): a retomada não repete o texto padrão.
+        this.deps.logger.error(
+          { companyId, ...refs },
+          'job de retomada falhou sem resposta gravada; o texto padrão não é repetido',
+        );
+        return;
+      }
       this.deps.logger.error(
         { companyId, ...refs },
         'job falhou sem resposta gravada; enviando o texto padrão ao contato',
@@ -286,8 +292,6 @@ export class ChannelInboundProcessor {
         companyId,
         job.contactRef,
         { maxMessages: this.deps.batch.maxMessages, maxChars: this.deps.batch.maxChars },
-        // Retentativa de um job que já falhou: a resposta gravada e não enviada sai primeiro.
-        { resumeUnsent: (context.attempt ?? 1) > 1 },
       );
     } catch (error) {
       if (error instanceof ForbiddenError) {
@@ -739,6 +743,21 @@ export class ChannelInboundProcessor {
   ): Promise<Error> {
     const permanent = isPermanentAttendanceError(error);
     if (!permanent && !context.finalAttempt) {
+      return error instanceof Error ? error : new Error('falha desconhecida no atendimento');
+    }
+    // Spec 035 (D4): o `flush` agendado pela varredura de retomada não repete o texto padrão. Quem já
+    // recebeu "tive um problema" não recebe a mesma frase a cada tentativa; as mensagens seguem pendentes.
+    if (job.kind === 'flush' && job.resume === true) {
+      this.deps.logger.error(
+        { companyId, ...refFields(job), permanent, ...describeError(error) },
+        'a retomada do atendimento falhou sem resposta gravada; o texto padrão não é repetido',
+      );
+      if (permanent) {
+        return new NonRetryableJobError('Atendimento falhou de forma permanente', {
+          cause: error,
+          context: { companyId, ...refFields(job), ...describeError(error) },
+        });
+      }
       return error instanceof Error ? error : new Error('falha desconhecida no atendimento');
     }
     this.deps.logger.error(

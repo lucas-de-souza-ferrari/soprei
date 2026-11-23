@@ -277,6 +277,8 @@ export const envSchema = z
     CHANNEL_BATCH_MAX_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
     CHANNEL_BATCH_MAX_MESSAGES: z.coerce.number().int().min(1).max(50).default(10),
     CHANNEL_BATCH_MAX_CHARS: z.coerce.number().int().min(1).max(24_000).default(8_000),
+    // Retomada do atendimento e limpeza da fila (spec 035): intervalo da varredura; 0 desliga as duas.
+    CHANNEL_RESUME_INTERVAL_MINUTES: z.coerce.number().int().min(0).max(1_440).default(5),
     // IP atrás de proxy: false | true | lista de IPs/CIDRs dos proxies (ver trust-proxy.ts).
     TRUST_PROXY: z
       .string()

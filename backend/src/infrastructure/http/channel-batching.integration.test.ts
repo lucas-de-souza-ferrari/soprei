@@ -657,7 +657,7 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
     });
   });
 
-  it('limitação conhecida: mensagem nova durante o backoff de um envio que falhou troca o job em retentativa; a resposta antiga fica gravada sem sentAt, o aviso aparece e a nova mensagem é respondida', async () => {
+  it('spec 035 (D6): mensagem nova durante o backoff de um envio que falhou troca o job em retentativa; o turno novo reenvia ANTES a resposta que não saiu e depois responde a nova mensagem', async () => {
     await withHarness(
       { windowMs: 300 },
       async (h) => {
@@ -674,31 +674,37 @@ describe('agrupamento de mensagens no canal (janela deslizante, spec 013)', () =
         );
         // O job está esperando o backoff (3 s). A mensagem nova o substitui.
         await send(h, number, contact, 'segunda');
-        await waitFor(async () => (await sentCount(company, contact)) === 1, 'segunda respondida');
+        await waitFor(async () => (await sentCount(company, contact)) === 2, 'as duas enviadas');
 
         const rows = await stored(company, contact);
         const replies = rows.filter((m) => m.role === 'ASSISTANT');
         assert.equal(replies.length, 2);
-        assert.equal(replies[0]?.sentAt, null, 'a resposta antiga ficou gravada, sem sentAt');
+        assert.notEqual(replies[0]?.sentAt, null, 'a resposta antiga foi reenviada');
         assert.notEqual(replies[1]?.sentAt, null);
         assert.equal(
           h.llm.calls.length,
           2,
-          'a primeira não foi reenviada: nova chamada só para a segunda',
+          'a primeira foi reenviada sem nova chamada ao LLM; a segunda teve a dela',
         );
         assert.equal(h.llm.calls[1]?.userMessage, 'segunda');
-        const warn = h.logs
-          .lines()
-          .find((line) => String(line.msg).includes('não foi enviada e não será reenviada'));
-        assert.equal(warn?.level, 40);
-        assert.equal(warn.companyId, company.id);
-        assert.equal(warn.replyId, replies[0].id);
+        // Ordem no canal: a tentativa que falhou, o reenvio da resposta antiga e só então a nova.
+        const texts = graph.requests.map(
+          (request) => (request.body as { text: { body: string } }).text.body,
+        );
+        assert.equal(texts.length, 3);
+        assert.equal(texts[0], replies[0]?.content);
+        assert.equal(texts[1], replies[0]?.content);
+        assert.equal(texts[2], replies[1]?.content);
+        assert.ok(
+          !h.logs.lines().some((line) => String(line.msg).includes('não será reenviada')),
+          'nada ficou para trás',
+        );
         const metrics = await h.app.inject({
           method: 'GET',
           url: '/metrics',
           headers: { authorization: `Bearer ${METRICS_TOKEN}` },
         });
-        assert.match(metrics.body, /attendance_unsent_replies_total 1/);
+        assert.doesNotMatch(metrics.body, /attendance_unsent_replies_total [1-9]/);
         const raw = h.logs.raw();
         for (const secret of ['primeira', 'segunda', contact, PERSONA]) {
           assert.ok(!raw.includes(secret), `vazou em log: ${secret}`);

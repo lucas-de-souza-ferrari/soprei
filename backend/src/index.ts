@@ -6,6 +6,8 @@ import { PaymentReconciler } from './application/billing/payment-reconciler.js';
 import { deriveWebhookSecret } from './application/billing/webhook-token.js';
 import { PaymentVerifier } from './application/billing/payment-verifier.js';
 import { PendingReplyResumer } from './application/billing/pending-reply-resumer.js';
+import { AttendanceResumer } from './application/channel/attendance-resumer.js';
+import { RedisResumeAttemptStore } from './infrastructure/auth/redis-resume-attempts.js';
 import { InfinitepayClient } from './infrastructure/external-apis/infinitepay/infinitepay.client.js';
 import { SecretString } from './shared/types/index.js';
 import { OnboardingService } from './application/onboarding/onboarding.service.js';
@@ -59,6 +61,7 @@ import {
   PrismaBillingRepository,
   PrismaCheckoutRepository,
   PrismaPendingReplyReader,
+  PrismaResumeTargetReader,
   PrismaEntitlementReader,
   PrismaUsageMeter,
 } from './infrastructure/database/index.js';
@@ -337,6 +340,8 @@ async function main(): Promise<void> {
   });
 
   let whatsappRoutes: WhatsappRoutesParams | undefined;
+  // Retomada do atendimento e limpeza da fila (spec 035): só com o canal ligado.
+  let channelResumer: AttendanceResumer | undefined;
   let channelService: ChannelConnectionService | undefined;
   if (whatsapp !== undefined && inboundQueue !== undefined) {
     const channelLogger = logger;
@@ -388,6 +393,14 @@ async function main(): Promise<void> {
     // Worker no mesmo processo, concorrência 1; o shutdown o espera antes de fechar Redis e banco.
     inboundQueue.startWorker((job, context) => processor.process(job, context), {
       onUnhandledFailure: (job) => processor.handleUnprocessedFailure(job),
+    });
+    channelResumer = new AttendanceResumer({
+      reader: new PrismaResumeTargetReader(prisma),
+      attempts: new RedisResumeAttemptStore(authRedis.client, config.AUTH_REDIS_PREFIX),
+      queue: inboundQueue.queue,
+      cleaner: inboundQueue.cleaner,
+      logger,
+      metrics,
     });
     whatsappRoutes = {
       appSecret: whatsapp.appSecret,
@@ -639,6 +652,25 @@ async function main(): Promise<void> {
         ]);
         // O desligamento também espera as confirmações em segundo plano (webhook já respondido).
         await checkout.verifier.drain();
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+      },
+    };
+  }
+
+  if (channelResumer !== undefined) {
+    // Timer PRÓPRIO (padrão 5 min; 0 desliga a retomada e a limpeza), sem sobreposição. Para junto com
+    // os outros timers, ANTES de a fila fechar (o closeInfrastructure para os timers primeiro).
+    const resumer = channelResumer;
+    const resumeTimer = startPurgeTimer({
+      enabled: true,
+      run: () => resumer.runOnce(),
+      intervalMinutes: config.CHANNEL_RESUME_INTERVAL_MINUTES,
+    });
+    const otherTimers = infrastructure.accountPurge;
+    infrastructure.accountPurge = {
+      async stop() {
+        const results = await Promise.allSettled([otherTimers?.stop(), resumeTimer?.stop()]);
         const failed = results.find((result) => result.status === 'rejected');
         if (failed?.status === 'rejected') throw failed.reason;
       },

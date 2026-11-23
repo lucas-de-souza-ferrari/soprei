@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ZodError } from 'zod';
-import type { Company, Message } from '../../domain/index.js';
+import { type Company, type Message, RESUME_WINDOW_MS } from '../../domain/index.js';
 import {
   MOCK_FAIL_MARKER,
   MockLlmProvider,
@@ -84,6 +84,22 @@ function accept(h: Harness, company: Company, text: string, contactRef = 'contat
     text,
     externalId: `wamid.${String(sequence)}`,
   });
+}
+
+/**
+ * Responde as pendentes e marca a resposta como enviada, como o processador do canal faz depois do
+ * envio. Desde a spec 035 (D6), uma resposta gravada e ainda sem `sentAt` é reenviada antes de
+ * qualquer resposta nova: sem esta marca, o turno seguinte reenviaria a anterior.
+ */
+async function respondAndSend(h: Harness, company: Company, limits: BatchLimits = LIMITS) {
+  const result = await h.service.respondToPending(company.id, 'contato-1', limits);
+  if (result.reply !== null && result.reply.sentAt === null) {
+    await h.store.messages.markSent(company.id, result.reply.id, {
+      channelMessageId: `wamid.out.${result.reply.id}`,
+      sentAt: new Date(),
+    });
+  }
+  return result;
 }
 
 const sorted = (messages: readonly Message[]): Message[] =>
@@ -191,13 +207,13 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     const company = await newCompany(h, 'alfa');
     // Um turno antigo já respondido: é o histórico.
     await accept(h, company, 'pergunta antiga');
-    await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    await respondAndSend(h, company);
     h.llm.calls.length = 0;
 
     await accept(h, company, 'oi');
     await accept(h, company, 'tudo bem?');
     await accept(h, company, 'preciso de ajuda');
-    const result = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    const result = await respondAndSend(h, company);
 
     assert.equal(h.llm.calls.length, 1);
     const [call] = h.llm.calls;
@@ -281,7 +297,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
     const turns = [];
     for (let i = 0; i < 3; i += 1) {
-      turns.push(await h.service.respondToPending(company.id, 'contato-1', limits));
+      turns.push(await respondAndSend(h, company, limits));
     }
 
     assert.deepEqual(
@@ -329,7 +345,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
     const sizes = [];
     for (let i = 0; i < 4; i += 1) {
-      const turn = await h.service.respondToPending(company.id, 'contato-1', limits);
+      const turn = await respondAndSend(h, company, limits);
       sizes.push(turn.batchSize);
       if (!turn.hasMorePending) break;
     }
@@ -347,7 +363,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     await accept(h, company, 'primeira');
     const release = h.llm.hold();
 
-    const running = h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    const running = respondAndSend(h, company);
     // Espera a chamada ao LLM começar e então chega uma mensagem nova.
     while (h.llm.calls.length === 0) await new Promise((resolve) => setImmediate(resolve));
     await accept(h, company, 'chegou durante');
@@ -356,7 +372,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
 
     assert.equal(first.batchSize, 1);
     assert.deepEqual(h.llm.calls[0]?.userMessage, 'primeira');
-    const second = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    const second = await respondAndSend(h, company);
     assert.equal(second.batchSize, 1);
     assert.equal(h.llm.calls[1]?.userMessage, 'chegou durante');
     assert.deepEqual(
@@ -466,6 +482,10 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
           createdAt: new Date(m1.messageCreatedAt.getTime() + 1),
         });
         await h.store.messages.markAnswered(company.id, [m1.messageId], other.id);
+        await h.store.messages.markSent(company.id, other.id, {
+          channelMessageId: 'wamid.outra',
+          sentAt: new Date(),
+        });
       }
       return generate(input);
     };
@@ -513,7 +533,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     assert.equal(done.outcome, 'empty');
   });
 
-  it('retentativa (resumeUnsent) com pendentes depois de uma resposta não enviada: reenvia a resposta primeiro e avisa que há mais', async () => {
+  it('spec 035 (D6): com pendentes depois de uma resposta não enviada, QUALQUER turno reenvia a resposta primeiro e avisa que há mais', async () => {
     const h = setup();
     const company = await newCompany(h, 'alfa');
     await accept(h, company, 'um');
@@ -521,32 +541,92 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     await accept(h, company, 'dois');
     const llmCalls = h.llm.calls.length;
 
-    const resumed = await h.service.respondToPending(company.id, 'contato-1', LIMITS, {
-      resumeUnsent: true,
-    });
+    const resumed = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
 
     assert.equal(resumed.outcome, 'resend');
     assert.equal(resumed.reply?.id, first.reply?.id);
     assert.equal(resumed.hasMorePending, true);
     assert.equal(h.llm.calls.length, llmCalls, 'sem nova chamada ao LLM');
+    assert.equal(h.metrics.unsentReplies, 0, 'reenviada: não conta como resposta perdida');
 
-    // Sem a opção (primeira tentativa), a resposta anterior não é reenviada: responde as pendentes,
-    // avisa em log (só ids) e conta o evento.
-    const normal = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
-    assert.equal(normal.outcome, 'answered');
-    assert.equal(normal.batchSize, 1);
-    const warn = h.logs
+    // Enviada a anterior, o turno seguinte responde a pendente.
+    await h.store.messages.markSent(company.id, first.reply?.id ?? '', {
+      channelMessageId: 'wamid.out',
+      sentAt: new Date(),
+    });
+    const next = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    assert.equal(next.outcome, 'answered');
+    assert.equal(next.batchSize, 1);
+    assert.equal(h.llm.calls.at(-1)?.userMessage, 'dois');
+  });
+
+  it('spec 035: resposta segurada pela equipe (aiIgnoreBefore) nunca é reenviada; as pendentes são respondidas, com aviso e métrica', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    const m1 = await accept(h, company, 'um');
+    const first = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    // A equipe assumiu a conversa depois da resposta (spec 039) e a pausa já venceu.
+    await h.store.conversations.extendAiPause(company.id, m1.conversationId, {
+      pausedUntil: new Date(0),
+      ignoreBefore: new Date(Date.now() + 60_000),
+    });
+    assert.equal(first.outcome, 'answered');
+
+    // Sem pendentes: a resposta segurada não sai.
+    const idle = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
+    assert.equal(idle.outcome, 'empty');
+    assert.equal(idle.reply, null);
+  });
+
+  it('spec 035: resposta não enviada fora da janela de retomada não é reenviada; o turno responde as pendentes e avisa', async () => {
+    let offset = 0;
+    const base = steppingClock(10);
+    const now = (): Date => new Date(base().getTime() + offset);
+    const companies = new InMemoryCompanyRepository();
+    const store = new InMemoryAttendanceStore(now);
+    const llm = new MockLlmProvider({ recordCalls: true });
+    const metrics = new FakeMetrics();
+    const logs = captureLogs();
+    const service = new AttendanceService({
+      companies,
+      conversations: store.conversations,
+      messages: store.messages,
+      unitOfWork: store,
+      llm,
+      logger: logs.logger,
+      metrics,
+      options: { llmTimeoutMs: 1_000, inFlightTimeoutMs: 60_000, now },
+    });
+    const created = await companies.create({ name: 'Empresa alfa', slug: 'alfa' });
+    const company = await companies.update(created.id, { persona: PERSONA });
+    await service.acceptInboundMessage(company.id, {
+      contactRef: 'contato-1',
+      text: 'um',
+      externalId: 'wamid.janela.1',
+    });
+    const first = await service.respondToPending(company.id, 'contato-1', LIMITS);
+
+    // Passa da janela de retomada; o contato volta a escrever.
+    offset = RESUME_WINDOW_MS + 60_000;
+    const idle = await service.respondToPending(company.id, 'contato-1', LIMITS);
+    assert.equal(idle.outcome, 'empty', 'sem pendentes, a resposta velha não sai');
+    await service.acceptInboundMessage(company.id, {
+      contactRef: 'contato-1',
+      text: 'dois',
+      externalId: 'wamid.janela.2',
+    });
+    const next = await service.respondToPending(company.id, 'contato-1', LIMITS);
+
+    assert.equal(next.outcome, 'answered');
+    assert.equal(next.batchSize, 1);
+    assert.notEqual(next.reply?.id, first.reply?.id);
+    const warn = logs
       .lines()
       .find((line) => String(line.msg).includes('não foi enviada e não será reenviada'));
     assert.equal(warn?.level, 40);
     assert.equal(warn.companyId, company.id);
     assert.equal(warn.replyId, first.reply?.id);
-    assert.ok(!h.logs.raw().includes('um'.repeat(10)), 'sem texto no aviso');
-    assert.deepEqual(
-      h.metrics.batches.map((batch) => batch.result),
-      ['answered', 'answered'],
-    );
-    assert.equal(h.metrics.unsentReplies, 1);
+    assert.equal(metrics.unsentReplies, 1);
   });
 
   it('não avisa quando a resposta anterior já foi enviada', async () => {
@@ -564,7 +644,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     assert.equal(h.metrics.unsentReplies, 0);
   });
 
-  it('resumeUnsent não reenvia resposta que já tem sentAt', async () => {
+  it('resposta que já tem sentAt nunca é reenviada', async () => {
     const h = setup();
     const company = await newCompany(h, 'alfa');
     await accept(h, company, 'um');
@@ -575,9 +655,7 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     });
     await accept(h, company, 'dois');
 
-    const resumed = await h.service.respondToPending(company.id, 'contato-1', LIMITS, {
-      resumeUnsent: true,
-    });
+    const resumed = await h.service.respondToPending(company.id, 'contato-1', LIMITS);
 
     assert.equal(resumed.outcome, 'answered');
     assert.equal(resumed.batchSize, 1);

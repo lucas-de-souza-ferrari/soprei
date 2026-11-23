@@ -228,7 +228,7 @@ describe('ChannelInboundProcessor: job echo (spec 039)', () => {
   it('falha transitória relança (a fila retenta) sem texto padrão; empresa removida é permanente', async () => {
     const h = setup((service) => ({
       acceptInboundMessage: (c, i, o) => service.acceptInboundMessage(c, i, o),
-      respondToPending: (c, r, l, o) => service.respondToPending(c, r, l, o),
+      respondToPending: (c, r, l) => service.respondToPending(c, r, l),
       hasPendingMessages: (c, r) => service.hasPendingMessages(c, r),
       recordHumanEcho: () => Promise.reject(new DatabaseError('banco fora')),
     }));
@@ -285,8 +285,8 @@ describe('ChannelInboundProcessor: flush com a IA pausada (spec 039)', () => {
     let paused = false;
     const h = setup((service) => ({
       acceptInboundMessage: (c, i, o) => service.acceptInboundMessage(c, i, o),
-      respondToPending: async (c, r, l, o) => {
-        const response = await service.respondToPending(c, r, l, o);
+      respondToPending: async (c, r, l) => {
+        const response = await service.respondToPending(c, r, l);
         paused = true;
         return response;
       },

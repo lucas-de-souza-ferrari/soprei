@@ -216,8 +216,8 @@ function bind(service: AttendanceService): InboundAttendance {
   return {
     acceptInboundMessage: (companyId, input, options) =>
       service.acceptInboundMessage(companyId, input, options),
-    respondToPending: (companyId, contactRef, limits, options) =>
-      service.respondToPending(companyId, contactRef, limits, options),
+    respondToPending: (companyId, contactRef, limits) =>
+      service.respondToPending(companyId, contactRef, limits),
     hasPendingMessages: (companyId, contactRef) =>
       service.hasPendingMessages(companyId, contactRef),
   };

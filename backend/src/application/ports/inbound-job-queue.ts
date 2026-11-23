@@ -84,11 +84,14 @@ export type InboundJob = z.infer<typeof inboundJobSchema>;
 /**
  * Job de resposta às mensagens pendentes de um contato (spec 013). **Não carrega texto**: o texto
  * vive no banco. Leva só a empresa, o número do negócio (para descartar o job se o número da empresa
- * mudou), o contato e o `requestId`.
+ * mudou), o contato e o `requestId`. `resume` (spec 035, opcional: job antigo sem o campo continua
+ * válido) marca o `flush` agendado pela varredura de retomada: reenvia a resposta gravada e não enviada
+ * e, se falhar, não manda o texto padrão ao contato.
  */
 export const flushJobSchema = z.object({
   kind: z.literal('flush'),
   ...identityFields,
+  resume: z.boolean().optional(),
 });
 
 export type FlushJob = z.infer<typeof flushJobSchema>;
@@ -150,6 +153,21 @@ export interface InboundJobQueue {
     job: FlushJob,
     schedule: FlushSchedule,
   ): Promise<Result<void, ExternalServiceError>>;
+}
+
+/** Jobs apagados por uma limpeza da fila, por estado (spec 035, E3). */
+export interface QueueCleanResult {
+  readonly completed: number;
+  readonly failed: number;
+}
+
+/**
+ * Limpeza por idade da fila (spec 035, E3): apaga os jobs concluídos e os falhos mais velhos que os
+ * prazos de retenção, haja ou não tráfego. Nunca toca job ativo, em espera ou atrasado. Porta
+ * separada da `InboundJobQueue` para que só a varredura a enxergue.
+ */
+export interface InboundQueueCleaner {
+  cleanOldJobs(): Promise<Result<QueueCleanResult, ExternalServiceError>>;
 }
 
 export interface InboundJobContext {
