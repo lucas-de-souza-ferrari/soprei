@@ -209,6 +209,8 @@ O servidor próprio (PM2 + nginx) é atualizado por **um comando**, `deploy/depl
 
 **Deploy automático (E3):** depois do merge na `main` com o `CI` verde, `.github/workflows/deploy.yml` (`workflow_run`; interruptor `DEPLOY_ENABLED`; disparo manual só em dry-run; sem `uses:`, sem checkout) manda por SSH só `--env production --ref <SHA>` ao usuário `soprei-deploy`, cujo comando forçado é o programa de entrada (`deploy/soprei-deploy-entry.sh`, instalado à mão em `/usr/local/sbin/`): ele confere o texto, chama a si mesmo pelo `sudo` restrito e roda o `deploy.sh --auto` como `root` com `env -i` (SHA só da `main` e só para a frente; nunca `--allow-breaking`, `--force` nem `--previous`). Mudou o programa de entrada ou `deploy.sh`: o dono reinstala/implanta à mão; `deploy-workflow.test.ts` trava o workflow e o `actionlint` (versão fixa, SHA-256 conferido) roda no job `static`. Passos do dono e desligamento: `docs/ops/deploy.md`.
 
+**Backup (spec 043):** `deploy/backup/soprei-backup.sh` (instalado à mão em `/usr/local/sbin/`, agendado por `systemd`) faz o `pg_dump` diário, cifra com a chave **pública** do `age` e envia **só o arquivo cifrado** para fora do servidor; nunca apaga nada no destino (a expiração e a trava são regras do bucket) e a saída das ferramentas vai só para um registro privado. `soprei-restore-check.sh` restaura num banco temporário de nome fixo e imprime só contagens. Um agente **não executa esses programas no servidor, não vê a credencial do destino nem a chave privada**; os testes usam dublês (`backup-script.behavior.test.ts`, `backup-scripts.test.ts`). Instalação, restauração e o que guardar fora do servidor: `docs/ops/backup.md`.
+
 ### Acesso a dados e isolamento (spec 003)
 
 Três barreiras independentes, cada uma com teste:

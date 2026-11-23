@@ -8,9 +8,9 @@
 
 - **E1**, branch `spec/042-organizacao-da-documentacao`: `AGENTS.md` de 180 KB para 44 KB; as regras de cada área foram movidas **sem reescrita** para `docs/areas/` (dez arquivos; a seção "Áreas" do `AGENTS.md` diz quando ler cada um); `backend/src/docs-structure.test.ts` novo; o gate de vocabulário varre `docs/areas`; roteiros de `docs/agents/` mandam ler a área tocada. O `reviewer` passou sem bloqueante e as correções estão aplicadas ("Revisão da E1" na spec).
 - **E2**, branch `spec/042-e2-handoff-e-specs` (empilhada sobre a E1): este arquivo enxuto, `docs/context.md` (seções 3 e 6), README novo, linha de status de todas as specs normalizada, índice `docs/specs/README.md`, `.tmp-onb.txt` e `lab/e0/` removidos.
-- **Spec 043 (backup externo do banco e teste de restauração), rascunho**, branch `spec/043-backup-externo` (empilhada sobre a E2 da 042): só a spec; substitui a E5 da 033; espera as decisões D1 a D9 e o E0 do dono. Nada implementado.
-- **Verde localmente (Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check`, `docs-structure`, `domain-vocabulary`, `ci-workflow` e `deploy-workflow`. **Não rodado:** o resto das suítes (nenhum código de produção mudou).
-- **Falta:** push e PR da E1; CI; depois do merge da E1, PR da E2 (se a E1 entrar por squash, rebase da E2 na `main`).
+- **Spec 043 (backup externo do banco), aprovada com D1 a D9; E1 implementada** na branch `spec/043-backup-externo` (empilhada sobre a E2 da 042): `deploy/backup/soprei-backup.sh` e `soprei-restore-check.sh`, exemplos, `docs/ops/backup.md`, testes com dublês e `shellcheck` no CI. Desvio: a proteção contra apagar é a trava do bucket do R2 (não existe credencial "sem apagar"). Nenhuma execução real.
+- **Verde localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check` e os testes de documentação, de workflows e do backup (2 cenários pulados: `flock` real e modo 600). **Não rodado:** `shellcheck` e o resto das suítes.
+- **Falta:** push e PR na ordem E1 da 042, E2 da 042, 043 (rebase se entrarem por squash); CI; `reviewer` na 043 (obrigatório: dados pessoais saem do servidor; olhar o gancho `SOPREI_BACKUP_TEST_NO_MODE_CHECK`).
 
 ## Onde estamos
 
@@ -24,7 +24,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 1. **Spec 042:** push da E1, CI, merge; depois a E2. Apagar, se quiser, as branches remotas já mergeadas (`spec/040-e2-tela`, `spec/041-conhecimento-pdf-docx`, `fix/backup-runuser`, `docs/registro-desligamento`) e a `dev`.
 2. **Staging (spec 037, E2):** montar conforme `docs/ops/staging.md`; até lá a produção roda com `ALLOW_UNSTAGED=true` no `entry.conf`. Quando `deploy/soprei-deploy-entry.sh` mudar, reinstalar o programa de entrada à mão.
-3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): decidir D1 a D9 da [spec 043](specs/043-backup-externo.md).
+3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): depois do merge da [spec 043](specs/043-backup-externo.md), os passos de `docs/ops/backup.md` (chaves, bucket do R2, instalar, primeiro backup, aviso, teste de restauração).
 4. **Anthropic:** termos de dados (LGPD) e limite de gasto mensal na Console.
 5. **Spec 028, E0** (roteiro na spec): obrigatório antes de ligar `SCHEDULE_AI_ENABLED` e a opção "A IA pode solicitar, cancelar e remarcar horários" com empresa real.
 6. **Spec 041 (conferir):** `location ~* \.mjs$` no nginx do servidor (sem ela o leitor de PDF não carrega) e o teste manual em computador, iPhone e Android.

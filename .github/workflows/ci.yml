@@ -59,6 +59,9 @@ jobs:
       # Scripts de deploy (spec 037): o shellcheck já vem na imagem do runner (ubuntu-latest).
       - run: shellcheck deploy/*.sh
 
+      # Scripts de backup (spec 043).
+      - run: shellcheck deploy/backup/*.sh
+
       # Workflows (spec 037, E3): actionlint em versão fixa, com o SHA-256 conferido antes de extrair.
       # Fonte da soma: actionlint_1.7.12_checksums.txt do release v1.7.12 de rhysd/actionlint no GitHub
       # (https://github.com/rhysd/actionlint/releases/tag/v1.7.12), conferido em 2026-11-12. Para trocar

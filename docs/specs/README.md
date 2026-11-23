@@ -51,4 +51,4 @@
 | [040](040-novos-planos-e-enterprise.md) | Novo catálogo de planos, cota de tokens fora da tela e plano Enterprise por contato | concluída | — |
 | [041](041-conhecimento-pdf-docx.md) | Conhecimento: ler PDF e DOCX no navegador | concluída | `location` do `.mjs` no nginx e teste manual (dono, conferir) |
 | [042](042-organizacao-da-documentacao.md) | Organização da documentação | em implementação | CI e merge da E1 e da E2 |
-| [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | rascunho | decisões D1 a D9 e o E0 (dono) |
+| [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | CI, `reviewer` e os passos do dono (instalar, primeiro backup, restauração) |
