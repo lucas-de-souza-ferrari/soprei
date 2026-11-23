@@ -288,11 +288,10 @@ export class ChannelInboundProcessor {
     }
     let response: PendingResponse;
     try {
-      response = await this.deps.attendance.respondToPending(
-        companyId,
-        job.contactRef,
-        { maxMessages: this.deps.batch.maxMessages, maxChars: this.deps.batch.maxChars },
-      );
+      response = await this.deps.attendance.respondToPending(companyId, job.contactRef, {
+        maxMessages: this.deps.batch.maxMessages,
+        maxChars: this.deps.batch.maxChars,
+      });
     } catch (error) {
       if (error instanceof ForbiddenError) {
         this.logSuspended(companyId, job);
