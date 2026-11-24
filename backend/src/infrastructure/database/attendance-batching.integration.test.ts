@@ -176,6 +176,14 @@ describe('agrupamento no banco (spec 013)', () => {
     assert.equal(rejected.length, 1);
     assert.ok(rejected[0]?.reason instanceof ConflictError);
 
+    // A resposta da que confirmou foi enviada (como o processador do canal faz; spec 035, D6: sem a
+    // marca, a retentativa a reenviaria antes de responder o que sobrou).
+    const won = fulfilled[0];
+    assert.ok(won?.status === 'fulfilled' && won.value.reply !== null);
+    await messages.markSent(company.id, won.value.reply.id, {
+      channelMessageId: `wamid.out.${won.value.reply.id}`,
+      sentAt: new Date(),
+    });
     // Retentativa da que perdeu: responde o que sobrou (ou nada), sem duplicar mensagem alguma.
     await service.respondToPending(company.id, contact, LIMITS);
     const conversation = await conversations.findByContact(company.id, contact);
