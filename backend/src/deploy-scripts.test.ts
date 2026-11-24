@@ -860,6 +860,11 @@ describe('admin da plataforma: deploy.sh (spec 044, E4)', () => {
     assert.match(app, /exec tsc --noEmit/);
     assert.match(app, /releases\/\$NEW_RELEASE/);
     assert.match(app, /chmod -R u=rwX,go=rX/);
+    // A pasta do app que chega numa versão nova nasce com o umask 077 do script: o nginx precisa entrar nela.
+    assert.match(
+      app,
+      /cd "\$APP_DIR\/\$dir" \|\| exit 1\n(?:\s*#.*\n)*\s*chmod 755 \. \|\| exit 1/,
+    );
   });
 
   it('troca, devolve e poda o site e o admin pela mesma lista (mesmo rollback)', () => {

@@ -939,8 +939,16 @@ describe('deploy.sh: admin da plataforma (spec 044, E4)', { skip: BASH_SKIP }, (
     { skip: SYMLINK_SKIP },
     () => {
       const world = makeWorld({ adminHost: true });
+      // Como na produção em 2026-11-24: a pasta admin/ chegou pelo git com o umask 077 do script.
+      const adminDir = join(world.appDir, 'admin');
+      if (existsSync(adminDir)) chmodSync(adminDir, 0o700);
       const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha]);
       assert.equal(result.status, 0, result.out);
+      assert.equal(
+        statSync(adminDir).mode & 0o755,
+        0o755,
+        'admin/ precisa de 755 (o nginx entra nela)',
+      );
       assert.ok(result.events.includes('pnpm --filter soprei-admin exec tsc --noEmit'));
       assert.ok(result.events.includes('pnpm --filter soprei-admin exec vite build'));
       const site = readlinkSync(join(world.appDir, 'frontend', 'dist'));
