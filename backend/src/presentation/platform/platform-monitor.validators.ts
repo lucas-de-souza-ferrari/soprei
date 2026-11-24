@@ -31,7 +31,13 @@ export const platformCompaniesQuerySchema = z
   .object({
     ...pageShape,
     status: z.enum(['active', 'suspended']).optional(),
-    q: z.string().trim().max(64).optional(),
+    // O Postgres recusa o caractere NUL num texto (viraria 503): recusado aqui, 400 (revisão da E2, M1).
+    q: z
+      .string()
+      .trim()
+      .max(64)
+      .refine((value) => !value.includes('\u0000'), 'Busca inválida')
+      .optional(),
     attention: z.enum(PLATFORM_ATTENTION_FILTERS).optional(),
   })
   .strict();
