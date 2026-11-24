@@ -167,6 +167,45 @@ describe('pipeline do CI (spec 036)', () => {
     );
   });
 
+  it('admin da plataforma (spec 044, E4): os scripts da raiz que o static e o tests rodam incluem o admin', () => {
+    const root = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
+    for (const script of ['typecheck', 'lint', 'build', 'test']) {
+      assert.match(
+        root.scripts[script] ?? '',
+        /--filter soprei-admin \w+/,
+        `o script ${script} da raiz não inclui o admin`,
+      );
+    }
+    // O format:check percorre a raiz inteira (admin incluído).
+    assert.match(root.scripts['format:check'] ?? '', /prettier --check \.\. /);
+    const admin = JSON.parse(read('admin/package.json')) as { scripts: Record<string, string> };
+    for (const script of ['typecheck', 'lint', 'build', 'test', 'test:browser']) {
+      assert.ok(admin.scripts[script], `admin/package.json sem o script ${script}`);
+    }
+  });
+
+  it('admin da plataforma (spec 044, E4): o browser roda as fatias do admin com o mesmo navegador', () => {
+    const browser = job('browser');
+    assert.match(
+      browser,
+      /- if: \$\{\{ !cancelled\(\) \}\}\n\s+run: pnpm --filter soprei-admin test:browser --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ strategy\.job-total \}\}\n/,
+      'browser não roda as fatias do admin (ou só roda se o site passou)',
+    );
+    assert.match(browser, /pnpm --filter soprei-admin exec playwright --version/);
+    assert.match(browser, /name: playwright-traces-admin-\$\{\{ matrix\.shard \}\}/);
+    assert.match(browser, /path: admin\/test-results/);
+
+    const adminConfig = read('admin/playwright.config.ts');
+    assert.match(adminConfig, /fullyParallel: true,/);
+    assert.match(adminConfig, /workers: process\.env\.CI \? 1 : undefined,/);
+    assert.match(adminConfig, /retries: process\.env\.CI \? 1 : 0,/);
+    // No CI (Linux) o Chromium do Playwright, o do cache; o Edge do sistema só no Windows local.
+    const channels = [...adminConfig.matchAll(/channel: '([^']+)'/g)];
+    assert.equal(channels.length, 1);
+    assert.match(adminConfig, /process\.platform === 'win32' \? \{ channel: 'msedge' \} : \{\}/);
+    assert.doesNotMatch(adminConfig, /browserName: '(?!chromium)/);
+  });
+
   it('a integração continua com um arquivo por vez', () => {
     const pkg = JSON.parse(read('backend/package.json')) as { scripts: Record<string, string> };
     assert.match(pkg.scripts['test:integration'] ?? '', /--test-concurrency=1\b/);

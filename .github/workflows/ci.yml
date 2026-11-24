@@ -50,6 +50,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://soprei:soprei@localhost:5432/soprei_test?schema=public
 
+      # Os scripts da raiz cobrem backend, site e admin (spec 044, E4; ci-workflow.test.ts confere).
       - run: pnpm typecheck
 
       - run: pnpm lint
@@ -193,7 +194,18 @@ jobs:
       # fatias por falha de DNS. Se uma imagem futura perder uma biblioteca, o navegador não abre e
       # o erro é explícito; aí se volta a instalar só o que faltar.
 
+      # Spec 044, E4: o admin usa o navegador em cache pela versão do site; as duas precisam ser iguais.
+      - name: Mesma versão do Playwright no site e no admin
+        env:
+          SITE_PLAYWRIGHT: ${{ steps.playwright.outputs.version }}
+        run: test "$(pnpm --filter soprei-admin exec playwright --version | awk '{print $2}')" = "$SITE_PLAYWRIGHT"
+
       - run: pnpm --filter soprei-frontend test:browser --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+      # Admin da plataforma (spec 044, E4), nas mesmas fatias. Roda mesmo se o do site falhou: uma falha
+      # não esconde a outra.
+      - if: ${{ !cancelled() }}
+        run: pnpm --filter soprei-admin test:browser --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       # Rastreamento (linha do tempo, DOM e rede) das tentativas que falharam, mesmo as que passaram na
       # retentativa. Baixe em "Artifacts" na página da execução e abra com: npx playwright show-trace <zip>.
@@ -202,5 +214,13 @@ jobs:
         with:
           name: playwright-traces-${{ matrix.shard }}${{ inputs.artifact-suffix }}
           path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-traces-admin-${{ matrix.shard }}${{ inputs.artifact-suffix }}
+          path: admin/test-results
           if-no-files-found: ignore
           retention-days: 7

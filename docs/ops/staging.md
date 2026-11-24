@@ -2,17 +2,17 @@
 
 O staging é **uma segunda instalação do Soprei** no servidor da produção, **sem nenhum recurso compartilhado que a produção possa alterar**: diretório, porta, app do PM2, banco e role do PostgreSQL, **instância de Redis**, caixa de e-mail e **todos os segredos** são próprios. Os arquivos de exemplo estão em `deploy/` (sem segredo; marcadores `<ASSIM>` mostram o que o dono preenche). Tudo abaixo é passo do **dono** no servidor; nenhum agente tem acesso a ele.
 
-| Peça          | Produção                         | Staging                                                                 |
-| ------------- | -------------------------------- | ----------------------------------------------------------------------- |
-| Hostname      | o de produção                    | subdomínio próprio (DNS A, **sem proxy** da Cloudflare)                 |
-| Diretório     | `/var/www/soprei`                | `/var/www/soprei-staging` (clone próprio; mesma chave de deploy somente leitura) |
-| Porta da API  | 3001                             | **3002** (`127.0.0.1`; nunca aberta no `ufw`)                           |
-| App no PM2    | `soprei-api`                     | `soprei-staging`                                                        |
-| Banco e role  | `soprei` e `soprei`              | `soprei_staging` e `soprei_staging`                                     |
-| Redis         | porta 6379, banco `/1`, senha    | **instância própria**, porta **6380**, banco `/0`, senha **diferente**  |
-| E-mail        | SMTP real                        | Mailpit local (nenhum e-mail sai do servidor)                           |
-| `.env`        | `backend/.env`                   | `/var/www/soprei-staging/backend/.env` (modo 600)                       |
-| Alvo do script| `deploy/targets/production.conf` | `deploy/targets/staging.conf`                                           |
+| Peça           | Produção                         | Staging                                                                          |
+| -------------- | -------------------------------- | -------------------------------------------------------------------------------- |
+| Hostname       | o de produção                    | subdomínio próprio (DNS A, **sem proxy** da Cloudflare)                          |
+| Diretório      | `/var/www/soprei`                | `/var/www/soprei-staging` (clone próprio; mesma chave de deploy somente leitura) |
+| Porta da API   | 3001                             | **3002** (`127.0.0.1`; nunca aberta no `ufw`)                                    |
+| App no PM2     | `soprei-api`                     | `soprei-staging`                                                                 |
+| Banco e role   | `soprei` e `soprei`              | `soprei_staging` e `soprei_staging`                                              |
+| Redis          | porta 6379, banco `/1`, senha    | **instância própria**, porta **6380**, banco `/0`, senha **diferente**           |
+| E-mail         | SMTP real                        | Mailpit local (nenhum e-mail sai do servidor)                                    |
+| `.env`         | `backend/.env`                   | `/var/www/soprei-staging/backend/.env` (modo 600)                                |
+| Alvo do script | `deploy/targets/production.conf` | `deploy/targets/staging.conf`                                                    |
 
 ## Limite do isolamento: só de CONFIGURAÇÃO (decisão do dono, 2026-11-11)
 
@@ -24,6 +24,7 @@ Enquanto staging e produção rodam **como o mesmo usuário do sistema** (`root`
 
 - Registro DNS A do staging (sem proxy). Clone: `git clone <o mesmo repositório> /var/www/soprei-staging` com a mesma chave de deploy somente leitura (`core.sshCommand`, como na produção).
 - nginx: copie `deploy/nginx/staging.conf.example` para `/etc/nginx/sites-available/soprei-staging`, troque `<HOSTNAME_DO_STAGING>`, crie o arquivo de senhas (`htpasswd -c /etc/nginx/soprei-staging.htpasswd <usuario>`, fora do repositório) e rode o certbot como na produção. O exemplo tem `auth_basic`, `X-Robots-Tag "noindex, nofollow"` e `proxy_set_header Authorization ""` nas duas rotas de proxy (a senha básica não chega à API). O arquivo equivalente da produção está em `deploy/nginx/production.conf.example`, **reconstruído da descrição** e a conferir com o arquivo real (S20).
+- Admin da plataforma no staging (spec 044, opcional): `deploy/nginx/admin-staging.conf.example` e a seção "Staging" de [admin.md](admin.md).
 
 ### 2. PostgreSQL (mesmo cluster, banco e role próprios)
 
