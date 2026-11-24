@@ -1,6 +1,6 @@
 # 044 — Admin da plataforma (painel do dono, frontend separado)
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-24: D1 a D12 como recomendadas, com uma mudança na D3: o domínio é `soadm.soprei.com`, não `admin.soprei.com`; E1 na `main` (PRs #22 e #23, com os ajustes da revisão); E2 na `main` (PR #24, com os ajustes da revisão); E3 e E4 no PR #25 (o #26, da E4, entrou na branch da E3), revisadas pelo `reviewer` e com os ajustes das revisões)
+- **Status:** concluída (aprovada pelo dono em 2026-11-24: D1 a D12 como recomendadas, com uma mudança na D3: o domínio é `soadm.soprei.com`, não `admin.soprei.com`; E1 na `main` (PRs #22 e #23, com os ajustes da revisão); E2 na `main` (PR #24, com os ajustes da revisão); E3 e E4 na `main` (PR #25, que levou também o #26), revisadas pelo `reviewer` e com os ajustes das revisões; CI verde, inclusive os cenários do deploy com atalho no Linux; falta só publicar, pelos passos de `docs/ops/admin.md`, quando houver servidor)
 - **Branch:** `spec/044-admin-da-plataforma`
 - **Depende de:** 007 (`PlatformAdmin`, sessões no Redis), 008 (auditoria), 017 (contas e cookie), 015/023/039 (canal), 031/040 (cobrança), 034/035 (fila e retomada), 037 (deploy e nginx), 032 (LGPD), 042 (organização da documentação).
 - **Esta spec passa pelo `reviewer`** antes do merge de cada etapa: cria um caminho de autenticação novo (sessão por cookie com segundo fator), um prefixo de rotas novo, a única leitura que cruza empresas por desenho e uma publicação num domínio novo.
