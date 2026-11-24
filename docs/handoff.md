@@ -8,8 +8,9 @@
 
 - **E1**, branch `spec/042-organizacao-da-documentacao`: `AGENTS.md` de 180 KB para 44 KB; as regras de cada área foram movidas **sem reescrita** para `docs/areas/` (dez arquivos; a seção "Áreas" do `AGENTS.md` diz quando ler cada um); `backend/src/docs-structure.test.ts` novo; o gate de vocabulário varre `docs/areas`; roteiros de `docs/agents/` mandam ler a área tocada. O `reviewer` passou sem bloqueante e as correções estão aplicadas ("Revisão da E1" na spec).
 - **E2**, branch `spec/042-e2-handoff-e-specs` (empilhada sobre a E1): este arquivo enxuto, `docs/context.md` (seções 3 e 6), README novo, linha de status de todas as specs normalizada, índice `docs/specs/README.md`, `.tmp-onb.txt` e `lab/e0/` removidos.
-- **Verde localmente (Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check`, `docs-structure`, `domain-vocabulary`, `ci-workflow` e `deploy-workflow`. **Não rodado:** o resto das suítes (nenhum código de produção mudou).
-- **Falta:** push e PR da E1; CI; depois do merge da E1, PR da E2 (se a E1 entrar por squash, rebase da E2 na `main`).
+- **Spec 043 (backup externo do banco), aprovada com D1 a D9; E1 implementada** na branch `spec/043-backup-externo` (empilhada sobre a E2 da 042): `deploy/backup/soprei-backup.sh` e `soprei-restore-check.sh`, exemplos, `docs/ops/backup.md`, testes com dublês e `shellcheck` no CI. O `reviewer` passou sem falha grave e as correções estão aplicadas ("Revisão da E1" na spec). **Aguarda o dono:** confirmar o desvio da D3 (trava do bucket do R2 no lugar da credencial "sem apagar"). Nenhuma execução real.
+- **Verde localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check` e os testes de documentação, de workflows e do backup (2 cenários pulados: `flock` real e modo 600). **Não rodado:** `shellcheck` e o resto das suítes.
+- **Falta:** push e PR na ordem E1 da 042, E2 da 042, 043 (rebase se entrarem por squash); CI; na 043, conferir no CI o `shellcheck` e os dois cenários que só rodam em Linux.
 
 ## Onde estamos
 
@@ -24,7 +25,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 0. **Sem servidor:** conferir no GitHub se `DEPLOY_ENABLED` está `false`; ligado e sem servidor, o workflow de deploy falha a cada merge na `main`.
 1. **Spec 042:** push da E1, CI, merge; depois a E2. Apagar, se quiser, as branches remotas já mergeadas (`spec/040-e2-tela`, `spec/041-conhecimento-pdf-docx`, `fix/backup-runuser`, `docs/registro-desligamento`) e a `dev`.
 2. **Staging (spec 037, E2):** montar conforme `docs/ops/staging.md`; até lá a produção roda com `ALLOW_UNSTAGED=true` no `entry.conf`. Quando `deploy/soprei-deploy-entry.sh` mudar, reinstalar o programa de entrada à mão.
-3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`).
+3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): depois do merge da [spec 043](specs/043-backup-externo.md), os passos de `docs/ops/backup.md` (chaves, bucket do R2, instalar, primeiro backup, aviso, teste de restauração).
 4. **Anthropic:** termos de dados (LGPD) e limite de gasto mensal na Console.
 5. **Spec 028, E0** (roteiro na spec): obrigatório antes de ligar `SCHEDULE_AI_ENABLED` e a opção "A IA pode solicitar, cancelar e remarcar horários" com empresa real.
 6. **Spec 041 (conferir):** `location ~* \.mjs$` no nginx do servidor (sem ela o leitor de PDF não carrega) e o teste manual em computador, iPhone e Android.
@@ -36,7 +37,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Fechar a 042 (E1, depois E2). Em seguida, por ordem de risco: staging e backup externo (passos 2 e 3); spec 035 (eficiência do turno: retomada de respostas não enviadas e de pendentes antigas, limpeza dos jobs com texto no Redis, leituras repetidas por job, prompt caching), junto com o fatiamento de `attendance.service.ts` (1.986 linhas) e de `frontend/src/AccountApp.tsx`; as etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
+Prioridade do dono (2026-11-23): **resiliência do atendimento**, spec 035 (retomada de respostas gravadas e não enviadas e de mensagens pendentes antigas, limpeza dos jobs com texto no Redis; o fatiamento de `attendance.service.ts` entra onde a spec pedir). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
 
 ## Decisões do dono que não são óbvias no código
 

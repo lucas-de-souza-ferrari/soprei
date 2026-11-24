@@ -18,7 +18,7 @@ Atendimento por inteligência artificial no WhatsApp para várias empresas. Cada
 - [docs/context.md](docs/context.md): objetivo, decisões, roadmap e histórico de decisões.
 - [docs/specs/README.md](docs/specs/README.md): índice das specs e o estado de cada uma. Nada é implementado sem spec aprovada.
 - [docs/handoff.md](docs/handoff.md): estado da última sessão de trabalho e passos pendentes.
-- [docs/ops/deploy.md](docs/ops/deploy.md) e [docs/ops/staging.md](docs/ops/staging.md): operação do servidor.
+- [docs/ops/deploy.md](docs/ops/deploy.md), [docs/ops/staging.md](docs/ops/staging.md) e [docs/ops/backup.md](docs/ops/backup.md): operação do servidor.
 
 ## Rodar localmente
 

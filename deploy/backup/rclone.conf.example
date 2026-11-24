@@ -1,0 +1,12 @@
+# Exemplo de /etc/soprei-backup/rclone.conf (spec 043). Dono root, modo 600. Fora do repositório.
+# Credencial do Cloudflare R2 com a permissão "Object Read & Write", restrita ao bucket do backup.
+# no_check_bucket: a credencial não cria nem confere o bucket.
+[<NOME_DO_REMOTO>]
+type = s3
+provider = Cloudflare
+access_key_id = <ID_DA_CHAVE_DE_ACESSO>
+secret_access_key = <CHAVE_SECRETA>
+region = auto
+endpoint = https://<ID_DA_CONTA>.r2.cloudflarestorage.com
+acl = private
+no_check_bucket = true

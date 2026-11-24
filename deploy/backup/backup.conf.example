@@ -1,0 +1,21 @@
+# Exemplo de /etc/soprei-backup/backup.conf (spec 043). Dono root, modo 600.
+# Lido como texto pelo soprei-backup (nunca por source): só as chaves abaixo, sem aspas nem espaços.
+# NENHUM segredo mora aqui: a credencial do destino fica só no arquivo do rclone (RCLONE_CONFIG_FILE)
+# e a chave PRIVADA do age nunca vem para o servidor.
+
+# Banco a copiar e pasta das cópias locais (claras e cifradas, guardadas por LOCAL_KEEP_DAYS dias).
+DB_NAME=soprei
+LOCAL_DIR=/var/backups/soprei
+LOCAL_KEEP_DAYS=7
+
+# Chave PÚBLICA do age (a linha "Public key: age1..." do age-keygen, gerada no computador do dono).
+AGE_RECIPIENT=<CHAVE_PUBLICA_AGE>
+
+# Destino no formato nome:bucket/pasta; "nome" é a seção do arquivo do rclone.
+REMOTE=<NOME_DO_REMOTO>:<BUCKET>/postgres
+RCLONE_CONFIG_FILE=/etc/soprei-backup/rclone.conf
+
+# Opcional: endereço do serviço de sinal de vida (um GET a cada backup bem-sucedido).
+PING_URL=
+
+STATUS_FILE=/var/lib/soprei-backup/status

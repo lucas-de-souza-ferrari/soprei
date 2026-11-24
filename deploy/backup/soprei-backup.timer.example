@@ -1,0 +1,12 @@
+# Exemplo de /etc/systemd/system/soprei-backup.timer (spec 043).
+# 06:30 UTC = 03:30 de Brasilia. Persistent: se o servidor estava desligado, roda ao voltar.
+[Unit]
+Description=Soprei: agenda do backup diario
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
