@@ -8,7 +8,7 @@
 
 - **PR aberto:** #25 (`spec/044-e3-app-admin`): o app `admin/` (E3) e a publicação (E4: nginx, `deploy.sh`, CI e `docs/ops/admin.md`; o #26 entrou nessa branch, não na `main`). A `main` com a E2 já foi trazida para a branch, com o conflito do texto da spec e deste arquivo resolvido.
 - **Conferir no log do CI do #25:** os 4 cenários do teste de comportamento do deploy que dependem de atalho (`SYMLINK_SKIP`: publicação do admin, rollback do admin com o site, primeira publicação que falha, versão sem `admin/`) só rodam no Linux; não podem aparecer como `skipped` lá.
-- **Decisões do dono tomadas (2026-11-24, em `docs/context.md`):** o `PATCH /admin/companies/:id` não aceita mais `status` (feito neste PR); contagens só de `ACTIVE` e sem o "Testar"; pausa de 30 min da Saúde; HSTS só com `max-age`. **Ainda com o dono:** D7, confirmar a leitura do agente de que a Política de Privacidade (seção 5: conta, assinatura e suporte por execução do contrato) já cobre o dono ver o e-mail da conta no admin, sem mudar o texto.
+- **Decisões do dono tomadas (2026-11-24, em `docs/context.md`):** o `PATCH /admin/companies/:id` não aceita mais `status` (feito neste PR); contagens só de `ACTIVE` e sem o "Testar"; pausa de 30 min da Saúde; HSTS só com `max-age`. D7 confirmada pelo dono: a Política de Privacidade (seção 5) já cobre ver o e-mail da conta no admin, sem mudar o texto. Nenhuma decisão da spec 044 pendente.
 - **Quando houver servidor:** migration da E1 e os passos de `docs/ops/admin.md`.
 
 ## Onde estamos
