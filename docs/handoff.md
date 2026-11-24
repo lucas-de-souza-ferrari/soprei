@@ -7,7 +7,7 @@
 2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), E2** na branch `spec/044-e2-leituras` (a E1 e os ajustes da revisão já estão na `main`): leituras agregadas em `/platform/*` (overview, empresas com filtro `attention`, detalhe, contas, detalhe com e-mail auditado, pedidos, avisos, saúde), suspender e reativar com trilha na mesma transação, módulo único de SQL `platform-read-model.ts` e o D8 em `/admin/companies` (`hasPersona`). Contratos de resposta exportados de `presentation/platform/platform-monitor.controller.ts` para a E3.
 
 - **Verde localmente:** typecheck, lint, format e os unitários. **Falta:** CI (inclui `platform-admin.integration.test.ts`, que não rodou aqui por falta de `soprei_test`), `reviewer` e merge; depois E3 (app, em outra cópia) e E4. Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
-- **Armadilha:** "respostas sem `sentAt`" conta também o teste do site numa empresa com número (limitação registrada na spec).
+- **Revisão de segurança da E2 corrigida na mesma branch** (I1, I2, M1 a M5, M7; ver "Revisão da E2" na spec): overview por empresa, "Testar" e empresa suspensa fora de "precisa de atenção". Integração não rodou aqui; CI é a palavra final. **Pendente do dono:** M4 (o `PATCH /admin/companies/:id` da plataforma ainda muda `status` sem trilha).
 
 ## Onde estamos
 
