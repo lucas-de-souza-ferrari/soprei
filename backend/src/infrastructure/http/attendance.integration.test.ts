@@ -277,11 +277,10 @@ describe('POST /admin/companies/:companyId/messages contra o PostgreSQL de teste
     assert.equal((await send(removed, { contactRef: 'c', text: 'oi-removido' })).statusCode, 404);
 
     const suspended = await createCompany('suspenso');
-    await app.inject({
-      method: 'PATCH',
-      url: `/admin/companies/${suspended}`,
-      headers: auth,
-      payload: { status: 'SUSPENDED' },
+    // Suspender pela API é só pela rota da plataforma (spec 044); aqui basta o estado no banco.
+    await database.prisma.company.update({
+      where: { id: suspended },
+      data: { status: 'SUSPENDED' },
     });
     const blocked = await send(suspended, { contactRef: 'c', text: 'oi-suspenso' });
     assert.equal(blocked.statusCode, 403);

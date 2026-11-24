@@ -90,10 +90,25 @@ describe('/admin/companies contra o PostgreSQL de testes', () => {
       method: 'PATCH',
       url: `/admin/companies/${company.id}`,
       headers: auth,
-      payload: { status: 'SUSPENDED' },
+      payload: { name: 'Empresa CRUD renomeada' },
     });
     assert.equal(patched.statusCode, 200);
-    assert.equal(patched.json<CompanyBody>().status, 'SUSPENDED');
+    assert.equal(patched.json<CompanyBody>().name, 'Empresa CRUD renomeada');
+
+    // Suspender não passa pelo PATCH (spec 044, revisão da E2, M4): 400 e nada muda.
+    const withStatus = await app.inject({
+      method: 'PATCH',
+      url: `/admin/companies/${company.id}`,
+      headers: auth,
+      payload: { status: 'SUSPENDED' },
+    });
+    assert.equal(withStatus.statusCode, 400);
+    const unchanged = await app.inject({
+      method: 'GET',
+      url: `/admin/companies/${company.id}`,
+      headers: auth,
+    });
+    assert.equal(unchanged.json<CompanyBody>().status, 'ACTIVE');
 
     const list = await app.inject({
       method: 'GET',
