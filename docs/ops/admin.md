@@ -2,6 +2,8 @@
 
 Como publicar o painel do dono (`admin/`) em `soadm.soprei.com` (D3), ligar a entrada com segundo fator e conferir que ele ficou fechado. As regras do admin estão em [docs/areas/plataforma.md](../areas/plataforma.md); o deploy, em [deploy.md](deploy.md). Tudo abaixo é passo do **dono** no servidor; nenhum agente tem acesso a ele, e **um agente não roda o `auth:cli` contra o banco do dono**.
 
+**Estado (2026-11-24):** publicado e ligado na produção, em `https://soadm.soprei.com`, seguindo os passos abaixo; o staging não existe ainda.
+
 ## Como fica
 
 | Peça             | Site das empresas                      | Admin da plataforma                                                           |
@@ -24,17 +26,21 @@ O script que executa é o da versão **já instalada** (ver [deploy.md](deploy.m
 - `deploy/deploy.sh --env staging --ref <sha> --force` e, depois, `deploy/deploy.sh --env production --ref <sha> --force` (o dry-run antes mostra a linha `admin da plataforma: publicado junto com o site`).
 - Ou espere o próximo merge: o deploy automático já usa o script novo.
 
-Nada instalado à mão muda nesta etapa: o programa de entrada (`/usr/local/sbin/soprei-deploy-entry`), o `sudoers` e o `sshd` continuam como estão (o programa chama o `deploy/deploy.sh` do clone). Confira: `ls -l /var/www/soprei/admin/dist` aponta para `releases/...` e `admin/dist/index.html` existe.
+Nada instalado à mão muda nesta etapa: o programa de entrada (`/usr/local/sbin/soprei-deploy-entry`), o `sudoers` e o `sshd` continuam como estão (o programa chama o `deploy/deploy.sh` do clone). Confira: `ls -l /var/www/soprei/admin/dist` aponta para `releases/...` e `admin/dist/index.html` existe. Confira também `namei -l /var/www/soprei/admin/dist/index.html`: a pasta `admin` precisa de `drwxr-xr-x`. O `deploy.sh` anterior a 2026-11-24 deixava a pasta `admin/` que chegou pelo git só com o `root` (`umask 077`), e o nginx respondia 403 (`Permission denied` no `error.log`); a correção à mão é `chmod 755 /var/www/soprei/admin`, e o script atual já faz isso a cada deploy.
 
 ### 2. DNS e certificado
 
 - Registro DNS **A** `soadm.soprei.com` para o IP do servidor, **sem proxy** (somente DNS), como o site.
-- Certificado: `certbot certonly --nginx -d soadm.soprei.com` (o plugin do nginx valida sem o bloco do admin existir ainda). Confira a renovação: `certbot renew --dry-run`.
+- Certificado: `certbot certonly --nginx -d soadm.soprei.com` (o plugin do nginx valida sem o bloco do admin existir ainda). Faça isto **antes** de ligar o arquivo do admin no nginx (passo 3): com o atalho em `sites-enabled` apontando para um certificado que ainda não existe, o `nginx -t` do certbot falha. Se o atalho já estiver lá, tire-o (`rm /etc/nginx/sites-enabled/soprei-admin`), gere o certificado e recoloque-o. Confira a renovação: `certbot renew --dry-run`.
 
 ### 3. nginx
 
 - `cp /var/www/soprei/deploy/nginx/admin.conf.example /etc/nginx/sites-available/soprei-admin` e `ln -s ../sites-available/soprei-admin /etc/nginx/sites-enabled/soprei-admin`.
-- No bloco do **site** (`/etc/nginx/sites-available/<o do site>`), acrescente o `location /api/platform/ { return 404; }` que está em `deploy/nginx/production.conf.example` (defesa em profundidade: o cookie do admin já não vai ao hostname do site).
+- No bloco `server_name www.soprei.com` do **site** (`/etc/nginx/sites-available/soprei`, o arquivo real, espelhado em `deploy/nginx/production.conf.example`), acrescente o `location /api/platform/ { return 404; }` (defesa em profundidade: o cookie do admin já não vai ao hostname do site). Antes, uma cópia: `cp /etc/nginx/sites-available/soprei /root/soprei-nginx-antes-do-admin.conf`. Um jeito de inserir sem editor, logo antes do `location /webhooks/`: `sed -i 's|^    location /webhooks/ {|    location /api/platform/ {
+        return 404;
+    }
+
+    location /webhooks/ {|' /etc/nginx/sites-available/soprei`, conferido com `grep -n -A3 'location /api/' /etc/nginx/sites-available/soprei`.
 - `nginx -t` sem erro e `systemctl reload nginx`.
 - **Não acrescente `add_header` dentro de um `location`** do admin: no nginx isso apaga, naquele `location`, todos os cabeçalhos do `server` (a CSP inclusive). O cache usa `expires` (que não tem esse efeito): `index.html` sem cache e `/assets/` (nomes com hash) por um ano.
 - TLS: o exemplo fixa `ssl_protocols TLSv1.2 TLSv1.3;` no `server` do `443`, porque o `certbot certonly` do passo 2 não edita o arquivo (não acrescenta o `options-ssl-nginx.conf`) e o padrão do nginx muda com a versão. O nginx negocia o protocolo antes de saber o hostname, então vale o do `server` padrão da porta `443`: confira com `openssl s_client -connect soadm.soprei.com:443 -servername soadm.soprei.com -tls1_1 </dev/null` (deve **falhar**).
@@ -53,7 +59,13 @@ PLATFORM_TOTP_ACTIVE_KEY_ID=k1
 ```
 
 - `ADMIN_ORIGIN`: a origem **exata** do admin (`https`, sem barra no fim), **diferente** do `APP_ORIGIN`; a escrita em `/platform/*` só é aceita com esse `Origin`.
-- `PLATFORM_TOTP_KEYS`: chaves **próprias** (nunca as `CHANNEL_CREDENTIALS_KEYS` do canal), no formato `keyId:<32 bytes em base64url>`, separadas por vírgula. Gere a chave no servidor, sem deixá-la no histórico do shell: `node -e "console.log('k1:' + require('node:crypto').randomBytes(32).toString('base64url'))"` e cole o resultado direto no `.env`. Guarde uma cópia no gerenciador de senhas (sem ela, os segredos do segundo fator não se decifram e o fator precisa ser recadastrado).
+- `PLATFORM_TOTP_KEYS`: chaves **próprias** (nunca as `CHANNEL_CREDENTIALS_KEYS` do canal), no formato `keyId:<32 bytes em base64url>`, separadas por vírgula. Gere a chave no servidor, sem ela aparecer na tela nem ir para o histórico: uma cópia antes (`cp -p /var/www/soprei/backend/.env /root/soprei-env-antes-do-admin`) e depois `printf '
+# Admin da plataforma (spec 044)
+PLATFORM_ADMIN_ENABLED=false
+ADMIN_ORIGIN=https://soadm.soprei.com
+PLATFORM_TOTP_KEYS=k1:%s
+PLATFORM_TOTP_ACTIVE_KEY_ID=k1
+' "$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')" >> /var/www/soprei/backend/.env` (antes, `grep -oE '^(PLATFORM_[A-Z_]*|ADMIN_ORIGIN)=' /var/www/soprei/backend/.env` mostra só os nomes que já existem). Guarde uma cópia no gerenciador de senhas (sem ela, os segredos do segundo fator não se decifram e o fator precisa ser recadastrado).
 - Opcionais: `PLATFORM_SESSION_IDLE_SECONDS` (padrão 1800) e `PLATFORM_SESSION_MAX_SECONDS` (padrão 43200, maior ou igual ao ocioso).
 - Confira: `cd /var/www/soprei/backend && pnpm config:check` imprime `ok` (ou só os **nomes** das variáveis inválidas).
 - **Troca de chave:** acrescente a nova à lista, aponte `PLATFORM_TOTP_ACTIVE_KEY_ID` para ela e mantenha a antiga até recadastrar o fator (passo 6), que regrava o segredo com a chave ativa.
@@ -85,7 +97,7 @@ PLATFORM_TOTP_ACTIVE_KEY_ID=k1
 
 ### 9. Conferência do admin no deploy (`ADMIN_HOST`)
 
-Com o admin respondendo, um PR pequeno descomenta `ADMIN_HOST=soadm.soprei.com` (e `ADMIN_OK_CODES`) em `deploy/targets/production.conf`: a partir dele, todo deploy confere `https://soadm.soprei.com/` por `127.0.0.1` depois da troca e, se não responder, faz o rollback como faz com o site. **Não edite o alvo no servidor**: ele é versionado, e a árvore suja faz o deploy recusar.
+Feito em 2026-11-24 (o admin está no ar desde então). Com o admin respondendo, um PR pequeno descomenta `ADMIN_HOST=soadm.soprei.com` (e `ADMIN_OK_CODES`) em `deploy/targets/production.conf`: a partir dele, todo deploy confere `https://soadm.soprei.com/` por `127.0.0.1` depois da troca e, se não responder, faz o rollback como faz com o site. **Não edite o alvo no servidor**: ele é versionado, e a árvore suja faz o deploy recusar.
 
 ## Opcional: só alguns IPs (lista `allow`, D5)
 

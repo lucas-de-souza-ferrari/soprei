@@ -4,16 +4,13 @@
 
 ## Última sessão
 
-2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** a spec (PR #21), a **E1** (PRs #22 e #23) e a **E2** (PR #24) estão na `main`, com os ajustes das revisões. A **E3** (app `admin/`) e a **E4** (publicação: nginx, `deploy.sh`, CI e `docs/ops/admin.md`) entraram juntas pelo PR #25 (que levou também o #26). **A spec está concluída** (detalhe no Registro da spec):
+2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md) concluída e publicada:** o admin da plataforma está no ar em `https://soadm.soprei.com` (nginx, certificado, `.env`, admin e segundo fator criados pelo dono no servidor, seguindo `docs/ops/admin.md`). Branch `spec/044-producao` (PR aberto): o `deploy.sh` passa a dar `chmod 755` na pasta do app (a `admin/` nasceu só do `root` e o nginx dava 403), `deploy/nginx/production.conf.example` agora espelha o arquivo real do servidor, `ADMIN_HOST` ligado no alvo de produção e `docs/ops/admin.md` com o que se aprendeu.
 
-- **CI do #25 verde**, inclusive as fatias do Playwright do admin e os 4 cenários do deploy que dependem de atalho (`SYMLINK_SKIP`), que rodaram no Linux (o aviso de pulo não aparece no log).
-- **Decisões do dono tomadas (2026-11-24, em `docs/context.md`):** o `PATCH /admin/companies/:id` não aceita mais `status`; contagens só de `ACTIVE` e sem o "Testar"; pausa de 30 min da Saúde; HSTS só com `max-age`. D7 confirmada pelo dono: a Política de Privacidade (seção 5) já cobre ver o e-mail da conta no admin, sem mudar o texto. Nenhuma decisão da spec 044 pendente.
-- **Quando houver servidor:** migration da E1 e os passos de `docs/ops/admin.md` (DNS de `soadm.soprei.com`, certificado, nginx, `.env`, criar o admin e cadastrar o segundo fator).
-- **Local (máquina do dono):** para testar o admin, `PLATFORM_ADMIN_ENABLED=true`, `ADMIN_ORIGIN=http://127.0.0.1:5175` e as chaves `PLATFORM_TOTP_*` no `backend/.env`, `pnpm dev` e `pnpm dev:admin`; criar o admin e cadastrar o código com `pnpm auth:cli create-platform-admin` e `enroll-platform-totp`.
+- **Admin local (máquina do dono):** `PLATFORM_ADMIN_ENABLED=true`, `ADMIN_ORIGIN=http://127.0.0.1:5175` e as chaves `PLATFORM_TOTP_*` no `backend/.env`, `pnpm dev` e `pnpm dev:admin`; o admin local é outro usuário, no banco `soprei`.
 
 ## Onde estamos
 
-- **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
+- **Servidor de produção no ar** (Hetzner, nginx 1.28, PM2, deploy automático pelo GitHub Actions a cada merge na `main` com o CI verde). Não há staging: a produção roda com `--allow-unstaged`/`ALLOW_UNSTAGED=true`. O nginx real do site é `/etc/nginx/sites-available/soprei` (espelho em `deploy/nginx/production.conf.example`) e o do admin, `/etc/nginx/sites-available/soprei-admin`.
 - **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
@@ -21,13 +18,13 @@
 
 Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sido feitos.
 
-0. **Sem servidor:** conferir no GitHub se `DEPLOY_ENABLED` está `false`; ligado e sem servidor, o workflow de deploy falha a cada merge na `main`.
+0. **Spec 044 (admin):** merge do PR `spec/044-producao`; o deploy automático dele já confere o admin (`ADMIN_HOST`).
 1. **Spec 042:** push da E1, CI, merge; depois a E2. Apagar, se quiser, as branches remotas já mergeadas (`spec/040-e2-tela`, `spec/041-conhecimento-pdf-docx`, `fix/backup-runuser`, `docs/registro-desligamento`) e a `dev`.
 2. **Staging (spec 037, E2):** montar conforme `docs/ops/staging.md`; até lá a produção roda com `ALLOW_UNSTAGED=true` no `entry.conf`. Quando `deploy/soprei-deploy-entry.sh` mudar, reinstalar o programa de entrada à mão.
 3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): depois do merge da [spec 043](specs/043-backup-externo.md), os passos de `docs/ops/backup.md` (chaves, bucket do R2, instalar, primeiro backup, aviso, teste de restauração).
 4. **Anthropic:** termos de dados (LGPD) e limite de gasto mensal na Console.
 5. **Spec 028, E0** (roteiro na spec): obrigatório antes de ligar `SCHEDULE_AI_ENABLED` e a opção "A IA pode solicitar, cancelar e remarcar horários" com empresa real.
-6. **Spec 041 (conferir):** `location ~* \.mjs$` no nginx do servidor (sem ela o leitor de PDF não carrega) e o teste manual em computador, iPhone e Android.
+6. **Spec 041 (falta no servidor, conferido em 2026-11-24):** o worker do pdf.js (`/assets/pdf.worker.min-*.mjs`) sai como `application/octet-stream`, então a leitura de PDF da aba Conhecimento falha na produção. Acrescentar o `location ~* .mjs$` de `deploy/nginx/production.conf.example` no bloco do `www.soprei.com`, `nginx -t` e `systemctl reload nginx`; depois o teste manual em computador, iPhone e Android.
 7. **Spec 040 (conferir):** revisar a Política de Privacidade versão 2; pedido de teste em `/fale-conosco`; pedidos `PENDING` e assinaturas anuais antigas; `BILLING_TRIAL_TOKENS` ausente ou 600000 no `.env` do servidor.
 8. **Spec 032 (conferir):** `pm2-logrotate` com 30 dias, `try_files` e log sem query no nginx, campo "URL dos Termos de Serviço" no app da Meta; conferir se o Gmail do SMTP é Workspace.
 9. **Spec 030 (conferir):** revisar a redação de `PERSONA_TEMPLATE` (`frontend/src/company/onboarding-steps.ts`).
