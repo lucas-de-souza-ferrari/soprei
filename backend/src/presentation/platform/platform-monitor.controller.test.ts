@@ -59,6 +59,8 @@ interface World {
   readonly auth: ReturnType<typeof buildTestAuth>;
   readonly cookie: string;
   readonly adminId: string;
+  readonly clock: ManualClock;
+  readonly cipher: ReturnType<typeof testPlatformCipher>;
 }
 
 async function setup(options: { platform?: boolean } = {}): Promise<World> {
@@ -147,7 +149,7 @@ async function setup(options: { platform?: boolean } = {}): Promise<World> {
   });
   await app.ready();
   if (options.platform === false) {
-    return { app, reads, audit, companies, auth, cookie: '', adminId: '' };
+    return { app, reads, audit, companies, auth, cookie: '', adminId: '', clock, cipher };
   }
   const admin = await enrollTestAdmin(auth, cipher);
   const login = await app.inject({
@@ -161,7 +163,7 @@ async function setup(options: { platform?: boolean } = {}): Promise<World> {
   const header = Array.isArray(setCookie) ? setCookie[0] : setCookie;
   const cookie = (header ?? '').split(';')[0] ?? '';
   assert.ok(cookie.startsWith(`${PLATFORM_COOKIE}=`));
-  return { app, reads, audit, companies, auth, cookie, adminId: admin.adminId };
+  return { app, reads, audit, companies, auth, cookie, adminId: admin.adminId, clock, cipher };
 }
 
 function actions(world: World): string[] {
@@ -192,9 +194,18 @@ describe('/platform/* leituras e ações (spec 044, E2)', () => {
   it('sem o cookie, com Bearer de plataforma ou de vínculo: 401 em toda rota, e nada é lido nem gravado', async () => {
     const world = await setup();
     try {
-      // Bearer de plataforma emitido sem o segundo fator (como o do E1): não entra em /platform/*.
-      const plain = buildTestAuth({ logger: captureLogs().logger });
-      const platformBearer = bearer((await plain.platformToken()).accessToken);
+      // Bearer de plataforma VÁLIDO, emitido por esta mesma instância (login com senha e segundo fator) e
+      // aceito pelo `authenticate`: ainda assim não entra em /platform/*, que só aceita o cookie (revisão da
+      // E2, M7).
+      const other = await enrollTestAdmin(world.auth, world.cipher);
+      const issued = await world.auth.service.loginPlatform({
+        email: other.email,
+        password: TEST_PASSWORD,
+        code: codeAt(other.secret, world.clock.ms),
+      });
+      assert.ok(issued.ok);
+      assert.ok((await world.auth.service.authenticate(issued.value.accessToken)).ok);
+      const platformBearer = bearer(issued.value.accessToken);
       const membershipBearer = bearer(
         (
           await world.auth.membershipToken(
@@ -282,6 +293,7 @@ describe('/platform/* leituras e ações (spec 044, E2)', () => {
         '/platform/companies?status=removed',
         '/platform/companies?attention=qualquer',
         `/platform/companies?q=${'x'.repeat(65)}`,
+        '/platform/companies?q=acme%00',
         '/platform/companies?outro=1',
         '/platform/accounts?verified=talvez',
         '/platform/accounts?status=ACTIVE',
