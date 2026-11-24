@@ -7,6 +7,8 @@ import {
   accountPageSchema,
   type AccountDetail,
   type AccountListItem,
+  type AccountStatusFilter,
+  type VerifiedFilter,
 } from '../contracts';
 import { errorMessage, formatCount, formatDate, formatDateTime, label } from '../format';
 import {
@@ -21,9 +23,7 @@ import {
   RowButton,
   Select,
 } from '../ui';
-
-type StatusFilter = '' | 'active' | 'disabled';
-type VerifiedFilter = '' | 'true' | 'false';
+import { subscriptionFacts } from './subscription-facts';
 
 /**
  * Detalhe de uma conta (D7): mostra o que a lista já trouxe (e-mail mascarado). O e-mail completo, as
@@ -115,6 +115,8 @@ function AccountDetailPanel({
                       <span className="font-semibold">{company.name}</span>
                       <span className="text-sm text-muted-foreground">
                         {company.slug} · {label(company.role)}
+                        {company.membershipStatus === 'DISABLED' ? ' (vínculo desativado)' : ''}
+                        {company.status === 'SUSPENDED' ? ' · empresa suspensa' : ''}
                       </span>
                     </RowButton>
                   ))}
@@ -122,24 +124,12 @@ function AccountDetailPanel({
               )}
             </Card>
             <Card title="Assinatura">
-              {detail.subscription === null ? (
-                <p className="text-sm text-muted-foreground">
-                  Sem assinatura (ou cobrança desligada).
-                </p>
+              {!detail.billingEnabled ? (
+                <p className="text-sm text-muted-foreground">Cobrança desligada.</p>
+              ) : detail.subscription === null ? (
+                <p className="text-sm text-muted-foreground">Sem assinatura.</p>
               ) : (
-                <Facts
-                  items={[
-                    [
-                      'Plano',
-                      `${label(detail.subscription.plan)} (${label(detail.subscription.cycle)})`,
-                    ],
-                    [
-                      'Estado',
-                      `${label(detail.subscription.state)} · ${label(detail.subscription.access)}`,
-                    ],
-                    ['Fim do período', formatDate(detail.subscription.periodEnd)],
-                  ]}
-                />
+                <Facts items={subscriptionFacts(detail.subscription)} />
               )}
             </Card>
           </>
@@ -151,8 +141,8 @@ function AccountDetailPanel({
 
 /** Contas (`GET /platform/accounts`): e-mail sempre mascarado na lista. */
 export function AccountsScreen() {
-  const [status, setStatus] = useState<StatusFilter>('');
-  const [verified, setVerified] = useState<VerifiedFilter>('');
+  const [status, setStatus] = useState<AccountStatusFilter | ''>('');
+  const [verified, setVerified] = useState<VerifiedFilter | ''>('');
   const [selected, setSelected] = useState<AccountListItem | undefined>(undefined);
   const page = usePaged(
     (api, cursor) =>
@@ -180,7 +170,7 @@ export function AccountsScreen() {
     <>
       <PageHeader title="Contas" onRefresh={page.reload} busy={page.loading} />
       <div className="mb-4 flex flex-wrap gap-3">
-        <Select<StatusFilter>
+        <Select<AccountStatusFilter | ''>
           label="Estado"
           value={status}
           onChange={setStatus}
@@ -190,7 +180,7 @@ export function AccountsScreen() {
             ['disabled', 'Desativadas'],
           ]}
         />
-        <Select<VerifiedFilter>
+        <Select<VerifiedFilter | ''>
           label="E-mail"
           value={verified}
           onChange={setVerified}

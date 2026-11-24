@@ -4,10 +4,11 @@ import { ApiError } from '../api';
 import { useAdmin, useLoad, type View } from '../admin-context';
 import {
   ACTION_REASONS,
+  HANDOFF_REASONS,
   companyDetailSchema,
+  countEntries,
   type ActionReason,
   type CompanyDetail,
-  type Group,
 } from '../contracts';
 import {
   errorMessage,
@@ -30,22 +31,25 @@ import {
   Stat,
   StatGrid,
 } from '../ui';
+import { modulesText, subscriptionFacts } from './subscription-facts';
 
-const ONBOARDING_LABELS: Record<string, string> = {
-  persona: 'Persona',
-  knowledge: 'Conhecimento',
-  schedule: 'Agenda',
-  inventory: 'Estoque',
-};
+const ONBOARDING_STEPS = [
+  ['persona', 'Persona'],
+  ['knowledge', 'Conhecimento'],
+  ['schedule', 'Agenda'],
+  ['inventory', 'Estoque'],
+] as const;
 
 function yesNo(value: boolean): string {
   return value ? 'Sim' : 'Não';
 }
 
-function groupText(group: Group): string {
-  return group.length === 0
+/** Handoffs por motivo: só os motivos com contagem (todos zerados: "nenhum"). */
+function handoffsText(handoffs: CompanyDetail['attendance']['last24h']['handoffs']): string {
+  const used = countEntries(HANDOFF_REASONS, handoffs).filter(([, value]) => value > 0);
+  return used.length === 0
     ? 'nenhum'
-    : group.map((item) => `${label(item.key)}: ${formatCount(item.count)}`).join(' · ');
+    : used.map(([key, value]) => `${label(key)}: ${formatCount(value)}`).join(' · ');
 }
 
 function Attendance({ detail }: { readonly detail: CompanyDetail }) {
@@ -66,7 +70,7 @@ function Attendance({ detail }: { readonly detail: CompanyDetail }) {
               ['Respostas', formatCount(w.replies)],
               ['Respostas de fallback', formatCount(w.fallbacks)],
               ['Entregas incertas', formatCount(w.uncertainDeliveries)],
-              ['Atendimento humano', groupText(w.handoffs)],
+              ['Atendimento humano', handoffsText(w.handoffs)],
             ]}
           />
         </div>
@@ -80,29 +84,18 @@ function Subscription({ detail }: { readonly detail: CompanyDetail }) {
     return <p className="text-sm text-muted-foreground">Cobrança desligada.</p>;
   const sub = detail.subscription;
   if (sub === null) return <p className="text-sm text-muted-foreground">Sem assinatura.</p>;
+  const usage = detail.usage;
   return (
-    <Facts
-      items={[
-        ['Plano', `${label(sub.plan)} (${label(sub.cycle)})`],
-        ['Estado', `${label(sub.state)} · ${label(sub.access)}`],
-        ['Período', `${formatDate(sub.periodStart)} a ${formatDate(sub.periodEnd)}`],
-        ['Cancela no fim do período', yesNo(sub.cancelAtPeriodEnd)],
-        [
-          'Troca agendada',
-          sub.scheduledChange === null
-            ? '—'
-            : `${label(sub.scheduledChange.plan)} (${label(sub.scheduledChange.cycle)}) em ${formatDate(sub.scheduledChange.effectiveAt)}`,
-        ],
-        ['Módulos', sub.modules.length === 0 ? '—' : sub.modules.map(label).join(', ')],
-        ['Respostas na janela', formatUsage(sub.usage.replies, sub.usage.repliesQuota)],
-        ['Tokens na janela', formatUsage(sub.usage.tokens, sub.usage.tokensQuota)],
-        [
-          'Janela de uso',
-          `${formatDate(sub.usage.windowStart)} a ${formatDate(sub.usage.windowEnd)}`,
-        ],
-      ]}
-    />
+    <Facts items={[...subscriptionFacts(sub), ...(usage === null ? [] : usageFacts(usage))]} />
   );
+}
+
+function usageFacts(usage: NonNullable<CompanyDetail['usage']>) {
+  return [
+    ['Respostas na janela', formatUsage(usage.replies.used, usage.replies.limit)],
+    ['Tokens na janela', formatUsage(usage.tokens.used, usage.tokens.limit)],
+    ['Janela de uso', `${formatDate(usage.windowStart)} a ${formatDate(usage.windowEnd)}`],
+  ] as const;
 }
 
 /**
@@ -229,9 +222,9 @@ export function CompanyDetailScreen({
                 ],
                 ['Slug', data.slug],
                 ['Criada em', formatDateTime(data.createdAt)],
-                ['Última atividade', formatDateTime(data.lastActivityAt)],
+                ['Atualizada em', formatDateTime(data.updatedAt)],
                 ['Persona preenchida', yesNo(data.hasPersona)],
-                ['Módulos', data.modules.length === 0 ? '—' : data.modules.map(label).join(', ')],
+                ['Módulos liberados', modulesText(data.modules)],
               ]}
             />
           </Card>
@@ -239,8 +232,8 @@ export function CompanyDetailScreen({
             <StatGrid>
               <Stat
                 label="Mensagens pendentes"
-                value={formatCount(data.attention.pendingMessages)}
-                alert={data.attention.pendingMessages > 0}
+                value={formatCount(data.attention.stalledPending)}
+                alert={data.attention.stalledPending > 0}
               />
               <Stat
                 label="Respostas não enviadas"
@@ -254,8 +247,8 @@ export function CompanyDetailScreen({
               />
               <Stat
                 label="Token vencendo"
-                value={yesNo(data.attention.tokenExpiring)}
-                alert={data.attention.tokenExpiring}
+                value={yesNo(data.attention.tokenExpiringSoon)}
+                alert={data.attention.tokenExpiringSoon}
               />
               <Stat
                 label="Atendimento humano aberto"
@@ -265,24 +258,20 @@ export function CompanyDetailScreen({
             </StatGrid>
           </Card>
           <Card title="Primeiros passos">
-            {data.onboarding.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sem dados.</p>
-            ) : (
-              <Facts
-                items={data.onboarding.map(
-                  (step) =>
-                    [
-                      ONBOARDING_LABELS[step.key] ?? step.key,
-                      step.done ? 'Feito' : 'Pendente',
-                    ] as const,
-                )}
-              />
-            )}
+            <Facts
+              items={[
+                ...ONBOARDING_STEPS.map(
+                  ([key, name]) =>
+                    [name, data.onboarding.steps[key] ? 'Feito' : 'Pendente'] as const,
+                ),
+                ['Lista dispensada pela equipe', yesNo(data.onboarding.dismissed)],
+              ]}
+            />
           </Card>
           <Card title="Equipe">
             <Facts
               items={[
-                ...data.members.map(
+                ...data.memberships.map(
                   (m) =>
                     [
                       `${label(m.role)} (${label(m.status).toLowerCase()})`,
@@ -291,9 +280,9 @@ export function CompanyDetailScreen({
                 ),
                 [
                   'Titular',
-                  data.owner === null
+                  data.holder === null
                     ? '—'
-                    : `${label(data.owner.status)} · e-mail ${data.owner.emailVerified ? 'confirmado' : 'não confirmado'} · desde ${formatDate(data.owner.createdAt)}`,
+                    : `${label(data.holder.status)} · e-mail ${data.holder.emailVerified ? 'confirmado' : 'não confirmado'} · desde ${formatDate(data.holder.createdAt)}`,
                 ],
               ]}
             />
@@ -302,13 +291,13 @@ export function CompanyDetailScreen({
             <Subscription detail={data} />
           </Card>
           <Card title="Canal">
-            {data.channel === null ? (
+            {data.channel.state === 'NOT_CONNECTED' ? (
               <p className="text-sm text-muted-foreground">Não conectado.</p>
             ) : (
               <Facts
                 items={[
                   ['Estado', label(data.channel.state)],
-                  ['Modo', label(data.channel.mode)],
+                  ['Modo', data.channel.mode === null ? '—' : label(data.channel.mode)],
                   ['Phone number id', data.channel.phoneNumberId ?? '—'],
                   ['WABA id', data.channel.wabaId ?? '—'],
                   ['Conectado em', formatDateTime(data.channel.connectedAt)],
@@ -326,7 +315,7 @@ export function CompanyDetailScreen({
               items={[
                 ['Documentos', formatCount(data.content.documents)],
                 ['Produtos ativos', formatCount(data.content.activeProducts)],
-                ['Reservas nos próximos 7 dias', formatCount(data.content.upcomingBookings7d)],
+                ['Reservas nos próximos 7 dias', formatCount(data.content.upcomingAppointments)],
               ]}
             />
           </Card>

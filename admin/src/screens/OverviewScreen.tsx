@@ -1,14 +1,29 @@
 import { useAdmin, useLoad } from '../admin-context';
-import { overviewSchema, type AttentionFilter, type Group } from '../contracts';
-import { errorMessage, formatCents, formatCount, label } from '../format';
+import {
+  ACCESS_LEVELS,
+  CHANNEL_MODES,
+  CHANNEL_STATES,
+  PLAN_CODES,
+  SUBSCRIPTION_STATES,
+  countEntries,
+  overviewSchema,
+  type AttentionFilter,
+} from '../contracts';
+import { errorMessage, formatCents, formatCount, formatDate, label } from '../format';
 import { Alert, Card, Loading, PageHeader, Stat, StatGrid } from '../ui';
 
-function GroupStats({ group }: { readonly group: Group }) {
-  if (group.length === 0) return <p className="text-sm text-muted-foreground">Nenhum.</p>;
+/** Um agrupamento de chaves fixas, na ordem da lista, com o rótulo em português de cada chave. */
+function GroupStats<K extends string>({
+  keys,
+  counts,
+}: {
+  readonly keys: readonly K[];
+  readonly counts: Readonly<Record<K, number>>;
+}) {
   return (
     <StatGrid>
-      {group.map((item) => (
-        <Stat key={item.key} label={label(item.key)} value={formatCount(item.count)} />
+      {countEntries(keys, counts).map(([key, value]) => (
+        <Stat key={key} label={label(key)} value={formatCount(value)} />
       ))}
     </StatGrid>
   );
@@ -37,8 +52,8 @@ export function OverviewScreen() {
             <StatGrid>
               <Stat
                 label="Mensagens pendentes há mais de 5 min"
-                value={formatCount(data.attention.pendingMessages)}
-                alert={data.attention.pendingMessages > 0}
+                value={formatCount(data.attention.stalledPending)}
+                alert={data.attention.stalledPending > 0}
                 onOpen={open('pending_messages')}
               />
               <Stat
@@ -55,8 +70,8 @@ export function OverviewScreen() {
               />
               <Stat
                 label="Tokens que vencem em até 7 dias"
-                value={formatCount(data.attention.tokenExpiring)}
-                alert={data.attention.tokenExpiring > 0}
+                value={formatCount(data.attention.tokensExpiringSoon)}
+                alert={data.attention.tokensExpiringSoon > 0}
                 onOpen={open('token_expiring')}
               />
               <Stat
@@ -68,7 +83,18 @@ export function OverviewScreen() {
             </StatGrid>
           </Card>
           <Card title="Empresas">
-            <GroupStats group={data.companies} />
+            <StatGrid>
+              <Stat
+                label="Ativas"
+                value={formatCount(data.companies.active)}
+                onOpen={() => navigate({ name: 'companies', status: 'active' })}
+              />
+              <Stat
+                label="Suspensas"
+                value={formatCount(data.companies.suspended)}
+                onOpen={() => navigate({ name: 'companies', status: 'suspended' })}
+              />
+            </StatGrid>
           </Card>
           <Card title="Contas">
             <StatGrid>
@@ -82,45 +108,57 @@ export function OverviewScreen() {
             <StatGrid>
               <Stat
                 label="Mensagens (24 h)"
-                value={formatCount(data.traffic.last24h.contactMessages)}
+                value={formatCount(data.attendance.last24h.contactMessages)}
               />
-              <Stat label="Respostas (24 h)" value={formatCount(data.traffic.last24h.replies)} />
+              <Stat label="Respostas (24 h)" value={formatCount(data.attendance.last24h.replies)} />
               <Stat
                 label="Respostas de fallback (24 h)"
-                value={formatCount(data.traffic.last24h.fallbacks)}
+                value={formatCount(data.attendance.last24h.fallbackReplies)}
               />
               <Stat
                 label="Mensagens (7 dias)"
-                value={formatCount(data.traffic.last7d.contactMessages)}
+                value={formatCount(data.attendance.last7d.contactMessages)}
               />
-              <Stat label="Respostas (7 dias)" value={formatCount(data.traffic.last7d.replies)} />
+              <Stat
+                label="Respostas (7 dias)"
+                value={formatCount(data.attendance.last7d.replies)}
+              />
               <Stat
                 label="Respostas de fallback (7 dias)"
-                value={formatCount(data.traffic.last7d.fallbacks)}
+                value={formatCount(data.attendance.last7d.fallbackReplies)}
               />
             </StatGrid>
           </Card>
           <Card title="Canal por estado">
-            <GroupStats group={data.channel.byState} />
+            <GroupStats keys={CHANNEL_STATES} counts={data.channel.byState} />
           </Card>
           <Card title="Canal por modo">
-            <GroupStats group={data.channel.byMode} />
+            <GroupStats keys={CHANNEL_MODES} counts={data.channel.byMode} />
           </Card>
           {data.billingEnabled && data.subscriptions !== null ? (
             <>
               <Card title="Assinaturas por estado">
-                <GroupStats group={data.subscriptions.byState} />
+                <GroupStats keys={SUBSCRIPTION_STATES} counts={data.subscriptions.byState} />
               </Card>
               <Card title="Assinaturas por plano">
-                <GroupStats group={data.subscriptions.byPlan} />
+                <GroupStats keys={PLAN_CODES} counts={data.subscriptions.byPlan} />
               </Card>
-              {data.paidThisMonth === null ? null : (
+              <Card title="Assinaturas por acesso">
+                <GroupStats keys={ACCESS_LEVELS} counts={data.subscriptions.byAccess} />
+              </Card>
+              {data.paidOrdersThisMonth === null ? null : (
                 <Card title="Pagos no mês">
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Desde {formatDate(data.paidOrdersThisMonth.monthStart)} (horário de Brasília).
+                  </p>
                   <StatGrid>
-                    <Stat label="Pedidos pagos" value={formatCount(data.paidThisMonth.count)} />
+                    <Stat
+                      label="Pedidos pagos"
+                      value={formatCount(data.paidOrdersThisMonth.count)}
+                    />
                     <Stat
                       label="Total recebido"
-                      value={formatCents(data.paidThisMonth.amountCents)}
+                      value={formatCents(data.paidOrdersThisMonth.amountCents)}
                     />
                   </StatGrid>
                 </Card>

@@ -2,25 +2,28 @@ import { z } from 'zod';
 
 /**
  * Contratos das rotas `/platform/*` que o admin lê (spec 044). Todo o formato esperado do servidor fica
- * neste arquivo: ajustar o app ao formato real da E2 é mexer aqui (e nas fixturas do Playwright, que são
- * validadas por estes mesmos esquemas).
+ * neste arquivo (e nas fixturas do Playwright, que são validadas por estes mesmos esquemas).
  *
- * As rotas de entrada (`/platform/auth/*`) são as da E1, conferidas no código. As de leitura e as ações
- * (E2) foram escritas a partir da lista de campos da spec, em paralelo com o backend. Onde a spec não diz
- * o formato, a escolha foi (registrada também no Registro da implementação da spec):
+ * As rotas de entrada (`/platform/auth/*`) são as da E1. As de leitura e as ações seguem os tipos de
+ * resposta exportados pela E2 em `backend/src/presentation/platform/platform-monitor.controller.ts`
+ * (`PlatformOverviewResponse`, `PlatformCompanyListResponse`, `PlatformCompanyDetailResponse`,
+ * `PlatformAccountListResponse`, `PlatformAccountDetailResponse`, `PlatformOrderListResponse`,
+ * `PlatformNoticeListResponse`, `PlatformHealthResponse`) e os filtros de
+ * `platform-monitor.validators.ts`. Pontos do formato:
  *
- * 1. **Agrupamentos** (empresas por estado, assinaturas por plano, conexões por modo, handoffs por motivo,
- *    fila por estado, contadores) são listas `{ key, count }`, não objetos de chaves fixas: um valor novo
- *    no servidor aparece na tela sem quebrar a leitura.
+ * 1. **Agrupamentos** (assinaturas por estado, plano e acesso; canal por estado e modo; handoffs por
+ *    motivo; resultados do contato comercial) são objetos com **chaves fixas** (`{ ACTIVE: n, ... }`),
+ *    todas presentes, mesmo com zero. A fila (`queue.jobs`) é o único mapa livre (estado do BullMQ).
  * 2. **Listas paginadas:** `{ items, nextCursor }` (`nextCursor` nulo no fim).
- * 3. **Cobrança desligada:** `billingEnabled: false` no `overview` e no detalhe da empresa (com
- *    `subscription` e `paidThisMonth` nulos); nas listas de pedidos e avisos, `items: null`.
- * 4. **"Precisa de atenção" levando à lista filtrada:** `GET /platform/companies` aceita também
- *    `attention=pending_messages|unsent_replies|token_invalid|token_expiring|open_handoffs` (proposta do E3
- *    para a E2; a tela Canal é essa lista com `token_invalid` e `token_expiring`).
- * 5. **Saúde:** fila, retomada e limpeza são uniões discriminadas por `status`
- *    (`ok`/`unavailable`/`disabled` e `ran`/`never`/`disabled`); contadores são `{ name, label, value }`
- *    (`label` é o valor do único rótulo da métrica, como o `result`, ou nulo).
+ * 3. **Cobrança desligada:** `billingEnabled: false` no `overview` (com `subscriptions` e
+ *    `paidOrdersThisMonth` nulos), nos detalhes (`subscription` e `usage` nulos) e nas listas de pedidos
+ *    e avisos (com `items: []`).
+ * 4. **Filtros das consultas em minúsculas** (`status=active`, `kind=extra_pack`, `verified=true`); os
+ *    enums das respostas vêm em maiúsculas. Valor desconhecido na consulta é 400: o app só manda os
+ *    valores das listas abaixo.
+ * 5. **Saúde:** fila e retomada são uniões discriminadas por `state` (`ok`/`unavailable`/`disabled` e
+ *    `ran`/`not_run`/`disabled`; a limpeza da fila vem dentro da execução da retomada); os contadores são
+ *    um objeto de chaves fixas.
  * 6. **Datas:** texto ISO 8601 em UTC (`toISOString()` do servidor); ids: UUID.
  *
  * Os objetos não são `strict` (campo a mais do servidor é ignorado, nunca mostrado); campo que falta ou
@@ -32,34 +35,87 @@ const instant = z.iso.datetime({ offset: true });
 const count = z.number().int().nonnegative();
 const cents = z.number().int();
 const shortText = z.string().max(200);
-const code = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/);
 const cursor = z.string().min(1).max(512).nullable();
 
-/** Agrupamento genérico: `{ key, count }` (ver item 1 do topo). */
-export const groupSchema = z.array(z.object({ key: code, count })).max(100);
-export type Group = z.infer<typeof groupSchema>;
+/** Objeto com um valor para cada chave da lista (todas presentes; chave a mais é descartada). */
+function fixedKeys<const K extends readonly [string, ...string[]], V extends z.ZodType>(
+  keys: K,
+  value: V,
+) {
+  return z.object(Object.fromEntries(keys.map((key) => [key, value])) as { [P in K[number]]: V });
+}
 
-export const companyStatusSchema = z.enum(['ACTIVE', 'SUSPENDED']);
-export const accessStatusSchema = z.enum(['ACTIVE', 'DISABLED']);
-export const planSchema = z.enum(['ESSENTIAL', 'PROFESSIONAL', 'SCALE']);
-export const cycleSchema = z.enum(['MONTHLY', 'ANNUAL']);
-export const subscriptionStateSchema = z.enum([
-  'TRIAL',
-  'ACTIVE',
-  'PAST_DUE',
-  'CANCELLED',
-  'EXPIRED',
-]);
-export const accessLevelSchema = z.enum(['ok', 'grace', 'blocked']);
-export const channelStateSchema = z.enum(['NOT_CONNECTED', 'CONNECTED', 'TOKEN_INVALID']);
-export const channelModeSchema = z.enum(['API_ONLY', 'COEXISTENCE']);
-export const membershipRoleSchema = z.enum(['OWNER', 'ADMIN', 'AGENT', 'VIEWER']);
+/** Pares `[chave, contagem]` na ordem da lista (a ordem em que a tela mostra). */
+export function countEntries<K extends string>(
+  keys: readonly K[],
+  counts: Readonly<Record<K, number>>,
+): (readonly [K, number])[] {
+  return keys.map((key) => [key, counts[key]] as const);
+}
+
+export const COMPANY_STATUSES = ['ACTIVE', 'SUSPENDED'] as const;
+export const ACCESS_STATUSES = ['ACTIVE', 'DISABLED'] as const;
+export const PLAN_CODES = ['ESSENTIAL', 'PROFESSIONAL', 'SCALE'] as const;
+export const BILLING_CYCLES = ['MONTHLY', 'ANNUAL'] as const;
+export const SUBSCRIPTION_STATES = ['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELLED', 'EXPIRED'] as const;
+export const ACCESS_LEVELS = ['ok', 'grace', 'blocked'] as const;
+export const CHANNEL_STATES = ['CONNECTED', 'TOKEN_INVALID', 'NOT_CONNECTED', 'LEGACY'] as const;
+export const CHANNEL_MODES = ['API_ONLY', 'COEXISTENCE'] as const;
+export const MEMBERSHIP_ROLES = ['OWNER', 'ADMIN', 'AGENT', 'VIEWER'] as const;
+export const HANDOFF_REASONS = [
+  'CONTACT_REQUESTED',
+  'CANNOT_HELP',
+  'COMPLAINT',
+  'SENSITIVE',
+  'OTHER',
+] as const;
+export const ORDER_KINDS = ['NEW', 'RENEWAL', 'UPGRADE', 'EXTRA_PACK'] as const;
+export const ORDER_STATUSES = ['PENDING', 'PAID', 'EXPIRED', 'FAILED'] as const;
+export const NOTICE_KINDS = [
+  'QUOTA_REPLIES_80',
+  'QUOTA_REPLIES_100',
+  'QUOTA_TOKENS_80',
+  'QUOTA_TOKENS_100',
+  'PERIOD_ENDING_7D',
+  'PERIOD_ENDING_1D',
+  'PERIOD_ENDED',
+  'PRICE_CHANGE',
+  'PERIOD_GRACE_ENDED',
+  'PAYMENT_RECEIVED',
+  'PLAN_CHANGE_APPLIED',
+  'DOWNGRADE_BLOCKED',
+  'TRIAL_ENDING',
+  'TRIAL_ENDED',
+] as const;
+/** Resultados do contato comercial (spec 040), na ordem da Saúde. */
+export const SALES_CONTACT_RESULTS = [
+  'sent',
+  'failed',
+  'spam',
+  'too_fast',
+  'capped',
+  'daily_cap',
+  'invalid',
+  'expired',
+] as const;
+/** Estados da fila que o backend lê do BullMQ, na ordem da tela (outro estado aparece depois). */
+export const QUEUE_JOB_STATES = ['waiting', 'active', 'delayed', 'completed', 'failed'] as const;
+
+export const companyStatusSchema = z.enum(COMPANY_STATUSES);
+export const accessStatusSchema = z.enum(ACCESS_STATUSES);
+export const planSchema = z.enum(PLAN_CODES);
+export const cycleSchema = z.enum(BILLING_CYCLES);
+export const subscriptionStateSchema = z.enum(SUBSCRIPTION_STATES);
+export const accessLevelSchema = z.enum(ACCESS_LEVELS);
+export const channelStateSchema = z.enum(CHANNEL_STATES);
+export const channelModeSchema = z.enum(CHANNEL_MODES);
+export const membershipRoleSchema = z.enum(MEMBERSHIP_ROLES);
 
 /** Motivos aceitos por suspender e reativar (D1), na ordem em que a tela os oferece. */
 export const ACTION_REASONS = ['PAYMENT', 'ABUSE', 'OWNER_REQUEST', 'OTHER'] as const;
 export type ActionReason = (typeof ACTION_REASONS)[number];
 
-/** Filtros de "precisa de atenção" da lista de empresas (ver item 4 do topo). */
+/** Filtro `attention` de `GET /platform/companies` (o mesmo critério de cada item do overview). */
 export const ATTENTION_FILTERS = [
   'pending_messages',
   'unsent_replies',
@@ -69,6 +125,17 @@ export const ATTENTION_FILTERS = [
 ] as const;
 export type AttentionFilter = (typeof ATTENTION_FILTERS)[number];
 
+/** Valores aceitos nos filtros das listas (minúsculos; ver item 4 do topo). */
+export type CompanyStatusFilter = 'active' | 'suspended';
+export type AccountStatusFilter = 'active' | 'disabled';
+export type VerifiedFilter = 'true' | 'false';
+/** `status` de `GET /platform/billing/orders`, par a par com `ORDER_STATUSES`. */
+export const ORDER_STATUS_FILTERS = ['pending', 'paid', 'expired', 'failed'] as const;
+export type OrderStatusFilter = (typeof ORDER_STATUS_FILTERS)[number];
+/** `kind` de `GET /platform/billing/orders`, par a par com `ORDER_KINDS`. */
+export const ORDER_KIND_FILTERS = ['new', 'renewal', 'upgrade', 'extra_pack'] as const;
+export type OrderKindFilter = (typeof ORDER_KIND_FILTERS)[number];
+
 // --- E1: entrada ---------------------------------------------------------------------------------
 
 /** `GET /platform/auth/session`. */
@@ -77,24 +144,34 @@ export type Session = z.infer<typeof sessionSchema>;
 
 // --- E2: visão geral -----------------------------------------------------------------------------
 
-const trafficSchema = z.object({ contactMessages: count, replies: count, fallbacks: count });
+const volumeSchema = z.object({ contactMessages: count, replies: count, fallbackReplies: count });
 
-/** `GET /platform/overview`. */
+/** `GET /platform/overview` (`PlatformOverviewResponse`). */
 export const overviewSchema = z.object({
+  generatedAt: instant,
   billingEnabled: z.boolean(),
-  companies: groupSchema,
+  companies: z.object({ active: count, suspended: count }),
   accounts: z.object({ total: count, verified: count, unverified: count, disabled: count }),
-  subscriptions: z.object({ byState: groupSchema, byPlan: groupSchema }).nullable(),
-  channel: z.object({ byState: groupSchema, byMode: groupSchema }),
-  traffic: z.object({ last24h: trafficSchema, last7d: trafficSchema }),
+  subscriptions: z
+    .object({
+      byState: fixedKeys(SUBSCRIPTION_STATES, count),
+      byPlan: fixedKeys(PLAN_CODES, count),
+      byAccess: fixedKeys(ACCESS_LEVELS, count),
+    })
+    .nullable(),
+  channel: z.object({
+    byState: fixedKeys(CHANNEL_STATES, count),
+    byMode: fixedKeys(CHANNEL_MODES, count),
+  }),
+  attendance: z.object({ last24h: volumeSchema, last7d: volumeSchema }),
   attention: z.object({
-    pendingMessages: count,
+    stalledPending: count,
     unsentReplies: count,
     tokenInvalid: count,
-    tokenExpiring: count,
+    tokensExpiringSoon: count,
     openHandoffs: count,
   }),
-  paidThisMonth: z.object({ count, amountCents: cents }).nullable(),
+  paidOrdersThisMonth: z.object({ monthStart: instant, count, amountCents: cents }).nullable(),
 });
 export type Overview = z.infer<typeof overviewSchema>;
 
@@ -115,12 +192,36 @@ export const companyListItemSchema = z.object({
 });
 export type CompanyListItem = z.infer<typeof companyListItemSchema>;
 
-/** `GET /platform/companies?status=&q=&attention=&cursor=&limit=`. */
+/** `GET /platform/companies?status=&q=&attention=&cursor=&limit=` (`PlatformCompanyListResponse`). */
 export const companyPageSchema = z.object({
   items: z.array(companyListItemSchema).max(50),
   nextCursor: cursor,
 });
 export type CompanyPage = z.infer<typeof companyPageSchema>;
+
+const modulesSchema = z.object({ schedule: z.boolean(), inventory: z.boolean() });
+
+/** A assinatura como a E2 a mostra (no detalhe da empresa e no da conta). */
+export const subscriptionSchema = z.object({
+  id,
+  plan: z.object({ code: planSchema, name: shortText }),
+  cycle: cycleSchema,
+  modules: modulesSchema,
+  /** Estado gravado. */
+  status: subscriptionStateSchema,
+  /** Estado efetivo agora. */
+  state: subscriptionStateSchema,
+  access: accessLevelSchema,
+  currentPeriodStart: instant,
+  currentPeriodEnd: instant,
+  trialEndsAt: instant.nullable(),
+  cancelAtPeriodEnd: z.boolean(),
+  /** Troca agendada para a próxima renovação. */
+  pendingChange: z
+    .object({ planCode: planSchema, cycle: cycleSchema, agenda: z.boolean(), stock: z.boolean() })
+    .nullable(),
+});
+export type Subscription = z.infer<typeof subscriptionSchema>;
 
 const windowSchema = z.object({
   activeConversations: count,
@@ -128,22 +229,37 @@ const windowSchema = z.object({
   replies: count,
   fallbacks: count,
   uncertainDeliveries: count,
-  handoffs: groupSchema,
+  handoffs: fixedKeys(HANDOFF_REASONS, count),
 });
 
-/** `GET /platform/companies/:companyId`. */
+const quotaSchema = z.object({ used: count, limit: count });
+
+/** `GET /platform/companies/:companyId` (`PlatformCompanyDetailResponse`). */
 export const companyDetailSchema = z.object({
+  billingEnabled: z.boolean(),
   id,
   name: shortText,
   slug: shortText,
   status: companyStatusSchema,
   createdAt: instant,
-  lastActivityAt: instant.nullable(),
+  updatedAt: instant,
   hasPersona: z.boolean(),
-  modules: z.array(code).max(20),
-  onboarding: z.array(z.object({ key: code, done: z.boolean() })).max(20),
-  members: z.array(z.object({ role: membershipRoleSchema, status: accessStatusSchema, count })),
-  owner: z
+  onboarding: z.object({
+    dismissed: z.boolean(),
+    steps: z.object({
+      persona: z.boolean(),
+      knowledge: z.boolean(),
+      schedule: z.boolean(),
+      inventory: z.boolean(),
+    }),
+  }),
+  /** Módulos liberados agora (cobrança desligada: tudo; sem assinatura: nada). */
+  modules: modulesSchema,
+  memberships: z
+    .array(z.object({ role: membershipRoleSchema, status: accessStatusSchema, count }))
+    .max(20),
+  /** Titular da assinatura, sem e-mail. */
+  holder: z
     .object({
       accountId: id,
       emailVerified: z.boolean(),
@@ -151,50 +267,28 @@ export const companyDetailSchema = z.object({
       createdAt: instant,
     })
     .nullable(),
-  billingEnabled: z.boolean(),
-  subscription: z
-    .object({
-      plan: planSchema,
-      cycle: cycleSchema,
-      modules: z.array(code).max(20),
-      state: subscriptionStateSchema,
-      access: accessLevelSchema,
-      periodStart: instant,
-      periodEnd: instant,
-      cancelAtPeriodEnd: z.boolean(),
-      scheduledChange: z
-        .object({ plan: planSchema, cycle: cycleSchema, effectiveAt: instant })
-        .nullable(),
-      usage: z.object({
-        windowStart: instant,
-        windowEnd: instant,
-        replies: count,
-        repliesQuota: count.nullable(),
-        tokens: count,
-        tokensQuota: count.nullable(),
-      }),
-    })
+  subscription: subscriptionSchema.nullable(),
+  usage: z
+    .object({ windowStart: instant, windowEnd: instant, replies: quotaSchema, tokens: quotaSchema })
     .nullable(),
-  channel: z
-    .object({
-      state: channelStateSchema,
-      mode: channelModeSchema,
-      phoneNumberId: z.string().max(64).nullable(),
-      wabaId: z.string().max(64).nullable(),
-      connectedAt: instant.nullable(),
-      tokenExpiresAt: instant.nullable(),
-      tokenInvalidAt: instant.nullable(),
-    })
-    .nullable(),
+  channel: z.object({
+    state: channelStateSchema,
+    mode: channelModeSchema.nullable(),
+    phoneNumberId: z.string().max(64).nullable(),
+    wabaId: z.string().max(64).nullable(),
+    connectedAt: instant.nullable(),
+    tokenExpiresAt: instant.nullable(),
+    tokenInvalidAt: instant.nullable(),
+  }),
   attendance: z.object({ last24h: windowSchema, last7d: windowSchema, last30d: windowSchema }),
   attention: z.object({
-    pendingMessages: count,
+    stalledPending: count,
     unsentReplies: count,
-    tokenInvalid: z.boolean(),
-    tokenExpiring: z.boolean(),
     openHandoffs: count,
+    tokenInvalid: z.boolean(),
+    tokenExpiringSoon: z.boolean(),
   }),
-  content: z.object({ documents: count, activeProducts: count, upcomingBookings7d: count }),
+  content: z.object({ documents: count, activeProducts: count, upcomingAppointments: count }),
 });
 export type CompanyDetail = z.infer<typeof companyDetailSchema>;
 
@@ -211,32 +305,37 @@ export const accountListItemSchema = z.object({
 });
 export type AccountListItem = z.infer<typeof accountListItemSchema>;
 
-/** `GET /platform/accounts?status=&verified=&cursor=`. */
+/** `GET /platform/accounts?status=&verified=&cursor=` (`PlatformAccountListResponse`). */
 export const accountPageSchema = z.object({
   items: z.array(accountListItemSchema).max(50),
   nextCursor: cursor,
 });
 export type AccountPage = z.infer<typeof accountPageSchema>;
 
-/** `GET /platform/accounts/:accountId` (com o e-mail completo: cada leitura é auditada, D7). */
+/**
+ * `GET /platform/accounts/:accountId` (`PlatformAccountDetailResponse`), com o e-mail completo: cada
+ * leitura é auditada (D7).
+ */
 export const accountDetailSchema = z.object({
+  billingEnabled: z.boolean(),
   id,
   email: z.string().max(320),
   status: accessStatusSchema,
   verified: z.boolean(),
   createdAt: instant,
   companies: z
-    .array(z.object({ id, name: shortText, slug: shortText, role: membershipRoleSchema }))
+    .array(
+      z.object({
+        id,
+        name: shortText,
+        slug: shortText,
+        status: companyStatusSchema,
+        role: membershipRoleSchema,
+        membershipStatus: accessStatusSchema,
+      }),
+    )
     .max(100),
-  subscription: z
-    .object({
-      plan: planSchema,
-      cycle: cycleSchema,
-      state: subscriptionStateSchema,
-      access: accessLevelSchema,
-      periodEnd: instant,
-    })
-    .nullable(),
+  subscription: subscriptionSchema.nullable(),
 });
 export type AccountDetail = z.infer<typeof accountDetailSchema>;
 
@@ -244,71 +343,86 @@ export type AccountDetail = z.infer<typeof accountDetailSchema>;
 
 export const orderSchema = z.object({
   id,
-  kind: z.enum(['NEW', 'RENEWAL', 'UPGRADE', 'EXTRA_PACK']),
-  status: z.enum(['PENDING', 'PAID', 'EXPIRED', 'FAILED']),
+  kind: z.enum(ORDER_KINDS),
+  status: z.enum(ORDER_STATUSES),
   amountCents: cents,
   captureMethod: z.string().max(32).nullable(),
   createdAt: instant,
   paidAt: instant.nullable(),
-  expiresAt: instant.nullable(),
+  expiresAt: instant,
   periodStart: instant.nullable(),
   periodEnd: instant.nullable(),
   accountId: id,
 });
 export type Order = z.infer<typeof orderSchema>;
 
-/** `GET /platform/billing/orders?status=&kind=&cursor=` (`items: null` com a cobrança desligada). */
+/** `GET /platform/billing/orders?status=&kind=&cursor=` (`PlatformOrderListResponse`). */
 export const orderPageSchema = z.object({
-  items: z.array(orderSchema).max(50).nullable(),
+  billingEnabled: z.boolean(),
+  items: z.array(orderSchema).max(50),
   nextCursor: cursor,
 });
 export type OrderPage = z.infer<typeof orderPageSchema>;
 
 export const noticeSchema = z.object({
-  kind: code,
-  windowStart: instant.nullable(),
+  kind: z.enum(NOTICE_KINDS),
+  windowStart: instant,
   createdAt: instant,
   accountId: id,
 });
 export type Notice = z.infer<typeof noticeSchema>;
 
-/** `GET /platform/billing/notices?kind=&cursor=` (`items: null` com a cobrança desligada). */
+/** `GET /platform/billing/notices?kind=&cursor=` (`PlatformNoticeListResponse`). */
 export const noticePageSchema = z.object({
-  items: z.array(noticeSchema).max(50).nullable(),
+  billingEnabled: z.boolean(),
+  items: z.array(noticeSchema).max(50),
   nextCursor: cursor,
 });
 export type NoticePage = z.infer<typeof noticePageSchema>;
 
 // --- E2: saúde -----------------------------------------------------------------------------------
 
-const jobSchema = z.discriminatedUnion('status', [
+const resumeSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('disabled') }),
+  z.object({ state: z.literal('not_run') }),
   z.object({
-    status: z.literal('ran'),
+    state: z.literal('ran'),
     at: instant,
-    result: z.enum(['ok', 'error']),
-    counts: groupSchema,
+    resume: z.object({ ok: z.boolean(), scheduled: count, skippedLimit: count, failed: count }),
+    clean: z.object({ ok: z.boolean(), completed: count, failed: count }),
   }),
-  z.object({ status: z.literal('never') }),
-  z.object({ status: z.literal('disabled') }),
 ]);
-export type JobRun = z.infer<typeof jobSchema>;
+export type ResumeHealth = z.infer<typeof resumeSchema>;
 
-/** `GET /platform/health`. */
+const counterValue = z.number().nonnegative();
+
+/** `GET /platform/health` (`PlatformHealthResponse`). */
 export const healthSchema = z.object({
   checkedAt: instant,
   bootedAt: instant,
   database: z.enum(['up', 'down']),
   redis: z.enum(['up', 'down']),
-  queue: z.discriminatedUnion('status', [
-    z.object({ status: z.literal('ok'), counts: groupSchema }),
-    z.object({ status: z.literal('unavailable') }),
-    z.object({ status: z.literal('disabled') }),
+  queue: z.discriminatedUnion('state', [
+    z.object({ state: z.literal('disabled') }),
+    z.object({ state: z.literal('unavailable') }),
+    z.object({
+      state: z.literal('ok'),
+      jobs: z.record(z.string().regex(/^[a-z][a-z-]{0,31}$/), count),
+    }),
   ]),
-  resume: jobSchema,
-  cleanup: jobSchema,
-  counters: z
-    .array(z.object({ name: code, label: code.nullable(), value: z.number().nonnegative() }))
-    .max(100),
+  resume: resumeSchema,
+  /** Contadores do processo que respondeu, desde o boot (lista fixa da E2). */
+  counters: z.object({
+    attendanceFallbacks: counterValue,
+    attendanceUnsentReplies: counterValue,
+    channelSend: z.object({ ok: counterValue, error: counterValue }),
+    queueJobsFailed: counterValue,
+    processFatalErrors: counterValue,
+    entitlementErrors: counterValue,
+    usageMeterErrors: counterValue,
+    billingNoticesFailed: counterValue,
+    salesContactRequests: fixedKeys(SALES_CONTACT_RESULTS, counterValue),
+  }),
 });
 export type Health = z.infer<typeof healthSchema>;
 

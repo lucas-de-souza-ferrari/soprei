@@ -70,6 +70,7 @@ const LABELS: Record<string, string> = {
   NOT_CONNECTED: 'Não conectado',
   CONNECTED: 'Conectado',
   TOKEN_INVALID: 'Token inválido',
+  LEGACY: 'Configuração antiga',
   API_ONLY: 'Só API',
   COEXISTENCE: 'Coexistência',
   // Papéis
@@ -117,6 +118,17 @@ const LABELS: Record<string, string> = {
   failed: 'Falharam',
   completed: 'Concluídos',
   prioritized: 'Priorizados',
+  'waiting-children': 'Esperando filhos',
+  paused: 'Pausados',
+  // Contato comercial (spec 040)
+  sent: 'Enviados',
+  spam: 'Spam',
+  too_fast: 'Rápido demais',
+  capped: 'Acima do limite por endereço',
+  daily_cap: 'Limite diário',
+  invalid: 'Inválidos',
+  expired: 'Expirados',
+  // Serviços
   up: 'No ar',
   down: 'Fora do ar',
   error: 'Erro',

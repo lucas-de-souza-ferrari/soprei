@@ -83,7 +83,7 @@ export interface PageResult<T> {
 }
 
 export interface Paged<T> {
-  /** `null`: a rota respondeu `items: null` (cobrança desligada). */
+  /** `null`: a página veio marcada como cobrança desligada (`billingEnabled: false`). */
   readonly items: readonly T[] | null | undefined;
   readonly hasMore: boolean;
   readonly error: unknown;

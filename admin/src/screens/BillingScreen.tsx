@@ -1,23 +1,40 @@
 import { useState } from 'react';
 import { query } from '../api';
 import { usePaged } from '../admin-context';
-import { noticePageSchema, orderPageSchema } from '../contracts';
+import {
+  ORDER_KINDS,
+  ORDER_KIND_FILTERS,
+  ORDER_STATUSES,
+  ORDER_STATUS_FILTERS,
+  noticePageSchema,
+  orderPageSchema,
+  type OrderKindFilter,
+  type OrderStatusFilter,
+} from '../contracts';
 import { errorMessage, formatCents, formatDate, formatDateTime, label } from '../format';
 import { Alert, Badge, Button, Card, List, Loading, PageHeader, Row, Select } from '../ui';
 
-type OrderStatus = '' | 'PENDING' | 'PAID' | 'EXPIRED' | 'FAILED';
-type OrderKind = '' | 'NEW' | 'RENEWAL' | 'UPGRADE' | 'EXTRA_PACK';
+type OrderStatus = '' | OrderStatusFilter;
+type OrderKind = '' | OrderKindFilter;
 
-const ORDER_STATUSES: readonly (readonly [OrderStatus, string])[] = [
+// A consulta leva o valor em minúsculas; o rótulo é o do enum da resposta (mesma posição na lista).
+const STATUS_OPTIONS: readonly (readonly [OrderStatus, string])[] = [
   ['', 'Todos'],
-  ...(['PENDING', 'PAID', 'EXPIRED', 'FAILED'] as const).map((key) => [key, label(key)] as const),
+  ...ORDER_STATUS_FILTERS.map((key, index) => [key, label(ORDER_STATUSES[index] ?? key)] as const),
 ];
-const ORDER_KINDS: readonly (readonly [OrderKind, string])[] = [
+const KIND_OPTIONS: readonly (readonly [OrderKind, string])[] = [
   ['', 'Todos'],
-  ...(['NEW', 'RENEWAL', 'UPGRADE', 'EXTRA_PACK'] as const).map(
-    (key) => [key, label(key)] as const,
-  ),
+  ...ORDER_KIND_FILTERS.map((key, index) => [key, label(ORDER_KINDS[index] ?? key)] as const),
 ];
+
+/** Com a cobrança desligada a rota responde `billingEnabled: false` e nenhuma linha: a tela diz isso. */
+function billingPage<T>(page: {
+  readonly billingEnabled: boolean;
+  readonly items: readonly T[];
+  readonly nextCursor: string | null;
+}) {
+  return page.billingEnabled ? page : { items: null, nextCursor: null };
+}
 
 function Disabled() {
   return <p className="text-sm text-muted-foreground">Cobrança desligada.</p>;
@@ -29,22 +46,23 @@ export function BillingScreen() {
   const [kind, setKind] = useState<OrderKind>('');
   const orders = usePaged(
     (api, cursor) =>
-      api.get(
-        `/platform/billing/orders${query({
-          status: status === '' ? undefined : status,
-          kind: kind === '' ? undefined : kind,
-          cursor: cursor ?? undefined,
-        })}`,
-        orderPageSchema,
-      ),
+      api
+        .get(
+          `/platform/billing/orders${query({
+            status: status === '' ? undefined : status,
+            kind: kind === '' ? undefined : kind,
+            cursor: cursor ?? undefined,
+          })}`,
+          orderPageSchema,
+        )
+        .then(billingPage),
     `${status}|${kind}`,
   );
   const notices = usePaged(
     (api, cursor) =>
-      api.get(
-        `/platform/billing/notices${query({ cursor: cursor ?? undefined })}`,
-        noticePageSchema,
-      ),
+      api
+        .get(`/platform/billing/notices${query({ cursor: cursor ?? undefined })}`, noticePageSchema)
+        .then(billingPage),
     'notices',
   );
 
@@ -65,9 +83,14 @@ export function BillingScreen() {
               label="Situação"
               value={status}
               onChange={setStatus}
-              options={ORDER_STATUSES}
+              options={STATUS_OPTIONS}
             />
-            <Select<OrderKind> label="Tipo" value={kind} onChange={setKind} options={ORDER_KINDS} />
+            <Select<OrderKind>
+              label="Tipo"
+              value={kind}
+              onChange={setKind}
+              options={KIND_OPTIONS}
+            />
           </div>
           {orders.error === undefined ? null : <Alert>{errorMessage(orders.error)}</Alert>}
           {orders.items === undefined ? (

@@ -2,11 +2,41 @@ import type { Page, Request } from '@playwright/test';
 import * as fx from './fixtures';
 
 /**
- * API falsa do admin (spec 044, E3), uma por teste, por `page.route`. Imita as regras da E1 que a tela
- * percebe: sessão por cookie (aqui um estado em memória), `X-Soprei-App: admin` exigido em `POST`, 401
- * uniforme no login e 401 em qualquer rota sem sessão.
+ * API falsa do admin (spec 044, E3), uma por teste, por `page.route`. Imita as regras da E1 e da E2 que a
+ * tela percebe: sessão por cookie (aqui um estado em memória), `X-Soprei-App: admin` exigido em `POST`,
+ * 401 uniforme no login, 401 em qualquer rota sem sessão e 400 a parâmetro de consulta desconhecido ou
+ * com valor fora da lista (os esquemas `.strict()` de `platform-monitor.validators.ts`).
  */
 export const GOOD = { email: fx.ADMIN_EMAIL, password: 'senha-do-dono-bem-longa', code: '123456' };
+
+/** `limit` de 1 a 50 e cursor opaco, como no `pageShape` da E2. */
+const PAGE = { limit: /^([1-9]|[1-4][0-9]|50)$/, cursor: /^.{1,512}$/ };
+
+/** Parâmetros aceitos por rota de lista, como nos validadores da E2 (valores em minúsculas). */
+const QUERY_RULES: Record<string, Record<string, RegExp>> = {
+  '/platform/companies': {
+    ...PAGE,
+    status: /^(active|suspended)$/,
+    q: /^.{0,64}$/,
+    attention: /^(pending_messages|unsent_replies|token_invalid|token_expiring|open_handoffs)$/,
+  },
+  '/platform/accounts': { ...PAGE, status: /^(active|disabled)$/, verified: /^(true|false)$/ },
+  '/platform/billing/orders': {
+    ...PAGE,
+    status: /^(pending|paid|expired|failed)$/,
+    kind: /^(new|renewal|upgrade|extra_pack)$/,
+  },
+  '/platform/billing/notices': { ...PAGE, kind: /^[a-z0-9_]+$/ },
+};
+
+function queryAccepted(path: string, search: URLSearchParams): boolean {
+  const rules = QUERY_RULES[path] ?? {};
+  for (const [key, value] of search) {
+    const rule = rules[key];
+    if (rule === undefined || !rule.test(value)) return false;
+  }
+  return true;
+}
 
 export interface Call {
   readonly method: string;
@@ -75,14 +105,14 @@ export class FakeApi {
     if (path === '/platform/auth/session') return { status: 200, json: { email: fx.ADMIN_EMAIL } };
 
     const billing = this.options.billingEnabled ?? true;
+    if (method === 'GET' && !queryAccepted(path, url.searchParams))
+      return error(400, 'VALIDATION_ERROR');
     if (method === 'GET') {
       switch (path) {
         case '/platform/overview':
           return {
             status: 200,
-            json: billing
-              ? fx.overview
-              : { ...fx.overview, billingEnabled: false, subscriptions: null, paidThisMonth: null },
+            json: billing ? fx.overview : fx.overviewBillingOff,
           };
         case '/platform/companies': {
           const attention = url.searchParams.get('attention');
@@ -109,14 +139,14 @@ export class FakeApi {
         case `/platform/accounts/${fx.ACCOUNT_A}`:
           return { status: 200, json: fx.accountDetail };
         case '/platform/billing/orders':
-          return { status: 200, json: billing ? fx.orderPage : { items: null, nextCursor: null } };
+          return { status: 200, json: billing ? fx.orderPage : fx.billingOffPage };
         case '/platform/billing/notices':
-          return { status: 200, json: billing ? fx.noticePage : { items: null, nextCursor: null } };
+          return { status: 200, json: billing ? fx.noticePage : fx.billingOffPage };
         case '/platform/health':
           return {
             status: 200,
             json: this.options.queueUnavailable
-              ? { ...fx.health, queue: { status: 'unavailable' } }
+              ? { ...fx.health, queue: { state: 'unavailable' } }
               : fx.health,
           };
       }

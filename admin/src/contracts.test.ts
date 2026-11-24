@@ -15,12 +15,14 @@ import {
 import {
   accountDetail,
   accountPage,
+  billingOffPage,
   companyDetail,
   companyPage,
   health,
   noticePage,
   orderPage,
   overview,
+  overviewBillingOff,
 } from '../e2e/fixtures';
 
 describe('contratos do admin (spec 044, E3)', () => {
@@ -60,27 +62,56 @@ describe('contratos do admin (spec 044, E3)', () => {
       false,
     );
     assert.equal(sessionSchema.safeParse({}).success, false);
-    assert.equal(healthSchema.safeParse({ ...health, queue: { status: 'talvez' } }).success, false);
-  });
-
-  it('cobrança desligada: listas com items nulos e overview sem assinaturas', () => {
-    assert.ok(orderPageSchema.safeParse({ items: null, nextCursor: null }).success);
-    assert.ok(noticePageSchema.safeParse({ items: null, nextCursor: null }).success);
-    assert.ok(
+    assert.equal(healthSchema.safeParse({ ...health, queue: { state: 'talvez' } }).success, false);
+    // Agrupamento de chaves fixas: faltar uma chave é recusado.
+    const withoutLegacy: Record<string, number> = { ...overview.channel.byState };
+    delete withoutLegacy.LEGACY;
+    assert.equal(
       overviewSchema.safeParse({
         ...overview,
-        billingEnabled: false,
-        subscriptions: null,
-        paidThisMonth: null,
+        channel: { ...overview.channel, byState: withoutLegacy },
       }).success,
+      false,
     );
+    // O formato provisório (listas `{ key, count }`) não passa mais.
+    assert.equal(
+      overviewSchema.safeParse({ ...overview, companies: [{ key: 'ACTIVE', count: 1 }] }).success,
+      false,
+    );
+  });
+
+  it('cobrança desligada: listas vazias com billingEnabled false e overview sem assinaturas', () => {
+    assert.ok(orderPageSchema.safeParse(billingOffPage).success);
+    assert.ok(noticePageSchema.safeParse(billingOffPage).success);
+    assert.equal(orderPageSchema.safeParse({ items: null, nextCursor: null }).success, false);
+    assert.ok(overviewSchema.safeParse(overviewBillingOff).success);
     assert.ok(
       companyDetailSchema.safeParse({
         ...companyDetail(),
         billingEnabled: false,
         subscription: null,
+        usage: null,
       }).success,
     );
+    assert.ok(
+      accountDetailSchema.safeParse({ ...accountDetail, billingEnabled: false, subscription: null })
+        .success,
+    );
+  });
+
+  it('chave a mais num agrupamento fixo é descartada; a fila aceita estados novos', () => {
+    const parsed = overviewSchema.parse({
+      ...overview,
+      channel: { ...overview.channel, byMode: { ...overview.channel.byMode, OUTRO: 9 } },
+    });
+    assert.equal('OUTRO' in parsed.channel.byMode, false);
+    const queue = healthSchema.parse({
+      ...health,
+      queue: { state: 'ok', jobs: { waiting: 1, prioritized: 2 } },
+    }).queue;
+    assert.deepEqual(queue, { state: 'ok', jobs: { waiting: 1, prioritized: 2 } });
+    for (const resume of [{ state: 'disabled' }, { state: 'not_run' }])
+      assert.ok(healthSchema.safeParse({ ...health, resume }).success);
   });
 
   it('o corpo das ações aceita só os quatro motivos e nada mais', () => {

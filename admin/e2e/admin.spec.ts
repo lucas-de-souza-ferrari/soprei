@@ -121,6 +121,36 @@ test('"Precisa de atenção" leva à lista de empresas filtrada', async ({ page 
   expect(last?.search.get('attention')).toBe('token_invalid');
 });
 
+test('filtros vão ao servidor em minúsculas (os validadores da E2 recusam outro valor)', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Suspensas/ }).click();
+  await expect(page.getByLabel('Estado')).toHaveValue('suspended');
+  await expect
+    .poll(() => api.callsTo('GET', '/platform/companies').at(-1)?.search.get('status'))
+    .toBe('suspended');
+
+  await nav(page, 'Contas').click();
+  await page.getByRole('combobox', { name: 'E-mail' }).selectOption({ label: 'Não confirmado' });
+  await expect
+    .poll(() => api.callsTo('GET', '/platform/accounts').at(-1)?.search.get('verified'))
+    .toBe('false');
+
+  await nav(page, 'Cobrança').click();
+  await expect(page.getByText(/149,00/)).toBeVisible();
+  await page.getByLabel('Situação').selectOption({ label: 'Pago' });
+  await page.getByLabel('Tipo').selectOption({ label: 'Pacote extra' });
+  await expect
+    .poll(() => {
+      const search = api.callsTo('GET', '/platform/billing/orders').at(-1)?.search;
+      return [search?.get('status'), search?.get('kind')];
+    })
+    .toEqual(['paid', 'extra_pack']);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 test('cobrança desligada aparece como tal na Visão geral e na Cobrança', async ({ page }) => {
   await installFakeApi(page, { signedIn: true, billingEnabled: false });
   await page.goto('/');
@@ -137,7 +167,7 @@ test('Saúde: fila indisponível sem derrubar o resto, e releitura a cada 60 s s
   await page.goto('/');
   await nav(page, 'Saúde').click();
   await expect(page.getByText('Indisponível')).toBeVisible();
-  await expect(page.getByText('channel_send_total (ok)')).toBeVisible();
+  await expect(page.getByText('Envios pelo canal: ok')).toBeVisible();
   // Em desenvolvimento o StrictMode do React monta a tela duas vezes; conta-se a partir daqui.
   const reads = () => api.callsTo('GET', '/platform/health').length;
   const first = reads();
