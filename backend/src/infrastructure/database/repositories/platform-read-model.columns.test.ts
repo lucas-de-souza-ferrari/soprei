@@ -37,6 +37,12 @@ const FORBIDDEN_COLUMNS = [
 ];
 
 /**
+ * O predicado permitido no SQL extraído: a interpolação do parâmetro vira espaço, e o predicado termina a
+ * linha (o próximo é outro `AND`). Nada de literal nem de outra coluna do lado direito.
+ */
+const ALLOWED_CONTACT_REF = /\bc\.contact_ref <> +\n/g;
+
+/**
  * O texto de todos os templates literais do arquivo (o SQL), sem as interpolações `${...}` (código
  * TypeScript) e sem comentários. Percorre o texto com uma pilha: template -> interpolação -> template...
  */
@@ -127,9 +133,33 @@ describe('platform-read-model.ts: SQL sem conteúdo (spec 044, E2)', () => {
   });
 
   it('nenhuma coluna de conteúdo aparece no SQL', () => {
+    // A única exceção (revisão da E2, I2): `c.contact_ref <> ${SITE_TEST_CONTACT_REF}`, que tira o
+    // "Testar" do site de "precisa de atenção". Compara com um parâmetro; nunca lê nem devolve a coluna.
+    const withoutSiteTest = sql.replace(ALLOWED_CONTACT_REF, '');
     for (const column of FORBIDDEN_COLUMNS) {
-      assert.doesNotMatch(sql, new RegExp(`\\b${column}\\b`), column);
+      assert.doesNotMatch(withoutSiteTest, new RegExp(`\\b${column}\\b`), column);
     }
+  });
+
+  it('contact_ref só no predicado do "Testar", sempre contra a constante SITE_TEST_CONTACT_REF', () => {
+    const source = readFileSync(MODULE, 'utf8');
+    const allowed = sql.match(ALLOWED_CONTACT_REF) ?? [];
+    assert.ok(allowed.length > 0, 'o predicado existe');
+    assert.equal(
+      (sql.match(/\bcontact_ref\b/g) ?? []).length,
+      allowed.length,
+      'nenhum outro uso de contact_ref',
+    );
+    assert.equal(
+      source.split('c.contact_ref <> ${SITE_TEST_CONTACT_REF}\n').length - 1,
+      allowed.length,
+      'o valor comparado é sempre o parâmetro SITE_TEST_CONTACT_REF',
+    );
+    assert.ok(
+      source.includes(
+        "import { SITE_TEST_CONTACT_REF } from '../../../application/attendance/contact-label.js';",
+      ),
+    );
   });
 
   it('"name" só como nome da EMPRESA (co.name), nunca de produto, serviço ou plano', () => {

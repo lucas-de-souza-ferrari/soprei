@@ -3,6 +3,7 @@ import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import type { AttendanceService } from '../../application/attendance/attendance.service.js';
+import { SITE_TEST_CONTACT_REF } from '../../application/attendance/contact-label.js';
 import { CompanyService } from '../../application/companies/company.service.js';
 import { PlatformAuthService } from '../../application/platform/platform-auth.service.js';
 import { PlatformMonitorService } from '../../application/platform/platform-monitor.service.js';
@@ -59,7 +60,10 @@ const tag = randomBytes(4).toString('hex').toUpperCase();
 const S = (label: string): string => `SENTINELA-${label}-${tag}`;
 const PHONE_A = `55119${String(randomInt(10_000_000, 99_999_999))}`;
 const PHONE_B = `55219${String(randomInt(10_000_000, 99_999_999))}`;
+const PHONE_D = `55319${String(randomInt(10_000_000, 99_999_999))}`;
 const NUMBER_A = String(randomInt(100_000_000, 999_999_999)) + String(randomInt(100_000, 999_999));
+const NUMBER_C = String(randomInt(100_000_000, 999_999_999)) + String(randomInt(100_000, 999_999));
+const NUMBER_D = String(randomInt(100_000_000, 999_999_999)) + String(randomInt(100_000, 999_999));
 const ACCOUNT_EMAIL = `sentinela-conta-${tag.toLowerCase()}@exemplo.test`;
 const MEMBER_EMAIL_A = `sentinela-membro-a-${tag.toLowerCase()}@exemplo.test`;
 
@@ -75,6 +79,10 @@ const CONTENT_SENTINELS = [
   S('REPLY-A4'),
   S('MSG-B1'),
   S('REPLY-B1'),
+  S('MSG-C1'),
+  S('REPLY-C1'),
+  S('MSG-D1'),
+  S('REPLY-D1'),
   S('PERSONA'),
   S('DOC-TITLE'),
   S('DOC-PREVIEW'),
@@ -93,6 +101,7 @@ const CONTENT_SENTINELS = [
   S('WAMID'),
   PHONE_A,
   PHONE_B,
+  PHONE_D,
   MEMBER_EMAIL_A,
 ];
 
@@ -107,6 +116,10 @@ let cookie: string;
 let adminId: PlatformAdminId;
 let companyA: Company;
 let companyB: Company;
+/** Ativa, com número, só com a conversa do "Testar" do site (revisão da E2, I2). */
+let companyC: Company;
+/** Suspensa, com número, com uma pendente parada e uma resposta não enviada de verdade. */
+let companyD: Company;
 let conversationA: string;
 let accountA: string;
 let subscriptionA: string;
@@ -387,6 +400,47 @@ async function seed(now: Date): Promise<void> {
       windowStart: subscription.currentPeriodStart,
     },
   });
+
+  // Revisão da E2 (I2): o "Testar" do site (empresa C, ativa e com número) grava a resposta sem `sent_at`
+  // e nunca conta como "precisa de atenção"; a empresa D, suspensa, tem uma pendente parada e uma resposta
+  // não enviada de verdade, e também não conta (só empresa ativa). As duas entram no volume.
+  companyC = await tenants.createCompany('plat-c', NUMBER_C);
+  const convC = await db().conversation.create({
+    data: { companyId: companyC.id, contactRef: SITE_TEST_CONTACT_REF },
+  });
+  await message({
+    companyId: companyC.id,
+    conversationId: convC.id,
+    role: 'USER',
+    content: S('MSG-C1'),
+    createdAt: at(12 * MINUTE),
+  });
+  await message({
+    companyId: companyC.id,
+    conversationId: convC.id,
+    role: 'ASSISTANT',
+    content: S('REPLY-C1'),
+    createdAt: at(11 * MINUTE),
+  });
+  companyD = await tenants.createCompany('plat-d', NUMBER_D);
+  await db().company.updateMany({ where: { id: companyD.id }, data: { status: 'SUSPENDED' } });
+  const convD = await db().conversation.create({
+    data: { companyId: companyD.id, contactRef: PHONE_D },
+  });
+  await message({
+    companyId: companyD.id,
+    conversationId: convD.id,
+    role: 'USER',
+    content: S('MSG-D1'),
+    createdAt: at(12 * MINUTE),
+  });
+  await message({
+    companyId: companyD.id,
+    conversationId: convD.id,
+    role: 'ASSISTANT',
+    content: S('REPLY-D1'),
+    createdAt: at(11 * MINUTE),
+  });
 }
 
 before(async () => {
@@ -489,7 +543,11 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
       pick(now) - pick(baseline);
     assert.equal(
       delta((o) => o.companies.active),
-      2,
+      3,
+    );
+    assert.equal(
+      delta((o) => o.companies.suspended),
+      1,
     );
     assert.equal(
       delta((o) => o.accounts.total),
@@ -511,13 +569,14 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
       delta((o) => o.channel.byMode.API_ONLY),
       1,
     );
+    // Volume: A (5 e 4), B (1 e 1), C e D (1 e 1 cada).
     assert.equal(
       delta((o) => o.attendance.last24h.contactMessages),
-      6,
+      8,
     );
     assert.equal(
       delta((o) => o.attendance.last24h.replies),
-      5,
+      7,
     );
     assert.equal(
       delta((o) => o.attendance.last24h.fallbackReplies),
@@ -525,8 +584,9 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
     );
     assert.equal(
       delta((o) => o.attendance.last7d.contactMessages),
-      6,
+      8,
     );
+    // Só as de A: nem o "Testar" de C nem a empresa suspensa D (revisão da E2, I2).
     assert.equal(
       delta((o) => o.attention.stalledPending),
       1,
@@ -630,6 +690,26 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
       tokenExpiringSoon: false,
     });
     assert.deepEqual(b.content, { documents: 0, activeProducts: 0, upcomingAppointments: 0 });
+  });
+
+  it('o "Testar" do site e a empresa suspensa não entram em "precisa de atenção" (detalhe e filtro da lista)', async () => {
+    for (const company of [companyC, companyD]) {
+      const detail = (
+        await get(`/platform/companies/${company.id}`)
+      ).json<PlatformCompanyDetailResponse>();
+      assert.equal(detail.attendance.last24h.contactMessages, 1, company.slug);
+      assert.equal(detail.attendance.last24h.replies, 1, company.slug);
+      assert.equal(detail.attention.stalledPending, 0, company.slug);
+      assert.equal(detail.attention.unsentReplies, 0, company.slug);
+    }
+    for (const attention of ['pending_messages', 'unsent_replies']) {
+      const found = (await get(`/platform/companies?attention=${attention}&limit=50`))
+        .json<PlatformCompanyListResponse>()
+        .items.map((entry) => entry.id);
+      assert.ok(found.includes(companyA.id), attention);
+      assert.ok(!found.includes(companyC.id), attention);
+      assert.ok(!found.includes(companyD.id), attention);
+    }
   });
 
   it('lista de empresas: busca por slug, números por empresa e o filtro de estado', async () => {

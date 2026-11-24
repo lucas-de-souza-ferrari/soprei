@@ -20,6 +20,7 @@ import type {
   PlatformReadModel,
   PlatformSubscriptionFacts,
 } from '../../../application/ports/platform-read-model.js';
+import { SITE_TEST_CONTACT_REF } from '../../../application/attendance/contact-label.js';
 import {
   PLATFORM_ATTENTION_MIN_AGE_MS,
   PLATFORM_ATTENTION_WINDOW_MS,
@@ -66,9 +67,16 @@ import { withRepositoryErrors } from './repository-errors.js';
  *   e-mail da conta (D7). Nenhuma coluna de conteúdo é citada (texto de mensagem, contato, persona,
  *   documento, produto, serviço, token, PIN, referência de pagamento);
  * - o detalhe de uma empresa filtra `company_id = $id` em TODA consulta (inclusive nas junções);
- * - janelas de tempo limitadas a 30 dias e apoiadas nos índices existentes: mensagens só de conversas
- *   com `updated_at` na janela (`(company_id, updated_at, id)`; o `updated_at` acompanha a última
- *   mensagem, spec 024) e depois pelo índice `(company_id, conversation_id, created_at, id)`;
+ * - janelas de tempo limitadas a 30 dias e apoiadas nos índices existentes, SEMPRE por empresa: as
+ *   consultas que somam várias empresas partem de `companies co` e descem por empresa (`CROSS JOIN
+ *   LATERAL` ou subconsulta com `company_id = co.id`), às conversas com `updated_at` na janela
+ *   (`(company_id, updated_at, id)`; o `updated_at` acompanha a última mensagem, spec 024) e delas às
+ *   mensagens pelo índice `(company_id, conversation_id, created_at, id)`. Nada filtra só por data numa
+ *   tabela inteira (`messages.created_at` não tem índice próprio; revisão da E2, I1);
+ * - "precisa de atenção" (pendentes paradas e respostas não enviadas) tem UMA definição, em
+ *   `stalledPendingFrom` e `unsentRepliesFrom`, usada pelo overview, pelo filtro da lista e pelo
+ *   detalhe: só empresa ATIVA e nunca a conversa do "Testar" do site, a única citação de `contact_ref`
+ *   (comparada com o parâmetro `SITE_TEST_CONTACT_REF`; nunca lida nem devolvida; revisão da E2, I2);
  * - cada chamada roda numa transação curta com `statement_timeout` de 3 s; estourou (ou o banco caiu),
  *   `ServiceUnavailableError` (503) sem detalhe.
  *
@@ -142,41 +150,64 @@ function emptyHandoffs(): Record<HandoffReason, number> {
 }
 
 /**
+ * `FROM ... WHERE ...` das mensagens do contato paradas sem resposta numa empresa (`company` é a expressão
+ * do id: `co.id` ou o parâmetro do detalhe). Mesma regra da retomada (spec 035): IA não pausada, fora o
+ * que a equipe tratou pelo celular (`ai_ignore_before`) e fora o "Testar" do site. Quem chama exige a
+ * empresa ATIVA (suspensa não é atendida nem retomada: o que fica parado nela não é alarme).
+ */
+function stalledPendingFrom(company: Prisma.Sql, now: Date): Prisma.Sql {
+  const attentionSince = since(now, PLATFORM_ATTENTION_WINDOW_MS);
+  const stalledBefore = new Date(now.getTime() - PLATFORM_ATTENTION_MIN_AGE_MS);
+  return Prisma.sql`
+      FROM conversations c
+      JOIN messages m ON m.company_id = c.company_id AND m.conversation_id = c.id
+     WHERE c.company_id = ${company}
+       AND m.company_id = ${company}
+       AND c.updated_at >= ${utc(attentionSince)}
+       AND c.contact_ref <> ${SITE_TEST_CONTACT_REF}
+       AND m.role = 'USER'
+       AND m.answered_by_id IS NULL
+       AND m.created_at >= ${utc(attentionSince)}
+       AND m.created_at < ${utc(stalledBefore)}
+       AND (c.ai_paused_until IS NULL OR c.ai_paused_until <= ${utc(now)})
+       AND (c.ai_ignore_before IS NULL OR m.created_at > c.ai_ignore_before)`;
+}
+
+/**
+ * `FROM ... WHERE ...` das respostas da IA que não saíram numa empresa. O "Testar" do site nunca envia
+ * pelo canal (a resposta volta na tela, sem `sent_at`), então a conversa dele não conta (revisão da E2,
+ * I2). Quem chama exige a empresa ATIVA e com número.
+ */
+function unsentRepliesFrom(company: Prisma.Sql, now: Date): Prisma.Sql {
+  const attentionSince = since(now, PLATFORM_ATTENTION_WINDOW_MS);
+  const stalledBefore = new Date(now.getTime() - PLATFORM_ATTENTION_MIN_AGE_MS);
+  return Prisma.sql`
+      FROM conversations c
+      JOIN messages m ON m.company_id = c.company_id AND m.conversation_id = c.id
+     WHERE c.company_id = ${company}
+       AND m.company_id = ${company}
+       AND c.updated_at >= ${utc(attentionSince)}
+       AND c.contact_ref <> ${SITE_TEST_CONTACT_REF}
+       AND m.role = 'ASSISTANT'
+       AND m.sent_at IS NULL
+       AND m.delivery_uncertain_at IS NULL
+       AND m.created_at >= ${utc(attentionSince)}
+       AND m.created_at < ${utc(stalledBefore)}`;
+}
+
+/**
  * Filtro "precisa de atenção" da lista de empresas: os MESMOS critérios do overview, por empresa
  * (`company_id = co.id` em toda subconsulta; `co` e `cc` são os aliases da consulta da lista).
  */
 function attentionFilter(attention: PlatformAttentionFilter | undefined, now: Date): Prisma.Sql {
   if (attention === undefined) return Prisma.empty;
-  const attentionSince = since(now, PLATFORM_ATTENTION_WINDOW_MS);
-  const stalledBefore = new Date(now.getTime() - PLATFORM_ATTENTION_MIN_AGE_MS);
   switch (attention) {
     case 'pending_messages':
-      return Prisma.sql`AND EXISTS (
-        SELECT 1
-          FROM messages m
-          JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
-         WHERE c.company_id = co.id
-           AND m.company_id = co.id
-           AND c.updated_at >= ${utc(attentionSince)}
-           AND m.role = 'USER'
-           AND m.answered_by_id IS NULL
-           AND m.created_at >= ${utc(attentionSince)}
-           AND m.created_at < ${utc(stalledBefore)}
-           AND (c.ai_paused_until IS NULL OR c.ai_paused_until <= ${utc(now)})
-           AND (c.ai_ignore_before IS NULL OR m.created_at > c.ai_ignore_before))`;
+      return Prisma.sql`AND co.status = 'ACTIVE'
+        AND EXISTS (SELECT 1 ${stalledPendingFrom(Prisma.sql`co.id`, now)})`;
     case 'unsent_replies':
-      return Prisma.sql`AND co.whatsapp_phone_number_id IS NOT NULL AND EXISTS (
-        SELECT 1
-          FROM messages m
-          JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
-         WHERE c.company_id = co.id
-           AND m.company_id = co.id
-           AND c.updated_at >= ${utc(attentionSince)}
-           AND m.role = 'ASSISTANT'
-           AND m.sent_at IS NULL
-           AND m.delivery_uncertain_at IS NULL
-           AND m.created_at >= ${utc(attentionSince)}
-           AND m.created_at < ${utc(stalledBefore)})`;
+      return Prisma.sql`AND co.status = 'ACTIVE' AND co.whatsapp_phone_number_id IS NOT NULL
+        AND EXISTS (SELECT 1 ${unsentRepliesFrom(Prisma.sql`co.id`, now)})`;
     case 'token_invalid':
       return Prisma.sql`AND cc.status = 'TOKEN_INVALID'`;
     case 'token_expiring':
@@ -257,8 +288,6 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
     return this.read('PlatformRead.overview', async (db) => {
       const s24 = since(now, DAY_MS);
       const s7 = since(now, 7 * DAY_MS);
-      const attentionSince = since(now, PLATFORM_ATTENTION_WINDOW_MS);
-      const stalledBefore = new Date(now.getTime() - PLATFORM_ATTENTION_MIN_AGE_MS);
       const expiringUntil = new Date(now.getTime() + PLATFORM_TOKEN_EXPIRY_SOON_MS);
 
       const companies = await db.$queryRaw<{ status: CompanyStatus; n: number }[]>`
@@ -300,6 +329,8 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
           LEFT JOIN channel_connections cc ON cc.company_id = co.id
          WHERE co.deleted_at IS NULL`;
 
+      // Por empresa (revisão da E2, I1): `companies` -> conversas na janela -> mensagens, sempre pelos
+      // índices que começam por `company_id`; os totais são a soma das empresas não removidas.
       const [volume] = await db.$queryRaw<
         {
           contact_24h: number;
@@ -310,49 +341,48 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
           fallback_7d: number;
         }[]
       >`
-        SELECT COUNT(*) FILTER (WHERE m.role = 'USER' AND m.created_at >= ${utc(s24)})::int AS contact_24h,
-               COUNT(*) FILTER (WHERE m.role = 'ASSISTANT' AND m.created_at >= ${utc(s24)})::int AS replies_24h,
-               COUNT(*) FILTER (WHERE m.role = 'ASSISTANT' AND m.is_fallback
-                                  AND m.created_at >= ${utc(s24)})::int AS fallback_24h,
-               COUNT(*) FILTER (WHERE m.role = 'USER')::int AS contact_7d,
-               COUNT(*) FILTER (WHERE m.role = 'ASSISTANT')::int AS replies_7d,
-               COUNT(*) FILTER (WHERE m.role = 'ASSISTANT' AND m.is_fallback)::int AS fallback_7d
-          FROM messages m
-          JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
-          JOIN companies co ON co.id = m.company_id AND co.deleted_at IS NULL
-         WHERE c.updated_at >= ${utc(s7)}
-           AND m.created_at >= ${utc(s7)}`;
+        SELECT COALESCE(SUM(v.contact_24h), 0)::int AS contact_24h,
+               COALESCE(SUM(v.replies_24h), 0)::int AS replies_24h,
+               COALESCE(SUM(v.fallback_24h), 0)::int AS fallback_24h,
+               COALESCE(SUM(v.contact_7d), 0)::int AS contact_7d,
+               COALESCE(SUM(v.replies_7d), 0)::int AS replies_7d,
+               COALESCE(SUM(v.fallback_7d), 0)::int AS fallback_7d
+          FROM companies co
+          CROSS JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE m.role = 'USER' AND m.created_at >= ${utc(s24)}) AS contact_24h,
+                   COUNT(*) FILTER (WHERE m.role = 'ASSISTANT' AND m.created_at >= ${utc(s24)}) AS replies_24h,
+                   COUNT(*) FILTER (WHERE m.role = 'ASSISTANT' AND m.is_fallback
+                                      AND m.created_at >= ${utc(s24)}) AS fallback_24h,
+                   COUNT(*) FILTER (WHERE m.role = 'USER') AS contact_7d,
+                   COUNT(*) FILTER (WHERE m.role = 'ASSISTANT') AS replies_7d,
+                   COUNT(*) FILTER (WHERE m.role = 'ASSISTANT' AND m.is_fallback) AS fallback_7d
+              FROM conversations c
+              JOIN messages m ON m.company_id = c.company_id AND m.conversation_id = c.id
+             WHERE c.company_id = co.id
+               AND m.company_id = co.id
+               AND c.updated_at >= ${utc(s7)}
+               AND m.created_at >= ${utc(s7)}) v
+         WHERE co.deleted_at IS NULL`;
 
-      const [attention] = await db.$queryRaw<
-        { stalled: number; unsent: number; open_handoffs: number }[]
-      >`
-        SELECT
-          (SELECT COUNT(*)::int
-             FROM messages m
-             JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
-             JOIN companies co ON co.id = m.company_id AND co.deleted_at IS NULL
-            WHERE c.updated_at >= ${utc(attentionSince)}
-              AND m.role = 'USER'
-              AND m.answered_by_id IS NULL
-              AND m.created_at >= ${utc(attentionSince)}
-              AND m.created_at < ${utc(stalledBefore)}
-              AND (c.ai_paused_until IS NULL OR c.ai_paused_until <= ${utc(now)})
-              AND (c.ai_ignore_before IS NULL OR m.created_at > c.ai_ignore_before)) AS stalled,
-          (SELECT COUNT(*)::int
-             FROM messages m
-             JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
-             JOIN companies co ON co.id = m.company_id AND co.deleted_at IS NULL
-                              AND co.whatsapp_phone_number_id IS NOT NULL
-            WHERE c.updated_at >= ${utc(attentionSince)}
-              AND m.role = 'ASSISTANT'
-              AND m.sent_at IS NULL
-              AND m.delivery_uncertain_at IS NULL
-              AND m.created_at >= ${utc(attentionSince)}
-              AND m.created_at < ${utc(stalledBefore)}) AS unsent,
-          (SELECT COUNT(*)::int
-             FROM notifications n
-             JOIN companies co ON co.id = n.company_id AND co.deleted_at IS NULL
-            WHERE n.status = 'OPEN' AND n.kind = 'HUMAN_HANDOFF') AS open_handoffs`;
+      const [attention] = await db.$queryRaw<{ stalled: number; unsent: number }[]>`
+        SELECT COALESCE(SUM(a.stalled), 0)::int AS stalled,
+               COALESCE(SUM(a.unsent), 0)::int AS unsent
+          FROM companies co
+          CROSS JOIN LATERAL (
+            SELECT (SELECT COUNT(*) ${stalledPendingFrom(Prisma.sql`co.id`, now)}) AS stalled,
+                   CASE WHEN co.whatsapp_phone_number_id IS NULL THEN 0
+                        ELSE (SELECT COUNT(*) ${unsentRepliesFrom(Prisma.sql`co.id`, now)}) END AS unsent) a
+         WHERE co.deleted_at IS NULL
+           AND co.status = 'ACTIVE'`;
+
+      const [handoffs] = await db.$queryRaw<{ open_handoffs: number }[]>`
+        SELECT COALESCE(SUM(h.n), 0)::int AS open_handoffs
+          FROM companies co
+          CROSS JOIN LATERAL (
+            SELECT COUNT(*) AS n
+              FROM notifications n
+             WHERE n.company_id = co.id AND n.status = 'OPEN' AND n.kind = 'HUMAN_HANDOFF') h
+         WHERE co.deleted_at IS NULL`;
 
       const byStatus = new Map(companies.map((row) => [row.status, num(row.n)]));
       return {
@@ -392,7 +422,7 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
           unsentReplies: num(attention?.unsent),
           tokenInvalid: num(channel?.token_invalid),
           tokensExpiringSoon: num(channel?.expiring),
-          openHandoffs: num(attention?.open_handoffs),
+          openHandoffs: num(handoffs?.open_handoffs),
         },
       };
     });
@@ -546,8 +576,6 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
       const s24 = since(now, DAY_MS);
       const s7 = since(now, 7 * DAY_MS);
       const s30 = since(now, 30 * DAY_MS);
-      const attentionSince = since(now, PLATFORM_ATTENTION_WINDOW_MS);
-      const stalledBefore = new Date(now.getTime() - PLATFORM_ATTENTION_MIN_AGE_MS);
       const weekAhead = new Date(now.getTime() + 7 * DAY_MS);
 
       const memberships = await db.$queryRaw<
@@ -641,30 +669,10 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
         { stalled: number; unsent: number; open_handoffs: number }[]
       >`
         SELECT
-          (SELECT COUNT(*)::int
-             FROM messages m
-             JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
-            WHERE c.company_id = ${companyId}::uuid
-              AND m.company_id = ${companyId}::uuid
-              AND c.updated_at >= ${utc(attentionSince)}
-              AND m.role = 'USER'
-              AND m.answered_by_id IS NULL
-              AND m.created_at >= ${utc(attentionSince)}
-              AND m.created_at < ${utc(stalledBefore)}
-              AND (c.ai_paused_until IS NULL OR c.ai_paused_until <= ${utc(now)})
-              AND (c.ai_ignore_before IS NULL OR m.created_at > c.ai_ignore_before)) AS stalled,
-          (SELECT COUNT(*)::int
-             FROM messages m
-             JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
-            WHERE c.company_id = ${companyId}::uuid
-              AND m.company_id = ${companyId}::uuid
-              AND ${company.phone_number_id !== null}::boolean
-              AND c.updated_at >= ${utc(attentionSince)}
-              AND m.role = 'ASSISTANT'
-              AND m.sent_at IS NULL
-              AND m.delivery_uncertain_at IS NULL
-              AND m.created_at >= ${utc(attentionSince)}
-              AND m.created_at < ${utc(stalledBefore)}) AS unsent,
+          (SELECT COUNT(*)::int ${stalledPendingFrom(Prisma.sql`${companyId}::uuid`, now)}
+              AND ${company.status === 'ACTIVE'}::boolean) AS stalled,
+          (SELECT COUNT(*)::int ${unsentRepliesFrom(Prisma.sql`${companyId}::uuid`, now)}
+              AND ${company.status === 'ACTIVE' && company.phone_number_id !== null}::boolean) AS unsent,
           (SELECT COUNT(*)::int
              FROM notifications n
             WHERE n.company_id = ${companyId}::uuid
