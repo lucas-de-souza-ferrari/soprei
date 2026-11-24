@@ -1,0 +1,88 @@
+@import 'tailwindcss';
+
+/*
+ * Tokens de cor copiados de frontend/src/style.css (spec 044, D2: nenhum código compartilhado entre
+ * pacotes). O admin não tem escolha de tema: segue só o `prefers-color-scheme` do sistema, sem script e sem
+ * nada guardado. Os pares texto/fundo são conferidos por src/contrast.test.ts nos dois temas; cor fixa nova
+ * é proibida. Fonte do sistema (o admin não carrega fonte própria).
+ */
+:root {
+  --background: #f9faf8;
+  --foreground: #172332;
+  --card: #ffffff;
+  --card-foreground: #172332;
+  --muted: #eef2f6;
+  --muted-foreground: #566272;
+  --border: #dde4ea;
+  --border-strong: #7f8fa1;
+  --input: #7f8fa1;
+  --ring: #0065d0;
+  --primary: #0065d0;
+  --primary-foreground: #ffffff;
+  --destructive: #c4282d;
+  --color-success: #0f7a4f;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b131c;
+    --foreground: #e8eef5;
+    --card: #111b26;
+    --card-foreground: #e8eef5;
+    --muted: #1a2735;
+    --muted-foreground: #9fb0c3;
+    --border: #243445;
+    --border-strong: #62768c;
+    --input: #62768c;
+    --ring: #5aaeff;
+    --primary: #5aaeff;
+    --primary-foreground: #04101d;
+    --destructive: #ff8f8f;
+    --color-success: #4ade80;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+}
+
+@layer base {
+  :root {
+    font-family:
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      Roboto,
+      sans-serif;
+    color: var(--foreground);
+    background: var(--background);
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  :focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.5);
+  }
+}
