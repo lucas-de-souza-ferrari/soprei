@@ -163,8 +163,8 @@ async function start(setup: Setup = {}): Promise<Harness> {
   });
   const attendance_: InboundAttendance = {
     acceptInboundMessage: (companyId, input) => attendance.acceptInboundMessage(companyId, input),
-    respondToPending: (companyId, contactRef, limits, options) =>
-      attendance.respondToPending(companyId, contactRef, limits, options),
+    respondToPending: (companyId, contactRef, limits) =>
+      attendance.respondToPending(companyId, contactRef, limits),
     hasPendingMessages: (companyId, contactRef) =>
       attendance.hasPendingMessages(companyId, contactRef),
   };

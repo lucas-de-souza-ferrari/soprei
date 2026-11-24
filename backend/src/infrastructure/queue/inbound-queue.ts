@@ -12,10 +12,12 @@ import {
   type InboundJobFailureHandler,
   type InboundJobHandler,
   type InboundJobQueue,
+  type InboundQueueCleaner,
   inboundJobId,
   NonRetryableJobError,
 } from '../../application/ports/inbound-job-queue.js';
 import { MessageSendError } from '../../application/ports/message-sender.js';
+import { QUEUE_CLEAN_BATCH } from '../../domain/index.js';
 import { ExternalServiceError } from '../../shared/errors/index.js';
 import {
   createRequestContext,
@@ -76,6 +78,8 @@ export interface WorkerHooks {
 export interface InboundQueueHandle {
   /** Lado produtor: a única coisa que a aplicação e a apresentação enxergam. */
   readonly queue: InboundJobQueue;
+  /** Limpeza por idade dos jobs concluídos e falhos (spec 035, E3); só a varredura a usa. */
+  readonly cleaner: InboundQueueCleaner;
   /** Liga o worker (concorrência de `settings.concurrency`). Chamar duas vezes não faz nada. */
   startWorker(handler: InboundJobHandler, hooks?: WorkerHooks): void;
   /** Contagem de jobs por estado (diagnóstico e testes). */
@@ -287,8 +291,40 @@ export function createInboundQueue(options: InboundQueueOptions): InboundQueueHa
     });
   }
 
+  /**
+   * Limpeza por idade (spec 035, E3). `removeOnComplete`/`removeOnFail` com `age` só apagam quando
+   * outro job termina: sem tráfego, o último job (com texto e `contactRef`) ficaria no Redis sem
+   * prazo. Aqui os concluídos e os falhos mais velhos que os prazos saem de qualquer jeito. O
+   * `clean` do BullMQ só olha o estado pedido: ativo, em espera e atrasado nunca são tocados.
+   */
+  const cleaner: InboundQueueCleaner = {
+    async cleanOldJobs() {
+      try {
+        const completed = await withTimeout(
+          queue.clean(settings.keepCompletedSeconds * 1000, QUEUE_CLEAN_BATCH, 'completed'),
+          enqueueTimeoutMs,
+          'limpeza da fila',
+        );
+        const failed = await withTimeout(
+          queue.clean(settings.keepFailedSeconds * 1000, QUEUE_CLEAN_BATCH, 'failed'),
+          enqueueTimeoutMs,
+          'limpeza da fila',
+        );
+        return Result.ok({ completed: completed.length, failed: failed.length });
+      } catch (error) {
+        // Sem `cause`: o erro do ioredis carrega os argumentos do comando.
+        return Result.err(
+          new ExternalServiceError('Falha ao limpar a fila', {
+            context: { queue: INBOUND_QUEUE_NAME, ...describeRedisError(error) },
+          }),
+        );
+      }
+    },
+  };
+
   return {
     queue: producer,
+    cleaner,
 
     startWorker(handler, hooks = {}) {
       if (worker !== undefined) return;

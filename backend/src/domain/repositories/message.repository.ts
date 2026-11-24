@@ -71,6 +71,16 @@ export interface MessageRepository {
     replyId: string,
   ): Promise<number>;
   /**
+   * A resposta `replyId` desta empresa atendeu um lote do canal (spec 013: alguma mensagem do contato
+   * aponta para ela em `answeredById`)? A resposta do simulador nunca atende lote (spec 035, revisão I1).
+   */
+  isBatchReply(companyId: CompanyId, replyId: string): Promise<boolean>;
+  /**
+   * Marca a resposta do assistente, ainda sem `sentAt`, como de entrega incerta (spec 035, revisão I4).
+   * Só altera mensagem desta empresa, do papel `ASSISTANT`, sem `sentAt` e sem a marca. Devolve se marcou.
+   */
+  markDeliveryUncertain(companyId: CompanyId, messageId: string, at: Date): Promise<boolean>;
+  /**
    * Histórico paginado da conversa: `asc` (padrão) em ordem cronológica, `desc` da mais nova para a
    * mais antiga (spec 024; o cursor sempre olha adiante na ordem pedida).
    */

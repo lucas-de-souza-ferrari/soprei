@@ -216,8 +216,8 @@ function bind(service: AttendanceService): InboundAttendance {
   return {
     acceptInboundMessage: (companyId, input, options) =>
       service.acceptInboundMessage(companyId, input, options),
-    respondToPending: (companyId, contactRef, limits, options) =>
-      service.respondToPending(companyId, contactRef, limits, options),
+    respondToPending: (companyId, contactRef, limits) =>
+      service.respondToPending(companyId, contactRef, limits),
     hasPendingMessages: (companyId, contactRef) =>
       service.hasPendingMessages(companyId, contactRef),
   };
@@ -1225,6 +1225,10 @@ describe('ChannelInboundProcessor: job flush (spec 013)', () => {
     h.sender.script(Result.err(permanent(131047)));
     await h.processor.process(flushOf(textJob(company.id)), MORE).catch(() => undefined);
     await h.processor.process(flushOf(textJob(company.id)), MORE);
+    // Spec 035 (revisão, S5): o texto padrão não enviado não é reenviado; o envio bem-sucedido vem da
+    // mensagem seguinte.
+    await textOf(h, company.id, `${SECRET_TEXT} 3`, 'wamid.3');
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
 
     const raw = h.logs.raw();
     for (const secret of [SECRET_TEXT, CONTACT, WAMID, PERSONA, '777888']) {
@@ -1440,5 +1444,257 @@ describe('ChannelInboundProcessor: ordem por instante de recebimento (spec 034)'
     assert.equal(await h.processor.process(flushOf(textJob(company.id)), MORE), 'done');
     assert.equal(h.llm.calls.length, 1);
     assert.equal(h.sender.calls.length, 1);
+  });
+});
+
+describe('ChannelInboundProcessor: flush de retomada (spec 035)', () => {
+  const resumeFlush = (companyId: string): FlushJob => ({
+    ...flushOf(textJob(companyId)),
+    resume: true,
+  });
+  const textOf = (h: Harness, companyId: string, text: string, id: string) =>
+    h.processor.process(textJob(companyId, { text, externalId: id }), MORE);
+
+  it('falha do atendimento na última tentativa: não repete o texto padrão e relança', async () => {
+    const error = new DatabaseError('indisponível');
+    const h = setup({ attendance: { respondToPending: () => Promise.reject(error) } });
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(
+      h.processor.process(resumeFlush(company.id), LAST),
+      (e: unknown) => e === error,
+    );
+    assert.equal(h.sender.calls.length, 0, 'nada ao contato');
+    const line = h.logs
+      .lines()
+      .find((entry) => String(entry.msg).includes('o texto padrão não é repetido'));
+    assert.equal(line?.level, 50);
+    assert.equal(line.companyId, company.id);
+    assert.ok(!h.logs.raw().includes(CONTACT), 'sem o contato no log');
+  });
+
+  it('erro permanente na retomada: sem retentativa e sem texto padrão', async () => {
+    const h = setup({
+      attendance: { respondToPending: () => Promise.reject(new ValidationError('inválido')) },
+    });
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(
+      h.processor.process(resumeFlush(company.id), MORE),
+      (e: unknown) => e instanceof NonRetryableJobError,
+    );
+    assert.equal(h.sender.calls.length, 0);
+  });
+
+  it('o mesmo flush sem a marca de retomada continua mandando o texto padrão', async () => {
+    const error = new DatabaseError('indisponível');
+    const h = setup({ attendance: { respondToPending: () => Promise.reject(error) } });
+    const company = await newCompany(h, 'alfa');
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), LAST),
+      (e: unknown) => e === error,
+    );
+    assert.equal(h.sender.calls.length, 1);
+    assert.equal(h.sender.calls[0]?.text, ATTENDANCE_FALLBACK_TEXT);
+  });
+
+  it('job de retomada que falhou fora do handler: sem texto padrão', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.r1');
+    await h.processor.handleUnprocessedFailure(resumeFlush(company.id));
+    assert.equal(h.sender.calls.length, 0);
+    const line = h.logs
+      .lines()
+      .find((entry) => String(entry.msg).includes('job de retomada falhou'));
+    assert.equal(line?.level, 50);
+  });
+
+  it('flush de retomada com resposta gravada e não enviada: reenvia sem nova chamada ao LLM e marca o envio', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa', '555001');
+    await textOf(h, company.id, 'um', 'wamid.r2');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    assert.equal(h.llm.calls.length, 1);
+
+    assert.equal(await h.processor.process(resumeFlush(company.id), MORE), 'done');
+    assert.equal(h.llm.calls.length, 1, 'sem nova chamada ao LLM');
+    assert.equal(h.sender.calls.length, 2);
+    assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.notEqual(reply?.sentAt, null);
+  });
+
+  it('spec 035 (D6): flush NOVO (primeira tentativa) reenvia antes a resposta que não saiu, depois responde a mensagem nova', async () => {
+    const h = setup({ batch: { maxMessages: 10 } });
+    const company = await newCompany(h, 'alfa', '555001');
+    await textOf(h, company.id, 'um', 'wamid.r3');
+    h.sender.script(Result.err(retryable()));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), { attempt: 1, finalAttempt: false }),
+    );
+    await textOf(h, company.id, 'dois', 'wamid.r4');
+
+    // O job em retentativa foi trocado por um novo (primeira tentativa).
+    h.scheduler.calls.length = 0;
+    await h.processor.process(flushOf(textJob(company.id)), { attempt: 1, finalAttempt: false });
+    assert.equal(h.llm.calls.length, 1, 'a resposta antiga sai sem nova chamada ao LLM');
+    assert.equal(h.sender.calls.length, 2);
+    assert.equal(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+    assert.deepEqual(
+      h.scheduler.calls.map((call) => call.schedule.mode),
+      ['ensure'],
+      'a mensagem nova fica para o turno seguinte',
+    );
+
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
+    assert.equal(h.llm.calls.length, 2);
+    assert.equal(h.llm.calls[1]?.userMessage, 'dois');
+    assert.equal(h.sender.calls.length, 3);
+  });
+});
+
+describe('ChannelInboundProcessor: revisão da spec 035', () => {
+  const textOf = (h: Harness, companyId: string, text: string, id: string) =>
+    h.processor.process(textJob(companyId, { text, externalId: id }), MORE);
+
+  it('B1: reenvio que falha de vez com pendentes agenda o próximo turno SEM o reenvio, e a cadeia termina respondendo a mensagem nova', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa', '555001');
+    await textOf(h, company.id, 'um', 'wamid.b1-1');
+    h.sender.script(Result.err(permanent(131042)), Result.err(permanent(131042)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    await textOf(h, company.id, 'dois', 'wamid.b1-2');
+    h.scheduler.calls.length = 0;
+
+    // Turno novo: reenvia a resposta antiga, o envio falha de vez de novo.
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    assert.equal(h.llm.calls.length, 1, 'o reenvio não chama o modelo');
+    assert.equal(h.scheduler.calls.length, 1);
+    const next = h.scheduler.calls[0]?.job;
+    assert.equal(next?.skipUnsent, true, 'o próximo turno não tenta a resposta antiga');
+
+    // O turno agendado responde a mensagem nova e a cadeia acaba.
+    h.scheduler.calls.length = 0;
+    assert.equal(await h.processor.process(next, MORE), 'done');
+    assert.equal(h.llm.calls.length, 2);
+    assert.equal(h.llm.calls[1]?.userMessage, 'dois');
+    assert.equal(h.sender.calls.length, 3, 'original, reenvio e a resposta nova');
+    assert.equal(h.scheduler.calls.length, 0, 'nada mais agendado');
+    const warn = h.logs
+      .lines()
+      .find((line) => String(line.msg).includes('não foi enviada e não será reenviada'));
+    assert.equal(warn?.level, 40);
+  });
+
+  it('B1: falha do envio de uma resposta NOVA (não reenvio) continua agendando o turno seguinte sem a marca', async () => {
+    const h = setup({ batch: { maxMessages: 1 } });
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'a', 'wamid.b1-3');
+    await textOf(h, company.id, 'b', 'wamid.b1-4');
+    h.scheduler.calls.length = 0;
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    assert.equal(h.scheduler.calls.length, 1);
+    assert.equal(h.scheduler.calls[0]?.job.skipUnsent, undefined);
+  });
+
+  it('I2: com cota esgotada, a resposta antiga não é reenviada (nada ao contato, sem modelo)', async () => {
+    let blocked = false;
+    const h = setup({
+      entitlements: {
+        forCompany: () =>
+          Promise.resolve({
+            access: 'ok' as const,
+            agenda: true,
+            stock: true,
+            tokens: { used: 5, limit: 100 },
+            replies: blocked ? { used: 10, limit: 10 } : { used: 0, limit: 10 },
+          }),
+      },
+    });
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.i2-1');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    blocked = true;
+    const resumeJob: FlushJob = { ...flushOf(textJob(company.id)), resume: true };
+    assert.equal(await h.processor.process(resumeJob, MORE), 'done');
+    assert.equal(h.sender.calls.length, 1, 'só o envio original');
+    assert.equal(h.llm.calls.length, 1);
+  });
+
+  it('S5: o texto padrão de falha gravado e não enviado nunca é reenviado', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um [[mock:fail]]', 'wamid.s5-1');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.equal(reply?.isFallback, true);
+    const resumeJob: FlushJob = { ...flushOf(textJob(company.id)), resume: true };
+    assert.equal(await h.processor.process(resumeJob, MORE), 'done');
+    assert.equal(h.sender.calls.length, 1, 'o texto padrão não sai de novo');
+  });
+});
+
+describe('ChannelInboundProcessor: entrega incerta (spec 035, revisão I4)', () => {
+  const textOf = (h: Harness, companyId: string, text: string, id: string) =>
+    h.processor.process(textJob(companyId, { text, externalId: id }), MORE);
+  const acceptedWithoutId = (): MessageSendError =>
+    new MessageSendError({ reason: 'invalid_response', retryable: false, httpStatus: 200 });
+
+  it('a Meta aceitou sem devolver o id: a resposta é marcada e nunca reenviada, nem pela retomada nem pelo turno seguinte', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.i4-1');
+    h.sender.script(Result.err(acceptedWithoutId()));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.equal(reply?.sentAt, null);
+    assert.ok(reply.deliveryUncertainAt instanceof Date, 'marcada como entrega incerta');
+
+    const resumeJob: FlushJob = { ...flushOf(textJob(company.id)), resume: true };
+    assert.equal(await h.processor.process(resumeJob, MORE), 'done');
+    assert.equal(h.sender.calls.length, 1, 'a retomada não reenvia');
+
+    await textOf(h, company.id, 'dois', 'wamid.i4-2');
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
+    assert.equal(h.sender.calls.length, 2, 'só a resposta nova sai');
+    assert.notEqual(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+    assert.equal(h.llm.calls.at(-1)?.userMessage, 'dois');
+  });
+
+  it('recusa comum (4xx) não marca: a resposta continua reenviável', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.i4-3');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.equal(reply?.deliveryUncertainAt ?? null, null);
   });
 });

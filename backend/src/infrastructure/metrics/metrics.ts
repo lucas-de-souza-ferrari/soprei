@@ -282,6 +282,15 @@ export interface Metrics {
   countUnsentReply(): void;
   /** Um turno não respondeu porque a IA está pausada no contato (spec 039). Sem labels. */
   countPausedTurn(): void;
+  /** Uma execução da retomada do atendimento terminou (spec 035). */
+  countResumeRun(result: 'ok' | 'error'): void;
+  /** Um contato tratado pela retomada (spec 035). Sem empresa, contato nem id em label. */
+  countResumeContact(
+    kind: 'pending' | 'unsent',
+    result: 'scheduled' | 'skipped_limit' | 'failed',
+  ): void;
+  /** Jobs apagados da fila por idade (spec 035, E3). */
+  countQueueCleaned(state: 'completed' | 'failed', jobs: number): void;
   /** A IA foi reativada numa conversa pelo painel (spec 039). Sem labels. */
   countAiResume(): void;
   /** Um eco de mensagem enviada pelo aplicativo terminou (spec 039). Conjunto fixo. */
@@ -484,6 +493,24 @@ export function createMetrics(): Metrics {
     registers: [registry],
   });
 
+  const resumeRuns = new Counter({
+    name: 'attendance_resume_runs_total',
+    help: 'Execuções da retomada do atendimento por resultado (ok, error) (spec 035)',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+  const resumeContacts = new Counter({
+    name: 'attendance_resume_targets_total',
+    help: 'Conversas tratadas pela retomada, por tipo (pending, unsent) e resultado (scheduled, skipped_limit, failed) (spec 035)',
+    labelNames: ['kind', 'result'] as const,
+    registers: [registry],
+  });
+  const queueCleaned = new Counter({
+    name: 'queue_cleaned_jobs_total',
+    help: 'Jobs apagados da fila por idade, por estado (completed, failed) (spec 035)',
+    labelNames: ['state'] as const,
+    registers: [registry],
+  });
   const pausedTurns = new Counter({
     name: 'attendance_paused_turns_total',
     help: 'Turnos do canal que não responderam porque a IA está pausada no contato (spec 039)',
@@ -907,6 +934,15 @@ export function createMetrics(): Metrics {
     },
     countPausedTurn() {
       pausedTurns.inc();
+    },
+    countResumeRun(result) {
+      resumeRuns.inc({ result });
+    },
+    countResumeContact(kind, result) {
+      resumeContacts.inc({ kind, result });
+    },
+    countQueueCleaned(state, jobs) {
+      if (jobs > 0) queueCleaned.inc({ state }, jobs);
     },
     countAiResume() {
       aiResumes.inc();

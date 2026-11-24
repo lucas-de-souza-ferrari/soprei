@@ -4,13 +4,14 @@
 
 ## Última sessão
 
-2026-11-23, Claude Code (Fable 5.2, spec-writer e implementer). **Spec 042 (organização da documentação)**, aprovada pelo dono com D1 a D8, só documentação e testes de texto; **sem push**.
+2026-11-23, Claude Code (Fable 5.2, spec-writer e implementer). Quatro branches locais **empilhadas, sem push**, nesta ordem:
 
-- **E1**, branch `spec/042-organizacao-da-documentacao`: `AGENTS.md` de 180 KB para 44 KB; as regras de cada área foram movidas **sem reescrita** para `docs/areas/` (dez arquivos; a seção "Áreas" do `AGENTS.md` diz quando ler cada um); `backend/src/docs-structure.test.ts` novo; o gate de vocabulário varre `docs/areas`; roteiros de `docs/agents/` mandam ler a área tocada. O `reviewer` passou sem bloqueante e as correções estão aplicadas ("Revisão da E1" na spec).
-- **E2**, branch `spec/042-e2-handoff-e-specs` (empilhada sobre a E1): este arquivo enxuto, `docs/context.md` (seções 3 e 6), README novo, linha de status de todas as specs normalizada, índice `docs/specs/README.md`, `.tmp-onb.txt` e `lab/e0/` removidos.
-- **Spec 043 (backup externo do banco), aprovada com D1 a D9; E1 implementada** na branch `spec/043-backup-externo` (empilhada sobre a E2 da 042): `deploy/backup/soprei-backup.sh` e `soprei-restore-check.sh`, exemplos, `docs/ops/backup.md`, testes com dublês e `shellcheck` no CI. O `reviewer` passou sem falha grave e as correções estão aplicadas ("Revisão da E1" na spec). **Aguarda o dono:** confirmar o desvio da D3 (trava do bucket do R2 no lugar da credencial "sem apagar"). Nenhuma execução real.
+- **`spec/042-organizacao-da-documentacao` (042, E1):** `AGENTS.md` de 180 KB para 44 KB, regras de área em `docs/areas/`; revisada, correções aplicadas.
+- **`spec/042-e2-handoff-e-specs` (042, E2):** handoff, `context.md`, README, status e índice das specs, sobras removidas.
+- **`spec/043-backup-externo` (043, E1):** `deploy/backup/` (backup diário cifrado, teste de restauração, exemplos), `docs/ops/backup.md`, testes com dublês, `shellcheck` no CI. Revisada, correções aplicadas. **Aguarda o dono:** confirmar o desvio da D3 (trava do bucket do R2). Passos de servidor parados.
+- **`spec/035-resiliencia-do-atendimento` (035), aprovada com D1 a D9; E1 a E3 implementadas:** varredura a cada 5 min que reagenda quem ficou sem resposta no canal (no máximo 3 vezes por contato por dia), o turno novo reenvia antes a resposta não enviada, o `flush` de retomada não repete o texto padrão, limpeza de verdade da fila; variável nova `CHANNEL_RESUME_INTERVAL_MINUTES` (padrão 5). Sem migration. **E4 (fatiar `attendance.service.ts`) não foi feita.** Revisada pelo `reviewer` (3 bloqueantes, entre eles um laço de reenvio, e 4 importantes): correções aplicadas. I1 e I4 corrigidos (decisão do dono); **migration aditiva nova** (`delivery_uncertain_at`). Todos os unitários do backend verdes; **os testes de integração novos não rodaram** (só no CI).
 - **Verde localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check` e os testes de documentação, de workflows e do backup (2 cenários pulados: `flock` real e modo 600). **Não rodado:** `shellcheck` e o resto das suítes.
-- **Falta:** push e PR na ordem E1 da 042, E2 da 042, 043 (rebase se entrarem por squash); CI; na 043, conferir no CI o `shellcheck` e os dois cenários que só rodam em Linux.
+- **Falta:** push e PR na ordem acima (rebase se entrarem por squash); CI (na 043, o `shellcheck` e os dois cenários que só rodam em Linux; na 035, os testes de integração novos); `reviewer` na 035.
 
 ## Onde estamos
 
@@ -37,7 +38,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Prioridade do dono (2026-11-23): **resiliência do atendimento**, spec 035 (retomada de respostas gravadas e não enviadas e de mensagens pendentes antigas, limpeza dos jobs com texto no Redis; o fatiamento de `attendance.service.ts` entra onde a spec pedir). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
+Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E3 prontas na branch (falta CI e `reviewer`); depois a E4 (fatiar `attendance.service.ts`), em PR só de movimentação. Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sugestões sem spec (não são decisões): lazy loading por rota e error boundary no site, CSP, proteger a `main` no GitHub.
 
 ## Decisões do dono que não são óbvias no código
 

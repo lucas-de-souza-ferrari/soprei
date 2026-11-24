@@ -167,6 +167,28 @@ export class InMemoryAttendanceStore implements AttendanceUnitOfWork {
         this.step(() => this.pendingIn(companyId, conversationId).slice(0, limit)),
       markAnswered: (companyId, messageIds, replyId) =>
         this.step(() => this.applyAnswered(companyId, messageIds, replyId)),
+      isBatchReply: (companyId, replyId) =>
+        this.step(() =>
+          this.messageRows.some(
+            (row) =>
+              row.companyId === companyId && row.role === 'USER' && row.answeredById === replyId,
+          ),
+        ),
+      markDeliveryUncertain: (companyId, messageId, at) =>
+        this.step(() => {
+          const index = this.messageRows.findIndex(
+            (row) =>
+              row.companyId === companyId &&
+              row.id === messageId &&
+              row.role === 'ASSISTANT' &&
+              row.sentAt === null &&
+              (row.deliveryUncertainAt ?? null) === null,
+          );
+          const row = this.messageRows[index];
+          if (row === undefined) return false;
+          this.messageRows[index] = { ...row, deliveryUncertainAt: at };
+          return true;
+        }),
       listByConversation: (companyId, conversationId, options, order = 'asc') =>
         this.step(() => {
           // Como o banco, só a conversa desta empresa tem histórico (o service confere antes).

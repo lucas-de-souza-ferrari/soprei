@@ -64,5 +64,6 @@ export { PrismaBillingRepository } from './repositories/billing.repository.js';
 export { PrismaBillingNoticeRepository } from './repositories/billing-notice.repository.js';
 export { PrismaCheckoutRepository } from './repositories/checkout.repository.js';
 export { PrismaPendingReplyReader } from './repositories/pending-reply-reader.js';
+export { PrismaResumeTargetReader } from './repositories/attendance-resume-reader.js';
 export { PrismaEntitlementReader } from './repositories/entitlement-reader.js';
 export { PrismaUsageMeter } from './repositories/usage-meter.js';

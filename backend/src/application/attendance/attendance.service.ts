@@ -19,6 +19,7 @@ import {
   AI_TAKEOVER_PAUSE_MS,
   HUMAN_MEDIA_PLACEHOLDER,
   isAiPaused,
+  isReplyResendable,
   KNOWLEDGE_RETRIEVAL_TIMEOUT_MS,
   MESSAGE_CONTENT_MAX_LENGTH,
   NOTIFICATION_MAX_OPEN,
@@ -349,10 +350,10 @@ export interface PendingResponse {
 
 export interface RespondToPendingOptions {
   /**
-   * Retentativa de um job que já falhou: se a resposta do turno anterior foi gravada mas não
-   * enviada, ela sai primeiro (antes de responder as pendentes), para não ficar perdida.
+   * Revisão da 035 (B1): o reenvio da resposta anterior já falhou de vez neste contato; o turno não a
+   * tenta de novo (fica só gravada, com aviso e métrica) e responde as pendentes.
    */
-  readonly resumeUnsent?: boolean;
+  readonly skipUnsent?: boolean;
 }
 
 type ExistingState =
@@ -528,18 +529,27 @@ export class AttendanceService {
     );
     const first = fetched[0];
     if (first === undefined) {
+      // Spec 035: a resposta gravada e não enviada só sai se ainda for reenviável (dentro da janela
+      // e não segurada pela equipe ao assumir a conversa).
       const unsent = await this.findUnsentTail(companyId, conversation.id);
-      return unsent === null
+      return unsent === null ||
+        options.skipUnsent === true ||
+        !(await this.canResend(companyId, conversation, unsent))
         ? this.emptyResponse(conversation.id)
-        : this.resendResponse(conversation.id, unsent, false);
+        : this.resendOrBlocked(company, conversation.id, unsent, false);
     }
     const [previous] = await this.deps.messages.listBefore(companyId, conversation.id, first.id, 1);
     if (previous?.role === 'ASSISTANT' && previous.sentAt === null) {
-      if (options.resumeUnsent === true) {
-        return this.resendResponse(conversation.id, previous, true);
+      // Spec 035 (D6): a resposta anterior que não saiu (envio recusado, ou o job em retentativa foi
+      // trocado por este) vai ANTES das novas, em qualquer tentativa, para a ordem ficar a certa.
+      if (
+        options.skipUnsent !== true &&
+        (await this.canResend(companyId, conversation, previous))
+      ) {
+        return this.resendOrBlocked(company, conversation.id, previous, true);
       }
-      // Não é retentativa: a resposta anterior não saiu (envio recusado de vez, ou o job em
-      // retentativa foi trocado por este) e não será reenviada. Fica só gravada: avisa, sem conteúdo.
+      // Fora da janela, segurada pela equipe (spec 039), texto padrão ou reenvio que já falhou de vez
+      // (revisão da 035): fica só gravada. Avisa, sem conteúdo.
       this.deps.logger.warn(
         {
           companyId,
@@ -1066,6 +1076,44 @@ export class AttendanceService {
       batchSize: 0,
       hasMorePending: false,
     };
+  }
+
+  /**
+   * A resposta gravada e não enviada pode sair de novo? Precisa ser reenviável (janela, equipe, texto
+   * padrão, entrega incerta) e ter atendido um lote do canal: a resposta do simulador nunca atende lote
+   * e nunca vai ao canal, mesmo com um `contactRef` em forma de telefone (revisão da 035, I1).
+   */
+  private async canResend(
+    companyId: CompanyId,
+    conversation: Pick<Conversation, 'aiIgnoreBefore'>,
+    reply: Message,
+  ): Promise<boolean> {
+    if (!isReplyResendable(reply, conversation, this.now())) return false;
+    return this.deps.messages.isBatchReply(companyId, reply.id);
+  }
+
+  /**
+   * Revisão da 035 (I2): o reenvio também respeita cota e assinatura (spec 031). Bloqueado, nada sai ao
+   * contato e o provedor não é chamado, como no turno normal.
+   */
+  private async resendOrBlocked(
+    company: Company,
+    conversationId: string,
+    reply: Message,
+    hasMorePending: boolean,
+  ): Promise<PendingResponse> {
+    const subject = { conversationId, messageId: reply.id };
+    const entitlements = await this.readEntitlements(company, subject);
+    if (this.blockedBy(company, subject, entitlements) !== null) {
+      return {
+        outcome: 'blocked',
+        conversationId,
+        reply: null,
+        batchSize: 0,
+        hasMorePending: false,
+      };
+    }
+    return this.resendResponse(conversationId, reply, hasMorePending);
   }
 
   private resendResponse(

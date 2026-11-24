@@ -64,6 +64,7 @@ export function toMessage(row: MessageRow): Message {
     channelMessageId: row.channelMessageId,
     sentAt: row.sentAt,
     answeredById: row.answeredById,
+    deliveryUncertainAt: row.deliveryUncertainAt,
   };
 }
 

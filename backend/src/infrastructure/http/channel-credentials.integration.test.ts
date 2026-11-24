@@ -289,9 +289,15 @@ describe('envio com o token da empresa do job (spec 015, Postgres real, Graph fa
       false,
     );
 
-    // Token novo: o próximo flush responde as duas mensagens pendentes de uma vez.
+    // Token novo. Spec 035 (D6): o próximo flush primeiro reenvia a resposta da primeira, que não tinha
+    // saído (sem chamar o modelo), e o seguinte responde as duas pendentes de uma vez.
     const third = textJob(a.company.id, a.phoneNumberId, contactRef, 'terceira');
     await h.processor.process(third, MORE);
+    const callsBeforeResend = h.llm.calls.length;
+    const sendsBeforeResend = graph.sendPairs().length;
+    assert.equal(await h.processor.process(flushOf(third), MORE), 'done');
+    assert.equal(h.llm.calls.length, callsBeforeResend, 'o reenvio não chama o modelo');
+    assert.equal(graph.sendPairs().length, sendsBeforeResend + 1, 'a resposta da primeira saiu');
     assert.equal(await h.processor.process(flushOf(third), MORE), 'done');
     const last = h.llm.calls[h.llm.calls.length - 1];
     assert.ok(last !== undefined);

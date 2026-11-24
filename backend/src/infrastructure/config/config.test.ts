@@ -1169,6 +1169,22 @@ describe('parseConfig', () => {
       }
     });
 
+    it('CHANNEL_RESUME_INTERVAL_MINUTES (spec 035): padrão 5, 0 desliga, 1440 é o teto', () => {
+      const base = parseConfig(ENABLED);
+      assert.ok(base.ok);
+      assert.equal(base.value.CHANNEL_RESUME_INTERVAL_MINUTES, 5);
+      for (const value of ['0', '1440']) {
+        const result = parseConfig({ ...ENABLED, CHANNEL_RESUME_INTERVAL_MINUTES: value });
+        assert.ok(result.ok, value);
+        assert.equal(result.value.CHANNEL_RESUME_INTERVAL_MINUTES, Number(value));
+      }
+      for (const value of ['-1', '1441', '2.5', 'abc']) {
+        const result = parseConfig({ ...ENABLED, CHANNEL_RESUME_INTERVAL_MINUTES: value });
+        assert.equal(result.ok, false, value);
+        assert.match(result.error.message, /CHANNEL_RESUME_INTERVAL_MINUTES/);
+      }
+    });
+
     it('CHANNEL_BATCH_MAX_WAIT_MS menor que a janela é rejeitado; igual passa', () => {
       const bad = parseConfig({
         ...ENABLED,

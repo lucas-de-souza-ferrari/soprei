@@ -172,6 +172,7 @@ export * from './schedule.js';
 export * from './schedule-ai.js';
 export * from './billing.js';
 export * from './billing-notices.js';
+export * from './attendance-resume.js';
 export type {
   BillingNoticeRepository,
   NoticeCandidate,

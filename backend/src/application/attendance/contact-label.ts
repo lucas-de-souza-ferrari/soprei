@@ -18,6 +18,13 @@ const MIN_PHONE_DIGITS = 8;
 const MAX_PHONE_DIGITS = 15;
 const VISIBLE_DIGITS = 4;
 
+/** O `contactRef` tem forma de telefone, isto é, a conversa é do canal e não do simulador? */
+export function isPhoneContactRef(contactRef: string): boolean {
+  if (contactRef === SITE_TEST_CONTACT_REF || !PHONE_SHAPE.test(contactRef)) return false;
+  const digits = contactRef.replace(/\D/gu, '');
+  return digits.length >= MIN_PHONE_DIGITS && digits.length <= MAX_PHONE_DIGITS;
+}
+
 /**
  * Máscara do contato, feita no servidor (spec 024): o `contactRef` do canal real é o telefone do
  * contato e **nunca** deve chegar ao navegador. Telefone vira `Contato final 1234` (canal

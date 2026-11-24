@@ -41,6 +41,11 @@ export interface Message {
    * caminho de uma resposta por mensagem, via `replyToId`).
    */
   readonly answeredById: string | null;
+  /**
+   * Spec 035 (revisão, I4): a Meta aceitou o envio desta resposta (2xx) mas devolveu sem id legível.
+   * Provavelmente entregue: nunca é reenviada. Opcional para os testes antigos (ausente = nulo).
+   */
+  readonly deliveryUncertainAt?: Date | null;
 }
 
 /** Marca de envio de uma resposta do assistente (`MessageRepository.markSent`). */
