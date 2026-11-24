@@ -36,7 +36,9 @@ Nada instalado à mão muda nesta etapa: o programa de entrada (`/usr/local/sbin
 - `cp /var/www/soprei/deploy/nginx/admin.conf.example /etc/nginx/sites-available/soprei-admin` e `ln -s ../sites-available/soprei-admin /etc/nginx/sites-enabled/soprei-admin`.
 - No bloco do **site** (`/etc/nginx/sites-available/<o do site>`), acrescente o `location /api/platform/ { return 404; }` que está em `deploy/nginx/production.conf.example` (defesa em profundidade: o cookie do admin já não vai ao hostname do site).
 - `nginx -t` sem erro e `systemctl reload nginx`.
-- **Não acrescente `add_header` dentro de um `location`** do admin: no nginx isso apaga, naquele `location`, todos os cabeçalhos do `server` (a CSP inclusive).
+- **Não acrescente `add_header` dentro de um `location`** do admin: no nginx isso apaga, naquele `location`, todos os cabeçalhos do `server` (a CSP inclusive). O cache usa `expires` (que não tem esse efeito): `index.html` sem cache e `/assets/` (nomes com hash) por um ano.
+- TLS: o exemplo fixa `ssl_protocols TLSv1.2 TLSv1.3;` no `server` do `443`, porque o `certbot certonly` do passo 2 não edita o arquivo (não acrescenta o `options-ssl-nginx.conf`) e o padrão do nginx muda com a versão. O nginx negocia o protocolo antes de saber o hostname, então vale o do `server` padrão da porta `443`: confira com `openssl s_client -connect soadm.soprei.com:443 -servername soadm.soprei.com -tls1_1 </dev/null` (deve **falhar**).
+- HSTS: `Strict-Transport-Security: max-age=31536000`, só deste hostname (sem `includeSubDomains` e sem `preload`; o preload do domínio inteiro é decisão do dono, pendente). Uma vez enviado, o navegador recusa `http` neste hostname por um ano: mantenha o certificado renovando.
 - O log de acesso do admin sai sem query string (`soprei_admin_sem_query`); a rotação de 30 dias do `access.log` e do `error.log` (logrotate) é a mesma do site.
 
 ### 4. `.env` da produção (`/var/www/soprei/backend/.env`, modo 600)
@@ -77,7 +79,7 @@ PLATFORM_TOTP_ACTIVE_KEY_ID=k1
 ### 8. Conferir (de fora do servidor)
 
 - `https://soadm.soprei.com` abre a tela Entrar; entrar com e-mail, senha e código mostra a Visão geral; Sair volta à tela Entrar.
-- Cabeçalhos: `curl -sI https://soadm.soprei.com/` mostra `Content-Security-Policy` (a de `admin.conf.example`), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` e `X-Robots-Tag: noindex, nofollow`. O console do navegador não mostra violação de CSP.
+- Cabeçalhos: `curl -sI https://soadm.soprei.com/` mostra `Content-Security-Policy` (a de `admin.conf.example`), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex, nofollow`, `X-Content-Type-Options: nosniff` e `Strict-Transport-Security: max-age=31536000` (sem `includeSubDomains`), e `Cache-Control: no-cache` no `index.html`; um arquivo de `/assets/` mostra os mesmos cabeçalhos com `Cache-Control: max-age=31536000`. O console do navegador não mostra violação de CSP.
 - Fechamentos: `curl -s -o /dev/null -w '%{http_code}\n' https://www.soprei.com/api/platform/auth/session` responde **404**; `https://soadm.soprei.com/api/auth/me` responde **404** (nenhuma outra rota da API passa pelo hostname do admin). O bloco do admin não tem `location /webhooks/`: esse caminho cai no `index.html` do app e nunca chega ao backend.
 - O cookie `__Host-soprei_platform` aparece só em `soadm.soprei.com` (ferramentas do navegador), com `HttpOnly`, `Secure` e `SameSite=Strict`.
 
@@ -102,7 +104,7 @@ deny all;
 
 ## Staging (opcional)
 
-O mesmo, no staging: `deploy/nginx/admin-staging.conf.example` (porta 3002, clone do staging, senha básica do staging), um hostname próprio, chaves e `ADMIN_ORIGIN` **novos** (nunca os da produção) no `.env` do staging, o admin criado com `pnpm auth:cli` dentro de `/var/www/soprei-staging`, e `ADMIN_HOST`/`ADMIN_OK_CODES=200,401` em `deploy/targets/staging.conf` por PR. O `.env` de exemplo do staging (`deploy/env/staging.env.example`) mantém o admin desligado.
+O mesmo, no staging: `deploy/nginx/admin-staging.conf.example` (porta 3002, clone do staging, senha básica do staging), um hostname próprio (troque o marcador `<HOSTNAME_DO_ADMIN_STAGING>` no nginx e, ao descomentar, no `ADMIN_HOST` do alvo), chaves e `ADMIN_ORIGIN` **novos** (nunca os da produção) no `.env` do staging, o admin criado com `pnpm auth:cli` dentro de `/var/www/soprei-staging`, e `ADMIN_HOST`/`ADMIN_OK_CODES=200,401` em `deploy/targets/staging.conf` por PR. O `.env` de exemplo do staging (`deploy/env/staging.env.example`) mantém o admin desligado.
 
 ## Desligar numa emergência
 

@@ -422,10 +422,11 @@ describe('deploy/: nenhum arquivo contém segredo, e-mail nem IP do servidor', (
     const name = relative(REPO_ROOT, file).replaceAll('\\', '/');
     it(name, () => {
       const text = readFileSync(file, 'utf8');
-      // NOME_SENSIVEL=valor (marcador <ASSIM> e valor vazio são permitidos).
+      // NOME_SENSIVEL=valor, também no plural (PLATFORM_TOTP_KEYS, como o redact do deploy.sh); marcador
+      // <ASSIM> e valor vazio são permitidos.
       assert.doesNotMatch(
         text,
-        /\b(?:JWT_SECRET|[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PSWD|PASSWORD))=(?![<\s]|$)\S+/m,
+        /\b(?:JWT_SECRET|[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PSWD|PASSWORD)S?)=(?![<\s]|$)\S+/m,
         'valor atribuído a variável de nome sensível',
       );
       // URL de conexão com credencial embutida (senha que não seja marcador).
@@ -797,13 +798,28 @@ describe('admin da plataforma: nginx (spec 044, E4)', () => {
         'add_header X-Frame-Options "DENY" always;',
         'add_header Referrer-Policy "no-referrer" always;',
         'add_header X-Robots-Tag "noindex, nofollow" always;',
+        'add_header X-Content-Type-Options "nosniff" always;',
+        // HSTS só deste hostname: sem includeSubDomains e sem preload (decisão do dono pendente).
+        'add_header Strict-Transport-Security "max-age=31536000" always;',
       ]) {
         assert.ok(conf.includes(`\n    ${header}\n`), `${file} sem ${header} no server`);
       }
+      assert.doesNotMatch(conf, /includeSubDomains|preload/);
+      // TLS explícito (o certbot certonly não edita o arquivo): nada abaixo de 1.2.
+      assert.match(conf, /^\s+ssl_protocols TLSv1\.2 TLSv1\.3;$/m);
       const locations = locationsOf(conf);
       for (const [path, body] of locations) {
         assert.doesNotMatch(body, /add_header/, `${file}: add_header dentro de location ${path}`);
       }
+      // Cache por expires (não apaga os cabeçalhos do server): index.html sem cache, assets por um ano.
+      assert.match(locations.get('= /index.html') ?? '', /^\s+expires -1;\s*$/);
+      const assets = locations.get('/assets/') ?? '';
+      assert.match(assets, /^\s+expires 1y;$/m);
+      assert.match(assets, /^\s+try_files \$uri =404;$/m);
+      // O IP real chega ao backend (rate limit e trilha): acrescenta ao X-Forwarded-For, não troca.
+      const platform = locations.get('/api/platform/') ?? '';
+      assert.match(platform, /^\s+proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;$/m);
+      assert.match(platform, /^\s+proxy_set_header X-Real-IP \$remote_addr;$/m);
       // Sem webhooks; a API só pelo prefixo do admin, para o backend do mesmo ambiente, sem Bearer.
       assert.doesNotMatch(conf, /webhooks/);
       const proxied = conf.split('\n').filter((line) => line.includes('proxy_pass'));

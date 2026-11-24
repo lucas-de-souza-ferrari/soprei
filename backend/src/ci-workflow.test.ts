@@ -170,10 +170,11 @@ describe('pipeline do CI (spec 036)', () => {
   it('admin da plataforma (spec 044, E4): os scripts da raiz que o static e o tests rodam incluem o admin', () => {
     const root = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
     for (const script of ['typecheck', 'lint', 'build', 'test']) {
-      assert.match(
-        root.scripts[script] ?? '',
-        /--filter soprei-admin \w+/,
-        `o script ${script} da raiz não inclui o admin`,
+      // O comando do admin é o MESMO script (typecheck chama typecheck...), não um qualquer.
+      const steps = (root.scripts[script] ?? '').split('&&').map((step) => step.trim());
+      assert.ok(
+        steps.includes(`pnpm --filter soprei-admin ${script}`),
+        `o script ${script} da raiz não roda o ${script} do admin`,
       );
     }
     // O format:check percorre a raiz inteira (admin incluído).

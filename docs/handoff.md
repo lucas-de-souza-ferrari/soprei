@@ -4,15 +4,18 @@
 
 ## Última sessão
 
-2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** a spec (PR #21) e a **E1** (PR #22, entrada do dono com TOTP, sessão por cookie no Redis, trilha `PlatformAuditEvent`) estão na `main` com o CI verde. O `reviewer` revisou a E1 depois do merge: nada bloqueante.
+2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** a spec (PR #21) e a **E1** (PRs #22 e #23, com os ajustes da revisão) estão na `main` com o CI verde. As outras três etapas estão em PR, cada uma já revisada pelo `reviewer` e com os ajustes da revisão na própria branch (detalhe no Registro da spec):
 
-- **Branch `spec/044-e1-ajustes-da-revisao`:** corrige o I1 da revisão (`enroll-platform-totp` revoga as sessões Bearer da plataforma abertas só com a senha), o M2 (formato de `PLATFORM_TOTP_KEYS` conferido mesmo com o admin desligado), o M4/M5 (comentários das métricas) e o M6 (`TestTenants.cleanup` apaga a trilha da plataforma das empresas que criou). Detalhe e o que ficou só registrado (M1, M3, M7) no Registro da spec.
-- **Falta:** CI e merge dessa branch; depois a E2 (leituras agregadas e suspender/reativar). Migration da E1 (`pnpm db:migrate:deploy`) quando houver servidor. Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
+- **PRs abertos:** #24 (E2, leituras agregadas e suspender/reativar, `spec/044-e2-leituras`), #25 (E3, app `admin/`, `spec/044-e3-app-admin`) e #26 (E4, publicação: nginx, `deploy.sh`, CI e `docs/ops/admin.md`, `spec/044-e4-publicacao`, empilhado sobre a E3).
+- **Ordem de merge:** #24, depois #25, depois #26 **reapontado para a `main`** (a base dele é a branch da E3). Conflito esperado só no texto da spec (Status e Registro, editados nas três branches): junte as seções, sem perder nenhuma.
+- **Conferir no log do CI do #26:** os 4 cenários do teste de comportamento do deploy que dependem de atalho (`SYMLINK_SKIP`: publicação do admin, rollback do admin com o site, primeira publicação que falha, versão sem `admin/`) só rodam no Linux; não podem aparecer como `skipped` lá.
+- **Decisões do dono pendentes:** (1) M4 da revisão da E2: o `PATCH /admin/companies` antigo muda o status da empresa **sem** trilha da plataforma; (2) as exclusões da E2 (contagens só de empresas `ACTIVE` e o "Testar" fora das contagens de atendimento); (3) D7: se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta pelo dono; (4) M3 da revisão da E3: intervalo de releitura da Saúde e prazo ocioso da sessão do admin; (5) preload do HSTS (`includeSubDomains`/`preload` do domínio inteiro; o admin manda só `max-age` de um ano).
+- **Quando houver servidor:** migration da E1 e os passos de `docs/ops/admin.md`.
 
 ## Onde estamos
 
 - **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na `main`). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na `main`, E2 a E4 nos PRs #24 a #26). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes
