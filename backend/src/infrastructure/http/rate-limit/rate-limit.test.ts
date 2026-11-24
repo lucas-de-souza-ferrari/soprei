@@ -214,6 +214,18 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
         },
         origin: 'https://soadm.exemplo.test',
         maxAgeSeconds: 43_200,
+        // Spec 044, E2: leituras agregadas e as duas ações entram no inventário.
+        monitor: {
+          overview: () => Promise.reject(new Error('inventário')),
+          listCompanies: () => Promise.reject(new Error('inventário')),
+          companyDetail: () => Promise.reject(new Error('inventário')),
+          listAccounts: () => Promise.reject(new Error('inventário')),
+          accountDetail: () => Promise.reject(new Error('inventário')),
+          listOrders: () => Promise.reject(new Error('inventário')),
+          listNotices: () => Promise.reject(new Error('inventário')),
+          setCompanyStatus: () => Promise.reject(new Error('inventário')),
+          health: () => Promise.reject(new Error('inventário')),
+        },
       },
       // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
       accounts: {
@@ -386,6 +398,16 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/platform/auth/login',
       '/platform/auth/logout',
       '/platform/auth/session',
+      '/platform/overview',
+      '/platform/companies',
+      '/platform/companies/:companyId',
+      '/platform/companies/:companyId/suspend',
+      '/platform/companies/:companyId/reactivate',
+      '/platform/accounts',
+      '/platform/accounts/:accountId',
+      '/platform/billing/orders',
+      '/platform/billing/notices',
+      '/platform/health',
     ]) {
       assert.ok(
         [...urls].some((url) => url.startsWith(expected)),

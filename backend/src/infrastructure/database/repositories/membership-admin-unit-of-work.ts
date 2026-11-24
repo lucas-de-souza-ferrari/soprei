@@ -19,7 +19,7 @@ import { PrismaMembershipRepository } from './membership.repository.js';
  * operações de gestão do mesma empresa seguem serializadas), mas não bloqueia o `FOR KEY SHARE` que
  * as chaves estrangeiras tomam em `companies` quando se grava mensagem, conversa ou usuário.
  */
-async function lockCompanyRow(db: TenantScopedDb, companyId: CompanyId): Promise<void> {
+export async function lockCompanyRow(db: TenantScopedDb, companyId: CompanyId): Promise<void> {
   const rows = await db.$queryRaw<{ id: string }[]>`
     SELECT id FROM companies WHERE id = ${companyId}::uuid AND deleted_at IS NULL FOR NO KEY UPDATE`;
   if (rows.length === 0) {
