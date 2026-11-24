@@ -4,17 +4,15 @@
 
 ## Última sessão
 
-2026-11-24, Claude Code (Opus 5.5, spec-writer e implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** escrita e aprovada pelo dono no mesmo dia (D1 a D12 como recomendadas; domínio trocado para `soadm.soprei.com`), e **E1 implementada**. Duas branches locais **empilhadas, sem push**, sobre `spec/035-e4-fatiar-atendimento` (topo da pilha anterior; `docs/areas/` e o índice da 042 ainda não estão na `main`):
+2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** a spec (PR #21) e a **E1** (PR #22, entrada do dono com TOTP, sessão por cookie no Redis, trilha `PlatformAuditEvent`) estão na `main` com o CI verde. O `reviewer` revisou a E1 depois do merge: nada bloqueante.
 
-- **`spec/044-admin-da-plataforma`:** só documentação (spec, índice, `context.md`, este arquivo).
-- **`spec/044-e1-entrada-do-dono` (E1):** entrada do dono por cookie `__Host-soprei_platform` com segundo fator TOTP (`/platform/auth/login|logout|session`), cadastro do fator só pela CLI (`pnpm auth:cli enroll-platform-totp`), sessão no Redis, trilha `PlatformAuditEvent` (model global), login Bearer da plataforma exigindo o código com a chave ligada. Tudo atrás de `PLATFORM_ADMIN_ENABLED` (padrão `false`); variáveis novas no `.env.example`. **Migration aditiva** `20261124100000_platform_admin_second_factor`. Regras em `docs/areas/autenticacao-e-papeis.md` ("Entrada do admin da plataforma"). Desvios registrados na spec (colunas `subject_*`, FK da conta `SET NULL` para não travar o expurgo da 021).
-- **Verde localmente (Windows, Node 26.13.1):** typecheck, build, lint, `format:check` e 244 unitários das áreas tocadas, mais os gates de docs, vocabulário e migrations. **Não rodado:** os dois testes de integração novos (sem `.env.test` aqui) e as suítes inteiras: CI.
-- **Falta:** push e PR das duas branches (depois da pilha #16 a #20); CI; `reviewer` na E1 (segurança); depois a E2 (leituras agregadas e suspender/reativar). Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
+- **Branch `spec/044-e1-ajustes-da-revisao`:** corrige o I1 da revisão (`enroll-platform-totp` revoga as sessões Bearer da plataforma abertas só com a senha), o M2 (formato de `PLATFORM_TOTP_KEYS` conferido mesmo com o admin desligado), o M4/M5 (comentários das métricas) e o M6 (`TestTenants.cleanup` apaga a trilha da plataforma das empresas que criou). Detalhe e o que ficou só registrado (M1, M3, M7) no Registro da spec.
+- **Falta:** CI e merge dessa branch; depois a E2 (leituras agregadas e suspender/reativar). Migration da E1 (`pnpm db:migrate:deploy`) quando houver servidor. Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
 
 ## Onde estamos
 
 - **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na branch). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na `main`). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes

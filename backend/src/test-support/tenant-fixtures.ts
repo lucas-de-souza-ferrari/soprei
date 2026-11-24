@@ -45,6 +45,8 @@ export class TestTenants {
       // Notificações (spec 038) antes de vínculos, mensagens e conversas (chaves estrangeiras compostas).
       await this.db.notification.deleteMany({ where: { companyId: id } });
       await this.db.auditEvent.deleteMany({ where: { companyId: id } });
+      // Trilha do admin da plataforma (spec 044) sobre esta empresa: a FK `subject_company_id` é Restrict.
+      await this.db.platformAuditEvent.deleteMany({ where: { subjectCompanyId: id } });
       // Convites antes dos vínculos (as chaves estrangeiras compostas apontam para eles) e depois da auditoria.
       await this.db.companyInvitation.deleteMany({ where: { companyId: id } });
       // Trechos e documentos da base de conhecimento antes dos vínculos (o autor é chave estrangeira composta).

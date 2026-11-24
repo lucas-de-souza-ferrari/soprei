@@ -743,6 +743,9 @@ function refinePlatformAdmin(
   },
   ctx: z.RefinementCtx,
 ): void {
+  // O formato das chaves é conferido sempre que presentes, mesmo com o admin desligado: a CLI monta a
+  // cifra com elas, e uma chave malformada derrubaria todo comando com uma mensagem enganosa.
+  refinePlatformTotpKeys(env, ctx);
   if (!env.PLATFORM_ADMIN_ENABLED) return;
   for (const name of [
     'ADMIN_ORIGIN',
@@ -772,26 +775,35 @@ function refinePlatformAdmin(
       });
     }
   }
-  if (env.PLATFORM_TOTP_KEYS !== undefined) {
-    const parsed = parseCredentialKeys(env.PLATFORM_TOTP_KEYS);
-    if (!parsed.ok) {
-      ctx.addIssue({ code: 'custom', path: ['PLATFORM_TOTP_KEYS'], message: parsed.message });
-    } else if (
-      env.PLATFORM_TOTP_ACTIVE_KEY_ID !== undefined &&
-      !parsed.keys.some((entry) => entry.keyId === env.PLATFORM_TOTP_ACTIVE_KEY_ID)
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['PLATFORM_TOTP_ACTIVE_KEY_ID'],
-        message: 'precisa ser um dos keyId de PLATFORM_TOTP_KEYS',
-      });
-    }
-  }
   if (env.PLATFORM_SESSION_MAX_SECONDS < env.PLATFORM_SESSION_IDLE_SECONDS) {
     ctx.addIssue({
       code: 'custom',
       path: ['PLATFORM_SESSION_MAX_SECONDS'],
       message: 'precisa ser maior ou igual a PLATFORM_SESSION_IDLE_SECONDS',
+    });
+  }
+}
+
+/** Formato de `PLATFORM_TOTP_KEYS` e chave ativa na lista, quando definidas (sem ecoar a chave). */
+function refinePlatformTotpKeys(
+  env: {
+    readonly PLATFORM_TOTP_KEYS: string | undefined;
+    readonly PLATFORM_TOTP_ACTIVE_KEY_ID?: string | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (env.PLATFORM_TOTP_KEYS === undefined) return;
+  const parsed = parseCredentialKeys(env.PLATFORM_TOTP_KEYS);
+  if (!parsed.ok) {
+    ctx.addIssue({ code: 'custom', path: ['PLATFORM_TOTP_KEYS'], message: parsed.message });
+  } else if (
+    env.PLATFORM_TOTP_ACTIVE_KEY_ID !== undefined &&
+    !parsed.keys.some((entry) => entry.keyId === env.PLATFORM_TOTP_ACTIVE_KEY_ID)
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PLATFORM_TOTP_ACTIVE_KEY_ID'],
+      message: 'precisa ser um dos keyId de PLATFORM_TOTP_KEYS',
     });
   }
 }

@@ -85,6 +85,20 @@ describe('pnpm auth:cli enroll-platform-totp (spec 044, E1)', () => {
     );
   });
 
+  it('cadastrar o fator revoga as sessões Bearer da plataforma abertas só com a senha', async () => {
+    const world = setup();
+    // Antes de ligar o admin, o login Bearer da plataforma não pede código.
+    const before = await world.auth.platformToken();
+    world.respond((printed) => codeFromPrinted(printed, world.clock.ms));
+    assert.equal(
+      await runAuthCli(['enroll-platform-totp', '--email', before.email], world.deps),
+      0,
+      world.err.join('\n'),
+    );
+    const refreshed = await world.auth.service.refresh(before.refreshToken);
+    assert.equal(refreshed.ok, false, 'a sessão aberta sem o fator não renova mais');
+  });
+
   it('código errado: saída 1 e nada gravado', async () => {
     const world = setup();
     const admin = await createAdmin(world);
