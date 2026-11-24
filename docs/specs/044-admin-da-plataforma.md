@@ -1,6 +1,6 @@
 # 044 — Admin da plataforma (painel do dono, frontend separado)
 
-- **Status:** aprovada (2026-11-24, pelo dono: D1 a D12 como recomendadas, com uma mudança na D3: o domínio é `soadm.soprei.com`, não `admin.soprei.com`); a implementar, E1 a E4 em PRs separados
+- **Status:** em implementação (aprovada pelo dono em 2026-11-24: D1 a D12 como recomendadas, com uma mudança na D3: o domínio é `soadm.soprei.com`, não `admin.soprei.com`; E1 implementada na branch `spec/044-e1-entrada-do-dono`, aguardando CI e `reviewer`; E2 a E4 por fazer)
 - **Branch:** `spec/044-admin-da-plataforma`
 - **Depende de:** 007 (`PlatformAdmin`, sessões no Redis), 008 (auditoria), 017 (contas e cookie), 015/023/039 (canal), 031/040 (cobrança), 034/035 (fila e retomada), 037 (deploy e nginx), 032 (LGPD), 042 (organização da documentação).
 - **Esta spec passa pelo `reviewer`** antes do merge de cada etapa: cria um caminho de autenticação novo (sessão por cookie com segundo fator), um prefixo de rotas novo, a única leitura que cruza empresas por desenho e uma publicação num domínio novo.
@@ -71,16 +71,16 @@ Todas as rotas em `/platform/*`, com `platformSession` + `requirePlatform()` e p
 
 ## Critérios de aceite
 
-- [ ] Com `PLATFORM_ADMIN_ENABLED=false`, toda rota `/platform/*` responde 404 e `POST /auth/platform/login` continua aceitando o corpo antigo (teste de rota e de config).
-- [ ] Com a chave ligada, a config recusa o boot sem `ADMIN_ORIGIN`, sem as chaves do TOTP, com `ADMIN_ORIGIN` igual a `APP_ORIGIN` ou `http` em produção, e com teto de sessão menor que o ocioso.
-- [ ] TOTP: vetores do RFC 6238 (SHA-1) conferem; código do passo anterior e do seguinte é aceito, dois passos fora não; o mesmo passo usado de novo é recusado.
-- [ ] `POST /platform/auth/login` devolve a mesma 401, com a mesma mensagem, para e-mail inexistente, admin desativado, admin sem fator, senha errada, código errado e código repetido; em todos esses casos o `verify` de senha roda exatamente uma vez.
-- [ ] Depois de `AUTH_LOGIN_MAX_FAILURES` falhas o login responde 429 com `Retry-After` antes de gastar hash; com o Redis do limiter fora, 503.
-- [ ] Login certo devolve 204 com `Set-Cookie` `__Host-soprei_platform` contendo `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/` e sem `Domain`; no Redis existe só o hash do segredo.
-- [ ] Sessão: passado o prazo ocioso ou o teto, 401; desativar o admin no banco derruba a sessão na requisição seguinte; logout apaga a chave no Redis; Redis fora = 503 em qualquer rota `/platform/*`.
-- [ ] `POST` em `/platform/*` sem `Origin = ADMIN_ORIGIN` ou sem `X-Soprei-App: admin` é 403 e nada é gravado.
-- [ ] Bearer de vínculo, Bearer de plataforma e cookie da conta recebem 401 ou 403 em toda rota `/platform/*` (inventário: o teste de rotas falha se uma rota `/platform/*` não declarar `requirePlatform()` e perfil).
-- [ ] Com a chave ligada, `POST /auth/platform/login` sem `code` ou com código errado devolve a 401 uniforme.
+- [x] Com `PLATFORM_ADMIN_ENABLED=false`, toda rota `/platform/*` responde 404 e `POST /auth/platform/login` continua aceitando o corpo antigo (teste de rota e de config).
+- [x] Com a chave ligada, a config recusa o boot sem `ADMIN_ORIGIN`, sem as chaves do TOTP, com `ADMIN_ORIGIN` igual a `APP_ORIGIN` ou `http` em produção, e com teto de sessão menor que o ocioso.
+- [x] TOTP: vetores do RFC 6238 (SHA-1) conferem; código do passo anterior e do seguinte é aceito, dois passos fora não; o mesmo passo usado de novo é recusado.
+- [x] `POST /platform/auth/login` devolve a mesma 401, com a mesma mensagem, para e-mail inexistente, admin desativado, admin sem fator, senha errada, código errado e código repetido; em todos esses casos o `verify` de senha roda exatamente uma vez.
+- [x] Depois de `AUTH_LOGIN_MAX_FAILURES` falhas o login responde 429 com `Retry-After` antes de gastar hash; com o Redis do limiter fora, 503.
+- [x] Login certo devolve 204 com `Set-Cookie` `__Host-soprei_platform` contendo `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/` e sem `Domain`; no Redis existe só o hash do segredo.
+- [x] Sessão: passado o prazo ocioso ou o teto, 401; desativar o admin no banco derruba a sessão na requisição seguinte; logout apaga a chave no Redis; Redis fora = 503 em qualquer rota `/platform/*`.
+- [x] `POST` em `/platform/*` sem `Origin = ADMIN_ORIGIN` ou sem `X-Soprei-App: admin` é 403 e nada é gravado.
+- [x] Bearer de vínculo, Bearer de plataforma e cookie da conta recebem 401 ou 403 em toda rota `/platform/*` (inventário: o teste de rotas falha se uma rota `/platform/*` não declarar `requirePlatform()` e perfil).
+- [x] Com a chave ligada, `POST /auth/platform/login` sem `code` ou com código errado devolve a 401 uniforme.
 - [ ] A sessão do admin continua recebendo 403 em `GET /admin/companies/:companyId/conversations` e `.../messages` (regra da 007 mantida).
 - [ ] Teste de privacidade de ponta a ponta (Postgres e Redis reais, duas empresas): mensagens, persona, documento, produto, serviço da agenda e `contactRef` com textos-sentinela, telefone no `contactRef`, `checkoutUrl` e referência de transação preenchidos; **nenhuma** resposta de `/platform/*`, nenhum log capturado e o `/metrics` contêm qualquer sentinela; o e-mail completo da conta só aparece em `GET /platform/accounts/:accountId`.
 - [ ] O detalhe da empresa A traz só números de A (as contagens de B, com valores diferentes, não se misturam), e o `overview` soma A e B corretamente.
@@ -88,7 +88,7 @@ Todas as rotas em `/platform/*`, com `platformSession` + `requirePlatform()` e p
 - [ ] Suspender e reativar: 204, estado gravado e um `PlatformAuditEvent` com o motivo na mesma transação; repetir não grava outro evento; motivo fora da lista é 400; empresa suspensa deixa de receber pelo canal (teste existente reaproveitado).
 - [ ] O módulo `platform-read-model.ts` é o único arquivo novo com SQL cru, e um teste confere que ele não referencia as colunas de conteúdo (`content`, `contact_ref`, `external_id`, `persona`, colunas de texto de documento, produto, serviço e `token_ciphertext`).
 - [ ] `GET /admin/companies` e `GET /admin/companies/:id` não trazem mais `persona` (trazem `hasPersona`); `PATCH` com `persona` é 400.
-- [ ] `PlatformAuditEvent` está em `MODEL_SCOPES` como `global`; o repositório não tem `update` nem `delete`.
+- [x] `PlatformAuditEvent` está em `MODEL_SCOPES` como `global`; o repositório não tem `update` nem `delete`.
 - [ ] Admin (Playwright, API falsa, desktop e celular, claro e escuro): entrar com código, ver Visão geral, abrir uma empresa, suspender com confirmação, 401 volta à tela Entrar, "Mostrar e-mail" chama a rota de detalhe; nenhuma chave em `localStorage`/`sessionStorage`; 360 px sem rolagem horizontal.
 - [ ] Pares de contraste do admin passam 4,5:1 nos dois temas; o `index.html` do admin não tem script inline (teste lê o build).
 - [ ] CI: o job `static` roda `typecheck`, `lint` e `build` do admin, o `tests` os unitários, e o `browser` as fatias do admin; `ci-workflow.test.ts` falha se algum sair.
@@ -147,4 +147,11 @@ O admin é, por desenho, a única identidade que vê mais de uma empresa, e só 
 
 ## Registro da implementação
 
-- **2026-11-24, aprovação:** o dono aprovou D1 a D12 como recomendadas, trocando só o domínio da D3 para `soadm.soprei.com`. Continua com o dono, sem bloquear a E1: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta pelo dono (D7). Nenhuma etapa implementada ainda.
+- **2026-11-24, aprovação:** o dono aprovou D1 a D12 como recomendadas, trocando só o domínio da D3 para `soadm.soprei.com`. Continua com o dono, sem bloquear a E1: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta pelo dono (D7).
+
+### E1 (2026-11-24, Claude Code, Opus 5.5, branch `spec/044-e1-entrada-do-dono`, sobre `spec/044-admin-da-plataforma`)
+
+- **Feito:** TOTP próprio (`application/platform/totp.ts`), cifra do segredo (`AesGcmPlatformSecretCipher`, núcleo AES-GCM extraído e compartilhado com a cifra do canal, sem mudar o formato nem o comportamento dela), `TotpSecondFactor`, `AuthService.checkCredentials` (a conferência de senha saiu do `loginFlow` para ser usada também sem criar sessão Bearer) e `verifyPlatformCredentials`, `PlatformAuthService`, `RedisPlatformSessionStore`, plugin `/platform/auth/*`, `PlatformAuditEvent` e o repositório, métricas, `redact`, config, `.env.example` e o comando `enroll-platform-totp`. Migration aditiva `20261124100000_platform_admin_second_factor` (gerada pelo `prisma migrate diff` a partir do schema; duas colunas anuláveis, dois tipos e uma tabela).
+- **Desvios e decisões de implementação:** (1) as colunas de sujeito da trilha se chamam `subject_company_id` e `subject_account_id`, não `company_id`/`account_id`: com `companyId` o teste de cobertura do `MODEL_SCOPES` exigiria classificar o model como tenant, e a trilha é do administrador; (2) a FK da conta é `ON DELETE SET NULL` (a spec dizia `Restrict`): com `Restrict`, uma leitura de e-mail auditada (E2) travaria o expurgo de contas não confirmadas da spec 021; a da empresa (soft delete) e a do admin continuam `Restrict`; (3) a sessão guarda a impressão digital do fator (hash do texto cifrado): recadastrar ou apagar o fator derruba as sessões abertas, sem precisar de geração no Redis; (4) o teste-guarda da spec 008 em `migrations.test.ts` passou a casar `audit_events` e `audit_action` como palavra inteira (a tabela nova `platform_audit_events` não é a trilha de tenant); (5) a regra da área entrou em `docs/areas/autenticacao-e-papeis.md`, seção "Entrada do admin da plataforma"; o arquivo `docs/areas/plataforma.md` da E4 fica para quando houver as leituras e o app.
+- **Critérios:** os da E1 estão marcados acima. O de `MODEL_SCOPES` e do repositório só com `create`/`list`, o "só o hash no Redis" com Redis real e a concorrência do `claimTotpStep` estão nos testes de integração, que **não rodaram localmente** (não há `.env.test` nesta máquina): a palavra final é o CI. O critério de que a sessão do admin segue com 403 nas conversas fica para o teste de ponta a ponta da E2 (a sessão do cookie nem é lida nas rotas `/admin/*`).
+- **Validação local (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `tsc --noEmit` e `tsc -p tsconfig.build.json` do backend, `eslint src` e `prettier --check` da raiz verdes; unitários das áreas tocadas: 244 testes verdes (auth, rotas de auth e de empresas, RBAC, cifra, métricas, `tenant-scope`, config, inventário de rotas e os novos), mais `migrations.test.ts`, `docs-structure.test.ts` e `domain-vocabulary.test.ts` (26); as suítes novas repetidas 3 vezes (36 testes, todas verdes). **Não rodado:** `pnpm test` inteiro, `pnpm test:integration` e o frontend (não mudou).

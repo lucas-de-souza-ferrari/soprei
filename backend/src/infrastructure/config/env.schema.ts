@@ -80,6 +80,13 @@ export const envSchema = z
     PORT: z.coerce.number().int().min(0).max(65535).default(3000),
     ACCOUNTS_ENABLED: booleanLiteral(false),
     APP_ORIGIN: optionalSecret,
+    // Admin da plataforma (spec 044, E1): sem a chave, /platform/* não existe e nada muda.
+    PLATFORM_ADMIN_ENABLED: booleanLiteral(false),
+    ADMIN_ORIGIN: optionalSecret,
+    PLATFORM_TOTP_KEYS: optionalSecret,
+    PLATFORM_TOTP_ACTIVE_KEY_ID: z.preprocess(emptyAsUndefined, z.string().optional()),
+    PLATFORM_SESSION_IDLE_SECONDS: z.coerce.number().int().min(60).max(86_400).default(1_800),
+    PLATFORM_SESSION_MAX_SECONDS: z.coerce.number().int().min(60).max(604_800).default(43_200),
     // SMTP genérico (spec 019). Host, porta e remetente são obrigatórios só com ACCOUNTS_ENABLED=true.
     EMAIL_PROVIDER_HOST: optionalSecret.refine(
       (value) => value === undefined || isValidSmtpHost(value),
@@ -363,6 +370,7 @@ export const envSchema = z
       });
     }
     refineCheckout(env, ctx);
+    refinePlatformAdmin(env, ctx);
     refineWhatsapp(env, ctx);
     refineAnthropic(env, ctx);
     if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < METRICS_TOKEN_MIN_LENGTH) {
@@ -714,6 +722,91 @@ function refineWhatsapp(
       path: ['CHANNEL_BATCH_MAX_WAIT_MS'],
       message: `precisa ser maior ou igual a CHANNEL_BATCH_WINDOW_MS (${String(env.CHANNEL_BATCH_WINDOW_MS)} ms)`,
     });
+  }
+}
+
+/**
+ * Admin da plataforma (spec 044, E1). Com a chave ligada: origem própria (HTTPS em produção e diferente da
+ * do site), chaves do segredo TOTP e teto da sessão maior ou igual ao prazo ocioso. Nenhuma mensagem
+ * inclui o valor de uma chave.
+ */
+function refinePlatformAdmin(
+  env: {
+    readonly NODE_ENV: 'development' | 'test' | 'production';
+    readonly PLATFORM_ADMIN_ENABLED: boolean;
+    readonly ADMIN_ORIGIN: string | undefined;
+    readonly APP_ORIGIN: string | undefined;
+    readonly PLATFORM_TOTP_KEYS: string | undefined;
+    readonly PLATFORM_TOTP_ACTIVE_KEY_ID?: string | undefined;
+    readonly PLATFORM_SESSION_IDLE_SECONDS: number;
+    readonly PLATFORM_SESSION_MAX_SECONDS: number;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (!env.PLATFORM_ADMIN_ENABLED) return;
+  for (const name of [
+    'ADMIN_ORIGIN',
+    'PLATFORM_TOTP_KEYS',
+    'PLATFORM_TOTP_ACTIVE_KEY_ID',
+  ] as const) {
+    if (env[name] === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [name],
+        message: 'obrigatória com PLATFORM_ADMIN_ENABLED=true',
+      });
+    }
+  }
+  if (env.ADMIN_ORIGIN !== undefined) {
+    if (!isExactOrigin(env.ADMIN_ORIGIN, env.NODE_ENV === 'production')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ADMIN_ORIGIN'],
+        message: 'origem HTTP(S) exata, HTTPS em produção',
+      });
+    } else if (env.ADMIN_ORIGIN === env.APP_ORIGIN) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ADMIN_ORIGIN'],
+        message: 'precisa ser diferente de APP_ORIGIN (o admin tem hostname próprio)',
+      });
+    }
+  }
+  if (env.PLATFORM_TOTP_KEYS !== undefined) {
+    const parsed = parseCredentialKeys(env.PLATFORM_TOTP_KEYS);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: 'custom', path: ['PLATFORM_TOTP_KEYS'], message: parsed.message });
+    } else if (
+      env.PLATFORM_TOTP_ACTIVE_KEY_ID !== undefined &&
+      !parsed.keys.some((entry) => entry.keyId === env.PLATFORM_TOTP_ACTIVE_KEY_ID)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PLATFORM_TOTP_ACTIVE_KEY_ID'],
+        message: 'precisa ser um dos keyId de PLATFORM_TOTP_KEYS',
+      });
+    }
+  }
+  if (env.PLATFORM_SESSION_MAX_SECONDS < env.PLATFORM_SESSION_IDLE_SECONDS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PLATFORM_SESSION_MAX_SECONDS'],
+      message: 'precisa ser maior ou igual a PLATFORM_SESSION_IDLE_SECONDS',
+    });
+  }
+}
+
+/** Origem `http(s)://host[:porta]` exata (sem caminho, query ou barra final); só HTTPS se `httpsOnly`. */
+function isExactOrigin(raw: string, httpsOnly: boolean): boolean {
+  try {
+    const origin = new URL(raw);
+    return (
+      ['http:', 'https:'].includes(origin.protocol) &&
+      origin.origin === raw &&
+      (!httpsOnly || origin.protocol === 'https:')
+    );
+  } catch {
+    return false;
   }
 }
 

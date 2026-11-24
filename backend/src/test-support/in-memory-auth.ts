@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { AuthService, deriveLoginLockSecret } from '../application/auth/auth.service.js';
 import { MembershipAdminService } from '../application/memberships/membership-admin.service.js';
+import type { PlatformSecretCipher } from '../application/ports/platform-secret-cipher.js';
+import { TotpSecondFactor } from '../application/platform/totp-second-factor.js';
 import type {
   MembershipAdminTransaction,
   MembershipAdminUnitOfWork,
@@ -310,12 +312,23 @@ export class InMemoryMembershipAdminUnitOfWork implements MembershipAdminUnitOfW
 }
 
 export class InMemoryPlatformAdminRepository implements PlatformAdminRepository {
-  private readonly rows: { admin: PlatformAdmin; passwordHash: string }[] = [];
+  private readonly rows: {
+    admin: PlatformAdmin;
+    passwordHash: string;
+    totpSecretCiphertext: string | null;
+    totpLastStep: number | null;
+  }[] = [];
 
   findCredentialsByEmail(email: string): Promise<PlatformAdminCredentials | null> {
     const row = this.rows.find((r) => r.admin.email === email);
     return Promise.resolve(
-      row === undefined ? null : { admin: row.admin, passwordHash: row.passwordHash },
+      row === undefined
+        ? null
+        : {
+            admin: row.admin,
+            passwordHash: row.passwordHash,
+            totpSecretCiphertext: row.totpSecretCiphertext,
+          },
     );
   }
 
@@ -337,7 +350,12 @@ export class InMemoryPlatformAdminRepository implements PlatformAdminRepository 
       createdAt: now,
       updatedAt: now,
     };
-    this.rows.push({ admin, passwordHash: data.passwordHash });
+    this.rows.push({
+      admin,
+      passwordHash: data.passwordHash,
+      totpSecretCiphertext: null,
+      totpLastStep: null,
+    });
     return Promise.resolve(admin);
   }
 
@@ -346,6 +364,28 @@ export class InMemoryPlatformAdminRepository implements PlatformAdminRepository 
     if (row === undefined) return Promise.reject(new NotFoundError('Administrador não encontrado'));
     row.passwordHash = passwordHash;
     return Promise.resolve();
+  }
+
+  findTotpSecret(id: PlatformAdminId): Promise<string | null> {
+    const row = this.rows.find((r) => r.admin.id === id);
+    if (row === undefined) return Promise.reject(new NotFoundError('Administrador não encontrado'));
+    return Promise.resolve(row.totpSecretCiphertext);
+  }
+
+  setTotpSecret(id: PlatformAdminId, ciphertext: string | null): Promise<void> {
+    const row = this.rows.find((r) => r.admin.id === id);
+    if (row === undefined) return Promise.reject(new NotFoundError('Administrador não encontrado'));
+    row.totpSecretCiphertext = ciphertext;
+    row.totpLastStep = null;
+    return Promise.resolve();
+  }
+
+  claimTotpStep(id: PlatformAdminId, step: number): Promise<boolean> {
+    const row = this.rows.find((r) => r.admin.id === id);
+    if (row === undefined || row.totpSecretCiphertext === null) return Promise.resolve(false);
+    if (row.totpLastStep !== null && row.totpLastStep >= step) return Promise.resolve(false);
+    row.totpLastStep = step;
+    return Promise.resolve(true);
   }
 
   /** Atalho dos testes: muda o status do administrador. */
@@ -519,6 +559,11 @@ export interface TestAuthOptions {
   readonly clockToleranceSeconds?: number;
   readonly maxFailures?: number;
   readonly sessions?: SessionStore;
+  /**
+   * Segundo fator do administrador da plataforma (spec 044). Com isto o `AuthService` exige o código no
+   * login da plataforma (e `platformToken` deixa de funcionar sem ele).
+   */
+  readonly platformTotp?: { readonly cipher: PlatformSecretCipher; readonly now: () => number };
 }
 
 export interface IssuedLogin {
@@ -576,6 +621,16 @@ export function buildTestAuth(options: TestAuthOptions) {
     logger: options.logger,
     metrics: options.metrics,
     loginLockSecret: deriveLoginLockSecret(TEST_JWT_SECRET),
+    ...(options.platformTotp === undefined
+      ? {}
+      : {
+          platformSecondFactor: new TotpSecondFactor({
+            cipher: options.platformTotp.cipher,
+            admins: platformAdmins,
+            logger: options.logger,
+            now: options.platformTotp.now,
+          }),
+        }),
   });
 
   async function membershipToken(

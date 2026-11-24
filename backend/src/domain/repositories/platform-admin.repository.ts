@@ -14,4 +14,16 @@ export interface PlatformAdminRepository {
   create(data: NewPlatformAdmin): Promise<PlatformAdmin>;
   /** Lança `NotFoundError` se não existe. */
   updatePassword(id: PlatformAdminId, passwordHash: string): Promise<void>;
+  /** Segredo TOTP cifrado (spec 044), ou `null` sem fator. Lança `NotFoundError` se o administrador não existe. */
+  findTotpSecret(id: PlatformAdminId): Promise<string | null>;
+  /**
+   * Grava (ou apaga, com `null`) o segredo TOTP cifrado e zera o último passo usado. Lança
+   * `NotFoundError` se o administrador não existe.
+   */
+  setTotpSecret(id: PlatformAdminId, ciphertext: string | null): Promise<void>;
+  /**
+   * Marca o passo TOTP como usado **se** for maior que o último gravado (atômico: um UPDATE
+   * condicional). `false` = o mesmo código (ou um passo anterior) já entrou; não entra de novo.
+   */
+  claimTotpStep(id: PlatformAdminId, step: number): Promise<boolean>;
 }

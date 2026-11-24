@@ -38,26 +38,27 @@ model Company {
   /// Único ponto do sistema que leva de um identificador externo à empresa (spec 011).
   whatsappPhoneNumberId String?       @unique @map("whatsapp_phone_number_id")
 
-  conversations      Conversation[]
-  messages           Message[]
-  memberships        Membership[]
-  auditEvents        AuditEvent[]
-  channelConnection  ChannelConnection?
-  invitations        CompanyInvitation[]
-  knowledgeDocuments KnowledgeDocument[]
-  knowledgeChunks    KnowledgeChunk[]
-  products           Product[]
-  stockMovements     StockMovement[]
-  scheduleSettings   ScheduleSettings?
-  scheduleResources  ScheduleResource[]
-  scheduleServices   ScheduleService[]
-  availabilityRules  AvailabilityRule[]
-  appointments       Appointment[]
-  lastUsedByAccounts Account[]           @relation("AccountLastCompany")
-  notifications      Notification[]
+  conversations       Conversation[]
+  messages            Message[]
+  memberships         Membership[]
+  auditEvents         AuditEvent[]
+  channelConnection   ChannelConnection?
+  invitations         CompanyInvitation[]
+  knowledgeDocuments  KnowledgeDocument[]
+  knowledgeChunks     KnowledgeChunk[]
+  products            Product[]
+  stockMovements      StockMovement[]
+  scheduleSettings    ScheduleSettings?
+  scheduleResources   ScheduleResource[]
+  scheduleServices    ScheduleService[]
+  availabilityRules   AvailabilityRule[]
+  appointments        Appointment[]
+  lastUsedByAccounts  Account[]            @relation("AccountLastCompany")
+  notifications       Notification[]
+  platformAuditEvents PlatformAuditEvent[]
   /// Assinatura da conta dona da empresa (spec 031); gravada na criacao com a cobranca ligada.
-  subscriptionId     String?             @map("subscription_id") @db.Uuid
-  subscription       Subscription?       @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  subscriptionId      String?              @map("subscription_id") @db.Uuid
+  subscription        Subscription?        @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
 
   @@index([subscriptionId])
   @@map("companies")
@@ -75,11 +76,11 @@ enum MessageRole {
 /// Conversa de um contato com o assistente de uma empresa. `contactRef` é o identificador do
 /// contato definido pelo canal (texto livre). (TENANT)
 model Conversation {
-  id         String   @id @default(uuid(7)) @db.Uuid
-  companyId  String   @map("company_id") @db.Uuid
-  contactRef String   @map("contact_ref")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id             String    @id @default(uuid(7)) @db.Uuid
+  companyId      String    @map("company_id") @db.Uuid
+  contactRef     String    @map("contact_ref")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
   /// Spec 039: a IA não responde este contato até este instante (a equipe respondeu pelo celular).
   aiPausedUntil  DateTime? @map("ai_paused_until")
   /// Spec 039: mensagens do contato até este instante foram tratadas pela equipe e nunca são respondidas.
@@ -103,26 +104,26 @@ model Conversation {
 /// então uma mensagem nunca aponta para conversa nem para outra mensagem de outra empresa.
 /// `content` nunca vai para log nem para label de métrica.
 model Message {
-  id               String      @id @default(uuid(7)) @db.Uuid
-  companyId        String      @map("company_id") @db.Uuid
-  conversationId   String      @map("conversation_id") @db.Uuid
-  role             MessageRole
-  content          String
-  isFallback       Boolean     @default(false) @map("is_fallback")
+  id                  String      @id @default(uuid(7)) @db.Uuid
+  companyId           String      @map("company_id") @db.Uuid
+  conversationId      String      @map("conversation_id") @db.Uuid
+  role                MessageRole
+  content             String
+  isFallback          Boolean     @default(false) @map("is_fallback")
   /// Id da mensagem no canal, para idempotência (único por empresa quando presente).
-  externalId       String?     @map("external_id")
+  externalId          String?     @map("external_id")
   /// Na resposta do assistente, a mensagem do contato a que ela responde.
-  replyToId        String?     @map("reply_to_id") @db.Uuid
-  createdAt        DateTime    @default(now()) @map("created_at")
+  replyToId           String?     @map("reply_to_id") @db.Uuid
+  createdAt           DateTime    @default(now()) @map("created_at")
   /// Id da mensagem enviada no canal (wamid), só em resposta do assistente já enviada.
-  channelMessageId String?     @map("channel_message_id")
+  channelMessageId    String?     @map("channel_message_id")
   /// Quando a resposta foi entregue ao canal; nulo = ainda não enviada (ou o envio falhou).
-  sentAt           DateTime?   @map("sent_at")
+  sentAt              DateTime?   @map("sent_at")
   /// Na mensagem do CONTATO, a resposta do assistente que a atendeu (agrupamento de mensagens, spec 013).
   /// Várias mensagens do mesmo lote apontam para a mesma resposta. Só mensagem USER tem o campo (CHECK).
-  answeredById     String?     @map("answered_by_id") @db.Uuid
+  answeredById        String?     @map("answered_by_id") @db.Uuid
   /// Spec 035 (revisão, I4): a Meta aceitou o envio (2xx) mas sem id legível; provavelmente entregue, nunca reenviada.
-  deliveryUncertainAt DateTime? @map("delivery_uncertain_at")
+  deliveryUncertainAt DateTime?   @map("delivery_uncertain_at")
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   conversation  Conversation   @relation(fields: [conversationId, companyId], references: [id, companyId], onDelete: NoAction)
@@ -192,30 +193,31 @@ model Membership {
 
 /// Identidade global da pessoa. O Membership representa a participação dela numa empresa (tenant).
 model Account {
-  id                        String        @id @default(uuid(7)) @db.Uuid
-  email                     String        @unique
-  passwordHash              String        @map("password_hash")
-  status                    AccessStatus  @default(ACTIVE)
-  emailVerifiedAt           DateTime?     @map("email_verified_at") @db.Timestamptz(6)
-  verificationHash          String?       @map("verification_hash")
-  verificationExpiresAt     DateTime?     @map("verification_expires_at") @db.Timestamptz(6)
-  verificationAttempts      Int           @default(0) @map("verification_attempts") @db.SmallInt
-  verificationFailuresDay   Int           @default(0) @map("verification_failures_day") @db.SmallInt
-  verificationFailuresSince DateTime?     @map("verification_failures_since") @db.Timestamptz(6)
+  id                        String               @id @default(uuid(7)) @db.Uuid
+  email                     String               @unique
+  passwordHash              String               @map("password_hash")
+  status                    AccessStatus         @default(ACTIVE)
+  emailVerifiedAt           DateTime?            @map("email_verified_at") @db.Timestamptz(6)
+  verificationHash          String?              @map("verification_hash")
+  verificationExpiresAt     DateTime?            @map("verification_expires_at") @db.Timestamptz(6)
+  verificationAttempts      Int                  @default(0) @map("verification_attempts") @db.SmallInt
+  verificationFailuresDay   Int                  @default(0) @map("verification_failures_day") @db.SmallInt
+  verificationFailuresSince DateTime?            @map("verification_failures_since") @db.Timestamptz(6)
   /// Código de recuperação de senha (HMAC, spec 021); nunca em log, resposta nem métrica.
-  resetHash                 String?       @map("reset_hash")
-  resetExpiresAt            DateTime?     @map("reset_expires_at") @db.Timestamptz(6)
-  resetAttempts             Int           @default(0) @map("reset_attempts") @db.SmallInt
-  resetFailuresDay          Int           @default(0) @map("reset_failures_day") @db.SmallInt
-  resetFailuresSince        DateTime?     @map("reset_failures_since") @db.Timestamptz(6)
+  resetHash                 String?              @map("reset_hash")
+  resetExpiresAt            DateTime?            @map("reset_expires_at") @db.Timestamptz(6)
+  resetAttempts             Int                  @default(0) @map("reset_attempts") @db.SmallInt
+  resetFailuresDay          Int                  @default(0) @map("reset_failures_day") @db.SmallInt
+  resetFailuresSince        DateTime?            @map("reset_failures_since") @db.Timestamptz(6)
   /// Última empresa que a conta selecionou (spec 029): só uma dica de conveniência para abrir a empresa
   /// certa depois do login; nunca é autoridade (o `select` e o login revalidam o vínculo ativo).
-  lastCompanyId             String?       @map("last_company_id") @db.Uuid
-  createdAt                 DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastCompanyId             String?              @map("last_company_id") @db.Uuid
+  createdAt                 DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
   memberships               Membership[]
   subscription              Subscription?
-  lastCompany               Company?      @relation("AccountLastCompany", fields: [lastCompanyId], references: [id], onDelete: SetNull)
+  platformAuditEvents       PlatformAuditEvent[]
+  lastCompany               Company?             @relation("AccountLastCompany", fields: [lastCompanyId], references: [id], onDelete: SetNull)
 
   @@index([lastCompanyId])
   @@map("accounts")
@@ -304,14 +306,61 @@ model CompanyInvitation {
 
 /// Operador da plataforma (GLOBAL: não pertence a empresa alguma). E-mail único global.
 model PlatformAdmin {
-  id           String       @id @default(uuid(7)) @db.Uuid
-  email        String       @unique
-  passwordHash String       @map("password_hash")
-  status       AccessStatus @default(ACTIVE)
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
+  id                   String       @id @default(uuid(7)) @db.Uuid
+  email                String       @unique
+  passwordHash         String       @map("password_hash")
+  status               AccessStatus @default(ACTIVE)
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  /// Segredo TOTP CIFRADO (spec 044, AES-256-GCM, chaves PLATFORM_TOTP_KEYS); nulo = sem segundo fator.
+  /// Nunca em claro, em log, resposta ou métrica.
+  totpSecretCiphertext String?      @map("totp_secret_ciphertext")
+  /// Último passo TOTP aceito: o mesmo código não entra duas vezes.
+  totpLastStep         Int?         @map("totp_last_step")
+
+  auditEvents PlatformAuditEvent[]
 
   @@map("platform_admins")
+}
+
+enum PlatformAuditAction {
+  PLATFORM_LOGIN
+  PLATFORM_LOGOUT
+  COMPANY_SUSPENDED
+  COMPANY_REACTIVATED
+  ACCOUNT_EMAIL_VIEWED
+
+  @@map("platform_audit_action")
+}
+
+enum PlatformActionReason {
+  PAYMENT
+  ABUSE
+  OWNER_REQUEST
+  OTHER
+
+  @@map("platform_action_reason")
+}
+
+/// Trilha das ações do administrador da plataforma (GLOBAL, spec 044; imutável: só create e list).
+/// Sem texto livre, e-mail nem IP. subject_* dizem sobre quem foi a ação (não é dado da empresa).
+model PlatformAuditEvent {
+  id               String                @id @default(uuid(7)) @db.Uuid
+  adminId          String                @map("admin_id") @db.Uuid
+  action           PlatformAuditAction
+  subjectCompanyId String?               @map("subject_company_id") @db.Uuid
+  subjectAccountId String?               @map("subject_account_id") @db.Uuid
+  reason           PlatformActionReason?
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  admin          PlatformAdmin @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  subjectCompany Company?      @relation(fields: [subjectCompanyId], references: [id], onDelete: Restrict)
+  subjectAccount Account?      @relation(fields: [subjectAccountId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt, id])
+  @@index([subjectCompanyId])
+  @@index([subjectAccountId])
+  @@map("platform_audit_events")
 }
 
 enum ChannelConnectionStatus {
@@ -344,7 +393,7 @@ model ChannelConnection {
   tokenVersion              Int                     @default(1) @map("token_version")
   status                    ChannelConnectionStatus @default(CONNECTED)
   mode                      ChannelConnectionMode   @default(API_ONLY)
-  tokenExpiresAt           DateTime?               @map("token_expires_at")
+  tokenExpiresAt            DateTime?               @map("token_expires_at")
   tokenInvalidAt            DateTime?               @map("token_invalid_at")
   createdAt                 DateTime                @default(now()) @map("created_at")
   updatedAt                 DateTime                @updatedAt @map("updated_at")

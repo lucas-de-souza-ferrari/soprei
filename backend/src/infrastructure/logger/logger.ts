@@ -54,6 +54,11 @@ const REDACTED_KEYS = [
   'formToken',
   'phone',
   'companyName',
+  // Admin da plataforma (spec 044, E1): segredo do segundo fator, as chaves dele e o segredo da sessão.
+  'totpSecret',
+  'totpSecretCiphertext',
+  'PLATFORM_TOTP_KEYS',
+  'platformSession',
 ] as const;
 
 /**

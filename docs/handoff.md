@@ -4,16 +4,17 @@
 
 ## Última sessão
 
-2026-11-24, Claude Code (Opus 5.5, spec-writer). Escrita a **[spec 044](specs/044-admin-da-plataforma.md), admin da plataforma** (painel do dono como frontend separado, `admin/`), status `aprovada` (2026-11-24, D1 a D12 como recomendadas; domínio trocado pelo dono para `soadm.soprei.com`), na branch local **`spec/044-admin-da-plataforma`, sem push, criada sobre `spec/035-e4-fatiar-atendimento`** (topo da pilha), porque `docs/areas/` e o índice `docs/specs/README.md` da 042 ainda não estão na `main`; se a pilha entrar por squash, rebase antes do PR. Só documentação (spec, linha no índice, este arquivo); nenhum código.
+2026-11-24, Claude Code (Opus 5.5, spec-writer e implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** escrita e aprovada pelo dono no mesmo dia (D1 a D12 como recomendadas; domínio trocado para `soadm.soprei.com`), e **E1 implementada**. Duas branches locais **empilhadas, sem push**, sobre `spec/035-e4-fatiar-atendimento` (topo da pilha anterior; `docs/areas/` e o índice da 042 ainda não estão na `main`):
 
-- **Próximo passo:** implementar a E1 (entrada do dono: sessão por cookie `__Host-` com TOTP, `PlatformAuditEvent`), numa branch própria; cada etapa passa pelo `reviewer`. Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
-- **Achado no código (vira a D8):** `GET /admin/companies` devolve o texto da `persona` ao `PlatformAdmin` e o `PATCH` a aceita, embora a regra seja que a plataforma não lê conteúdo das empresas.
-- **A pilha anterior** (042 E1 e E2, 043, 035 e 035 E4) está nos PRs #16 a #20, ainda sem merge; o detalhe está no "Registro da implementação" de cada spec.
+- **`spec/044-admin-da-plataforma`:** só documentação (spec, índice, `context.md`, este arquivo).
+- **`spec/044-e1-entrada-do-dono` (E1):** entrada do dono por cookie `__Host-soprei_platform` com segundo fator TOTP (`/platform/auth/login|logout|session`), cadastro do fator só pela CLI (`pnpm auth:cli enroll-platform-totp`), sessão no Redis, trilha `PlatformAuditEvent` (model global), login Bearer da plataforma exigindo o código com a chave ligada. Tudo atrás de `PLATFORM_ADMIN_ENABLED` (padrão `false`); variáveis novas no `.env.example`. **Migration aditiva** `20261124100000_platform_admin_second_factor`. Regras em `docs/areas/autenticacao-e-papeis.md` ("Entrada do admin da plataforma"). Desvios registrados na spec (colunas `subject_*`, FK da conta `SET NULL` para não travar o expurgo da 021).
+- **Verde localmente (Windows, Node 26.13.1):** typecheck, build, lint, `format:check` e 244 unitários das áreas tocadas, mais os gates de docs, vocabulário e migrations. **Não rodado:** os dois testes de integração novos (sem `.env.test` aqui) e as suítes inteiras: CI.
+- **Falta:** push e PR das duas branches (depois da pilha #16 a #20); CI; `reviewer` na E1 (segurança); depois a E2 (leituras agregadas e suspender/reativar). Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
 
 ## Onde estamos
 
 - **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Aprovada, a implementar: 044 (admin da plataforma). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na branch). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes

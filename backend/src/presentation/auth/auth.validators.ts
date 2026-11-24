@@ -14,8 +14,17 @@ export const loginBodySchema = z
   .object({ companySlug: companySlugSchema, email: emailSchema, password: loginPasswordSchema })
   .strict();
 
+/** Código de 6 dígitos do aplicativo autenticador (spec 044). Formato inválido é 400 e não conta como falha. */
+export const totpCodeSchema = z.string().regex(/^[0-9]{6}$/);
+
+/** `code` só é exigido com o segundo fator ligado (spec 044); a regra fica no serviço. */
 export const platformLoginBodySchema = z
-  .object({ email: emailSchema, password: loginPasswordSchema })
+  .object({ email: emailSchema, password: loginPasswordSchema, code: totpCodeSchema.optional() })
+  .strict();
+
+/** Entrada no admin da plataforma pelo cookie (spec 044, E1): o código é sempre obrigatório. */
+export const platformSessionLoginBodySchema = z
+  .object({ email: emailSchema, password: loginPasswordSchema, code: totpCodeSchema })
   .strict();
 
 /** O refresh é opaco (`<escopo>.<sessionId>.<segredo>`); o serviço confere o formato. */

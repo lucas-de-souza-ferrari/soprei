@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { CredentialCipher } from '../../application/ports/credential-cipher.js';
-import type { CompanyId } from '../../domain/index.js';
+import type { PlatformSecretCipher } from '../../application/ports/platform-secret-cipher.js';
+import type { CompanyId, PlatformAdminId } from '../../domain/index.js';
 import {
   CredentialDecryptionError,
   type CredentialDecryptionReason,
@@ -56,6 +57,68 @@ function aad(companyId: CompanyId, keyId: string): Buffer {
   return Buffer.from(`${companyId}|${keyId}`, 'utf8');
 }
 
+/** Cifra com a chave ativa e a AAD que `aadFor(keyId)` devolve (núcleo comum das duas cifras). */
+function seal(
+  active: CredentialKey,
+  aadFor: (keyId: string) => Buffer,
+  plain: SecretString,
+): string {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv(ALGORITHM, active.key, iv, { authTagLength: TAG_BYTES });
+  cipher.setAAD(aadFor(active.keyId));
+  const body = Buffer.concat([cipher.update(plain.reveal(), 'utf8'), cipher.final()]);
+  return [
+    VERSION,
+    active.keyId,
+    iv.toString('base64url'),
+    cipher.getAuthTag().toString('base64url'),
+    body.toString('base64url'),
+  ].join('.');
+}
+
+/** Decifra `v1.<keyId>.<iv>.<tag>.<texto>`; lança `CredentialDecryptionError` (sem o texto). */
+function open(
+  keys: ReadonlyMap<string, Buffer>,
+  aadFor: (keyId: string) => Buffer,
+  stored: string,
+): SecretString {
+  const parts = stored.split('.');
+  const [version, keyId, ivText, tagText, bodyText] = parts;
+  if (
+    parts.length !== 5 ||
+    version !== VERSION ||
+    keyId === undefined ||
+    ivText === undefined ||
+    tagText === undefined ||
+    bodyText === undefined
+  ) {
+    throw fail('malformed');
+  }
+  const key = keys.get(keyId);
+  if (key === undefined) throw fail('unknown_key');
+  const iv = Buffer.from(ivText, 'base64url');
+  const tag = Buffer.from(tagText, 'base64url');
+  if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) throw fail('malformed');
+  try {
+    const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_BYTES });
+    decipher.setAAD(aadFor(keyId));
+    decipher.setAuthTag(tag);
+    const plain = Buffer.concat([
+      decipher.update(Buffer.from(bodyText, 'base64url')),
+      decipher.final(),
+    ]);
+    return new SecretString(plain.toString('utf8'));
+  } catch {
+    throw fail('tampered');
+  }
+}
+
+function activeKey(keys: readonly CredentialKey[], activeKeyId: string): CredentialKey {
+  const active = keys.find((entry) => entry.keyId === activeKeyId);
+  if (active === undefined) throw new Error('chave ativa de credenciais ausente da lista');
+  return active;
+}
+
 /**
  * AES-256-GCM (spec 015): IV aleatório de 12 bytes por cifra, tag de 16 bytes, formato
  * `v1.<keyId>.<iv>.<tag>.<ciphertext>` (base64url). A AAD é `companyId|keyId`. Chaves com `keyId`:
@@ -67,55 +130,42 @@ export class AesGcmCredentialCipher implements CredentialCipher {
 
   constructor(keys: readonly CredentialKey[], activeKeyId: string) {
     this.keys = new Map(keys.map((entry) => [entry.keyId, entry.key]));
-    const active = keys.find((entry) => entry.keyId === activeKeyId);
-    if (active === undefined) throw new Error('chave ativa de credenciais ausente da lista');
-    this.active = active;
+    this.active = activeKey(keys, activeKeyId);
   }
 
   encrypt(companyId: CompanyId, plain: SecretString): string {
-    const iv = randomBytes(IV_BYTES);
-    const cipher = createCipheriv(ALGORITHM, this.active.key, iv, { authTagLength: TAG_BYTES });
-    cipher.setAAD(aad(companyId, this.active.keyId));
-    const body = Buffer.concat([cipher.update(plain.reveal(), 'utf8'), cipher.final()]);
-    return [
-      VERSION,
-      this.active.keyId,
-      iv.toString('base64url'),
-      cipher.getAuthTag().toString('base64url'),
-      body.toString('base64url'),
-    ].join('.');
+    return seal(this.active, (keyId) => aad(companyId, keyId), plain);
   }
 
   decrypt(companyId: CompanyId, stored: string): SecretString {
-    const parts = stored.split('.');
-    const [version, keyId, ivText, tagText, bodyText] = parts;
-    if (
-      parts.length !== 5 ||
-      version !== VERSION ||
-      keyId === undefined ||
-      ivText === undefined ||
-      tagText === undefined ||
-      bodyText === undefined
-    ) {
-      throw fail('malformed');
-    }
-    const key = this.keys.get(keyId);
-    if (key === undefined) throw fail('unknown_key');
-    const iv = Buffer.from(ivText, 'base64url');
-    const tag = Buffer.from(tagText, 'base64url');
-    if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) throw fail('malformed');
-    try {
-      const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_BYTES });
-      decipher.setAAD(aad(companyId, keyId));
-      decipher.setAuthTag(tag);
-      const plain = Buffer.concat([
-        decipher.update(Buffer.from(bodyText, 'base64url')),
-        decipher.final(),
-      ]);
-      return new SecretString(plain.toString('utf8'));
-    } catch {
-      throw fail('tampered');
-    }
+    return open(this.keys, (keyId) => aad(companyId, keyId), stored);
+  }
+}
+
+/**
+ * O mesmo formato para o segredo TOTP do administrador da plataforma (spec 044, E1), com chaves
+ * próprias (`PLATFORM_TOTP_KEYS`) e AAD `platform-totp|<adminId>|<keyId>`: o texto copiado para a
+ * linha de outro administrador, ou para uma credencial do canal, não decifra.
+ */
+export class AesGcmPlatformSecretCipher implements PlatformSecretCipher {
+  private readonly keys: ReadonlyMap<string, Buffer>;
+  private readonly active: CredentialKey;
+
+  constructor(keys: readonly CredentialKey[], activeKeyId: string) {
+    this.keys = new Map(keys.map((entry) => [entry.keyId, entry.key]));
+    this.active = activeKey(keys, activeKeyId);
+  }
+
+  private static aad(adminId: PlatformAdminId, keyId: string): Buffer {
+    return Buffer.from(`platform-totp|${adminId}|${keyId}`, 'utf8');
+  }
+
+  encrypt(adminId: PlatformAdminId, plain: SecretString): string {
+    return seal(this.active, (keyId) => AesGcmPlatformSecretCipher.aad(adminId, keyId), plain);
+  }
+
+  decrypt(adminId: PlatformAdminId, stored: string): SecretString {
+    return open(this.keys, (keyId) => AesGcmPlatformSecretCipher.aad(adminId, keyId), stored);
   }
 }
 
