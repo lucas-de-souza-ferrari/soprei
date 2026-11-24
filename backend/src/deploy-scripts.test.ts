@@ -204,7 +204,13 @@ describe('deploy.sh (spec 037, E1)', () => {
   it('.gitattributes força LF e o .gitignore cobre as pastas de espera do deploy', () => {
     assert.match(read('.gitattributes'), /eol=lf/);
     const ignore = read('.gitignore');
-    for (const entry of ['backend/dist.next', 'backend/dist.prev', 'frontend/releases']) {
+    for (const entry of [
+      'backend/dist.next',
+      'backend/dist.prev',
+      'frontend/releases',
+      'admin/releases',
+      'admin/.dist.new',
+    ]) {
       assert.ok(ignore.split('\n').includes(entry), `.gitignore sem ${entry}`);
     }
   });
@@ -741,5 +747,143 @@ describe('documentação operacional (spec 037)', () => {
       assert.ok(doc.includes(text), `docs/ops/deploy.md sem ${text}`);
     }
     assert.ok(!doc.includes('E3, adiada'), 'a linha antiga sobre a E3 adiada precisa sair');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Spec 044, E4: publicação do admin da plataforma
+// ---------------------------------------------------------------------------------------------
+
+const ADMIN_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+
+/** Linhas de configuração do nginx, sem comentários. */
+function nginxCode(path: string): string {
+  return read(path)
+    .split('\n')
+    .filter((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
+    .join('\n');
+}
+
+/** Corpos dos blocos `location ... { ... }` (um nível; os exemplos não aninham). */
+function locationsOf(conf: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const match of conf.matchAll(/^\s+location ([^{]+?) \{\n([\s\S]*?)^\s+\}$/gm)) {
+    map.set((match[1] ?? '').trim(), match[2] ?? '');
+  }
+  return map;
+}
+
+describe('admin da plataforma: nginx (spec 044, E4)', () => {
+  for (const [file, port, root, hostname] of [
+    ['deploy/nginx/admin.conf.example', '3001', '/var/www/soprei/admin/dist', 'soadm.soprei.com'],
+    [
+      'deploy/nginx/admin-staging.conf.example',
+      '3002',
+      '/var/www/soprei-staging/admin/dist',
+      '<HOSTNAME_DO_ADMIN_STAGING>',
+    ],
+  ] as const) {
+    it(`${file}: hostname próprio, admin/dist, cabeçalhos do E3 e só /api/platform/ para a API`, () => {
+      const conf = nginxCode(file);
+      assert.match(
+        conf,
+        new RegExp(`^\\s+server_name ${hostname.replace(/[.<>]/g, '\\$&')};$`, 'm'),
+      );
+      assert.match(conf, new RegExp(`^\\s+root ${root.replace(/[./]/g, '\\$&')};$`, 'm'));
+      // Cabeçalhos no nível do server (always): um add_header dentro de location apagaria todos.
+      for (const header of [
+        `add_header Content-Security-Policy "${ADMIN_CSP}" always;`,
+        'add_header X-Frame-Options "DENY" always;',
+        'add_header Referrer-Policy "no-referrer" always;',
+        'add_header X-Robots-Tag "noindex, nofollow" always;',
+      ]) {
+        assert.ok(conf.includes(`\n    ${header}\n`), `${file} sem ${header} no server`);
+      }
+      const locations = locationsOf(conf);
+      for (const [path, body] of locations) {
+        assert.doesNotMatch(body, /add_header/, `${file}: add_header dentro de location ${path}`);
+      }
+      // Sem webhooks; a API só pelo prefixo do admin, para o backend do mesmo ambiente, sem Bearer.
+      assert.doesNotMatch(conf, /webhooks/);
+      const proxied = conf.split('\n').filter((line) => line.includes('proxy_pass'));
+      assert.deepEqual(
+        proxied.map((line) => line.trim()),
+        [`proxy_pass http://127.0.0.1:${port}/platform/;`],
+      );
+      assert.match(locations.get('/api/platform/') ?? '', /proxy_set_header Authorization "";/);
+      assert.match(locations.get('/api/') ?? '', /^\s+return 404;\s*$/);
+      assert.match(locations.get('/') ?? '', /try_files \$uri \/index\.html;/);
+    });
+  }
+
+  it('o admin do staging tem a senha básica; o da produção não', () => {
+    assert.match(nginxCode('deploy/nginx/admin-staging.conf.example'), /^\s+auth_basic "[^"]+";$/m);
+    assert.doesNotMatch(nginxCode('deploy/nginx/admin.conf.example'), /auth_basic|3002/);
+    assert.doesNotMatch(nginxCode('deploy/nginx/admin-staging.conf.example'), /:3001/);
+  });
+
+  it('o site (produção e staging) responde 404 em /api/platform/ (defesa em profundidade)', () => {
+    for (const file of [
+      'deploy/nginx/production.conf.example',
+      'deploy/nginx/staging.conf.example',
+    ]) {
+      const locations = locationsOf(nginxCode(file));
+      assert.match(locations.get('/api/platform/') ?? '', /^\s+return 404;\s*$/, file);
+    }
+  });
+});
+
+describe('admin da plataforma: deploy.sh (spec 044, E4)', () => {
+  it('compila o admin junto com o site, na mesma release, só quando a versão tem admin/', () => {
+    const build = functionBody('build_frontend');
+    assert.match(build, /admin\/package\.json/);
+    assert.match(build, /build_static_app frontend soprei-frontend/);
+    assert.match(build, /build_static_app admin soprei-admin/);
+    const app = functionBody('build_static_app');
+    assert.match(app, /exec tsc --noEmit/);
+    assert.match(app, /releases\/\$NEW_RELEASE/);
+    assert.match(app, /chmod -R u=rwX,go=rX/);
+  });
+
+  it('troca, devolve e poda o site e o admin pela mesma lista (mesmo rollback)', () => {
+    for (const name of ['switch_site', 'restore_site', 'prune_releases', 'cleanup_waiting']) {
+      assert.match(
+        functionBody(name),
+        /"\$\{STATIC_APPS\[@\]\}"/,
+        `${name} não percorre STATIC_APPS`,
+      );
+    }
+    assert.match(functionBody('rollback_code'), /restore_site \|\| return 1/);
+    const flow = functionBody('run_deploy');
+    assert.match(flow, /admin_ok \|\| post_swap_failure/);
+    assert.ok(flow.indexOf('site_ok ||') < flow.indexOf('admin_ok ||'));
+    assert.match(functionBody('load_target'), /ADMIN_HOST\) ADMIN_HOST=\$value/);
+  });
+
+  it('o filtro de redação também cobre nomes no plural, como PLATFORM_TOTP_KEYS', () => {
+    assert.match(functionBody('redact'), /\(KEY\|SECRET\|TOKEN\|PSWD\|PASSWORD\)S\?\)=/);
+  });
+});
+
+describe('documentação do admin da plataforma (spec 044, E4)', () => {
+  it('docs/ops/admin.md cobre DNS, certificado, nginx, .env, criar o admin, o fator e a lista de IPs', () => {
+    const doc = read('docs/ops/admin.md');
+    for (const text of [
+      'soadm.soprei.com',
+      'certbot',
+      'deploy/nginx/admin.conf.example',
+      'PLATFORM_ADMIN_ENABLED',
+      'ADMIN_ORIGIN',
+      'PLATFORM_TOTP_KEYS',
+      'PLATFORM_TOTP_ACTIVE_KEY_ID',
+      'create-platform-admin',
+      'enroll-platform-totp',
+      'allow',
+      'ADMIN_HOST',
+      '--force',
+    ]) {
+      assert.ok(doc.includes(text), `docs/ops/admin.md sem ${text}`);
+    }
   });
 });

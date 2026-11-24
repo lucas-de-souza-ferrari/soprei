@@ -61,6 +61,12 @@ server {
         proxy_set_header Authorization "";
     }
 
+    # Admin da plataforma (spec 044, E4): /platform/* só pelo hostname do admin do staging
+    # (deploy/nginx/admin-staging.conf.example).
+    location /api/platform/ {
+        return 404;
+    }
+
     # Webhooks (no staging o canal WhatsApp e o checkout ficam desligados; a rota existe só por paridade).
     location /webhooks/ {
         proxy_pass http://127.0.0.1:3002;
