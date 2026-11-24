@@ -45,7 +45,7 @@ Este arquivo guarda só o que vale para qualquer tarefa. As regras de cada área
 
 Os caminhos sem `frontend/` são relativos a `backend/src/`. Três casos atravessam as áreas:
 
-- **`application/attendance/attendance.service.ts` é ponto de cruzamento:** antes de mexer nele, leia `canal-whatsapp.md` (agrupamento, pausa da IA), `cobranca.md` (medição e cota antes do provedor), `painel.md` (notificação na transação da resposta), `conhecimento-e-estoque.md`, `agenda.md` e `llm.md`.
+- **`application/attendance/attendance.service.ts` (e as partes dele desde a spec 035, E4: `attendance.types.ts`, `attendance-prompt.ts`, `attendance-llm.ts` e `attendance-takeover.ts`) é ponto de cruzamento:** antes de mexer nele, leia `canal-whatsapp.md` (agrupamento, pausa da IA), `cobranca.md` (medição e cota antes do provedor), `painel.md` (notificação na transação da resposta), `conhecimento-e-estoque.md`, `agenda.md` e `llm.md`.
 - **Log, métrica ou uso de Redis novo, em qualquer área:** leia "Rate limiting" e "Observabilidade" em `http-base.md` (lista do `redact`, nada de URL crua, id ou IP em log e label, erro do ioredis só por `describeRedisError`) e os itens "Privacidade" de `autenticacao-e-papeis.md` (e-mail, senha, hash e tokens) e de `canal-whatsapp.md` (o `wamid` carrega o telefone: logue `messageRef`).
 - **Resposta de API ou tela nova com dado de contato:** leia "Painel de conversas" em `painel.md` (`contactRef` e `externalId` nunca saem; o contato aparece só pelo rótulo mascarado).
 

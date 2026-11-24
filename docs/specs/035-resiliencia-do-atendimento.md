@@ -1,6 +1,6 @@
 # 035 — Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 a E3 implementadas, aguardando CI e `reviewer`; E4 não feita)
+- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 a E4 implementadas, revisadas as E1 a E3; aguardando CI)
 - **Branch:** `spec/035-resiliencia-do-atendimento` (uma branch por etapa, se o dono preferir PRs menores)
 - **Depende de:** 011 (canal e fila), 013 (agrupamento, `flush`), 015 (credencial por empresa, `TOKEN_INVALID`), 031 (retomada depois do pagamento), 034 (concorrência e guarda do processo), 039 (pausa da IA).
 - **Numeração:** o número 035 estava reservado para "eficiência do turno". O dono priorizou em 2026-11-23 a parte de **resiliência**; a parte de eficiência (leituras repetidas por job, prompt caching, índice de busca) fica em "Fora de escopo" e ganha número novo quando for a vez.
@@ -112,8 +112,8 @@ E3:
 
 E4:
 
-- [ ] `attendance.service.ts` tem menos de 900 linhas e as mesmas assinaturas públicas (teste de texto). *(E4 não feita)*
-- [ ] `pnpm test` e `pnpm test:integration` no CI com as mesmas contagens de antes da E4; nenhum arquivo de teste alterado além de imports. *(E4 não feita)*
+- [x] `attendance.service.ts` tem menos de 900 linhas e as mesmas assinaturas públicas (teste de texto). *(`attendance-structure.test.ts`, passando: 881 linhas)*
+- [ ] `pnpm test` e `pnpm test:integration` no CI com as mesmas contagens de antes da E4; nenhum arquivo de teste alterado além de imports. *(unitários locais: 1.919 verdes e 11 pulados, antes e depois, sem alterar nenhum teste; a integração, só no CI)*
 
 Todas: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`; inventário de variáveis em `.env.example`; `docs/areas/canal-whatsapp.md` atualizado.
 
@@ -197,4 +197,12 @@ O `reviewer` não aprovou a primeira versão: três bloqueantes e quatro importa
   - **Testes novos:** unitários (processador: marca e não reenvio; atendimento: resposta do simulador com telefone não é reenviada), `message-delivery.integration.test.ts` (origem, marca, isolamento entre empresas e o CHECK) e um cenário a mais em `attendance-resume-reader.integration.test.ts`.
   - **Desvio declarado:** a spec dizia "nenhuma migration"; a correção do I4 exige uma, aditiva e compatível com a versão anterior do código (o código antigo ignora a coluna).
 - **Não verificado:** os testes de integração (só no CI), planos de consulta, o efeito da D6 nos testes de privacidade e de coexistência de `whatsapp-channel.integration.test.ts` (que passam por um reenvio a mais).
+
+### E4 (2026-11-24, Claude Code, Opus 5.5, branch `spec/035-e4-fatiar-atendimento`, empilhada sobre a 035)
+
+- **Só movimentação, sem mudar a lógica.** O `attendance.service.ts` (2.034 linhas) virou cinco arquivos em `application/attendance/`: `attendance.types.ts` (tipos, constantes e contratos), `attendance-prompt.ts` (`buildSystemPrompt`, estilo e a classe `AttendancePrompt`: conhecimento, agenda e ferramentas), `attendance-llm.ts` (classe `AttendanceLlm`: histórico, chamada ao provedor, texto final, cotas, medição e métricas do modelo), `attendance-takeover.ts` (classe `AttendanceTakeover`: eco e pausa da 039 e o pedido de humano da 038) e o serviço, com 881 linhas, que compõe as três classes.
+- **Desvios da tabela da E4:** (1) o pedido de humano (038) foi para `attendance-takeover.ts` (atendimento humano), não ficou no serviço: sem isso o serviço passava das 900 linhas; (2) `toReply`, `toResult`, `selectBatch` e o sinal interno da pausa continuam no serviço; (3) o serviço **reexporta** o que exportava (`export *` de `attendance.types.ts`, mais `buildSystemPrompt`, `ATTENDANCE_STYLE_INSTRUCTION` e `humanEchoContent`), então nenhum chamador nem teste mudou de import.
+- **Conferência linha a linha:** toda linha não vazia do serviço antigo (1.916) existe, igual, num dos cinco arquivos, descontados `private`, `export`, o prefixo `this.llm.`/`this.prompt.`/`this.takeover.` nas chamadas e os imports. Ausentes: 0.
+- **Teste novo:** `attendance-structure.test.ts` (tamanho do serviço, interface pública da classe, reexportações e composição).
+- **Verificado localmente (Windows, Node 26.13.1):** `typecheck`, `lint`, `format:check`; todos os unitários do backend com a mesma contagem de antes (1.919 verdes, 11 pulados), mais os 4 do teste novo. **Não rodado:** integração (só no CI).
 
