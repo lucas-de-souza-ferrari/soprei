@@ -85,3 +85,72 @@ describe('estrutura da documentação dos agentes (spec 042)', () => {
     }
   });
 });
+
+const HANDOFF_MAX_BYTES = 20_000;
+const HANDOFF_SECTIONS = [
+  'Última sessão',
+  'Onde estamos',
+  'Passos do dono pendentes',
+  'Próximo passo',
+  'Decisões do dono que não são óbvias no código',
+  'Armadilhas',
+  'O que não vem pelo git',
+  'Pendências abertas',
+];
+const STATUS_LINE =
+  /^- \*\*Status:\*\* (esboço|rascunho|aprovada|em implementação|concluída)(?=[ (.;,]|$)/m;
+const specFiles = tracked('docs/specs').filter((path) => /^docs\/specs\/\d{3}-.+\.md$/.test(path));
+
+describe('passagem de turno, specs e sobras (spec 042)', () => {
+  it('o handoff guarda só o estado atual: teto de tamanho e seções fixas, nesta ordem', () => {
+    const handoff = read('docs/handoff.md');
+    const size = Buffer.byteLength(handoff);
+    assert.ok(
+      size <= HANDOFF_MAX_BYTES,
+      `docs/handoff.md tem ${String(size)} bytes (teto ${String(HANDOFF_MAX_BYTES)}): substitua "Última sessão" em vez de empilhar`,
+    );
+    assert.ok(!handoff.startsWith(BOM), 'docs/handoff.md começa com BOM');
+    const titles = [...handoff.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+    assert.deepEqual(titles, HANDOFF_SECTIONS);
+  });
+
+  it('a linha de status de toda spec começa por uma das cinco palavras do modelo', () => {
+    assert.ok(specFiles.length >= 41, 'docs/specs tem as specs');
+    for (const path of specFiles) {
+      assert.match(read(path), STATUS_LINE, `${path}: status fora do vocabulário`);
+    }
+  });
+
+  it('o índice docs/specs/README.md tem uma linha por spec, com o status da própria spec', () => {
+    const index = read('docs/specs/README.md');
+    const rows = new Map(
+      [...index.matchAll(/^\| \[\d{3}\]\(([^)]+)\) \| .* \| ([^|]+) \| [^|]* \|$/gm)].map(
+        (match) => [`docs/specs/${match[1] ?? ''}`, (match[2] ?? '').trim()],
+      ),
+    );
+    assert.deepEqual([...rows.keys()].sort(), [...specFiles].sort());
+    for (const path of specFiles) {
+      const status = STATUS_LINE.exec(read(path))?.[1];
+      assert.equal(rows.get(path), status, `${path}: o índice diz outro status`);
+    }
+  });
+
+  it('as sobras removidas não voltam a ser versionadas', () => {
+    assert.deepEqual(tracked('.tmp-onb.txt', 'lab'), []);
+  });
+
+  it('todo link relativo do README aponta para algo versionado', () => {
+    const readme = read('README.md');
+    const everything = tracked();
+    const links = [...readme.matchAll(/\]\(([^)#]+)\)/g)]
+      .map((match) => match[1] ?? '')
+      .filter((target) => !/^[a-z]+:/.test(target));
+    assert.ok(links.length >= 5, 'o README aponta para a documentação');
+    for (const target of links) {
+      const found = target.endsWith('/')
+        ? everything.some((path) => path.startsWith(target))
+        : everything.includes(target);
+      assert.ok(found, `README.md aponta para ${target}, que não existe`);
+    }
+  });
+});

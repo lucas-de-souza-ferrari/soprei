@@ -1,14 +1,40 @@
 # Soprei
 
-O repositório reúne o servidor em `backend/` e o site de apresentação em `frontend/`. As decisões e o roadmap ficam em [docs/context.md](docs/context.md).
+Atendimento por inteligência artificial no WhatsApp para várias empresas. Cada empresa conecta o próprio número, escreve a persona do atendente, carrega documentos e estoque, configura a agenda e acompanha as conversas por um painel na web.
 
-Com Node 22 ou superior e pnpm instalado, execute `pnpm install` na raiz. Para configurar o servidor, crie `backend/.env` e `backend/.env.test` a partir dos exemplos na mesma pasta e siga as instruções de ambiente em [AGENTS.md](AGENTS.md); então execute `pnpm db:generate` na raiz. Em instalações anteriores à spec 016, mova os arquivos locais `.env` e `.env.test` da raiz para `backend/`; eles não devem ser versionados.
+## O que há no repositório
 
-- `pnpm dev`: servidor backend.
-- `pnpm dev:frontend`: site local.
-- `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check` e `pnpm test`: verificações dos dois pacotes.
-- `pnpm test:integration`: integração do backend, que exige PostgreSQL e Redis locais configurados conforme `AGENTS.md`.
+| Pasta       | Conteúdo                                                                                       |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| `backend/`  | API e worker da fila (Node.js, TypeScript, Fastify, Prisma sobre PostgreSQL, Redis e BullMQ)   |
+| `frontend/` | Site, telas de conta e painel da empresa (React, Vite, Tailwind)                               |
+| `deploy/`   | Script de deploy com rollback, programa de entrada do deploy automático e exemplos do servidor |
+| `docs/`     | Contexto, specs, regras por área, operação e passagem de turno                                 |
 
-A página de apresentação é estática. A publicação e a hospedagem serão definidas separadamente.
+## Documentação
 
-O cadastro/login e a área de empresas da spec 017 dependem do backend. Configure `ACCOUNTS_ENABLED=true`, `APP_ORIGIN` com a origem exata do Vite, e o SMTP (`EMAIL_PROVIDER_*`, Mailpit no desenvolvimento; ver `backend/.env.example`) em `backend/.env`. Copie `frontend/.env.example` para `frontend/.env` se o backend estiver em outra porta. Migre o banco somente após conferir colisões de e-mails legados; não una contas automaticamente. O cadastro pede e-mail/senha; copie o código recebido por e-mail na tela de confirmação. Para contas migradas, use o reenvio com e-mail e senha anteriores. Sem SMTP configurado, mantenha o modo novo desligado; testes nunca exigem conta real.
+- [AGENTS.md](AGENTS.md): regras que valem para qualquer tarefa (stack, fluxo de trabalho, comandos, regras invariantes, arquitetura, isolamento entre empresas). Leitura obrigatória para pessoas e agentes.
+- [docs/areas/](docs/areas/): regras de cada área (canal WhatsApp, cobrança, agenda, painel...). A seção "Áreas" do `AGENTS.md` diz qual ler.
+- [docs/context.md](docs/context.md): objetivo, decisões, roadmap e histórico de decisões.
+- [docs/specs/README.md](docs/specs/README.md): índice das specs e o estado de cada uma. Nada é implementado sem spec aprovada.
+- [docs/handoff.md](docs/handoff.md): estado da última sessão de trabalho e passos pendentes.
+- [docs/ops/deploy.md](docs/ops/deploy.md) e [docs/ops/staging.md](docs/ops/staging.md): operação do servidor.
+
+## Rodar localmente
+
+Requisitos: Node.js na versão do `.nvmrc` (22 ou superior funciona), pnpm, PostgreSQL e Redis nativos (sem Docker).
+
+1. `pnpm install` na raiz.
+2. Crie `backend/.env` e `backend/.env.test` a partir dos exemplos da mesma pasta e prepare o banco conforme "Ambiente local" no [AGENTS.md](AGENTS.md). Esses arquivos nunca são versionados.
+3. `pnpm db:generate` e `pnpm db:migrate:deploy`.
+4. `pnpm dev` (backend) e `pnpm dev:frontend` (site). Se o backend estiver em outra porta, copie `frontend/.env.example` para `frontend/.env`.
+
+O cadastro, o login e o painel exigem `ACCOUNTS_ENABLED=true`, `APP_ORIGIN` com a origem exata do site e um SMTP (Mailpit no desenvolvimento); ver `backend/.env.example`. Canal WhatsApp, IA real, cobrança e checkout são desligados por padrão e têm as próprias variáveis.
+
+## Verificações
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm format:check` e `pnpm build`: os dois pacotes.
+- `pnpm test`: testes unitários. `pnpm test:integration`: integração do backend (exige PostgreSQL e Redis locais; só toca `soprei_test` e o Redis `/15`).
+- `pnpm --filter soprei-frontend test:browser`: Playwright.
+
+O CI do GitHub Actions é a palavra final. Com um servidor configurado (`docs/ops/deploy.md`) e o interruptor `DEPLOY_ENABLED` ligado, cada merge na `main` com o CI verde é publicado pelo deploy automático (`.github/workflows/deploy.yml`).

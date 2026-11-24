@@ -1,6 +1,6 @@
 # 030 — Primeiros passos: assistente de configuração (wizard) e lista "Configuração"
 
-- **Status:** aprovada (2026-11-06, dono: "Aprovo tudo", com D1 a D13 como recomendadas)
+- **Status:** concluída (na `main`; status normalizado em 2026-11-23, spec 042). Antes: aprovada (2026-11-06, dono: "Aprovo tudo", com D1 a D13 como recomendadas)
 - **Branch:** `spec/030-wizard-onboarding`
 - **Depende de:** 018 (beUI, tokens, contraste, `localStorage` só com o tema), 023 (persona, Testar), 025 (papéis e convite), 026 (conhecimento, estoque, exemplo, importação CSV), 027 (agenda e exemplo), 029 (shell do painel, empresa sempre aberta)
 - **Observação de numeração:** conferido em `docs/specs/` (existem de 001 a 029; **não há arquivo 030**) e em `docs/context.md` (nenhuma spec 030 reservada; a única ocorrência de "030" é o nome de uma migration). A 028 (a IA marca horários) e a 029 (redesign do painel) já existem e estão concluídas; esta é a **030**. Esta spec **passa pelo `reviewer`** antes do merge (permissão nova, rota nova sobre dados da empresa).
