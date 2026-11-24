@@ -78,6 +78,18 @@ describe('config do admin da plataforma (spec 044, E1)', () => {
     assert.equal(inactive.includes(KEY), false);
   });
 
+  it('desligado: chaves presentes também são conferidas (a CLI monta a cifra com elas)', () => {
+    const off = { PLATFORM_TOTP_KEYS: `k1:${KEY}`, PLATFORM_TOTP_ACTIVE_KEY_ID: 'k1' };
+    assert.equal(value(off).PLATFORM_ADMIN_ENABLED, false);
+    const bad = refused({ ...off, PLATFORM_TOTP_KEYS: 'k1:curta' });
+    assert.match(bad, /PLATFORM_TOTP_KEYS/);
+    assert.equal(bad.includes('curta'), false);
+    assert.match(
+      refused({ ...off, PLATFORM_TOTP_ACTIVE_KEY_ID: 'k2' }),
+      /PLATFORM_TOTP_ACTIVE_KEY_ID/,
+    );
+  });
+
   it('teto da sessão menor que o prazo ocioso é recusado', () => {
     assert.match(
       refused({

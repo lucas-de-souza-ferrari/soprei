@@ -117,7 +117,12 @@ export type InvitationEmailResult = 'sent' | 'failed' | 'skipped';
  * Pedido de contato comercial (spec 040, E4). Conjunto fixo; nunca nome, e-mail, telefone nem texto. `capped` é a
  * fila de envios cheia; `daily_cap` é o teto global diário (o alerta do dono para pedidos perdidos).
  */
-/** Sessões do admin da plataforma pelo cookie (spec 044, E1). */
+export type SalesContactResult =
+  'sent' | 'failed' | 'spam' | 'too_fast' | 'capped' | 'daily_cap' | 'invalid' | 'expired';
+/**
+ * Sessões do admin da plataforma pelo cookie (spec 044, E1). `expired` é "vencida ou desconhecida": um
+ * cookie bem formado que não existe no Redis conta aqui.
+ */
 export type PlatformSessionResult = 'created' | 'expired' | 'revoked' | 'rejected';
 /** Ações gravadas na trilha da plataforma (spec 044); o mesmo conjunto fixo do enum, em minúsculas. */
 export type PlatformActionMetric =
@@ -126,8 +131,6 @@ export type PlatformActionMetric =
   | 'company_suspended'
   | 'company_reactivated'
   | 'account_email_viewed';
-export type SalesContactResult =
-  'sent' | 'failed' | 'spam' | 'too_fast' | 'capped' | 'daily_cap' | 'invalid' | 'expired';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {

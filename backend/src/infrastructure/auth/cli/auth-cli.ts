@@ -237,8 +237,9 @@ async function resetPassword(
 /**
  * Cadastra (ou troca) o segundo fator do administrador da plataforma (spec 044, E1). Imprime **uma vez** a
  * URI `otpauth://` e a chave para digitar no aplicativo autenticador, pede um código e só grava se ele
- * conferir; o passo desse código fica marcado como usado. As sessões do admin abertas com o fator antigo
- * caem na próxima requisição.
+ * conferir; o passo desse código fica marcado como usado. As sessões do cookie abertas com o fator antigo
+ * caem na próxima requisição, e as sessões Bearer da plataforma desse admin são revogadas: podem ter sido
+ * abertas só com a senha, antes de existir o fator.
  */
 async function enrollPlatformTotp(
   deps: AuthCliDeps,
@@ -276,6 +277,8 @@ async function enrollPlatformTotp(
   await deps.platformAdmins.setTotpSecret(found.admin.id, ciphertext);
   // O código usado no cadastro não serve para entrar.
   await deps.platformAdmins.claimTotpStep(found.admin.id, step);
+  // Revisão da E1 (I1): sessão Bearer aberta antes do fator (só com a senha) não sobrevive ao cadastro.
+  await deps.sessions.revokeAllSessions(PLATFORM_SCOPE, found.admin.id);
   deps.out(`segundo fator cadastrado: ${found.admin.id}`);
   return 0;
 }
