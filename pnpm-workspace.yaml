@@ -1,6 +1,7 @@
 packages:
   - backend
   - frontend
+  - admin
 
 allowBuilds:
   '@prisma/engines': true

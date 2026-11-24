@@ -1,0 +1,97 @@
+# nginx do ADMIN DA PLATAFORMA do Soprei, produção (spec 044, E4). Exemplo: o dono copia para
+# /etc/nginx/sites-available/soprei-admin, liga em sites-enabled e roda o certbot para o hostname abaixo
+# (passo a passo em docs/ops/admin.md). O hostname é público (decisão D3 do dono): troque se for outro.
+#
+# Hostname PRÓPRIO, separado do site (D3): o cookie __Host-soprei_platform só existe aqui e uma falha de
+# XSS no site não alcança o admin. A API é o MESMO backend da produção (127.0.0.1:3001), pela mesma origem
+# do navegador (sem CORS), e só o prefixo /api/platform/ passa: nada de /webhooks/, /auth/ ou /admin/ por
+# este hostname. Cloudflare sem proxy (somente DNS), como o site.
+
+# Log de acesso sem query string (a busca de empresas vai na query). Nomes (soprei_admin_*) únicos por
+# arquivo porque produção, staging e admin dividem o mesmo nginx (log_format e map ficam no contexto http).
+map $request_uri $soprei_admin_log_path {
+    ~^(?<soprei_admin_path>[^?]*)    $soprei_admin_path;
+}
+log_format soprei_admin_sem_query '$remote_addr - $remote_user [$time_local] '
+                                  '"$request_method $soprei_admin_log_path $server_protocol" '
+                                  '$status $body_bytes_sent "$http_user_agent"';
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name soadm.soprei.com;
+    access_log /var/log/nginx/access.log soprei_admin_sem_query;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name soadm.soprei.com;
+
+    ssl_certificate /etc/letsencrypt/live/soadm.soprei.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/soadm.soprei.com/privkey.pem;
+    # Só TLS 1.2 e 1.3, explícito: o certificado sai do `certbot certonly`, que não edita este arquivo
+    # (nem acrescenta o options-ssl-nginx.conf), e o padrão do nginx muda com a versão.
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # App estático: admin/dist é um atalho para a release atual (deploy/deploy.sh, mesma release do site).
+    root /var/www/soprei/admin/dist;
+    index index.html;
+    access_log /var/log/nginx/access.log soprei_admin_sem_query;
+
+    # Opcional (D5): só alguns IPs. O IP do dono muda, por isso vem desligado. Para ligar, descomente e
+    # troque o marcador; mantenha o 127.0.0.1 e o ::1 se o alvo do deploy tiver ADMIN_HOST (a conferência
+    # do deploy.sh chega por 127.0.0.1). Fora da lista: 403.
+    # allow 127.0.0.1;
+    # allow ::1;
+    # allow <IP_DO_DONO>;
+    # deny all;
+
+    # Cabeçalhos do admin (E3), em toda resposta (always), inclusive de erro. ATENÇÃO: um add_header dentro
+    # de um location apaga TODOS estes naquele location (herança do nginx); não acrescente add_header abaixo.
+    # A CSP estrita só funciona porque o app não tem script nem estilo inline (admin/src/page-rules.test.ts).
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    # HSTS de um ano, só neste hostname: sem includeSubDomains e sem preload (decisão do dono pendente).
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # API do admin: /api/platform/* vai a /platform/* do backend (porta 3001, só em 127.0.0.1). O admin entra
+    # só pelo cookie: o cabeçalho Authorization é apagado (nenhum Bearer passa por este hostname).
+    location /api/platform/ {
+        proxy_pass http://127.0.0.1:3001/platform/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # ACRESCENTA ao X-Forwarded-For (o backend usa TRUST_PROXY=127.0.0.1,::1).
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization "";
+    }
+
+    # Qualquer outra rota da API não existe neste hostname.
+    location /api/ {
+        return 404;
+    }
+
+    # Cache por `expires` (nunca add_header aqui): o index.html não fica em cache (aponta para os arquivos
+    # da release do momento); os de /assets/ têm hash no nome e ficam um ano. Arquivo de /assets/ que não
+    # existe é 404, não o index.html.
+    location = /index.html {
+        expires -1;
+    }
+
+    location /assets/ {
+        expires 1y;
+        try_files $uri =404;
+    }
+
+    # Sem rotas na URL (a navegação do admin é só em memória): tudo cai no index.html.
+    location / {
+        try_files $uri /index.html;
+    }
+}

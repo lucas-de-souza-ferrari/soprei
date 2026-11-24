@@ -160,3 +160,6 @@ backend/dist.prev
 backend/dist.failed
 frontend/releases
 frontend/.dist.new
+# Admin da plataforma (spec 044, E4): mesmo esquema de releases do site
+admin/releases
+admin/.dist.new

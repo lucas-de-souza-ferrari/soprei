@@ -49,18 +49,12 @@ const personaSchema = z
 export const putPersonaBodySchema = z.object({ persona: personaSchema }).strict();
 
 /**
- * Corpo do `PATCH /admin/companies/:id` (plataforma). Sem `persona` desde a spec 044 (D8): a plataforma não
- * lê nem altera conteúdo da empresa; o campo é recusado (400, `strict`).
+ * Corpo do `PATCH /admin/companies/:id` (plataforma): só `name`. Sem `persona` desde a spec 044 (D8): a
+ * plataforma não lê nem altera conteúdo da empresa. Sem `status` desde a revisão da E2 da spec 044 (M4,
+ * decisão do dono): suspender e reativar são só `POST /platform/companies/:companyId/suspend|reactivate`,
+ * que exigem motivo e gravam a trilha da plataforma na mesma transação. Os dois são recusados (400, `strict`).
  */
-export const updateCompanyBodySchema = z
-  .object({
-    name: nameSchema.optional(),
-    status: statusSchema.optional(),
-  })
-  .strict()
-  .refine((body) => body.name !== undefined || body.status !== undefined, {
-    message: 'informe name ou status',
-  });
+export const updateCompanyBodySchema = z.object({ name: nameSchema }).strict();
 
 export const listCompaniesQuerySchema = z
   .object({

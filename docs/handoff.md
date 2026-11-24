@@ -4,15 +4,17 @@
 
 ## Última sessão
 
-2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), E2** na branch `spec/044-e2-leituras` (a E1 e os ajustes da revisão já estão na `main`): leituras agregadas em `/platform/*` (overview, empresas com filtro `attention`, detalhe, contas, detalhe com e-mail auditado, pedidos, avisos, saúde), suspender e reativar com trilha na mesma transação, módulo único de SQL `platform-read-model.ts` e o D8 em `/admin/companies` (`hasPersona`). Contratos de resposta exportados de `presentation/platform/platform-monitor.controller.ts` para a E3.
+2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** a spec (PR #21), a **E1** (PRs #22 e #23) e a **E2** (PR #24) estão na `main`, com os ajustes das revisões. A E3 e a E4 já revisadas pelo `reviewer` e com os ajustes das revisões estão juntas num PR só (detalhe no Registro da spec):
 
-- **Verde localmente:** typecheck, lint, format e os unitários. **Falta:** CI (inclui `platform-admin.integration.test.ts`, que não rodou aqui por falta de `soprei_test`), `reviewer` e merge; depois E3 (app, em outra cópia) e E4. Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
-- **Revisão de segurança da E2 corrigida na mesma branch** (I1, I2, M1 a M5, M7; ver "Revisão da E2" na spec): overview por empresa, "Testar" e empresa suspensa fora de "precisa de atenção". Integração não rodou aqui; CI é a palavra final. **Pendente do dono:** M4 (o `PATCH /admin/companies/:id` da plataforma ainda muda `status` sem trilha).
+- **PR aberto:** #25 (`spec/044-e3-app-admin`): o app `admin/` (E3) e a publicação (E4: nginx, `deploy.sh`, CI e `docs/ops/admin.md`; o #26 entrou nessa branch, não na `main`). A `main` com a E2 já foi trazida para a branch, com o conflito do texto da spec e deste arquivo resolvido.
+- **Conferir no log do CI do #25:** os 4 cenários do teste de comportamento do deploy que dependem de atalho (`SYMLINK_SKIP`: publicação do admin, rollback do admin com o site, primeira publicação que falha, versão sem `admin/`) só rodam no Linux; não podem aparecer como `skipped` lá.
+- **Decisões do dono tomadas (2026-11-24, em `docs/context.md`):** o `PATCH /admin/companies/:id` não aceita mais `status` (feito neste PR); contagens só de `ACTIVE` e sem o "Testar"; pausa de 30 min da Saúde; HSTS só com `max-age`. D7 confirmada pelo dono: a Política de Privacidade (seção 5) já cobre ver o e-mail da conta no admin, sem mudar o texto. Nenhuma decisão da spec 044 pendente.
+- **Quando houver servidor:** migration da E1 e os passos de `docs/ops/admin.md`.
 
 ## Onde estamos
 
 - **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na `main`, E2 em branch). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 e E2 na `main`, E3 e E4 no PR #25). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes

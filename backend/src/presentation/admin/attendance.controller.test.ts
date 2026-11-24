@@ -64,8 +64,10 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
   }>;
   let platformHeaders: () => Promise<{ authorization: string }>;
 
+  let companies: InMemoryCompanyRepository;
+
   before(async () => {
-    const companies = new InMemoryCompanyRepository();
+    companies = new InMemoryCompanyRepository();
     const testAuth = buildTestAuth({ logger: logs.logger, companies });
     membershipHeaders.clear();
     const authTokens = testAuth;
@@ -199,12 +201,8 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
       assert.equal((await send(removed, { contactRef: 'c1', text: 'oi' })).statusCode, 404);
 
       const suspended = await createCompany('post-suspended');
-      await app.inject({
-        method: 'PATCH',
-        url: `/admin/companies/${suspended}`,
-        headers: auth,
-        payload: { status: 'SUSPENDED' },
-      });
+      // Suspender pela API é só pela rota da plataforma (spec 044); aqui basta o estado no repositório.
+      await companies.update(CompanyId.parse(suspended), { status: 'SUSPENDED' });
       const blocked = await send(suspended, { contactRef: 'c1', text: 'oi' });
       assert.equal(blocked.statusCode, 403);
       assert.equal(blocked.json<ErrorBody>().error.code, 'FORBIDDEN');

@@ -52,6 +52,8 @@ HEALTH_URL=''
 READY_URL=''
 SITE_HOST=''
 SITE_OK_CODES=200
+ADMIN_HOST=''
+ADMIN_OK_CODES=200
 REQUIRE_STAGED=false
 PRE_MIGRATION_BACKUP=''
 HEALTH_TIMEOUT_SECONDS=90
@@ -73,10 +75,11 @@ TARGET_SHA=''
 ADOPT_PENDING=false
 TREE_CHANGED=false
 POINT_OF_NO_RETURN=false
-SITE_SWITCHED=false
-LEGACY_MOVED=false
 NEW_RELEASE=''
-PREV_SITE=''
+# Apps estáticos publicados por release com atalho (spec 044, E4): o site sempre e o admin quando a
+# versão pedida tem a pasta admin/. O estado de cada um fica em SWITCHED_<app>, LEGACY_MOVED_<app> e
+# PREV_RELEASE_<app>, iniciados por build_frontend e lidos por indireção.
+STATIC_APPS=()
 PM2_STATUS=''
 PM2_RESTARTS=0
 NOW_MS=0
@@ -99,7 +102,7 @@ redact() {
   sed -u -E \
     -e 's#(postgres(ql)?|rediss?|amqp|mongodb)://[^[:space:]"'"'"']+#[redacted]#g' \
     -e 's#//[^/[:space:]]*:[^@[:space:]]*@#//[redacted]@#g' \
-    -e 's#(JWT_SECRET|[A-Za-z0-9_]*(KEY|SECRET|TOKEN|PSWD|PASSWORD))=[^[:space:]]+#\1=[redacted]#gI'
+    -e 's#(JWT_SECRET|[A-Za-z0-9_]*(KEY|SECRET|TOKEN|PSWD|PASSWORD)S?)=[^[:space:]]+#\1=[redacted]#gI'
 }
 
 log() {
@@ -212,6 +215,8 @@ load_target() {
       READY_URL) READY_URL=$value ;;
       SITE_HOST) SITE_HOST=$value ;;
       SITE_OK_CODES) SITE_OK_CODES=$value ;;
+      ADMIN_HOST) ADMIN_HOST=$value ;;
+      ADMIN_OK_CODES) ADMIN_OK_CODES=$value ;;
       REQUIRE_STAGED) REQUIRE_STAGED=$value ;;
       PRE_MIGRATION_BACKUP) PRE_MIGRATION_BACKUP=$value ;;
       HEALTH_TIMEOUT_SECONDS) HEALTH_TIMEOUT_SECONDS=$value ;;
@@ -235,7 +240,9 @@ load_target() {
     [[ ${!path_key} != *..* && ${!path_key} != */-* ]] || die_early "$path_key com '..' ou componente começando com '-'"
   done
   [[ $APP_DIR =~ ^/[^/]+/[^/]+ ]] || die_early 'APP_DIR raso demais (precisa de pelo menos dois níveis)'
-  [[ $PM2_APP != -* && $SITE_HOST != -* ]] || die_early 'PM2_APP e SITE_HOST não podem começar com "-"'
+  [[ $PM2_APP != -* && $SITE_HOST != -* && $ADMIN_HOST != -* ]] \
+    || die_early 'PM2_APP, SITE_HOST e ADMIN_HOST não podem começar com "-"'
+  [[ $ADMIN_HOST != "$SITE_HOST" ]] || die_early 'ADMIN_HOST precisa ser diferente de SITE_HOST (spec 044, D3)'
   [[ $HEALTH_URL == http://127.0.0.1:* && $READY_URL == http://127.0.0.1:* ]] \
     || die_early 'HEALTH_URL e READY_URL precisam começar com http://127.0.0.1:'
   [[ $ENV_FILE == "$APP_DIR/backend/.env" ]] \
@@ -337,18 +344,31 @@ probe_health() {
   [[ $(http_code "$HEALTH_URL") == 200 && $(http_code "$READY_URL") == 200 ]]
 }
 
-site_ok() {
-  local code ok
+# Confere https://<host>/ resolvido para 127.0.0.1 contra a lista de códigos aceitos.
+host_ok() {
+  local host=$1 codes=$2 label=$3 code ok
   local -a accepted
-  code=$(http_code "https://$SITE_HOST/" --resolve "$SITE_HOST:443:127.0.0.1")
-  IFS=, read -ra accepted <<<"$SITE_OK_CODES"
+  code=$(http_code "https://$host/" --resolve "$host:443:127.0.0.1")
+  IFS=, read -ra accepted <<<"$codes"
   for ok in "${accepted[@]}"; do
     if [[ $code == "$ok" ]]; then
       return 0
     fi
   done
-  log "o site respondeu $code por 127.0.0.1 (aceitos: $SITE_OK_CODES)"
+  log "o $label respondeu $code por 127.0.0.1 (aceitos: $codes)"
   return 1
+}
+
+site_ok() {
+  host_ok "$SITE_HOST" "$SITE_OK_CODES" site
+}
+
+# Admin da plataforma (spec 044, E4): conferido só quando o alvo tem ADMIN_HOST (o dono o define
+# depois de instalar o nginx do admin) e a versão publicada tem o app.
+admin_ok() {
+  [[ -n $ADMIN_HOST ]] || return 0
+  has_static_app admin || return 0
+  host_ok "$ADMIN_HOST" "$ADMIN_OK_CODES" admin
 }
 
 node_major_of_tree() {
@@ -576,6 +596,11 @@ print_plan() {
   fi
   log "node $(node -v), pnpm $(pnpm --version), espaço livre ${free_kb} KB, PM2 ${PM2_APP}: ${PM2_STATUS:-ausente} (reinícios ${PM2_RESTARTS}), API na porta $PORT"
   log "backup antes de migration: ${PRE_MIGRATION_BACKUP:-nenhum}"
+  if git -C "$APP_DIR" cat-file -e "$TARGET_SHA:admin/package.json" 2>/dev/null; then
+    log "admin da plataforma: publicado junto com o site (conferência por https: ${ADMIN_HOST:-nenhuma, alvo sem ADMIN_HOST})"
+  else
+    log 'admin da plataforma: a versão pedida não tem admin/; o admin publicado não muda'
+  fi
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -604,22 +629,55 @@ build_backend() {
   )
 }
 
-build_frontend() {
-  local stamp
-  stamp=$(date -u +%Y%m%d%H%M%S)
-  NEW_RELEASE="${TARGET_SHA:0:12}-$stamp"
+# Verdadeiro se o app estático "$1" faz parte desta publicação.
+has_static_app() {
+  local app
+  for app in "${STATIC_APPS[@]}"; do
+    if [[ $app == "$1" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Compila um app estático ("$1": pasta, "$2": pacote) em <pasta>/releases/$NEW_RELEASE.
+build_static_app() {
+  local dir=$1 package=$2
   (
     # O nginx (outro usuário) precisa ler a release: umask 022 aqui e modo explícito depois.
     umask 022
-    cd "$APP_DIR/frontend" || exit 1
+    cd "$APP_DIR/$dir" || exit 1
     mkdir -p releases || exit 1
     chmod 755 releases || exit 1
     run_cmd nice -n 10 env "NODE_OPTIONS=--max-old-space-size=$BUILD_MEMORY_MB" \
-      pnpm --filter soprei-frontend exec tsc --noEmit || exit 1
+      pnpm --filter "$package" exec tsc --noEmit || exit 1
     run_cmd nice -n 10 env "NODE_OPTIONS=--max-old-space-size=$BUILD_MEMORY_MB" \
-      pnpm --filter soprei-frontend exec vite build --outDir "$APP_DIR/frontend/releases/$NEW_RELEASE" || exit 1
+      pnpm --filter "$package" exec vite build --outDir "$APP_DIR/$dir/releases/$NEW_RELEASE" || exit 1
     chmod -R u=rwX,go=rX "releases/$NEW_RELEASE"
   )
+}
+
+# O site e, se a versão tem a pasta admin/ (spec 044, E4), o admin da plataforma: mesma release, mesma
+# troca e mesmo rollback. Versão anterior ao admin: o admin publicado fica como está.
+build_frontend() {
+  local stamp app
+  stamp=$(date -u +%Y%m%d%H%M%S)
+  NEW_RELEASE="${TARGET_SHA:0:12}-$stamp"
+  STATIC_APPS=(frontend)
+  if [[ -f $APP_DIR/admin/package.json ]]; then
+    STATIC_APPS+=(admin)
+  else
+    log 'AVISO: esta versão não tem o app admin/ (anterior à spec 044); o admin publicado não muda'
+  fi
+  for app in "${STATIC_APPS[@]}"; do
+    printf -v "SWITCHED_$app" '%s' false
+    printf -v "LEGACY_MOVED_$app" '%s' false
+    printf -v "PREV_RELEASE_$app" '%s' ''
+  done
+  build_static_app frontend soprei-frontend || return 1
+  if has_static_app admin; then
+    build_static_app admin soprei-admin || return 1
+  fi
 }
 
 # Coloca a árvore na versão pedida e compila nas pastas de espera; o processo em execução não é tocado.
@@ -634,10 +692,15 @@ prepare_version() {
 }
 
 cleanup_waiting() {
+  local app switched
   rm -rf "$APP_DIR/backend/dist.next"
-  if [[ -n $NEW_RELEASE && $SITE_SWITCHED != true ]]; then
-    rm -rf "$APP_DIR/frontend/releases/$NEW_RELEASE"
-  fi
+  [[ -n $NEW_RELEASE ]] || return 0
+  for app in "${STATIC_APPS[@]}"; do
+    switched="SWITCHED_$app"
+    if [[ ${!switched:-false} != true ]]; then
+      rm -rf "${APP_DIR:?}/$app/releases/$NEW_RELEASE"
+    fi
+  done
 }
 
 # Falhas antes de trocar: devolve a árvore à versão anterior e sai com 2 (ou 3 se não conseguir).
@@ -792,68 +855,104 @@ wait_healthy() {
   return 1
 }
 
-switch_site() {
-  local fe="$APP_DIR/frontend" stamp
-  PREV_SITE=''
-  LEGACY_MOVED=false
+# Rótulo de um app estático nas mensagens ("site" para o frontend).
+static_label() {
+  if [[ $1 == frontend ]]; then
+    printf 'site'
+  else
+    printf '%s' "$1"
+  fi
+}
+
+# Troca o atalho <app>/dist para a release nova e guarda o que havia em PREV_RELEASE_<app>.
+switch_static() {
+  local app=$1 fe="$APP_DIR/$1" label stamp prev=''
+  label=$(static_label "$app")
+  printf -v "PREV_RELEASE_$app" '%s' ''
+  printf -v "LEGACY_MOVED_$app" '%s' false
   # Valida e prepara TUDO antes de mexer na pasta atual (se algo falhar aqui, nada mudou).
-  [[ -f $fe/releases/$NEW_RELEASE/index.html ]] || { log 'a release nova do site não tem index.html'; return 1; }
+  [[ -f $fe/releases/$NEW_RELEASE/index.html ]] || { log "a release nova do $label não tem index.html"; return 1; }
   (umask 022 && mkdir -p "$fe/releases") || return 1
   chmod 755 "$fe/releases" || return 1
   rm -rf "$fe/.dist.new"
   ln -s "releases/$NEW_RELEASE" "$fe/.dist.new" || return 1
   if [[ -L $fe/dist ]]; then
-    PREV_SITE=$(readlink "$fe/dist")
+    prev=$(readlink "$fe/dist")
   elif [[ -d $fe/dist ]]; then
-    # Primeira vez: o site era uma pasta real; vira uma release e passa a ser servido por atalho.
+    # Primeira vez: o app era uma pasta real; vira uma release e passa a ser servido por atalho.
     stamp=$(date -u +%Y%m%d%H%M%S)
-    PREV_SITE="releases/legacy-$stamp"
-    if ! mv "$fe/dist" "$fe/$PREV_SITE"; then
+    prev="releases/legacy-$stamp"
+    if ! mv "$fe/dist" "$fe/$prev"; then
       rm -rf "$fe/.dist.new"
       return 1
     fi
-    LEGACY_MOVED=true
-    chmod 755 "$fe/$PREV_SITE" || true
+    printf -v "LEGACY_MOVED_$app" '%s' true
+    chmod 755 "$fe/$prev" || true
   fi
-  SITE_SWITCHED=true
+  printf -v "PREV_RELEASE_$app" '%s' "$prev"
+  printf -v "SWITCHED_$app" '%s' true
   if ! mv -T "$fe/.dist.new" "$fe/dist"; then
-    log 'não consegui colocar o atalho do site no lugar'
+    log "não consegui colocar o atalho do $label no lugar"
     return 1
   fi
 }
 
-# Devolve o site ao que era antes de switch_site (inclusive a pasta real da primeira vez).
-restore_site() {
-  local fe="$APP_DIR/frontend"
-  [[ $SITE_SWITCHED == true || $LEGACY_MOVED == true ]] || return 0
+# Troca o site e, quando publicado junto, o admin (spec 044, E4).
+switch_site() {
+  local app
+  for app in "${STATIC_APPS[@]}"; do
+    switch_static "$app" || return 1
+  done
+}
+
+# Devolve um app estático ao que era antes de switch_static (inclusive a pasta real da primeira vez).
+restore_static() {
+  local app=$1 fe="$APP_DIR/$1" label prev
+  local switched="SWITCHED_$1" legacy="LEGACY_MOVED_$1" prev_name="PREV_RELEASE_$1"
+  [[ ${!switched:-false} == true || ${!legacy:-false} == true ]] || return 0
+  label=$(static_label "$app")
+  prev=${!prev_name:-}
   rm -rf "$fe/.dist.new"
-  if [[ $LEGACY_MOVED == true ]]; then
+  if [[ ${!legacy:-false} == true ]]; then
     rm -f "$fe/dist"
-    mv "$fe/$PREV_SITE" "$fe/dist" || return 1
-    LEGACY_MOVED=false
-  elif [[ -n $PREV_SITE ]]; then
-    ln -s "$PREV_SITE" "$fe/.dist.new" || return 1
+    mv "$fe/$prev" "$fe/dist" || return 1
+    printf -v "LEGACY_MOVED_$app" '%s' false
+  elif [[ -n $prev ]]; then
+    ln -s "$prev" "$fe/.dist.new" || return 1
     mv -T "$fe/.dist.new" "$fe/dist" || return 1
   else
     rm -f "$fe/dist"
   fi
   rm -rf "${fe:?}/releases/$NEW_RELEASE"
-  SITE_SWITCHED=false
-  log "site restaurado para ${PREV_SITE:-nenhuma release}"
+  printf -v "SWITCHED_$app" '%s' false
+  log "$label restaurado para ${prev:-nenhuma release}"
 }
 
-# Mantém as 3 releases mais novas do site (e nunca apaga a que está no ar).
+# Devolve o site e o admin ao que eram; tenta cada um mesmo que o outro falhe.
+restore_site() {
+  local app rc=0
+  for app in "${STATIC_APPS[@]}"; do
+    restore_static "$app" || rc=1
+  done
+  return "$rc"
+}
+
+# Mantém as 3 releases mais novas de cada app estático (e nunca apaga a que está no ar).
 prune_releases() {
-  local fe="$APP_DIR/frontend" live dir count=0
-  live=$(readlink "$fe/dist" 2>/dev/null || true)
-  [[ -d $fe/releases ]] || return 0
-  while IFS= read -r dir; do
-    [[ -n $dir ]] || continue
-    count=$((count + 1))
-    if ((count > 3)) && [[ releases/${dir##*/} != "$live" ]]; then
-      rm -rf "${fe:?}/releases/${dir##*/}"
-    fi
-  done < <(find "$fe/releases" -mindepth 1 -maxdepth 1 -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+  local app fe live dir count
+  for app in "${STATIC_APPS[@]}"; do
+    fe="$APP_DIR/$app"
+    count=0
+    live=$(readlink "$fe/dist" 2>/dev/null || true)
+    [[ -d $fe/releases ]] || continue
+    while IFS= read -r dir; do
+      [[ -n $dir ]] || continue
+      count=$((count + 1))
+      if ((count > 3)) && [[ releases/${dir##*/} != "$live" ]]; then
+        rm -rf "${fe:?}/releases/${dir##*/}"
+      fi
+    done < <(find "$fe/releases" -mindepth 1 -maxdepth 1 -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+  done
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -953,7 +1052,7 @@ run_deploy() {
     abort_before_swap 'o arquivo de ambiente não vale para a versão nova (variáveis listadas acima); nenhuma migration foi aplicada e o processo não foi tocado'
   fi
 
-  build_frontend || abort_before_swap 'o build do site falhou'
+  build_frontend || abort_before_swap 'o build do site ou do admin falhou'
 
   # Ponto sem volta: um deploy não pode parar entre a migration e a saúde.
   trap '' INT TERM
@@ -976,11 +1075,12 @@ run_deploy() {
   wait_healthy inject || post_swap_failure 'o sistema novo não ficou saudável'
   switch_site || post_swap_failure 'a troca do site falhou'
   site_ok || post_swap_failure 'o site novo não respondeu'
+  admin_ok || post_swap_failure 'o admin novo não respondeu'
 
   # Concluído: daqui em diante um erro não é motivo de rollback.
   trap - ERR
   POINT_OF_NO_RETURN=false
-  prune_releases || log 'AVISO: não consegui apagar releases antigas do site'
+  prune_releases || log 'AVISO: não consegui apagar releases antigas do site ou do admin'
   if ! write_sha_file "$STATE_DIR/previous" "$PREV_SHA" || ! write_sha_file "$STATE_DIR/current" "$TARGET_SHA"; then
     manual_intervention 'o deploy foi concluído, mas não consegui gravar o estado; grave o SHA atual em current à mão'
   fi

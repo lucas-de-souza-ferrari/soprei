@@ -176,20 +176,19 @@ describe('rotas /admin/companies', () => {
       assert.equal(read.json<CompanyBody>().name, created.name);
     });
 
-    it('PATCH atualiza nome e status; DELETE remove (204) e depois é 404', async () => {
+    it('PATCH atualiza o nome; DELETE remove (204) e depois é 404', async () => {
       const created = await createCompany('acme-upd');
       const patched = await app.inject({
         method: 'PATCH',
         url: `/admin/companies/${created.id}`,
         headers: auth,
-        payload: { name: 'Novo Nome', status: 'SUSPENDED' },
+        payload: { name: 'Novo Nome' },
       });
       assert.equal(patched.statusCode, 200);
       assert.equal(patched.json<CompanyBody>().name, 'Novo Nome');
-      assert.equal(patched.json<CompanyBody>().status, 'SUSPENDED');
+      assert.equal(patched.json<CompanyBody>().status, 'ACTIVE');
       assert.equal(patched.json<CompanyBody>().slug, 'acme-upd');
 
-      // Empresa suspensa continua legível e editável pelo CRUD.
       const read = await app.inject({
         method: 'GET',
         url: `/admin/companies/${created.id}`,
@@ -385,12 +384,15 @@ describe('rotas /admin/companies', () => {
       assert.equal(noBody.statusCode, 400);
     });
 
-    it('PATCH exige name ou status e não aceita slug nem persona', async () => {
+    it('PATCH exige name e não aceita slug, persona nem status (suspender é só pela plataforma)', async () => {
       const created = await createCompany('acme-patch400');
       for (const payload of [
         {},
         { slug: 'outro-slug' },
         { status: 'X' },
+        { status: 'SUSPENDED' },
+        { status: 'ACTIVE' },
+        { name: 'Outro', status: 'SUSPENDED' },
         { name: '' },
         { persona: 'x' },
         { persona: 42 },
