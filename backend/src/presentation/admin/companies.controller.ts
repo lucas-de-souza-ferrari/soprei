@@ -19,13 +19,16 @@ export interface AdminCompaniesControllerOptions {
   readonly companies: CompanyService;
 }
 
-/** Só campos seguros: nada de `deletedAt` nem de detalhe interno. */
+/**
+ * Só campos seguros: nada de `deletedAt` nem de detalhe interno. A persona é conteúdo da empresa (spec 044,
+ * D8): a plataforma só sabe se existe (`hasPersona`); o texto fica no `PUT .../persona` da própria empresa.
+ */
 function toResponse(company: Company): {
   id: string;
   name: string;
   slug: string;
   status: string;
-  persona: string | null;
+  hasPersona: boolean;
   whatsappPhoneNumberId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -35,7 +38,7 @@ function toResponse(company: Company): {
     name: company.name,
     slug: company.slug,
     status: company.status,
-    persona: company.persona,
+    hasPersona: company.persona !== null,
     whatsappPhoneNumberId: company.whatsappPhoneNumberId,
     createdAt: company.createdAt.toISOString(),
     updatedAt: company.updatedAt.toISOString(),

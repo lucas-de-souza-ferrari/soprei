@@ -55,21 +55,18 @@ export class CompanyService {
   }
 
   /**
-   * Atualiza nome, status e/ou persona (`null` limpa a persona). O slug não muda: ele identifica o
+   * Atualiza nome e/ou status. A persona não passa por aqui (spec 044, D8): só a própria empresa a grava
+   * (`setPersona`). O slug não muda: ele identifica o
    * empresa para sempre. O número do WhatsApp **não** passa por aqui (spec 015): só o `OWNER`/`ADMIN`
    * da empresa o liga, pelo `PUT /admin/companies/:companyId/channel`.
    */
-  async update(
-    id: CompanyId,
-    input: Omit<CompanyUpdate, 'whatsappPhoneNumberId'>,
-  ): Promise<Company> {
-    if (input.name === undefined && input.status === undefined && input.persona === undefined) {
-      throw new ValidationError('Informe name, status ou persona');
+  async update(id: CompanyId, input: Pick<CompanyUpdate, 'name' | 'status'>): Promise<Company> {
+    if (input.name === undefined && input.status === undefined) {
+      throw new ValidationError('Informe name ou status');
     }
-    const data: Omit<CompanyUpdate, 'whatsappPhoneNumberId'> = {
+    const data: Pick<CompanyUpdate, 'name' | 'status'> = {
       ...(input.name === undefined ? {} : { name: parseName(input.name) }),
       ...(input.status === undefined ? {} : { status: parseStatus(input.status) }),
-      ...(input.persona === undefined ? {} : { persona: parsePersona(input.persona) }),
     };
     return await this.companies.update(id, data);
   }

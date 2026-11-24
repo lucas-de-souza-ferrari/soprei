@@ -140,10 +140,11 @@ async function createCompany(label: string, persona?: string): Promise<string> {
   tenants.track(id);
   membershipHeaders.set(id, await makeMembership(id));
   if (persona !== undefined) {
+    // Spec 044 (D8): a persona só entra pela rota da própria empresa.
     const patched = await app.inject({
-      method: 'PATCH',
-      url: `/admin/companies/${id}`,
-      headers: auth,
+      method: 'PUT',
+      url: `/admin/companies/${id}/persona`,
+      headers: as(id),
       payload: { persona },
     });
     assert.equal(patched.statusCode, 200);
@@ -179,7 +180,7 @@ function withStyle(persona: string): string {
 }
 
 describe('POST /admin/companies/:companyId/messages contra o PostgreSQL de testes', () => {
-  it('fluxo completo: persona definida por PATCH, duas mensagens, duplicata, histórico e listagens', async () => {
+  it('fluxo completo: persona definida pela rota da empresa, duas mensagens, duplicata, histórico e listagens', async () => {
     const companyId = await createCompany('fluxo', 'Persona-Fluxo-HTTP');
     const first = await send(companyId, {
       contactRef: 'tel-1',
@@ -318,9 +319,9 @@ describe('POST /admin/companies/:companyId/messages contra o PostgreSQL de teste
     assert.deepEqual(none.json<PageBody<unknown>>().items, []);
     // Persona com NUL: 400, não 500.
     const patched = await app.inject({
-      method: 'PATCH',
-      url: `/admin/companies/${companyId}`,
-      headers: auth,
+      method: 'PUT',
+      url: `/admin/companies/${companyId}/persona`,
+      headers: as(companyId),
       payload: { persona: 'com\u0000nul' },
     });
     assert.equal(patched.statusCode, 400);
