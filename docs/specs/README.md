@@ -52,4 +52,4 @@
 | [041](041-conhecimento-pdf-docx.md) | Conhecimento: ler PDF e DOCX no navegador | concluída | `location` do `.mjs` no nginx e teste manual (dono, conferir) |
 | [042](042-organizacao-da-documentacao.md) | Organização da documentação | em implementação | CI e merge da E1 e da E2 |
 | [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | CI; confirmação da D3; passos do dono parados até existir servidor |
-| [044](044-admin-da-plataforma.md) | Admin da plataforma (painel do dono, frontend separado) | em implementação | E1 na branch (CI e `reviewer`); E2 a E4 |
+| [044](044-admin-da-plataforma.md) | Admin da plataforma (painel do dono, frontend separado) | concluída | passos no servidor (`docs/ops/admin.md`, dono, quando houver servidor) |
