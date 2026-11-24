@@ -43,7 +43,7 @@
 | [032](032-lgpd-e-retencao.md) | LGPD e retenção de dados | em implementação | E2 em diante (aceite dos termos, retenção, exclusão) |
 | [033](033-producao-deploy-e-operacao.md) | Produção, deploy e operação | rascunho | não aprovada |
 | [034](034-capacidade-do-canal.md) | Capacidade do canal (worker concorrente e processo robusto) | em implementação | E4 (`PROCESS_ROLE`) e E5 (limite do webhook) |
-| [035](035-resiliencia-do-atendimento.md) | Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila | em implementação | CI (integração), `reviewer`; E4 (fatiar o serviço) |
+| [035](035-resiliencia-do-atendimento.md) | Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila | em implementação | CI (integração); `reviewer` na E4, se o dono quiser |
 | [036](036-ci-mais-rapido.md) | CI mais rápido | concluída | — |
 | [037](037-deploy-e-staging.md) | Deploy com rollback e staging | concluída | servidor de produção e de staging (dono) |
 | [038](038-notificacoes-atendimento-humano.md) | Notificações no painel: a IA pede atendimento humano | concluída | — |
