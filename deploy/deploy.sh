@@ -647,6 +647,9 @@ build_static_app() {
     # O nginx (outro usuário) precisa ler a release: umask 022 aqui e modo explícito depois.
     umask 022
     cd "$APP_DIR/$dir" || exit 1
+    # A própria pasta do app também: o git a cria com o umask 077 do script quando ela chega numa versão
+    # nova (foi o caso do admin/ na produção, em 2026-11-24: 403 no nginx até um chmod à mão).
+    chmod 755 . || exit 1
     mkdir -p releases || exit 1
     chmod 755 releases || exit 1
     run_cmd nice -n 10 env "NODE_OPTIONS=--max-old-space-size=$BUILD_MEMORY_MB" \

@@ -1,64 +1,63 @@
-# nginx da PRODUÇÃO do Soprei, como o repositório entende que ele é (spec 037, E2).
+# nginx da PRODUÇÃO do Soprei: /etc/nginx/sites-available/soprei (ligado em sites-enabled/soprei).
 #
-# ATENÇÃO: este arquivo foi RECONSTRUÍDO a partir da descrição do desenho (site e API no mesmo
-# hostname, /api/ com o prefixo removido e /webhooks/ para 127.0.0.1:3001, certbot) e NÃO foi copiado
-# do servidor (S20 da spec). O dono deve conferir com o arquivo real, ajustar este exemplo para ficar
-# igual a ele (sem segredo) e só então confiar nele como documentação. Ao conferir, troque também o
-# hostname abaixo se for outro.
+# CONFERIDO com o arquivo real do servidor em 2026-11-24 (spec 044, publicação do admin): este exemplo é o
+# arquivo de lá, já com o /api/platform/ e o .mjs acrescentados pelo dono no mesmo dia. Ao
+# mudar o servidor, mude este exemplo junto (e vice-versa); ele substitui o reconstruído da spec 037 (S20).
 #
-# Cloudflare sem proxy (somente DNS). Com o proxy ligado seria preciso real_ip no nginx e TRUST_PROXY
-# com as faixas dela (fora de escopo).
-
-# Log de acesso sem query string e sem o caminho completo do webhook de pagamento (spec 032, D13): a query
-# do handshake do WhatsApp leva o hub.verify_token e o caminho /webhooks/infinitepay/<pedido>/<token> leva um
-# token. Os nomes (soprei_prod_*) são únicos por arquivo porque produção e staging podem dividir o mesmo nginx
-# (log_format e map ficam no contexto http, que inclui este arquivo).
-# ATENÇÃO: o error.log não usa este formato e ainda pode guardar o caminho do webhook com o token e a query do
+# Certificado pelo `certbot --nginx` (as linhas "managed by Certbot" são dele): um certificado só, em
+# /etc/letsencrypt/live/soprei.com/, vale para soprei.com e www.soprei.com. Cloudflare sem proxy (somente
+# DNS). Com o proxy ligado seria preciso real_ip no nginx e TRUST_PROXY com as faixas dela (fora de escopo).
+#
+# Log de acesso: o formato soprei_prod_sem_query (sem query string e sem o caminho do webhook de pagamento,
+# spec 032, D13) é definido FORA deste arquivo no servidor, no contexto http. Não o declare aqui de novo: o
+# nginx recusa um log_format repetido. A definição, para referência:
+#
+#   map $request_uri $soprei_prod_log_path {
+#       ~^/webhooks/infinitepay/        "/webhooks/infinitepay/[oculto]";
+#       ~^(?<soprei_prod_path>[^?]*)    $soprei_prod_path;
+#   }
+#   log_format soprei_prod_sem_query '$remote_addr - $remote_user [$time_local] '
+#                                    '"$request_method $soprei_prod_log_path $server_protocol" '
+#                                    '$status $body_bytes_sent "$http_user_agent"';
+#
+# ATENÇÃO: o error.log não usa esse formato e ainda pode guardar o caminho do webhook com o token e a query do
 # handshake do WhatsApp (hub.verify_token) quando uma requisição dá erro. Rotação com prazo de 30 dias
 # (logrotate) do access.log E do error.log, e dos logs do PM2, é passo do dono no servidor.
-map $request_uri $soprei_prod_log_path {
-    ~^/webhooks/infinitepay/        "/webhooks/infinitepay/[oculto]";
-    ~^(?<soprei_prod_path>[^?]*)    $soprei_prod_path;
-}
-log_format soprei_prod_sem_query '$remote_addr - $remote_user [$time_local] '
-                                 '"$request_method $soprei_prod_log_path $server_protocol" '
-                                 '$status $body_bytes_sent "$http_user_agent"';
 
+# soprei.com (sem www) vai para www.soprei.com.
 server {
-    listen 80;
-    listen [::]:80;
-    server_name www.soprei.com;
-    access_log /var/log/nginx/access.log soprei_prod_sem_query;
-    return 301 https://$host$request_uri;
+    server_name soprei.com;
+    return 301 https://www.soprei.com$request_uri;
+
+    listen [::]:443 ssl ipv6only=on; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/soprei.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/soprei.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
 }
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
     server_name www.soprei.com;
-
-    ssl_certificate /etc/letsencrypt/live/www.soprei.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/www.soprei.com/privkey.pem;
 
     # Site estático: frontend/dist é um atalho para a release atual (deploy/deploy.sh).
     root /var/www/soprei/frontend/dist;
     index index.html;
+    client_max_body_size 4m;
     access_log /var/log/nginx/access.log soprei_prod_sem_query;
 
-    # API: o prefixo /api/ é removido antes de chegar ao backend (porta 3001, só em 127.0.0.1).
+    # API: o prefixo /api/ é removido antes de chegar ao backend (porta 3001, só em 127.0.0.1). O
+    # X-Forwarded-For é SUBSTITUÍDO pelo IP de quem conectou (o backend usa TRUST_PROXY=127.0.0.1,::1).
     location /api/ {
         proxy_pass http://127.0.0.1:3001/;
-        proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        # ACRESCENTA ao X-Forwarded-For (o backend usa TRUST_PROXY=127.0.0.1,::1).
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Admin da plataforma (spec 044, E4): /platform/* só pelo hostname do admin (deploy/nginx/admin.conf.example).
-    # Defesa em profundidade: o cookie do admin já não vem a este hostname.
+    # Admin da plataforma (spec 044): /platform/* só pelo hostname do admin (deploy/nginx/admin.conf.example).
+    # Defesa em profundidade: o cookie do admin já não vem a este hostname. Acrescentado no servidor em
+    # 2026-11-24.
     location /api/platform/ {
         return 404;
     }
@@ -66,22 +65,58 @@ server {
     # Webhooks da Meta e da InfinitePay.
     location /webhooks/ {
         proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Worker do pdf.js (spec 041): o .mjs precisa sair como JavaScript (o mime.types de versões antigas
-    # do nginx não conhece a extensão e o navegador recusa o worker servido como octet-stream).
+    # Worker do pdf.js (spec 041): o .mjs precisa sair como JavaScript (sem isto saía como
+    # application/octet-stream e a leitura de PDF da aba Conhecimento falhava; acrescentado no servidor em
+    # 2026-11-24). Location por regex: vence o prefixo /assets/ abaixo.
     location ~* \.mjs$ {
         types { text/javascript mjs; }
         try_files $uri =404;
     }
 
+    # Arquivos com hash no nome: cache de um ano.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
     # Páginas legais estáticas (spec 032, E1): /privacidade serve privacidade.html; o resto cai no SPA.
     location / {
         try_files $uri $uri.html /index.html;
+        add_header Cache-Control "no-cache";
     }
+
+    listen [::]:443 ssl; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/soprei.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/soprei.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+}
+
+# Porta 80: o certbot redireciona para https.
+server {
+    if ($host = soprei.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+    listen 80;
+    listen [::]:80;
+    server_name soprei.com;
+    return 404; # managed by Certbot
+}
+
+server {
+    if ($host = www.soprei.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+    listen 80;
+    listen [::]:80;
+    server_name www.soprei.com;
+    return 404; # managed by Certbot
 }
