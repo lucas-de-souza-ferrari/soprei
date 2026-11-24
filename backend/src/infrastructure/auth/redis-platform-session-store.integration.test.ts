@@ -93,7 +93,11 @@ describe('sessões do admin da plataforma no Redis (spec 044, E1)', () => {
   it('prazo ocioso: sem uso a sessão some; teto absoluto vale mesmo com uso', async () => {
     const idle = await createStore({ idle: 1, max: 600 });
     const lazy = await idle.store.create(randomUUID(), FACTOR);
-    assert.ok(await waitFor(async () => (await idle.store.read(lazy)) === null, 5_000));
+    // Sonda pela existência da chave, sem ler a sessão: cada leitura renova o prazo ocioso (é o
+    // comportamento esperado), e sondar com `read` manteria a sessão viva para sempre.
+    const lazyKey = `${idle.prefix}platform-session:${createHash('sha256').update(lazy).digest('hex')}`;
+    assert.ok(await waitFor(async () => (await main.client.exists(lazyKey)) === 0, 5_000));
+    assert.equal(await idle.store.read(lazy), null);
 
     const capped = await createStore({ idle: 60, max: 2 });
     const busy = await capped.store.create(randomUUID(), FACTOR);
