@@ -8,6 +8,10 @@ import type {
   QuotaBlockReason,
 } from '../../domain/index.js';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
+import {
+  type PlatformProcessCounters,
+  SALES_CONTACT_RESULTS,
+} from '../../application/ports/platform-health.js';
 
 /** Fotografia do pool de conexões (mesma forma de `Database.poolMetrics()`). */
 export interface PoolSnapshot {
@@ -1136,5 +1140,53 @@ export function createMetrics(): Metrics {
     countProcessFatalError(kind) {
       processFatalErrors.inc({ kind });
     },
+  };
+}
+
+/** Soma das amostras de um contador do registro cujos labels casam com os pedidos (ausente: 0). */
+async function counterSum(
+  registry: Registry,
+  name: string,
+  labels: Readonly<Record<string, string>> = {},
+): Promise<number> {
+  const metric = registry.getSingleMetric(name);
+  if (metric === undefined) return 0;
+  const { values } = await metric.get();
+  let total = 0;
+  for (const sample of values) {
+    const matches = Object.entries(labels).every(([key, value]) => sample.labels[key] === value);
+    if (matches) total += sample.value;
+  }
+  return total;
+}
+
+/**
+ * Lista fixa de contadores do processo para a Saúde do admin da plataforma (spec 044, E2, D11). Lê o
+ * registro na hora (desde o boot); nenhum label livre sai daqui, só os conjuntos fixos.
+ */
+export async function readPlatformProcessCounters(
+  registry: Registry,
+): Promise<PlatformProcessCounters> {
+  const sales = await Promise.all(
+    SALES_CONTACT_RESULTS.map(
+      async (result) =>
+        [result, await counterSum(registry, 'sales_contact_requests_total', { result })] as const,
+    ),
+  );
+  return {
+    attendanceFallbacks: await counterSum(registry, 'attendance_fallbacks_total'),
+    attendanceUnsentReplies: await counterSum(registry, 'attendance_unsent_replies_total'),
+    channelSend: {
+      ok: await counterSum(registry, 'channel_send_total', { result: 'ok' }),
+      error: await counterSum(registry, 'channel_send_total', { result: 'error' }),
+    },
+    queueJobsFailed: await counterSum(registry, 'queue_jobs_total', { result: 'failed' }),
+    processFatalErrors: await counterSum(registry, 'process_fatal_errors_total'),
+    entitlementErrors: await counterSum(registry, 'entitlement_errors_total'),
+    usageMeterErrors: await counterSum(registry, 'usage_meter_errors_total'),
+    billingNoticesFailed: await counterSum(registry, 'billing_notices_total', { result: 'failed' }),
+    salesContactRequests: Object.fromEntries(
+      sales,
+    ) as PlatformProcessCounters['salesContactRequests'],
   };
 }
