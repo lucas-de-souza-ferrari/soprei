@@ -217,3 +217,10 @@ Nada bloqueante. Corrigido:
 - **M5:** Status da spec e `docs/handoff.md` atualizados (PRs abertos, ordem de merge, decisões do dono pendentes).
 - **M6:** o `ADMIN_HOST` comentado de `deploy/targets/staging.conf` usa o marcador `<HOSTNAME_DO_ADMIN_STAGING>` do nginx do staging; a seção de staging de `docs/ops/admin.md` cita o marcador.
 - **Validação local (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `deploy-scripts.test.ts` (74) e `ci-workflow.test.ts` (11) verdes; `pnpm typecheck`, `pnpm lint` e `pnpm format:check` da raiz verdes. **Não verificado:** `nginx -t` com os exemplos (não há nginx aqui) e os cabeçalhos de verdade (só no servidor, passo 8).
+
+### Decisões do dono depois das revisões (2026-11-24; ajustes no PR #25)
+
+- **M4 da E2, feito:** o `PATCH /admin/companies/:id` aceita só `name`; `status` é 400 (`updateCompanyBodySchema`, `strict`). Suspender e reativar são só `POST /platform/companies/:companyId/suspend|reactivate`, com motivo, trava da empresa e trilha. A criação (`POST /admin/companies`) continua aceitando `status`. Testes: `companies.controller.test.ts` (400 para `status` sozinho e junto de `name`), `admin-companies.integration.test.ts` (400 e a empresa continua `ACTIVE`); os testes que suspendiam pelo `PATCH` (`attendance.controller.test.ts`, `attendance.integration.test.ts`) passam a pôr o estado direto no repositório ou no banco.
+- **Mantidos como estão:** contagens só de empresas `ACTIVE` e sem o "Testar" (E2); pausa da releitura da Saúde depois de 30 min sem uso (M3 da E3); HSTS só com `max-age` de um ano, sem `includeSubDomains` nem `preload` (E4).
+- **D7, leitura do agente, a confirmar pelo dono:** a Política de Privacidade já cobre o dono ver o e-mail da conta no admin (seção 5: criar e proteger a conta, cobrar a assinatura e prestar suporte, com base na execução do contrato); o e-mail não vai para a trilha (só o id da conta). Nenhuma mudança de texto, nem de versão da política.
+- **Validação local (Windows, Node 26.13.1):** `companies.controller.test.ts` e `attendance.controller.test.ts` (38) verdes; a integração fica para o CI.
