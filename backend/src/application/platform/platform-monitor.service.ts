@@ -20,7 +20,11 @@ import {
   usageWindowEnd,
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
-import { NotFoundError } from '../../shared/errors/index.js';
+import {
+  DatabaseError,
+  NotFoundError,
+  ServiceUnavailableError,
+} from '../../shared/errors/index.js';
 import type { Result } from '../../shared/types/index.js';
 import { isUuid } from '../../shared/utils/index.js';
 import type { PlatformIdentity } from '../auth/identity.js';
@@ -331,6 +335,22 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
+ * Falha do banco numa leitura que não passa pelo `PlatformReadModel` (o Primeiros passos do detalhe): o
+ * mesmo 503 sem detalhe das leituras agregadas (revisão da E2, M2), em vez do 500 do `DatabaseError`.
+ */
+function readUnavailable(operation: string): (error: unknown) => never {
+  return (error: unknown) => {
+    if (error instanceof DatabaseError) {
+      throw new ServiceUnavailableError('Leitura do admin indisponível', {
+        cause: error,
+        context: { operation },
+      });
+    }
+    throw error;
+  };
+}
+
+/**
  * Leituras e ações do admin da plataforma (spec 044, E2). Não conhece Fastify nem Prisma. Só números,
  * estados, datas, ids, nome e slug de empresa e (D7) o e-mail da conta no detalhe, com trilha. Nunca loga
  * e-mail, nome nem conteúdo: só ids, ação e motivo.
@@ -414,12 +434,9 @@ export class PlatformMonitorService {
     if (facts === null) throw companyNotFound();
     const id = facts.company.id;
     const [onboarding, subscriptionFacts] = await Promise.all([
-      this.deps.onboarding.read(id, {
-        persona: true,
-        knowledge: true,
-        schedule: true,
-        inventory: true,
-      }),
+      this.deps.onboarding
+        .read(id, { persona: true, knowledge: true, schedule: true, inventory: true })
+        .catch(readUnavailable('PlatformMonitor.onboarding')),
       this.deps.billing === undefined || facts.subscriptionId === null
         ? Promise.resolve(null)
         : this.deps.reads.subscription({ subscriptionId: facts.subscriptionId }, now),

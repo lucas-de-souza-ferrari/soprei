@@ -8,7 +8,11 @@ import {
   type SubscriptionRecord,
   type SubscriptionStatus,
 } from '../../domain/index.js';
-import { NotFoundError } from '../../shared/errors/index.js';
+import {
+  DatabaseError,
+  NotFoundError,
+  ServiceUnavailableError,
+} from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import {
   FakePlatformReadModel,
@@ -71,6 +75,7 @@ function setup(
     billing?: boolean;
     health?: Partial<PlatformHealthSources>;
     onboarding?: { persona: boolean };
+    onboardingRead?: () => Promise<never>;
   } = {},
 ) {
   const logs = captureLogs();
@@ -82,6 +87,7 @@ function setup(
     reads,
     onboarding: {
       read: () =>
+        options.onboardingRead?.() ??
         Promise.resolve({
           dismissed: false,
           persona: options.onboarding?.persona ?? false,
@@ -408,6 +414,21 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
     await assert.rejects(service.companyDetail('nao-uuid'), NotFoundError);
     assert.equal(reads.calls.length, before, 'id malformado nem chega ao banco');
     await assert.rejects(service.companyDetail(randomUUID()), NotFoundError);
+  });
+
+  it('detalhe da empresa: falha do banco no Primeiros passos vira o mesmo 503 das leituras (revisão da E2, M2)', async () => {
+    const id = CompanyId.parse(randomUUID());
+    const reads = new FakePlatformReadModel({
+      companyDetail: () => Promise.resolve(companyFacts(id)),
+    });
+    const { service } = setup({
+      reads,
+      onboardingRead: () => Promise.reject(new DatabaseError('Falha ao ler')),
+    });
+    await assert.rejects(
+      service.companyDetail(id),
+      (error: unknown) => error instanceof ServiceUnavailableError && error.statusCode === 503,
+    );
   });
 
   it('detalhe da conta: grava ACCOUNT_EMAIL_VIEWED com o admin e a conta (e a métrica); ausente é 404 sem gravar', async () => {
