@@ -91,6 +91,7 @@ case "$*" in
     echo "DATABASE_URL=\${DATABASE_URL:-}"
     echo "JWT_SECRET=\${LEAK_JWT:-}"
     echo "password=SENTINELA-PW apiKey=SENTINELA-APIKEY Token=SENTINELA-TOKEN"
+    echo "PLATFORM_TOTP_KEYS=k1:SENTINELA-TOTPKEYS"
     echo "conectando em https://usuario:SENTINELA-URLPW@host.invalido/caminho"
     printf '%s' "\${DATABASE_URL:-}" > "$STUB_DIR/db_url_seen_generate"
     exit 0 ;;
@@ -121,8 +122,15 @@ console.log('ok');
 JS
     exit 0 ;;
   *"exec vite build"*)
-    mkdir -p "$out"
-    echo "<html>site</html>" > "$out/index.html"
+    case "$*" in
+      *"--filter soprei-admin "*)
+        if [ -f "$STUB_DIR/admin_build_fail" ]; then echo "build do admin falhou (dublê)"; exit 1; fi
+        mkdir -p "$out"
+        echo "<html>admin</html>" > "$out/index.html" ;;
+      *)
+        mkdir -p "$out"
+        echo "<html>site</html>" > "$out/index.html" ;;
+    esac
     exit 0 ;;
 esac
 echo "dublê de pnpm: comando não previsto: $*" >&2
@@ -159,6 +167,11 @@ case "$url" in
     if [ -f "$STUB_DIR/health_down" ]; then printf 000; exit 7; fi
     cur=$(sed -n 's#^// sha=##p' "$STUB_APP_DIR/backend/dist/index.js" 2>/dev/null)
     if [ -f "$STUB_DIR/health_bad_sha" ] && [ "$cur" = "$(cat "$STUB_DIR/health_bad_sha")" ]; then printf 503; else printf 200; fi ;;
+  https://admin.teste.invalid/)
+    # O admin (spec 044, E4) só responde 200 se o admin/dist (atalho ou pasta) existe de verdade.
+    if [ -n "\${ADMIN_CODE:-}" ]; then printf '%s' "$ADMIN_CODE"
+    elif [ -f "$STUB_APP_DIR/admin/dist/index.html" ]; then printf 200
+    else printf 404; fi ;;
   *)
     # O site só responde 200 se o frontend/dist (atalho ou pasta) existe de verdade.
     if [ -n "\${SITE_CODE:-}" ]; then printf '%s' "$SITE_CODE"
@@ -199,6 +212,10 @@ interface WorldOptions {
   targetMigration?: string; // conteúdo do migration.sql que o commit-alvo adiciona
   withBackup?: boolean;
   registerState?: boolean;
+  /** Spec 044, E4: o repositório tem o app admin/ (padrão: sim, como o de verdade). */
+  withAdmin?: boolean;
+  /** Alvo com ADMIN_HOST (a conferência do admin por https depois da troca). */
+  adminHost?: boolean;
 }
 
 const roots: string[] = [];
@@ -256,6 +273,9 @@ function makeWorld(options: WorldOptions = {}): World {
     'CREATE TABLE t (id int);\n',
   );
   write(join(workDir, 'frontend', 'package.json'), '{"name":"soprei-frontend","private":true}\n');
+  if (options.withAdmin !== false) {
+    write(join(workDir, 'admin', 'package.json'), '{"name":"soprei-admin","private":true}\n');
+  }
   write(join(workDir, 'deploy', 'ecosystem.config.cjs'), 'module.exports = { apps: [] };\n');
   git(workDir, 'add', '-A');
   git(workDir, 'commit', '-m', 'versao anterior');
@@ -297,6 +317,7 @@ function makeWorld(options: WorldOptions = {}): World {
     'READY_URL=http://127.0.0.1:39999/health/ready',
     'SITE_HOST=app.teste.invalid',
     'SITE_OK_CODES=200',
+    ...(options.adminHost === true ? ['ADMIN_HOST=admin.teste.invalid', 'ADMIN_OK_CODES=200'] : []),
     `REQUIRE_STAGED=${env === 'production' ? 'true' : 'false'}`,
     ...(options.withBackup === true
       ? [`PRE_MIGRATION_BACKUP=${toPosix(join(stubDir, 'backup'))}`]
@@ -409,6 +430,7 @@ function assertNoSecrets(result: RunResult): void {
     'SENTINELA-APIKEY',
     'SENTINELA-TOKEN',
     'SENTINELA-URLPW',
+    'SENTINELA-TOTPKEYS',
   ]) {
     assert.ok(!result.out.includes(secret), `a saída contém o segredo ${secret}`);
     assert.ok(!result.log.includes(secret), `o log contém o segredo ${secret}`);
@@ -863,6 +885,137 @@ describe('deploy.sh: deploy concluído e redação de segredos', { skip: BASH_SK
       const dist = join(world.appDir, 'frontend', 'dist');
       assert.ok(!lstatSync(dist).isSymbolicLink());
       assert.match(readFileSync(join(dist, 'index.html'), 'utf8'), /legado/);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Spec 044, E4: o admin da plataforma é publicado junto com o site, com o mesmo rollback
+// ---------------------------------------------------------------------------------------------
+
+/** Nomes das releases (sem as `legacy-*`) de um app estático. */
+function releasesOf(world: World, app: 'frontend' | 'admin'): string[] {
+  const dir = join(world.appDir, app, 'releases');
+  return existsSync(dir)
+    ? readdirSync(dir)
+        .filter((name) => !name.startsWith('legacy-'))
+        .sort()
+    : [];
+}
+
+describe('deploy.sh: admin da plataforma (spec 044, E4)', { skip: BASH_SKIP }, () => {
+  it('o plano diz se o admin entra; versão sem admin/ avisa que o publicado não muda', () => {
+    const world = makeWorld();
+    const dry = deploy(world, ['--env', 'staging', '--ref', world.targetSha, '--dry-run']);
+    assert.equal(dry.status, 0, dry.out);
+    assert.match(dry.out, /admin da plataforma: publicado junto com o site/);
+
+    const old = makeWorld({ withAdmin: false });
+    const oldDry = deploy(old, ['--env', 'staging', '--ref', old.targetSha, '--dry-run']);
+    assert.equal(oldDry.status, 0, oldDry.out);
+    assert.match(oldDry.out, /a versão pedida não tem admin\//);
+  });
+
+  it('build do admin que falha: nada é trocado, nenhuma release sobra e a árvore volta (saída 2)', () => {
+    const world = makeWorld({ targetMigration: ADDITIVE });
+    setStub(world, 'admin_build_fail');
+    const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha]);
+    assert.equal(result.status, 2, result.out);
+    assert.match(result.out, /o build do site ou do admin falhou/);
+    assert.ok(!result.events.includes('db:migrate:deploy'), 'a migration não roda');
+    assert.ok(!result.events.includes('startOrReload'), 'o processo não é tocado');
+    assert.deepEqual(releasesOf(world, 'frontend'), [], 'a release do site também é apagada');
+    assert.deepEqual(releasesOf(world, 'admin'), []);
+    assert.match(
+      readFileSync(join(world.appDir, 'frontend', 'dist', 'index.html'), 'utf8'),
+      /legado/,
+    );
+    assert.equal(head(world), world.prevSha);
+    assertNoSecrets(result);
+  });
+
+  it(
+    'deploy concluído publica admin/dist por atalho, na mesma release do site e legível pelo nginx',
+    { skip: SYMLINK_SKIP },
+    () => {
+      const world = makeWorld({ adminHost: true });
+      const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha]);
+      assert.equal(result.status, 0, result.out);
+      assert.ok(result.events.includes('pnpm --filter soprei-admin exec tsc --noEmit'));
+      assert.ok(result.events.includes('pnpm --filter soprei-admin exec vite build'));
+      const site = readlinkSync(join(world.appDir, 'frontend', 'dist'));
+      const admin = join(world.appDir, 'admin', 'dist');
+      assert.ok(lstatSync(admin).isSymbolicLink());
+      assert.equal(readlinkSync(admin), site, 'site e admin na mesma release');
+      assert.match(readFileSync(join(admin, 'index.html'), 'utf8'), /admin/);
+      const releasesDir = join(world.appDir, 'admin', 'releases');
+      assert.equal(statSync(releasesDir).mode & 0o755, 0o755, 'admin/releases precisa de 755');
+      const [release] = releasesOf(world, 'admin');
+      assert.equal(statSync(join(releasesDir, release ?? '', 'index.html')).mode & 0o044, 0o044);
+      assertNoSecrets(result);
+    },
+  );
+
+  it(
+    'admin que não responde depois da troca: rollback devolve o admin e o site à release anterior (saída 2)',
+    { skip: SYMLINK_SKIP },
+    () => {
+      const world = makeWorld({ adminHost: true });
+      const first = deploy(world, ['--env', 'staging', '--ref', world.targetSha]);
+      assert.equal(first.status, 0, first.out);
+      const siteBefore = readlinkSync(join(world.appDir, 'frontend', 'dist'));
+      const adminBefore = readlinkSync(join(world.appDir, 'admin', 'dist'));
+
+      const second = deploy(world, ['--env', 'staging', '--ref', world.prevSha], {
+        ADMIN_CODE: '502',
+      });
+      assert.equal(second.status, 2, second.out);
+      assert.match(second.out, /o admin respondeu 502/);
+      assert.match(second.out, /o admin novo não respondeu/);
+      assert.match(second.out, /site restaurado para releases\//);
+      assert.match(second.out, /admin restaurado para releases\//);
+      assert.match(second.out, /DEPLOY FALHOU; VOLTEI PARA/);
+      assert.equal(readlinkSync(join(world.appDir, 'frontend', 'dist')), siteBefore);
+      assert.equal(readlinkSync(join(world.appDir, 'admin', 'dist')), adminBefore);
+      // A release que falhou não sobra em nenhum dos dois.
+      assert.deepEqual(releasesOf(world, 'admin'), [adminBefore.replace('releases/', '')]);
+      assert.deepEqual(releasesOf(world, 'frontend'), [siteBefore.replace('releases/', '')]);
+      assert.equal(head(world), world.targetSha);
+      assert.equal(stateOf(world, 'current'), world.targetSha);
+      assertNoSecrets(second);
+    },
+  );
+
+  it(
+    'primeira publicação do admin que falha: o atalho sai e o site volta à pasta original',
+    { skip: SYMLINK_SKIP },
+    () => {
+      const world = makeWorld({ adminHost: true });
+      const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha], {
+        ADMIN_CODE: '502',
+      });
+      assert.equal(result.status, 2, result.out);
+      assert.match(result.out, /admin restaurado para nenhuma release/);
+      assert.ok(!existsSync(join(world.appDir, 'admin', 'dist')), 'o admin some de novo');
+      assert.deepEqual(releasesOf(world, 'admin'), []);
+      const dist = join(world.appDir, 'frontend', 'dist');
+      assert.ok(!lstatSync(dist).isSymbolicLink());
+      assert.match(readFileSync(join(dist, 'index.html'), 'utf8'), /legado/);
+      assert.equal(head(world), world.prevSha);
+    },
+  );
+
+  it(
+    'versão sem admin/ (anterior à spec 044) publica só o site e não cria nada do admin',
+    { skip: SYMLINK_SKIP },
+    () => {
+      const world = makeWorld({ withAdmin: false, adminHost: true });
+      const result = deploy(world, ['--env', 'staging', '--ref', world.targetSha]);
+      assert.equal(result.status, 0, result.out);
+      assert.match(result.out, /esta versão não tem o app admin\//);
+      assert.ok(!result.events.includes('soprei-admin'), result.events);
+      assert.ok(!existsSync(join(world.appDir, 'admin', 'releases')));
+      assert.ok(!existsSync(join(world.appDir, 'admin', 'dist')));
     },
   );
 });

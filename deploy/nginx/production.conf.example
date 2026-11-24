@@ -57,6 +57,12 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Admin da plataforma (spec 044, E4): /platform/* só pelo hostname do admin (deploy/nginx/admin.conf.example).
+    # Defesa em profundidade: o cookie do admin já não vem a este hostname.
+    location /api/platform/ {
+        return 404;
+    }
+
     # Webhooks da Meta e da InfinitePay.
     location /webhooks/ {
         proxy_pass http://127.0.0.1:3001;

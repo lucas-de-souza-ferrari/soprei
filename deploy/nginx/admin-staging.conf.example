@@ -1,0 +1,65 @@
+# nginx do ADMIN DA PLATAFORMA do STAGING (spec 044, E4; opcional). Exemplo: o dono copia para
+# /etc/nginx/sites-available/soprei-admin-staging, troca <HOSTNAME_DO_ADMIN_STAGING> e roda o certbot,
+# como no staging do site (docs/ops/staging.md e docs/ops/admin.md).
+#
+# Mesmo desenho do admin da produção (deploy/nginx/admin.conf.example), apontando para o backend do
+# staging (porta 3002) e para o clone do staging, mais a senha básica do staging (D5 da spec 037). O
+# arquivo de senhas pode ser o mesmo do site do staging (fora do repositório). Nenhum cabeçalho
+# Authorization chega à API.
+
+map $request_uri $soprei_admin_staging_log_path {
+    ~^(?<soprei_admin_staging_path>[^?]*)    $soprei_admin_staging_path;
+}
+log_format soprei_admin_staging_sem_query '$remote_addr - $remote_user [$time_local] '
+                                          '"$request_method $soprei_admin_staging_log_path $server_protocol" '
+                                          '$status $body_bytes_sent "$http_user_agent"';
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <HOSTNAME_DO_ADMIN_STAGING>;
+    access_log /var/log/nginx/access.log soprei_admin_staging_sem_query;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name <HOSTNAME_DO_ADMIN_STAGING>;
+
+    ssl_certificate /etc/letsencrypt/live/<HOSTNAME_DO_ADMIN_STAGING>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<HOSTNAME_DO_ADMIN_STAGING>/privkey.pem;
+
+    auth_basic "Soprei staging";
+    auth_basic_user_file /etc/nginx/soprei-staging.htpasswd;
+
+    root /var/www/soprei-staging/admin/dist;
+    index index.html;
+    access_log /var/log/nginx/access.log soprei_admin_staging_sem_query;
+
+    # Cabeçalhos do admin (E3); nenhum add_header dentro dos location (apagaria estes).
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    location /api/platform/ {
+        proxy_pass http://127.0.0.1:3002/platform/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization "";
+    }
+
+    location /api/ {
+        return 404;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}
