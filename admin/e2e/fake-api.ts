@@ -58,6 +58,10 @@ export class FakeApi {
   companyStatus: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE';
   /** Caminhos que passam a responder 401 (sessão vencida no servidor). */
   readonly expired = new Set<string>();
+  /** Caminhos que respondem com este status de erro antes de qualquer outra regra (logout com 503...). */
+  readonly failures = new Map<string, number>();
+  /** Caminhos cuja resposta espera esta promessa (ação "em andamento" pelo tempo que o teste quiser). */
+  readonly holds = new Map<string, Promise<void>>();
 
   constructor(private readonly options: FakeApiOptions) {
     this.signedIn = options.signedIn ?? false;
@@ -85,6 +89,9 @@ export class FakeApi {
       json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
     });
     if (method === 'POST' && headers['x-soprei-app'] !== 'admin') return error(403, 'FORBIDDEN');
+    const failure = this.failures.get(path);
+    if (failure !== undefined)
+      return error(failure, failure === 401 ? 'UNAUTHORIZED' : 'SERVICE_UNAVAILABLE');
 
     if (path === '/platform/auth/login' && method === 'POST') {
       const { email, password, code } = (body ?? {}) as Record<string, unknown>;
@@ -166,6 +173,8 @@ export class FakeApi {
 export async function installFakeApi(page: Page, options: FakeApiOptions = {}): Promise<FakeApi> {
   const api = new FakeApi(options);
   await page.route('**/api/**', async (route) => {
+    const hold = api.holds.get(new URL(route.request().url()).pathname.replace(/^\/api/, ''));
+    if (hold !== undefined) await hold;
     const { status, json } = api.respond(route.request());
     await route.fulfill(json === undefined ? { status } : { status, json });
   });

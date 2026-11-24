@@ -171,6 +171,18 @@ export function loginErrorMessage(error: unknown): string {
   return errorMessage(error);
 }
 
+/** "Sair" que o servidor não confirmou (503, 403, rede): a sessão continua, e a tela diz isso. */
+export function signOutErrorMessage(error: unknown): string {
+  return `Não foi possível sair: ${errorMessage(error)} Se persistir, feche o navegador.`;
+}
+
+/**
+ * O login respondeu 204, mas a leitura da sessão logo depois deu 401: o navegador não guardou o cookie
+ * (ex.: cookie `Secure` num endereço sem HTTPS, ou outro hostname).
+ */
+export const SESSION_NOT_KEPT =
+  'O servidor aceitou a entrada, mas o navegador não guardou a sessão (cookie seguro). Confira o endereço do admin.';
+
 /** Código de 6 dígitos: tira tudo o que não é dígito (o autocompletar do celular cola com espaço). */
 export function normalizeCode(value: string): string {
   return value.replace(/\D/g, '').slice(0, 6);

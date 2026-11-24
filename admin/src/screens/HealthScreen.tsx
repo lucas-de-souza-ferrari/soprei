@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLoad } from '../admin-context';
 import {
   QUEUE_JOB_STATES,
@@ -9,21 +9,45 @@ import {
   type ResumeHealth,
 } from '../contracts';
 import { errorMessage, formatCount, formatDateTime, label } from '../format';
-import { Alert, Badge, Card, Facts, Loading, PageHeader } from '../ui';
+import { Alert, Badge, Button, Card, Facts, Loading, PageHeader } from '../ui';
 
 /** Intervalo da releitura automática da Saúde (spec 044, E3), só com a aba visível. */
 export const HEALTH_REFRESH_MS = 60_000;
 
 /**
- * Chama `tick` a cada `ms` enquanto a aba está visível; ao voltar a ficar visível, relê na hora se o
- * intervalo já passou. Com a aba escondida não há chamada nenhuma.
+ * Sem tecla nem ponteiro por este tempo, a releitura automática pausa: cada leitura renova o prazo ocioso
+ * da sessão no servidor, e uma aba esquecida na Saúde não pode manter a sessão viva para sempre.
  */
-function useVisibleInterval(tick: () => void, ms: number): void {
+export const HEALTH_IDLE_PAUSE_MS = 30 * 60_000;
+
+const INTERACTION_EVENTS = ['keydown', 'pointerdown'] as const;
+
+/**
+ * Chama `tick` a cada `ms` enquanto a aba está visível; ao voltar a ficar visível, relê na hora se o
+ * intervalo já passou. Com a aba escondida não há chamada nenhuma. Depois de `idleMs` sem interação do
+ * usuário, pausa até `resume()` (que relê na hora).
+ */
+function useVisibleInterval(
+  tick: () => void,
+  ms: number,
+  idleMs: number,
+): { readonly paused: boolean; readonly resume: () => void } {
   const tickRef = useRef(tick);
   tickRef.current = tick;
+  const lastInteraction = useRef(Date.now());
+  const pausedRef = useRef(false);
+  const [paused, setPaused] = useState(false);
+
   useEffect(() => {
     let last = Date.now();
+    lastInteraction.current = Date.now();
     const run = () => {
+      if (pausedRef.current) return;
+      if (Date.now() - lastInteraction.current >= idleMs) {
+        pausedRef.current = true;
+        setPaused(true);
+        return;
+      }
       last = Date.now();
       tickRef.current();
     };
@@ -33,12 +57,28 @@ function useVisibleInterval(tick: () => void, ms: number): void {
     const onVisibility = () => {
       if (document.visibilityState === 'visible' && Date.now() - last >= ms) run();
     };
+    const onInteraction = () => {
+      lastInteraction.current = Date.now();
+    };
     document.addEventListener('visibilitychange', onVisibility);
+    for (const name of INTERACTION_EVENTS)
+      window.addEventListener(name, onInteraction, { passive: true, capture: true });
     return () => {
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibility);
+      for (const name of INTERACTION_EVENTS)
+        window.removeEventListener(name, onInteraction, { capture: true });
     };
-  }, [ms]);
+  }, [ms, idleMs]);
+
+  const resume = useCallback(() => {
+    lastInteraction.current = Date.now();
+    pausedRef.current = false;
+    setPaused(false);
+    tickRef.current();
+  }, []);
+
+  return { paused, resume };
 }
 
 function okText(ok: boolean): string {
@@ -105,11 +145,19 @@ export function HealthScreen() {
     (api) => api.get('/platform/health', healthSchema),
     'health',
   );
-  useVisibleInterval(reload, HEALTH_REFRESH_MS);
+  const { paused, resume } = useVisibleInterval(reload, HEALTH_REFRESH_MS, HEALTH_IDLE_PAUSE_MS);
 
   return (
     <>
-      <PageHeader title="Saúde" onRefresh={reload} busy={loading} />
+      <PageHeader title="Saúde" onRefresh={paused ? resume : reload} busy={loading} />
+      {paused ? (
+        <Alert tone="info">
+          <span className="flex flex-wrap items-center gap-2">
+            Atualização automática pausada (30 min sem uso).
+            <Button onClick={resume}>Retomar</Button>
+          </span>
+        </Alert>
+      ) : null}
       {error === undefined ? null : <Alert>{errorMessage(error)}</Alert>}
       {data === undefined ? (
         loading ? (

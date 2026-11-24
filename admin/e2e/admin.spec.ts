@@ -1,9 +1,37 @@
 import { test, expect, type Page } from '@playwright/test';
 import { ACCOUNT_A, ADMIN_EMAIL, COMPANY_A, FULL_EMAIL } from './fixtures';
-import { GOOD, hasHorizontalScroll, installFakeApi, signIn, storageSizes } from './fake-api';
+import {
+  GOOD,
+  hasHorizontalScroll,
+  installFakeApi,
+  signIn,
+  storageSizes,
+  type FakeApi,
+  type FakeApiOptions,
+} from './fake-api';
 
 const nav = (page: Page, name: string) =>
   page.getByRole('navigation', { name: 'Seções' }).getByRole('button', { name, exact: true });
+
+const CLOCK_START = new Date('2026-11-24T15:00:00.000Z');
+
+/**
+ * Abre a Saúde com o relógio da página parado (`pauseAt`) antes de a tela montar: o intervalo de 60 s
+ * começa num instante conhecido, e só `runFor` o faz andar (nada depende do relógio real da máquina).
+ */
+async function openHealthWithFrozenClock(
+  page: Page,
+  options: FakeApiOptions = {},
+): Promise<FakeApi> {
+  await page.clock.install({ time: CLOCK_START });
+  const api = await installFakeApi(page, { signedIn: true, ...options });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
+  await page.clock.pauseAt(new Date(CLOCK_START.getTime() + 5 * 60_000));
+  await nav(page, 'Saúde').click();
+  await expect(page.getByRole('heading', { name: 'Saúde', level: 1 })).toBeVisible();
+  return api;
+}
 
 test('entrar com e-mail, senha e código e ver a Visão geral, sem nada guardado no navegador', async ({
   page,
@@ -79,15 +107,105 @@ test('abrir uma empresa e suspender com confirmação e motivo; depois reativar'
   expect(reactivate?.body).toEqual({ reason: 'PAYMENT' });
 });
 
+test('com a suspensão em andamento, Esc não fecha o diálogo e o erro da ação aparece', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  const path = `/platform/companies/${COMPANY_A}/suspend`;
+  api.failures.set(path, 503);
+  let release: () => void = () => undefined;
+  api.holds.set(
+    path,
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  await page.goto('/');
+  await nav(page, 'Empresas').click();
+  await page.getByRole('button', { name: 'Abrir Padaria Aurora' }).click();
+  await page.getByRole('button', { name: 'Suspender', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Suspender Padaria Aurora?' });
+  await dialog.getByRole('button', { name: 'Confirmar suspensão' }).click();
+  await expect(dialog.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+
+  release();
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'Serviço indisponível no momento. Tente novamente em instantes.',
+  );
+  // Fechado o diálogo, o erro continua à vista fora dele.
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('alert')).toHaveText(
+    'Serviço indisponível no momento. Tente novamente em instantes.',
+  );
+  expect(api.callsTo('POST', path)).toHaveLength(1);
+});
+
 test('401 em qualquer chamada volta à tela Entrar', async ({ page }) => {
   const api = await installFakeApi(page, { signedIn: true });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
+  // Espera a carga inicial terminar (o StrictMode de desenvolvimento carrega duas vezes).
+  await expect(page.getByRole('button', { name: 'Atualizar' })).toBeEnabled();
   api.expired.add('/platform/overview');
   await page.getByRole('button', { name: 'Atualizar' }).click();
   await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Sessão encerrada. Entre novamente.');
   expect(await storageSizes(page)).toEqual([0, 0]);
+});
+
+test('"Sair" que o servidor não confirma (503) mantém a sessão na tela e mostra o erro', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
+  api.failures.set('/platform/auth/logout', 503);
+  let release: () => void = () => undefined;
+  api.holds.set(
+    '/platform/auth/logout',
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  await page.getByRole('button', { name: 'Sair' }).click();
+  await expect(page.getByRole('button', { name: 'Saindo…' })).toBeDisabled();
+  release();
+  await expect(page.getByRole('alert')).toContainText('Não foi possível sair');
+  await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
+  await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sair' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Entrar' })).toHaveCount(0);
+  expect(api.callsTo('POST', '/platform/auth/logout')).toHaveLength(1);
+});
+
+test('"Sair" com 401 do servidor conta como saída concluída', async ({ page }) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
+  api.failures.set('/platform/auth/logout', 401);
+  await page.getByRole('button', { name: 'Sair' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('login aceito (204) mas sessão 401 em seguida: aviso de cookie não guardado em Entrar', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page);
+  api.failures.set('/platform/auth/session', 401);
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  // Ao abrir, um 401 é só "sem sessão": nenhum aviso.
+  await expect(page.getByRole('status')).toHaveCount(0);
+  await signIn(page);
+  await expect(page.getByRole('status')).toHaveText(
+    'O servidor aceitou a entrada, mas o navegador não guardou a sessão (cookie seguro). Confira o endereço do admin.',
+  );
+  await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  expect(api.callsTo('POST', '/platform/auth/login')).toHaveLength(1);
 });
 
 test('"Mostrar e-mail" chama a rota de detalhe da conta; a lista só tem o e-mail mascarado', async ({
@@ -162,27 +280,56 @@ test('cobrança desligada aparece como tal na Visão geral e na Cobrança', asyn
 test('Saúde: fila indisponível sem derrubar o resto, e releitura a cada 60 s só com a aba visível', async ({
   page,
 }) => {
-  await page.clock.install();
-  const api = await installFakeApi(page, { signedIn: true, queueUnavailable: true });
-  await page.goto('/');
-  await nav(page, 'Saúde').click();
+  const api = await openHealthWithFrozenClock(page, { queueUnavailable: true });
   await expect(page.getByText('Indisponível')).toBeVisible();
   await expect(page.getByText('Envios pelo canal: ok')).toBeVisible();
   // Em desenvolvimento o StrictMode do React monta a tela duas vezes; conta-se a partir daqui.
   const reads = () => api.callsTo('GET', '/platform/health').length;
   const first = reads();
 
-  await page.clock.fastForward(59_000);
+  // Relógio parado desde antes de a tela montar: o intervalo começa num instante conhecido.
+  await page.clock.runFor(59_000);
   expect(reads()).toBe(first);
-  await page.clock.fastForward(1_000);
+  await page.clock.runFor(1_000);
   await expect.poll(reads).toBe(first + 1);
 
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
   });
-  await page.clock.fastForward(120_000);
-  await page.clock.runFor(1_000);
+  await page.clock.runFor(180_000);
   expect(reads()).toBe(first + 1);
+});
+
+test('Saúde: 30 min sem tecla nem ponteiro pausam a releitura automática até "Retomar"', async ({
+  page,
+}) => {
+  const api = await openHealthWithFrozenClock(page);
+  await expect(page.getByText('Envios pelo canal: ok')).toBeVisible();
+  const reads = () => api.callsTo('GET', '/platform/health').length;
+  const paused = page.getByText('Atualização automática pausada');
+  const first = reads();
+
+  // Uma tecla aos 20 min renova o prazo: aos 40 min (20 desde a tecla) ainda relê.
+  await page.clock.runFor(20 * 60_000);
+  await expect.poll(reads).toBe(first + 20);
+  await page.keyboard.press('Shift');
+  await page.clock.runFor(20 * 60_000);
+  await expect.poll(reads).toBe(first + 40);
+  await expect(paused).toHaveCount(0);
+
+  // Aos 30 min desde a tecla, pausa: nenhuma releitura a mais, por mais tempo que passe.
+  await page.clock.runFor(10 * 60_000);
+  await expect(paused).toBeVisible();
+  const atPause = reads();
+  expect(atPause).toBe(first + 49);
+  await page.clock.runFor(30 * 60_000);
+  expect(reads()).toBe(atPause);
+
+  await page.getByRole('button', { name: 'Retomar' }).click();
+  await expect(paused).toHaveCount(0);
+  await expect.poll(reads).toBe(atPause + 1);
+  await page.clock.runFor(60_000);
+  await expect.poll(reads).toBe(atPause + 2);
 });
 
 test('nenhuma tela rola de lado e o tema segue o sistema', async ({ page }, testInfo) => {

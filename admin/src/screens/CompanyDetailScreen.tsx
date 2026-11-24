@@ -145,9 +145,16 @@ function StatusAction({
       >
         {suspend ? 'Suspender' : 'Reativar'}
       </Button>
+      {/* Se o navegador fechar o diálogo à força no meio da ação, o erro aparece aqui fora. */}
+      {open || error === undefined ? null : (
+        <div className="basis-full">
+          <Alert>{errorMessage(error)}</Alert>
+        </div>
+      )}
       <Dialog
         open={open}
         title={suspend ? `Suspender ${detail.name}?` : `Reativar ${detail.name}?`}
+        busy={busy}
         onClose={() => setOpen(false)}
       >
         <p className="mb-3 text-sm">

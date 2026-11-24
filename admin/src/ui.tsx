@@ -262,15 +262,21 @@ export function Select<T extends string>({
   );
 }
 
-/** Diálogo modal nativo (`<dialog>`): foco preso pelo navegador, Esc fecha. */
+/**
+ * Diálogo modal nativo (`<dialog>`): foco preso pelo navegador, Esc fecha, exceto com `busy` (ação em
+ * andamento), quando o `cancel` é recusado. O navegador ainda pode forçar o fechamento (um segundo Esc
+ * sem interação no meio); quem usa o diálogo mostra o erro da ação também fora dele.
+ */
 export function Dialog({
   open,
   title,
+  busy = false,
   onClose,
   children,
 }: {
   readonly open: boolean;
   readonly title: string;
+  readonly busy?: boolean;
   readonly onClose: () => void;
   readonly children: ReactNode;
 }) {
@@ -285,6 +291,10 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby="dialog-title"
+      aria-busy={busy || undefined}
+      onCancel={(event) => {
+        if (busy) event.preventDefault();
+      }}
       onClose={onClose}
       className="m-auto w-[calc(100%-2rem)] max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground"
     >

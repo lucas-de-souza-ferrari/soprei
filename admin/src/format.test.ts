@@ -11,6 +11,7 @@ import {
   label,
   loginErrorMessage,
   normalizeCode,
+  signOutErrorMessage,
 } from './format';
 
 /** O Intl usa espaço fino/rígido em alguns formatos; os testes comparam com espaço comum. */
@@ -69,6 +70,10 @@ describe('formatação do admin (spec 044, E3)', () => {
     assert.equal(
       loginErrorMessage(new ApiError(403, 'FORBIDDEN')),
       'Este endereço não está autorizado a entrar.',
+    );
+    assert.equal(
+      signOutErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE')),
+      'Não foi possível sair: Serviço indisponível no momento. Tente novamente em instantes. Se persistir, feche o navegador.',
     );
   });
 
