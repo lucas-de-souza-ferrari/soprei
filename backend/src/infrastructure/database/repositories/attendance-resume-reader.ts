@@ -139,6 +139,9 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
                     companyId,
                     role: 'ASSISTANT',
                     sentAt: null,
+                    deliveryUncertainAt: null,
+                    // Só resposta que atendeu um lote do canal; a do simulador nunca (revisão, I1).
+                    answers: { some: { companyId } },
                     createdAt: { lte: stalledBefore, gt: windowStart },
                   },
                 },
@@ -151,7 +154,14 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
             aiIgnoreBefore: true,
             messages: {
               where: { companyId },
-              select: { role: true, sentAt: true, createdAt: true, isFallback: true },
+              select: {
+                role: true,
+                sentAt: true,
+                createdAt: true,
+                isFallback: true,
+                deliveryUncertainAt: true,
+                answers: { where: { companyId }, select: { id: true }, take: 1 },
+              },
               orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               take: 1,
             },
@@ -163,8 +173,11 @@ export class PrismaResumeTargetReader implements ResumeTargetReader {
           if (seen.has(conversation.id)) continue;
           const [last] = conversation.messages;
           if (last === undefined || last.role !== 'ASSISTANT' || last.sentAt !== null) continue;
-          // O texto padrão de falha nunca é reenviado (D4; revisão da 035, S5).
-          if (last.isFallback) continue;
+          // O texto padrão de falha nunca é reenviado (D4; revisão da 035, S5); nem a resposta que a
+          // Meta aceitou sem devolver o id (I4); nem a que não atendeu lote do canal, a do simulador (I1).
+          if (last.isFallback || last.deliveryUncertainAt !== null || last.answers.length === 0) {
+            continue;
+          }
           if (last.createdAt.getTime() > stalledBefore.getTime()) continue;
           if (
             conversation.aiIgnoreBefore !== null &&

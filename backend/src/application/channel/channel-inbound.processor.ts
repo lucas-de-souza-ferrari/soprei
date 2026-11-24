@@ -83,7 +83,10 @@ export interface ChannelInboundProcessorDeps {
   readonly attendance: InboundAttendance;
   /** O número do canal é lido daqui, pelo `companyId` do job: nunca do payload. */
   readonly companies: Pick<CompanyRepository, 'findById'>;
-  readonly messages: Pick<MessageRepository, 'markSent' | 'findByExternalId' | 'findReplyTo'>;
+  readonly messages: Pick<
+    MessageRepository,
+    'markSent' | 'findByExternalId' | 'findReplyTo' | 'markDeliveryUncertain'
+  >;
   readonly sender: MessageSender;
   /**
    * Número, token e estado da credencial da empresa, lidos do banco pelo `companyId` do job a cada
@@ -495,7 +498,7 @@ export class ChannelInboundProcessor {
     replyId: string,
     text: string,
   ): Promise<InboundJobOutcome> {
-    const outcome = await this.deliver(companyId, job, text);
+    const outcome = await this.deliver(companyId, job, text, replyId);
     if (outcome.kind === 'discarded') return 'discarded';
 
     await this.recordSent(companyId, job);
@@ -552,6 +555,7 @@ export class ChannelInboundProcessor {
     companyId: CompanyId,
     job: ChannelJob,
     text: string,
+    replyId?: string,
   ): Promise<{ kind: 'sent'; channelMessageId: string } | { kind: 'discarded' }> {
     const target = await this.resolvePhoneNumber(companyId, job);
     if (target.kind === 'suspended') return { kind: 'discarded' };
@@ -573,6 +577,9 @@ export class ChannelInboundProcessor {
       text,
     });
     if (sent.ok) return { kind: 'sent', channelMessageId: sent.value.channelMessageId };
+    if (replyId !== undefined && isDeliveryUncertain(sent.error)) {
+      await this.markDeliveryUncertain(companyId, job, replyId);
+    }
     throw await this.classifySendFailure(companyId, job, sent.error, target.tokenVersion);
   }
 
@@ -703,6 +710,30 @@ export class ChannelInboundProcessor {
       this.deps.logger.error(
         { companyId, ...describeError(error) },
         'não foi possível marcar a conexão como TOKEN_INVALID',
+      );
+    }
+  }
+
+  /**
+   * Revisão da 035 (I4): a Meta aceitou o envio (2xx) mas não devolveu um id legível. A mensagem
+   * provavelmente chegou: a resposta ganha a marca e nunca é reenviada (decisão da spec 011). Melhor
+   * esforço: falha ao marcar só é registrada.
+   */
+  private async markDeliveryUncertain(
+    companyId: CompanyId,
+    job: ChannelJob,
+    replyId: string,
+  ): Promise<void> {
+    try {
+      await this.deps.messages.markDeliveryUncertain(companyId, replyId, this.now());
+      this.deps.logger.warn(
+        { companyId, replyId, ...refFields(job) },
+        'o canal aceitou o envio sem devolver o id; a resposta não será reenviada',
+      );
+    } catch (error) {
+      this.deps.logger.error(
+        { companyId, replyId, ...refFields(job), ...describeError(error) },
+        'não foi possível marcar a resposta de entrega incerta',
       );
     }
   }
@@ -886,4 +917,14 @@ function sendErrorFields(error: ExternalServiceError): object {
         retryable: error.retryable,
       }
     : {};
+}
+
+/** A Meta aceitou o envio (2xx), mas a resposta não trouxe um id legível (spec 011; revisão I4 da 035). */
+function isDeliveryUncertain(error: ExternalServiceError): boolean {
+  return (
+    error instanceof MessageSendError &&
+    error.httpStatus !== undefined &&
+    error.httpStatus >= 200 &&
+    error.httpStatus < 300
+  );
 }

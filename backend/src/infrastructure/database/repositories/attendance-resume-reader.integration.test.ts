@@ -240,6 +240,40 @@ describe('PrismaResumeTargetReader (spec 035)', () => {
     );
   });
 
+  it('revisão (I1, I4): resposta do simulador (não atendeu lote) e resposta de entrega incerta nunca entram como unsent', async () => {
+    const company = await newCompany('resume-origem');
+    const simulated = contact();
+    const uncertain = contact();
+    // Simulador: a mensagem do contato tem resposta por replyToId, mas nenhuma aponta para ela por
+    // answeredById (o simulador não atende lote).
+    const simId = await conversation(company, simulated);
+    const user = await userMessage(company, simId, at(30 * MINUTE));
+    await db().message.create({
+      data: {
+        companyId: company.id,
+        conversationId: simId,
+        role: 'ASSISTANT',
+        content: 'resposta simulada',
+        replyToId: user.id,
+        createdAt: at(29 * MINUTE),
+      },
+    });
+    const { assistant } = await answered(
+      company,
+      await conversation(company, uncertain),
+      at(30 * MINUTE),
+      {
+        at: at(29 * MINUTE),
+        sent: false,
+      },
+    );
+    await db().message.updateMany({
+      where: { companyId: company.id, id: assistant.id },
+      data: { deliveryUncertainAt: at(29 * MINUTE) },
+    });
+    assert.deepEqual(await scanFor([company]), []);
+  });
+
   it('o contato fixo do teste do site não entra', async () => {
     const company = await newCompany('resume-site');
     await userMessage(company, await conversation(company, SITE_TEST_CONTACT_REF), at(10 * MINUTE));

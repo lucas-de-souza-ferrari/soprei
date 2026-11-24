@@ -644,6 +644,26 @@ describe('AttendanceService.respondToPending (spec 013)', () => {
     assert.equal(h.metrics.unsentReplies, 0);
   });
 
+  it('spec 035 (revisão, I1): resposta do simulador nunca é reenviada pelo canal, mesmo com contato em forma de telefone', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    const phone = '5511999990000';
+    const simulated = await h.service.handleInboundMessage(company.id, {
+      contactRef: phone,
+      text: 'oi',
+    });
+    assert.equal(simulated.reply.sentAt, null);
+    const resumed = await h.service.respondToPending(company.id, phone, LIMITS);
+    assert.equal(resumed.outcome, 'empty');
+    assert.equal(resumed.reply, null);
+
+    // Uma mensagem do canal depois: responde a nova, sem reenviar a simulada.
+    await accept(h, company, 'pergunta do canal', phone);
+    const next = await h.service.respondToPending(company.id, phone, LIMITS);
+    assert.equal(next.outcome, 'answered');
+    assert.notEqual(next.reply?.id, simulated.reply.id);
+  });
+
   it('resposta que já tem sentAt nunca é reenviada', async () => {
     const h = setup();
     const company = await newCompany(h, 'alfa');

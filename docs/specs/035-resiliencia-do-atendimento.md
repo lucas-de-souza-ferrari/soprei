@@ -143,7 +143,7 @@ A varredura é o segundo ponto do sistema que percorre todas as empresas com o c
 
 ## Decisões e dependências novas
 
-Nenhuma dependência nova. Com a D3 recomendada, **nenhuma migration**. Decisões para o dono:
+Nenhuma dependência nova. Com a D3 recomendada, **nenhuma migration** (a revisão acrescentou uma, aditiva, para o I4: ver o Registro). Decisões para o dono:
 
 - **D1 — Janela de retomada: 23 horas desde a última mensagem do contato.** Recomendado (a Meta só aceita texto livre por 24 horas). Alternativa: janela menor (por exemplo 6 horas), para não responder de madrugada algo da manhã anterior.
 - **D2 — Idade mínima: 5 minutos**, e varredura a cada 5 minutos. Recomendado. O contato que caiu num buraco espera de 5 a 10 minutos pela resposta. Alternativa: 2 minutos e 2 minutos (mais rápido, mais consultas).
@@ -191,8 +191,10 @@ O `reviewer` não aprovou a primeira versão: três bloqueantes e quatro importa
 - **S6 (aplicado):** sem `WHATSAPP_ACCESS_TOKEN`, empresas sem conexão própria (`LEGACY`) ficam fora da varredura (`includeLegacy`).
 - **S7 (aplicado):** a área do canal não descreve mais a regra antiga da retentativa.
 - **S8 (registrado):** a marca `resume` passa para os `flush` de continuação do mesmo contato, que também não mandam o texto padrão.
-- **Para o dono decidir (não aplicados):**
-  - **I1 (decisão do dono, 2026-11-23: risco aceito, nada muda no código):** o simulador (`POST /admin/companies/:id/messages`, que OWNER, ADMIN e AGENT usam) aceita qualquer `contactRef`. Se alguém simular com o telefone de um contato real que escreveu nas últimas 23 h, a resposta simulada (sem `sentAt`) passa a ser enviada a esse contato pela varredura ou pelo próximo turno dele. Antes da 035 isso nunca acontecia.
-  - **I4:** o envio que a Meta aceitou mas cuja resposta veio sem id legível é tratado como permanente de propósito (spec 011: "retentar poderia duplicar"). Com a D6 e a varredura, essa resposta passa a ser reenviada: provável duplicata. A D5 aprovada fala de outro caso (banco fora logo depois do envio).
+- **I1 e I4 (decisão do dono, 2026-11-23: corrigir os dois; aplicados):**
+  - **I1, simulador com telefone real:** a retomada (varredura e D6) só reenvia resposta que **atendeu um lote do canal** (alguma mensagem do contato aponta para ela em `answeredById`, spec 013); a resposta do simulador nunca atende lote, então nunca vai ao canal, qualquer que seja o `contactRef`. O simulador não mudou. `MessageRepository.isBatchReply`; na leitura, `answers: { some: { companyId } }`.
+  - **I4, envio aceito pela Meta sem id:** migration aditiva `20261123100000_message_delivery_uncertain` (`messages.delivery_uncertain_at`, anulável, com CHECK de só `ASSISTANT`). O processador marca a resposta (`MessageRepository.markDeliveryUncertain`) quando o envio volta com status 2xx e sem id legível; `isReplyResendable` e a leitura excluem a resposta marcada. A decisão da spec 011 (não retentar esse caso) volta a valer.
+  - **Testes novos:** unitários (processador: marca e não reenvio; atendimento: resposta do simulador com telefone não é reenviada), `message-delivery.integration.test.ts` (origem, marca, isolamento entre empresas e o CHECK) e um cenário a mais em `attendance-resume-reader.integration.test.ts`.
+  - **Desvio declarado:** a spec dizia "nenhuma migration"; a correção do I4 exige uma, aditiva e compatível com a versão anterior do código (o código antigo ignora a coluna).
 - **Não verificado:** os testes de integração (só no CI), planos de consulta, o efeito da D6 nos testes de privacidade e de coexistência de `whatsapp-channel.integration.test.ts` (que passam por um reenvio a mais).
 

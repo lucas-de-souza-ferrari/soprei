@@ -121,6 +121,8 @@ model Message {
   /// Na mensagem do CONTATO, a resposta do assistente que a atendeu (agrupamento de mensagens, spec 013).
   /// Várias mensagens do mesmo lote apontam para a mesma resposta. Só mensagem USER tem o campo (CHECK).
   answeredById     String?     @map("answered_by_id") @db.Uuid
+  /// Spec 035 (revisão, I4): a Meta aceitou o envio (2xx) mas sem id legível; provavelmente entregue, nunca reenviada.
+  deliveryUncertainAt DateTime? @map("delivery_uncertain_at")
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
   conversation  Conversation   @relation(fields: [conversationId, companyId], references: [id, companyId], onDelete: NoAction)

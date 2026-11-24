@@ -534,7 +534,7 @@ export class AttendanceService {
       const unsent = await this.findUnsentTail(companyId, conversation.id);
       return unsent === null ||
         options.skipUnsent === true ||
-        !isReplyResendable(unsent, conversation, this.now())
+        !(await this.canResend(companyId, conversation, unsent))
         ? this.emptyResponse(conversation.id)
         : this.resendOrBlocked(company, conversation.id, unsent, false);
     }
@@ -542,7 +542,10 @@ export class AttendanceService {
     if (previous?.role === 'ASSISTANT' && previous.sentAt === null) {
       // Spec 035 (D6): a resposta anterior que não saiu (envio recusado, ou o job em retentativa foi
       // trocado por este) vai ANTES das novas, em qualquer tentativa, para a ordem ficar a certa.
-      if (options.skipUnsent !== true && isReplyResendable(previous, conversation, this.now())) {
+      if (
+        options.skipUnsent !== true &&
+        (await this.canResend(companyId, conversation, previous))
+      ) {
         return this.resendOrBlocked(company, conversation.id, previous, true);
       }
       // Fora da janela, segurada pela equipe (spec 039), texto padrão ou reenvio que já falhou de vez
@@ -1073,6 +1076,20 @@ export class AttendanceService {
       batchSize: 0,
       hasMorePending: false,
     };
+  }
+
+  /**
+   * A resposta gravada e não enviada pode sair de novo? Precisa ser reenviável (janela, equipe, texto
+   * padrão, entrega incerta) e ter atendido um lote do canal: a resposta do simulador nunca atende lote
+   * e nunca vai ao canal, mesmo com um `contactRef` em forma de telefone (revisão da 035, I1).
+   */
+  private async canResend(
+    companyId: CompanyId,
+    conversation: Pick<Conversation, 'aiIgnoreBefore'>,
+    reply: Message,
+  ): Promise<boolean> {
+    if (!isReplyResendable(reply, conversation, this.now())) return false;
+    return this.deps.messages.isBatchReply(companyId, reply.id);
   }
 
   /**

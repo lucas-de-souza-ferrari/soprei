@@ -194,6 +194,33 @@ export class PrismaMessageRepository
     });
   }
 
+  isBatchReply(companyId: CompanyId, replyId: string): Promise<boolean> {
+    return this.run('isBatchReply', async () => {
+      if (!isUuid(replyId)) return false;
+      const count = await this.db.message.count({
+        where: { companyId, role: 'USER', answeredById: replyId },
+      });
+      return count > 0;
+    });
+  }
+
+  markDeliveryUncertain(companyId: CompanyId, messageId: string, at: Date): Promise<boolean> {
+    return this.run('markDeliveryUncertain', async () => {
+      if (!isUuid(messageId)) return false;
+      const { count } = await this.db.message.updateMany({
+        where: {
+          companyId,
+          id: messageId,
+          role: 'ASSISTANT',
+          sentAt: null,
+          deliveryUncertainAt: null,
+        },
+        data: { deliveryUncertainAt: at },
+      });
+      return count === 1;
+    });
+  }
+
   markAnswered(
     companyId: CompanyId,
     messageIds: readonly string[],

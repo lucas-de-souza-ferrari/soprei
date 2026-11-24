@@ -1654,3 +1654,47 @@ describe('ChannelInboundProcessor: revisão da spec 035', () => {
     assert.equal(h.sender.calls.length, 1, 'o texto padrão não sai de novo');
   });
 });
+
+describe('ChannelInboundProcessor: entrega incerta (spec 035, revisão I4)', () => {
+  const textOf = (h: Harness, companyId: string, text: string, id: string) =>
+    h.processor.process(textJob(companyId, { text, externalId: id }), MORE);
+  const acceptedWithoutId = (): MessageSendError =>
+    new MessageSendError({ reason: 'invalid_response', retryable: false, httpStatus: 200 });
+
+  it('a Meta aceitou sem devolver o id: a resposta é marcada e nunca reenviada, nem pela retomada nem pelo turno seguinte', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.i4-1');
+    h.sender.script(Result.err(acceptedWithoutId()));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.equal(reply?.sentAt, null);
+    assert.ok(reply.deliveryUncertainAt instanceof Date, 'marcada como entrega incerta');
+
+    const resumeJob: FlushJob = { ...flushOf(textJob(company.id)), resume: true };
+    assert.equal(await h.processor.process(resumeJob, MORE), 'done');
+    assert.equal(h.sender.calls.length, 1, 'a retomada não reenvia');
+
+    await textOf(h, company.id, 'dois', 'wamid.i4-2');
+    await h.processor.process(flushOf(textJob(company.id)), MORE);
+    assert.equal(h.sender.calls.length, 2, 'só a resposta nova sai');
+    assert.notEqual(h.sender.calls[1]?.text, h.sender.calls[0]?.text);
+    assert.equal(h.llm.calls.at(-1)?.userMessage, 'dois');
+  });
+
+  it('recusa comum (4xx) não marca: a resposta continua reenviável', async () => {
+    const h = setup();
+    const company = await newCompany(h, 'alfa');
+    await textOf(h, company.id, 'um', 'wamid.i4-3');
+    h.sender.script(Result.err(permanent(131047)));
+    await assert.rejects(
+      h.processor.process(flushOf(textJob(company.id)), MORE),
+      NonRetryableJobError,
+    );
+    const reply = h.store.allMessages().find((message) => message.role === 'ASSISTANT');
+    assert.equal(reply?.deliveryUncertainAt ?? null, null);
+  });
+});

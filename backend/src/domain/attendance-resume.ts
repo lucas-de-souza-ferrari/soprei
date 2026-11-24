@@ -33,14 +33,21 @@ export const QUEUE_CLEAN_BATCH = 1000;
  * A resposta gravada e ainda sem `sentAt` pode ser reenviada agora? Não, se a equipe assumiu a
  * conversa depois dela (spec 039: `aiIgnoreBefore` igual ou posterior à resposta, que foi segurada de
  * propósito), se ela saiu da janela de retomada ou se é o texto padrão de falha (`isFallback`: repeti-lo
- * minutos ou horas depois iria contra a D4).
+ * minutos ou horas depois iria contra a D4) ou se a Meta aceitou o envio sem devolver o id
+ * (`deliveryUncertainAt`, revisão I4: provavelmente entregue).
  */
 export function isReplyResendable(
-  reply: { readonly createdAt: Date; readonly isFallback?: boolean },
+  reply: {
+    readonly createdAt: Date;
+    readonly isFallback?: boolean;
+    readonly deliveryUncertainAt?: Date | null;
+  },
   conversation: { readonly aiIgnoreBefore: Date | null },
   now: Date,
 ): boolean {
   if (reply.isFallback === true) return false;
+  // A Meta aceitou o envio sem devolver o id: provavelmente entregue (spec 011; revisão I4 da 035).
+  if ((reply.deliveryUncertainAt ?? null) !== null) return false;
   const created = reply.createdAt.getTime();
   if (conversation.aiIgnoreBefore !== null && created <= conversation.aiIgnoreBefore.getTime()) {
     return false;
