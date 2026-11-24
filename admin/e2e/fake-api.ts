@@ -1,0 +1,165 @@
+import type { Page, Request } from '@playwright/test';
+import * as fx from './fixtures';
+
+/**
+ * API falsa do admin (spec 044, E3), uma por teste, por `page.route`. Imita as regras da E1 que a tela
+ * percebe: sessão por cookie (aqui um estado em memória), `X-Soprei-App: admin` exigido em `POST`, 401
+ * uniforme no login e 401 em qualquer rota sem sessão.
+ */
+export const GOOD = { email: fx.ADMIN_EMAIL, password: 'senha-do-dono-bem-longa', code: '123456' };
+
+export interface Call {
+  readonly method: string;
+  readonly path: string;
+  readonly search: URLSearchParams;
+  readonly headers: Record<string, string>;
+  readonly body: unknown;
+}
+
+export interface FakeApiOptions {
+  readonly signedIn?: boolean;
+  readonly billingEnabled?: boolean;
+  readonly queueUnavailable?: boolean;
+}
+
+export class FakeApi {
+  readonly calls: Call[] = [];
+  signedIn: boolean;
+  companyStatus: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE';
+  /** Caminhos que passam a responder 401 (sessão vencida no servidor). */
+  readonly expired = new Set<string>();
+
+  constructor(private readonly options: FakeApiOptions) {
+    this.signedIn = options.signedIn ?? false;
+  }
+
+  callsTo(method: string, path: string): Call[] {
+    return this.calls.filter((call) => call.method === method && call.path === path);
+  }
+
+  respond(request: Request): { status: number; json?: unknown } {
+    const url = new URL(request.url());
+    const path = url.pathname.replace(/^\/api/, '');
+    const method = request.method();
+    const headers = request.headers();
+    let body: unknown;
+    try {
+      body = request.postDataJSON();
+    } catch {
+      body = undefined;
+    }
+    this.calls.push({ method, path, search: url.searchParams, headers, body });
+
+    const error = (status: number, code: string) => ({
+      status,
+      json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
+    });
+    if (method === 'POST' && headers['x-soprei-app'] !== 'admin') return error(403, 'FORBIDDEN');
+
+    if (path === '/platform/auth/login' && method === 'POST') {
+      const { email, password, code } = (body ?? {}) as Record<string, unknown>;
+      if (email === GOOD.email && password === GOOD.password && code === GOOD.code) {
+        this.signedIn = true;
+        return { status: 204 };
+      }
+      return error(401, 'UNAUTHORIZED');
+    }
+    if (path === '/platform/auth/logout' && method === 'POST') {
+      this.signedIn = false;
+      return { status: 204 };
+    }
+    if (!this.signedIn || this.expired.has(path)) {
+      this.signedIn = false;
+      return error(401, 'UNAUTHORIZED');
+    }
+    if (path === '/platform/auth/session') return { status: 200, json: { email: fx.ADMIN_EMAIL } };
+
+    const billing = this.options.billingEnabled ?? true;
+    if (method === 'GET') {
+      switch (path) {
+        case '/platform/overview':
+          return {
+            status: 200,
+            json: billing
+              ? fx.overview
+              : { ...fx.overview, billingEnabled: false, subscriptions: null, paidThisMonth: null },
+          };
+        case '/platform/companies': {
+          const attention = url.searchParams.get('attention');
+          const items =
+            attention === 'token_invalid'
+              ? [fx.companyB]
+              : attention === null
+                ? [fx.companyA, fx.companyB]
+                : [];
+          return {
+            status: 200,
+            json: {
+              items: items.map((c) =>
+                c.id === fx.COMPANY_A ? { ...c, status: this.companyStatus } : c,
+              ),
+              nextCursor: null,
+            },
+          };
+        }
+        case `/platform/companies/${fx.COMPANY_A}`:
+          return { status: 200, json: fx.companyDetail(this.companyStatus) };
+        case '/platform/accounts':
+          return { status: 200, json: fx.accountPage };
+        case `/platform/accounts/${fx.ACCOUNT_A}`:
+          return { status: 200, json: fx.accountDetail };
+        case '/platform/billing/orders':
+          return { status: 200, json: billing ? fx.orderPage : { items: null, nextCursor: null } };
+        case '/platform/billing/notices':
+          return { status: 200, json: billing ? fx.noticePage : { items: null, nextCursor: null } };
+        case '/platform/health':
+          return {
+            status: 200,
+            json: this.options.queueUnavailable
+              ? { ...fx.health, queue: { status: 'unavailable' } }
+              : fx.health,
+          };
+      }
+    }
+    if (method === 'POST' && path === `/platform/companies/${fx.COMPANY_A}/suspend`) {
+      this.companyStatus = 'SUSPENDED';
+      return { status: 204 };
+    }
+    if (method === 'POST' && path === `/platform/companies/${fx.COMPANY_A}/reactivate`) {
+      this.companyStatus = 'ACTIVE';
+      return { status: 204 };
+    }
+    return error(404, 'NOT_FOUND');
+  }
+}
+
+export async function installFakeApi(page: Page, options: FakeApiOptions = {}): Promise<FakeApi> {
+  const api = new FakeApi(options);
+  await page.route('**/api/**', async (route) => {
+    const { status, json } = api.respond(route.request());
+    await route.fulfill(json === undefined ? { status } : { status, json });
+  });
+  return api;
+}
+
+/** Entra pela tela Entrar com as credenciais certas. */
+export async function signIn(page: Page): Promise<void> {
+  await page.getByLabel('E-mail').fill(GOOD.email);
+  await page.getByLabel('Senha').fill(GOOD.password);
+  await page.getByLabel('Código do autenticador').fill(GOOD.code);
+  await page.getByRole('button', { name: 'Entrar' }).click();
+}
+
+/** Nada do admin no armazenamento do navegador. */
+export async function storageSizes(page: Page): Promise<[number, number]> {
+  return page.evaluate(
+    () => [window.localStorage.length, window.sessionStorage.length] as [number, number],
+  );
+}
+
+/** A página não rola de lado (360 px no celular). */
+export async function hasHorizontalScroll(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+}
