@@ -31,6 +31,8 @@ export { PrismaCompanyRepository } from './repositories/company.repository.js';
 export { PrismaConversationRepository } from './repositories/conversation.repository.js';
 export { PrismaPlatformAdminRepository } from './repositories/platform-admin.repository.js';
 export { PrismaPlatformAuditRepository } from './repositories/platform-audit.repository.js';
+export { PrismaPlatformCompanyUnitOfWork } from './repositories/platform-company-unit-of-work.js';
+export { PrismaPlatformReadModel } from './repositories/platform-read-model.js';
 export { PrismaMembershipRepository } from './repositories/membership.repository.js';
 export { PrismaMessageRepository } from './repositories/message.repository.js';
 export { PrismaNotificationRepository } from './repositories/notification.repository.js';

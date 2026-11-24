@@ -77,7 +77,7 @@ import {
   verifyInfrastructure,
 } from './infrastructure/lifecycle.js';
 import { createLogger } from './infrastructure/logger/logger.js';
-import { createMetrics } from './infrastructure/metrics/index.js';
+import { createMetrics, readPlatformProcessCounters } from './infrastructure/metrics/index.js';
 import {
   AesGcmCredentialCipher,
   parseCredentialKeys,
@@ -91,6 +91,8 @@ const RATE_LIMIT_READY_TIMEOUT_MS = 2_000;
 const AUTH_REDIS_READY_TIMEOUT_MS = 2_000;
 
 async function main(): Promise<void> {
+  // Instante do boot (spec 044, E2: a Saúde do admin da plataforma).
+  const bootedAt = new Date();
   const config = loadConfig();
   const logger = createLogger(config);
 
@@ -553,6 +555,25 @@ async function main(): Promise<void> {
             }),
             origin: config.ADMIN_ORIGIN,
             maxAgeSeconds: config.PLATFORM_SESSION_MAX_SECONDS,
+            // Leituras agregadas e as duas ações (E2): a única leitura que cruza empresas, por desenho.
+            monitor: new PlatformMonitorService({
+              reads: new PrismaPlatformReadModel(prisma),
+              onboarding: new PrismaOnboardingStore(prisma),
+              companies: new PrismaPlatformCompanyUnitOfWork(prisma),
+              audit: new PrismaPlatformAuditRepository(prisma),
+              billing: billing?.settings,
+              health: {
+                database: () => infrastructure.database.check(),
+                redis: () => infrastructure.redis.check(),
+                queue: inboundQueue,
+                // Intervalo 0 desliga a retomada: a Saúde mostra 'disabled'.
+                resumer: config.CHANNEL_RESUME_INTERVAL_MINUTES > 0 ? channelResumer : undefined,
+                counters: () => readPlatformProcessCounters(metrics.registry),
+                bootedAt,
+              },
+              logger,
+              metrics,
+            }),
           },
         }
       : {}),
@@ -729,9 +750,12 @@ import {
   PrismaInvitationExpiryRepository,
   PrismaInvitationUnitOfWork,
   PrismaPlatformAuditRepository,
+  PrismaPlatformCompanyUnitOfWork,
+  PrismaPlatformReadModel,
   PrismaUnverifiedAccountPurgeRepository,
 } from './infrastructure/database/index.js';
 import { PlatformAuthService } from './application/platform/platform-auth.service.js';
+import { PlatformMonitorService } from './application/platform/platform-monitor.service.js';
 import { RedisPlatformSessionStore } from './infrastructure/auth/redis-platform-session-store.js';
 import { InvitationExpiryPurger } from './application/invitations/invitation-expiry-purger.js';
 import { InvitationService } from './application/invitations/invitation.service.js';

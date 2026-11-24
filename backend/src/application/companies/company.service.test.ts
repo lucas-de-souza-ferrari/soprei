@@ -60,20 +60,16 @@ describe('CompanyService', () => {
     const created = await service.create(input());
     assert.equal(created.persona, null);
 
-    const set = await service.update(created.id, { persona: '  Você é a Ana.  ' });
-    assert.equal(set.persona, 'Você é a Ana.');
+    assert.equal(await service.setPersona(created.id, '  Você é a Ana.  '), 'Você é a Ana.');
     // Atualizar outro campo não mexe na persona.
     assert.equal((await service.update(created.id, { name: 'Outro' })).persona, 'Você é a Ana.');
 
-    assert.equal((await service.update(created.id, { persona: null })).persona, null);
-    assert.equal(
-      (await service.update(created.id, { persona: 'p'.repeat(4000) })).persona?.length,
-      4000,
-    );
+    assert.equal(await service.setPersona(created.id, null), null);
+    assert.equal((await service.setPersona(created.id, 'p'.repeat(4000)))?.length, 4000);
 
     for (const persona of ['', '   ', 'p'.repeat(4001), 'com\u0000nul']) {
       await assert.rejects(
-        service.update(created.id, { persona }),
+        service.setPersona(created.id, persona),
         ValidationError,
         persona.slice(0, 5),
       );
