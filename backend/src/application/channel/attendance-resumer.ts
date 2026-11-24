@@ -52,6 +52,21 @@ export interface ResumeRunSummary {
 }
 
 /**
+ * Última execução da retomada e da limpeza (spec 044, E2: a Saúde do admin da plataforma). Fica só em
+ * memória, neste processo: some no reinício. Só instante, resultado e contagens; nunca contato nem empresa.
+ */
+export interface ResumeRunReport {
+  readonly at: Date;
+  readonly resume: {
+    readonly ok: boolean;
+    readonly scheduled: number;
+    readonly skippedLimit: number;
+    readonly failed: number;
+  };
+  readonly clean: { readonly ok: boolean; readonly completed: number; readonly failed: number };
+}
+
+/**
  * Retomada do atendimento (spec 035). A cada execução:
  *
  * 1. lê quem ficou sem resposta no canal (mensagem pendente parada ou resposta gravada e não enviada,
@@ -69,14 +84,30 @@ export class AttendanceResumer {
   private readonly now: () => Date;
   /** Rodízio entre execuções: a próxima continua depois da última empresa lida. */
   private afterCompanyId: string | null = null;
+  private last: ResumeRunReport | null = null;
 
   constructor(private readonly deps: AttendanceResumerDeps) {
     this.now = deps.now ?? (() => new Date());
   }
 
+  /** A última execução neste processo (`null` antes da primeira). */
+  lastRun(): ResumeRunReport | null {
+    return this.last;
+  }
+
   async runOnce(): Promise<ResumeRunSummary> {
     const resumed = await this.resume();
     const cleaned = await this.clean();
+    this.last = {
+      at: this.now(),
+      resume: {
+        ok: resumed.ok,
+        scheduled: resumed.scheduled,
+        skippedLimit: resumed.skippedLimit,
+        failed: resumed.failed,
+      },
+      clean: { ok: cleaned.ok, completed: cleaned.completed, failed: cleaned.failed },
+    };
     const result = resumed.ok && cleaned.ok ? 'ok' : 'error';
     this.count(() => this.deps.metrics?.countResumeRun(result));
     const summary: ResumeRunSummary = {

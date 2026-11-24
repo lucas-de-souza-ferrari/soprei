@@ -48,17 +48,19 @@ const personaSchema = z
 /** Corpo de `PUT /admin/companies/:companyId/persona` (spec 023): só `persona`, nada mais. */
 export const putPersonaBodySchema = z.object({ persona: personaSchema }).strict();
 
+/**
+ * Corpo do `PATCH /admin/companies/:id` (plataforma). Sem `persona` desde a spec 044 (D8): a plataforma não
+ * lê nem altera conteúdo da empresa; o campo é recusado (400, `strict`).
+ */
 export const updateCompanyBodySchema = z
   .object({
     name: nameSchema.optional(),
     status: statusSchema.optional(),
-    persona: personaSchema.optional(),
   })
   .strict()
-  .refine(
-    (body) => body.name !== undefined || body.status !== undefined || body.persona !== undefined,
-    { message: 'informe name, status ou persona' },
-  );
+  .refine((body) => body.name !== undefined || body.status !== undefined, {
+    message: 'informe name ou status',
+  });
 
 export const listCompaniesQuerySchema = z
   .object({

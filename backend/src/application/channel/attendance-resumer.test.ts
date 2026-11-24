@@ -311,6 +311,22 @@ describe('AttendanceResumer (spec 035)', () => {
     assert.equal(failed.result, 'error');
   });
 
+  it('guarda a última execução em memória: instante, resultado e contagens da retomada e da limpeza (spec 044)', async () => {
+    const h = setup([{ targets: [target(COMPANY_A, PHONE_A)], nextCompanyId: null }]);
+    assert.equal(h.resumer.lastRun(), null);
+    h.cleaner.result = Result.ok({ completed: 4, failed: 1 });
+    await h.resumer.runOnce();
+    assert.deepEqual(h.resumer.lastRun(), {
+      at: NOW,
+      resume: { ok: true, scheduled: 1, skippedLimit: 0, failed: 0 },
+      clean: { ok: true, completed: 4, failed: 1 },
+    });
+    h.cleaner.result = Result.err(new ExternalServiceError('fila fora'));
+    await h.resumer.runOnce();
+    assert.deepEqual(h.resumer.lastRun()?.clean, { ok: false, completed: 0, failed: 0 });
+    assert.equal(JSON.stringify(h.resumer.lastRun()).includes(PHONE_A), false);
+  });
+
   it('o log da execução só tem contagens: nem contato, nem empresa', async () => {
     const h = setup([
       {

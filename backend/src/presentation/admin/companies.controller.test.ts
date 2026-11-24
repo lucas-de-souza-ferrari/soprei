@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import { CompanyService } from '../../application/companies/company.service.js';
+import { CompanyId } from '../../domain/index.js';
 import { buildTestServer } from '../../infrastructure/http/test-server.js';
 import { createLogger } from '../../infrastructure/logger/logger.js';
 import { bearer, buildTestAuth, type TestAuth } from '../../test-support/in-memory-auth.js';
@@ -17,7 +18,7 @@ interface CompanyBody {
   name: string;
   slug: string;
   status: string;
-  persona: string | null;
+  hasPersona: boolean;
   whatsappPhoneNumberId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -26,12 +27,11 @@ interface ErrorBody {
   error: { code: string; message: string; details?: unknown[] };
 }
 
+// O serviço fica à mão para gravar a persona pelo caminho da empresa (a plataforma não a grava, spec 044 D8).
+const companyService = new CompanyService(new InMemoryCompanyRepository());
+
 function buildApp(source: TestAuth): FastifyInstance {
-  return buildTestServer(
-    undefined,
-    { companies: new CompanyService(new InMemoryCompanyRepository()) },
-    { auth: source.service },
-  );
+  return buildTestServer(undefined, { companies: companyService }, { auth: source.service });
 }
 
 describe('rotas /admin/companies', () => {
@@ -69,9 +69,9 @@ describe('rotas /admin/companies', () => {
       const body = response.json<CompanyBody>();
       assert.deepEqual(Object.keys(body).sort(), [
         'createdAt',
+        'hasPersona',
         'id',
         'name',
-        'persona',
         'slug',
         'status',
         'updatedAt',
@@ -109,37 +109,43 @@ describe('rotas /admin/companies', () => {
       assert.equal(next.statusCode, 200);
     });
 
-    it('PATCH define a persona (com trim), a devolve no GET e null a limpa', async () => {
+    it('persona (spec 044, D8): a resposta traz só hasPersona, nunca o texto; o PATCH com persona é 400', async () => {
       const created = await createCompany('acme-persona');
-      assert.equal(created.persona, null);
+      assert.equal(created.hasPersona, false);
+      await companyService.setPersona(CompanyId.parse(created.id), 'PERSONA-SECRETA-D8');
 
-      const set = await app.inject({
-        method: 'PATCH',
-        url: `/admin/companies/${created.id}`,
-        headers: auth,
-        payload: { persona: '  Você é a Ana, atendente da Acme.  ' },
-      });
-      assert.equal(set.statusCode, 200);
-      assert.equal(set.json<CompanyBody>().persona, 'Você é a Ana, atendente da Acme.');
       const read = await app.inject({
         method: 'GET',
         url: `/admin/companies/${created.id}`,
         headers: auth,
       });
-      assert.equal(read.json<CompanyBody>().persona, 'Você é a Ana, atendente da Acme.');
+      assert.equal(read.json<CompanyBody>().hasPersona, true);
+      const list = await app.inject({ method: 'GET', url: '/admin/companies', headers: auth });
+      for (const response of [read, list]) {
+        assert.ok(!response.body.includes('PERSONA-SECRETA-D8'));
+        assert.ok(!response.body.includes('"persona"'));
+      }
 
-      // Persona mexe só na persona: o resto fica como estava.
-      assert.equal(set.json<CompanyBody>().name, created.name);
-      assert.equal(set.json<CompanyBody>().status, 'ACTIVE');
-
-      const cleared = await app.inject({
+      for (const persona of ['Outra persona', null, 'p'.repeat(4000)]) {
+        const response = await app.inject({
+          method: 'PATCH',
+          url: `/admin/companies/${created.id}`,
+          headers: auth,
+          payload: { persona },
+        });
+        assert.equal(response.statusCode, 400, String(persona));
+      }
+      const withName = await app.inject({
         method: 'PATCH',
         url: `/admin/companies/${created.id}`,
         headers: auth,
-        payload: { persona: null },
+        payload: { name: 'Outro', persona: 'x' },
       });
-      assert.equal(cleared.statusCode, 200);
-      assert.equal(cleared.json<CompanyBody>().persona, null);
+      assert.equal(withName.statusCode, 400);
+      assert.equal(
+        await companyService.getPersona(CompanyId.parse(created.id)),
+        'PERSONA-SECRETA-D8',
+      );
     });
 
     it('PATCH não aceita mais whatsappPhoneNumberId (spec 015): 400, o número só muda pelo canal da empresa', async () => {
@@ -168,17 +174,6 @@ describe('rotas /admin/companies', () => {
       });
       assert.equal(read.json<CompanyBody>().whatsappPhoneNumberId, null);
       assert.equal(read.json<CompanyBody>().name, created.name);
-    });
-
-    it('persona de 4000 caracteres é aceita', async () => {
-      const created = await createCompany('acme-persona-max');
-      const response = await app.inject({
-        method: 'PATCH',
-        url: `/admin/companies/${created.id}`,
-        headers: auth,
-        payload: { persona: 'p'.repeat(4000) },
-      });
-      assert.equal(response.statusCode, 200);
     });
 
     it('PATCH atualiza nome e status; DELETE remove (204) e depois é 404', async () => {
@@ -390,18 +385,15 @@ describe('rotas /admin/companies', () => {
       assert.equal(noBody.statusCode, 400);
     });
 
-    it('PATCH exige name, status ou persona e não aceita slug nem persona inválida', async () => {
+    it('PATCH exige name ou status e não aceita slug nem persona', async () => {
       const created = await createCompany('acme-patch400');
       for (const payload of [
         {},
         { slug: 'outro-slug' },
         { status: 'X' },
         { name: '' },
-        { persona: '' },
-        { persona: '   ' },
-        { persona: 'p'.repeat(4001) },
+        { persona: 'x' },
         { persona: 42 },
-        { persona: 'com\u0000nul' },
       ]) {
         const response = await app.inject({
           method: 'PATCH',

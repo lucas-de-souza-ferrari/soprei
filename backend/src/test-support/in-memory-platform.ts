@@ -1,5 +1,13 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type {
+  PlatformCompanyTransaction,
+  PlatformCompanyUnitOfWork,
+} from '../application/ports/platform-company-unit-of-work.js';
+import type {
+  PlatformOverviewFacts,
+  PlatformReadModel,
+} from '../application/ports/platform-read-model.js';
+import type {
   PlatformSession,
   PlatformSessionStore,
 } from '../application/ports/platform-session.js';
@@ -10,6 +18,7 @@ import {
   totpStep,
 } from '../application/platform/totp.js';
 import type {
+  CompanyStatus,
   ListOptions,
   NewPlatformAuditEvent,
   Page,
@@ -21,7 +30,7 @@ import {
   AesGcmPlatformSecretCipher,
   parseCredentialKeys,
 } from '../infrastructure/security/aes-gcm-credential-cipher.js';
-import { ServiceUnavailableError } from '../shared/errors/index.js';
+import { NotFoundError, ServiceUnavailableError } from '../shared/errors/index.js';
 import { SecretString } from '../shared/types/index.js';
 import { type TestAuth, TEST_PASSWORD } from './in-memory-auth.js';
 
@@ -155,5 +164,132 @@ export class InMemoryPlatformAuditRepository implements PlatformAuditRepository 
       items: [...this.events].reverse().slice(0, limit),
       nextCursor: null,
     });
+  }
+}
+
+/**
+ * `PlatformCompanyUnitOfWork` em memória (spec 044, E2): estado das empresas num mapa, trilha no
+ * repositório em memória e transações serializadas (como a trava da linha no Postgres).
+ */
+export class InMemoryPlatformCompanyUnitOfWork implements PlatformCompanyUnitOfWork {
+  readonly statuses = new Map<string, CompanyStatus>();
+  private chain: Promise<unknown> = Promise.resolve();
+
+  constructor(
+    readonly audit: InMemoryPlatformAuditRepository = new InMemoryPlatformAuditRepository(),
+  ) {}
+
+  run<T>(fn: (tx: PlatformCompanyTransaction) => Promise<T>): Promise<T> {
+    const next = this.chain.then(async () => {
+      const pending = new Map<string, CompanyStatus>();
+      const events: NewPlatformAuditEvent[] = [];
+      const result = await fn({
+        lockCompany: (companyId) => {
+          const status = pending.get(companyId) ?? this.statuses.get(companyId);
+          if (status === undefined) {
+            return Promise.reject(new NotFoundError('Empresa não encontrada'));
+          }
+          return Promise.resolve(status);
+        },
+        setStatus: (companyId, status) => {
+          pending.set(companyId, status);
+          return Promise.resolve();
+        },
+        audit: (event) => {
+          events.push(event);
+          return Promise.resolve();
+        },
+      });
+      // Só no fim, como o commit: falha no meio não grava nada.
+      for (const [id, status] of pending) this.statuses.set(id, status);
+      for (const event of events) await this.audit.create(event);
+      return result;
+    });
+    this.chain = next.catch(() => undefined);
+    return next;
+  }
+}
+
+type Overrides = { -readonly [K in keyof PlatformReadModel]?: PlatformReadModel[K] };
+
+/** Leitura agregada falsa: cada método devolve o que o teste pôs (ou um padrão vazio) e registra a chamada. */
+export class FakePlatformReadModel implements PlatformReadModel {
+  readonly calls: { readonly method: keyof PlatformReadModel; readonly args: unknown[] }[] = [];
+
+  constructor(private readonly overrides: Overrides = {}) {}
+
+  private record(method: keyof PlatformReadModel, args: unknown[]): void {
+    this.calls.push({ method, args });
+  }
+
+  overview(now: Date): Promise<PlatformOverviewFacts> {
+    this.record('overview', [now]);
+    if (this.overrides.overview !== undefined) return this.overrides.overview(now);
+    const volume = { contactMessages: 0, replies: 0, fallbackReplies: 0 };
+    return Promise.resolve({
+      companies: { active: 0, suspended: 0 },
+      accounts: { total: 0, verified: 0, unverified: 0, disabled: 0 },
+      channel: {
+        byState: { NOT_CONNECTED: 0, CONNECTED: 0, TOKEN_INVALID: 0, LEGACY: 0 },
+        byMode: { API_ONLY: 0, COEXISTENCE: 0 },
+      },
+      attendance: { last24h: volume, last7d: volume },
+      attention: {
+        stalledPending: 0,
+        unsentReplies: 0,
+        tokenInvalid: 0,
+        tokensExpiringSoon: 0,
+        openHandoffs: 0,
+      },
+    });
+  }
+
+  billingOverview(now: Date, graceDays: number, monthStart: Date) {
+    this.record('billingOverview', [now, graceDays, monthStart]);
+    if (this.overrides.billingOverview !== undefined) {
+      return this.overrides.billingOverview(now, graceDays, monthStart);
+    }
+    return Promise.resolve({ subscriptions: [], paidOrders: { count: 0, amountCents: 0 } });
+  }
+
+  listCompanies(...args: Parameters<PlatformReadModel['listCompanies']>) {
+    this.record('listCompanies', args);
+    return (
+      this.overrides.listCompanies?.(...args) ?? Promise.resolve({ items: [], nextCursor: null })
+    );
+  }
+
+  companyDetail(...args: Parameters<PlatformReadModel['companyDetail']>) {
+    this.record('companyDetail', args);
+    return this.overrides.companyDetail?.(...args) ?? Promise.resolve(null);
+  }
+
+  subscription(...args: Parameters<PlatformReadModel['subscription']>) {
+    this.record('subscription', args);
+    return this.overrides.subscription?.(...args) ?? Promise.resolve(null);
+  }
+
+  listAccounts(...args: Parameters<PlatformReadModel['listAccounts']>) {
+    this.record('listAccounts', args);
+    return (
+      this.overrides.listAccounts?.(...args) ?? Promise.resolve({ items: [], nextCursor: null })
+    );
+  }
+
+  accountDetail(...args: Parameters<PlatformReadModel['accountDetail']>) {
+    this.record('accountDetail', args);
+    return this.overrides.accountDetail?.(...args) ?? Promise.resolve(null);
+  }
+
+  listOrders(...args: Parameters<PlatformReadModel['listOrders']>) {
+    this.record('listOrders', args);
+    return this.overrides.listOrders?.(...args) ?? Promise.resolve({ items: [], nextCursor: null });
+  }
+
+  listNotices(...args: Parameters<PlatformReadModel['listNotices']>) {
+    this.record('listNotices', args);
+    return (
+      this.overrides.listNotices?.(...args) ?? Promise.resolve({ items: [], nextCursor: null })
+    );
   }
 }

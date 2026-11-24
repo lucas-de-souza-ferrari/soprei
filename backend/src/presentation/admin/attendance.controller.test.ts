@@ -155,12 +155,12 @@ describe('rotas de atendimento (/admin/companies/:companyId/...)', () => {
       assert.equal(second.json<ReplyBody>().conversationId, body.conversationId);
     });
 
-    it('persona da empresa chega ao provider (PATCH /admin/companies/:id)', async () => {
+    it('persona da empresa chega ao provider (PUT /admin/companies/:companyId/persona)', async () => {
       const companyId = await createCompany('post-persona');
       const patched = await app.inject({
-        method: 'PATCH',
-        url: `/admin/companies/${companyId}`,
-        headers: auth,
+        method: 'PUT',
+        url: `/admin/companies/${companyId}/persona`,
+        headers: as(companyId),
         payload: { persona: 'Persona-Rota-123' },
       });
       assert.equal(patched.statusCode, 200);

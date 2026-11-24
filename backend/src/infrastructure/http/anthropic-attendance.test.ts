@@ -87,10 +87,11 @@ async function startApp(options: { llmTimeoutMs?: number; maxRetries?: number } 
   });
   companyId = created.json<{ id: string }>().id;
   membershipAuth = bearer((await testAuth.membershipToken(CompanyId.parse(companyId))).accessToken);
+  // Spec 044 (D8): a persona só entra pela rota da própria empresa.
   const patched = await app.inject({
-    method: 'PATCH',
-    url: `/admin/companies/${companyId}`,
-    headers: auth,
+    method: 'PUT',
+    url: `/admin/companies/${companyId}/persona`,
+    headers: membershipAuth,
     payload: { persona: SECRET_PERSONA },
   });
   assert.equal(patched.statusCode, 200);

@@ -1,5 +1,6 @@
 export {
   createMetrics,
+  readPlatformProcessCounters,
   QUEUE_JOB_STATES,
   DB_DURATION_BUCKETS,
   HTTP_DURATION_BUCKETS,

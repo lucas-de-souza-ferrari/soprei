@@ -10,6 +10,10 @@ import { setActorId } from '../../shared/request-context/index.js';
 import { requestAuth, requirePlatform } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import { platformSessionLoginBodySchema } from '../auth/auth.validators.js';
+import {
+  platformMonitorController,
+  type PlatformMonitorRoutes,
+} from './platform-monitor.controller.js';
 
 /**
  * Cookie da sessão do admin da plataforma (spec 044, E1). O prefixo `__Host-` obriga o navegador a
@@ -40,6 +44,8 @@ export interface PlatformAuthControllerOptions {
   readonly origin: string;
   /** Teto absoluto da sessão (`PLATFORM_SESSION_MAX_SECONDS`), usado como `Max-Age` do cookie. */
   readonly maxAgeSeconds: number;
+  /** Leituras e ações da E2 (spec 044); sem isto só existem as rotas de entrada. */
+  readonly monitor?: PlatformMonitorRoutes | undefined;
 }
 
 function sessionCookie(value: string, maxAgeSeconds: number): string {
@@ -57,7 +63,7 @@ function clearCookie(reply: FastifyReply): void {
  */
 export const platformAuthController: FastifyPluginCallback<PlatformAuthControllerOptions> = (
   app,
-  { auth, origin, maxAgeSeconds },
+  { auth, origin, maxAgeSeconds, monitor },
   done,
 ) => {
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -111,6 +117,9 @@ export const platformAuthController: FastifyPluginCallback<PlatformAuthControlle
     if (identity.kind !== 'platform') throw new UnauthorizedError();
     return auth.me(identity);
   });
+
+  // Dentro deste plugin: herdam o hook acima (só o cookie do admin, origem conferida nas escritas).
+  if (monitor !== undefined) void app.register(platformMonitorController, { monitor });
 
   done();
 };
