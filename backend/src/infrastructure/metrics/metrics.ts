@@ -11,6 +11,7 @@ import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom
 import {
   type PlatformProcessCounters,
   SALES_CONTACT_RESULTS,
+  type SalesContactResultName,
 } from '../../application/ports/platform-health.js';
 
 /** Fotografia do pool de conexões (mesma forma de `Database.poolMetrics()`). */
@@ -119,10 +120,11 @@ export type InvitationMetricResult =
 export type InvitationEmailResult = 'sent' | 'failed' | 'skipped';
 /**
  * Pedido de contato comercial (spec 040, E4). Conjunto fixo; nunca nome, e-mail, telefone nem texto. `capped` é a
- * fila de envios cheia; `daily_cap` é o teto global diário (o alerta do dono para pedidos perdidos).
+ * fila de envios cheia; `daily_cap` é o teto global diário (o alerta do dono para pedidos perdidos). O conjunto
+ * é a lista `SALES_CONTACT_RESULTS` da porta da Saúde (spec 044, E2): um resultado novo entra lá, e a Saúde e
+ * a métrica não divergem (revisão da E2, M3).
  */
-export type SalesContactResult =
-  'sent' | 'failed' | 'spam' | 'too_fast' | 'capped' | 'daily_cap' | 'invalid' | 'expired';
+export type SalesContactResult = SalesContactResultName;
 /**
  * Sessões do admin da plataforma pelo cookie (spec 044, E1). `expired` é "vencida ou desconhecida": um
  * cookie bem formado que não existe no Redis conta aqui.
