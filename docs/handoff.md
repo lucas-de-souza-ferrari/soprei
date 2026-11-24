@@ -4,20 +4,16 @@
 
 ## Última sessão
 
-2026-11-23, Claude Code (Fable 5.2, spec-writer e implementer). Quatro branches locais **empilhadas, sem push**, nesta ordem:
+2026-11-24, Claude Code (Opus 5.5, spec-writer). Escrita a **[spec 044](specs/044-admin-da-plataforma.md), admin da plataforma** (painel do dono como frontend separado, `admin/`), status `rascunho`, na branch local **`spec/044-admin-da-plataforma`, sem push, criada sobre `spec/035-e4-fatiar-atendimento`** (topo da pilha), porque `docs/areas/` e o índice `docs/specs/README.md` da 042 ainda não estão na `main`; se a pilha entrar por squash, rebase antes do PR. Só documentação (spec, linha no índice, este arquivo); nenhum código.
 
-- **`spec/042-organizacao-da-documentacao` (042, E1):** `AGENTS.md` de 180 KB para 44 KB, regras de área em `docs/areas/`; revisada, correções aplicadas.
-- **`spec/042-e2-handoff-e-specs` (042, E2):** handoff, `context.md`, README, status e índice das specs, sobras removidas.
-- **`spec/043-backup-externo` (043, E1):** `deploy/backup/` (backup diário cifrado, teste de restauração, exemplos), `docs/ops/backup.md`, testes com dublês, `shellcheck` no CI. Revisada, correções aplicadas. **Aguarda o dono:** confirmar o desvio da D3 (trava do bucket do R2). Passos de servidor parados.
-- **`spec/035-resiliencia-do-atendimento` (035), aprovada com D1 a D9; E1 a E3 implementadas:** varredura a cada 5 min que reagenda quem ficou sem resposta no canal (no máximo 3 vezes por contato por dia), o turno novo reenvia antes a resposta não enviada, o `flush` de retomada não repete o texto padrão, limpeza de verdade da fila; variável nova `CHANNEL_RESUME_INTERVAL_MINUTES` (padrão 5). Sem migration. Revisada pelo `reviewer` (3 bloqueantes, entre eles um laço de reenvio, e 4 importantes): correções aplicadas. I1 e I4 corrigidos (decisão do dono); **migration aditiva nova** (`delivery_uncertain_at`). Todos os unitários do backend verdes; **os testes de integração novos não rodaram** (só no CI).
-- **`spec/035-e4-fatiar-atendimento` (035, E4):** `attendance.service.ts` dividido em cinco arquivos (881 linhas no serviço), só movimentação; mesmos unitários verdes.
-- **Verde localmente (Windows, Node 26.13.1, não o 24 do `.nvmrc`):** `typecheck`, `lint`, `format:check` e os testes de documentação, de workflows e do backup (2 cenários pulados: `flock` real e modo 600). **Não rodado:** `shellcheck` e o resto das suítes.
-- **Falta:** push e PR na ordem acima (rebase se entrarem por squash); CI (na 043, o `shellcheck` e os dois cenários que só rodam em Linux; na 035, os testes de integração novos); `reviewer` na 035.
+- **Aguarda o dono:** as decisões D1 a D12 da spec (escopo de leitura e ações, pacote `admin/`, domínio `admin.soprei.com`, cookie `__Host-` com sessão no Redis, TOTP obrigatório, módulo único de SQL agregado, e-mail da conta só no detalhe e auditado, persona fora das rotas da plataforma, `PlatformAuditEvent`, contato comercial só por e-mail, Saúde sem monitoramento externo, quatro PRs). Spec de segurança: cada etapa passa pelo `reviewer`.
+- **Achado no código (vira a D8):** `GET /admin/companies` devolve o texto da `persona` ao `PlatformAdmin` e o `PATCH` a aceita, embora a regra seja que a plataforma não lê conteúdo das empresas.
+- **A pilha anterior** (042 E1 e E2, 043, 035 e 035 E4) está nos PRs #16 a #20, ainda sem merge; o detalhe está no "Registro da implementação" de cada spec.
 
 ## Onde estamos
 
 - **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033 e 044 (admin da plataforma). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes
