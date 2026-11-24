@@ -204,6 +204,17 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       },
       auth: testAuth.service,
       membershipAdmin: testAuth.membershipAdmin,
+      // Admin da plataforma (spec 044, E1): as rotas /platform/* também entram no inventário.
+      platform: {
+        auth: {
+          login: () => Promise.reject(new Error('inventário')),
+          logout: () => Promise.reject(new Error('inventário')),
+          authenticate: () => Promise.resolve(undefined),
+          me: () => Promise.reject(new Error('inventário')),
+        },
+        origin: 'https://soadm.exemplo.test',
+        maxAgeSeconds: 43_200,
+      },
       // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
       accounts: {
         service: { drain: () => Promise.resolve() } as unknown as AccountService,
@@ -372,6 +383,9 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/webhooks/whatsapp',
       '/contact/sales/form-token',
       '/contact/sales',
+      '/platform/auth/login',
+      '/platform/auth/logout',
+      '/platform/auth/session',
     ]) {
       assert.ok(
         [...urls].some((url) => url.startsWith(expected)),
@@ -563,6 +577,17 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           // Spec 008: nenhuma rota de tenant sem permissão explícita (e a permissão existe).
           assert.equal(permissionProblem(route.permissions), undefined, label);
         }
+      } else if (route.url.startsWith('/platform/')) {
+        // Spec 044: entrar e sair são `login` (fail-closed) e sem identidade; todo o resto do admin da
+        // plataforma é `admin` e declara requirePlatform(), nunca uma permissão de tenant.
+        const entry = ['/platform/auth/login', '/platform/auth/logout'].includes(route.url);
+        assert.equal(route.config.rateLimitProfile, entry ? 'login' : 'admin', `${label} perfil`);
+        assert.deepEqual(
+          route.authKinds.filter(Boolean),
+          entry ? [] : ['platform'],
+          `${label} deve declarar ${entry ? 'nenhuma identidade' : 'requirePlatform()'}`,
+        );
+        assert.deepEqual(route.permissions.filter(Boolean), [], `${label} sem permissão de tenant`);
       } else if (route.url.startsWith('/contact/')) {
         // Spec 040 (E4): o token do formulário é `public`; o envio é `contact` (fail-closed). Nenhuma é de tenant
         // (sem hook de identidade nem de permissão) e nenhuma é isenta da política de assinatura.

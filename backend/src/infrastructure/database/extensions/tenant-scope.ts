@@ -31,6 +31,8 @@ export const MODEL_SCOPES = {
   Appointment: 'tenant',
   Notification: 'tenant',
   PlatformAdmin: 'global',
+  // Trilha da plataforma (spec 044): do administrador, não da empresa (subject_company_id não é escopo).
+  PlatformAuditEvent: 'global',
   Account: 'global',
   // Cobranca (spec 031): da CONTA, nao da empresa; a barreira e o repositorio por AccountId/SubscriptionId.
   Plan: 'global',

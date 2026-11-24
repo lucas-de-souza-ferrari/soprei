@@ -30,6 +30,7 @@ export { PrismaMembershipAdminUnitOfWork } from './repositories/membership-admin
 export { PrismaCompanyRepository } from './repositories/company.repository.js';
 export { PrismaConversationRepository } from './repositories/conversation.repository.js';
 export { PrismaPlatformAdminRepository } from './repositories/platform-admin.repository.js';
+export { PrismaPlatformAuditRepository } from './repositories/platform-audit.repository.js';
 export { PrismaMembershipRepository } from './repositories/membership.repository.js';
 export { PrismaMessageRepository } from './repositories/message.repository.js';
 export { PrismaNotificationRepository } from './repositories/notification.repository.js';

@@ -534,6 +534,28 @@ async function main(): Promise<void> {
     auth: auth.service,
     membershipAdmin: auth.membershipAdmin,
     trustProxy: config.TRUST_PROXY,
+    // Admin da plataforma (spec 044, E1): entrada do dono por cookie com segundo fator.
+    ...(config.PLATFORM_ADMIN_ENABLED && config.ADMIN_ORIGIN !== undefined
+      ? {
+          platform: {
+            auth: new PlatformAuthService({
+              credentials: auth.service,
+              admins: auth.platformAdmins,
+              sessions: new RedisPlatformSessionStore(
+                authRedis.client,
+                versionedAuthPrefix(config.AUTH_REDIS_PREFIX, config.ACCOUNTS_ENABLED),
+                config.PLATFORM_SESSION_IDLE_SECONDS,
+                config.PLATFORM_SESSION_MAX_SECONDS,
+              ),
+              audit: new PrismaPlatformAuditRepository(prisma),
+              logger,
+              metrics,
+            }),
+            origin: config.ADMIN_ORIGIN,
+            maxAgeSeconds: config.PLATFORM_SESSION_MAX_SECONDS,
+          },
+        }
+      : {}),
     ...(rateLimitRedis === undefined
       ? {}
       : {
@@ -706,8 +728,11 @@ import {
   PrismaCompanyInvitationRepository,
   PrismaInvitationExpiryRepository,
   PrismaInvitationUnitOfWork,
+  PrismaPlatformAuditRepository,
   PrismaUnverifiedAccountPurgeRepository,
 } from './infrastructure/database/index.js';
+import { PlatformAuthService } from './application/platform/platform-auth.service.js';
+import { RedisPlatformSessionStore } from './infrastructure/auth/redis-platform-session-store.js';
 import { InvitationExpiryPurger } from './application/invitations/invitation-expiry-purger.js';
 import { InvitationService } from './application/invitations/invitation.service.js';
 import {

@@ -1,6 +1,12 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { AuthService, deriveLoginLockSecret } from '../../application/auth/auth.service.js';
 import { MembershipAdminService } from '../../application/memberships/membership-admin.service.js';
+import type { PlatformSecretCipher } from '../../application/ports/platform-secret-cipher.js';
+import { TotpSecondFactor } from '../../application/platform/totp-second-factor.js';
+import {
+  AesGcmPlatformSecretCipher,
+  parseCredentialKeys,
+} from '../security/aes-gcm-credential-cipher.js';
 import type { PlatformAdminRepository, MembershipRepository } from '../../domain/index.js';
 import type { Config } from '../config/index.js';
 import { versionedAudience, versionedAuthPrefix } from './auth-version.js';
@@ -31,7 +37,25 @@ export type AuthConfig = Pick<
   | 'AUTH_LOGIN_LOCK_SECONDS'
   | 'AUTH_REDIS_PREFIX'
   | 'ACCOUNTS_ENABLED'
+  | 'PLATFORM_ADMIN_ENABLED'
+  | 'PLATFORM_TOTP_KEYS'
+  | 'PLATFORM_TOTP_ACTIVE_KEY_ID'
 >;
+
+/**
+ * Cifra do segredo TOTP (spec 044) a partir da config já validada, ou `undefined` sem as chaves. A
+ * validação do boot garante o formato; aqui um erro é bug de configuração e derruba o boot.
+ */
+export function createPlatformSecretCipher(
+  config: Pick<Config, 'PLATFORM_TOTP_KEYS' | 'PLATFORM_TOTP_ACTIVE_KEY_ID'>,
+): PlatformSecretCipher | undefined {
+  if (config.PLATFORM_TOTP_KEYS === undefined || config.PLATFORM_TOTP_ACTIVE_KEY_ID === undefined) {
+    return undefined;
+  }
+  const parsed = parseCredentialKeys(config.PLATFORM_TOTP_KEYS);
+  if (!parsed.ok) throw new Error('PLATFORM_TOTP_KEYS inválida');
+  return new AesGcmPlatformSecretCipher(parsed.keys, config.PLATFORM_TOTP_ACTIVE_KEY_ID);
+}
 
 export interface AuthComponents {
   readonly service: AuthService;
@@ -57,6 +81,14 @@ export function createAuthComponents(params: {
   const memberships = new PrismaMembershipRepository(prisma);
   const platformAdmins = new PrismaPlatformAdminRepository(prisma);
   const hasher = params.hasher ?? new ScryptPasswordHasher();
+  // Segundo fator do administrador da plataforma (spec 044): só com o admin ligado.
+  const platformCipher = config.PLATFORM_ADMIN_ENABLED
+    ? createPlatformSecretCipher(config)
+    : undefined;
+  const platformSecondFactor =
+    platformCipher === undefined
+      ? undefined
+      : new TotpSecondFactor({ cipher: platformCipher, admins: platformAdmins, logger });
   const sessions = new RedisSessionStore({
     client: authRedis.client,
     logger,
@@ -83,6 +115,7 @@ export function createAuthComponents(params: {
     logger,
     metrics,
     loginLockSecret: deriveLoginLockSecret(config.JWT_SECRET),
+    platformSecondFactor,
   });
   const membershipAdmin = new MembershipAdminService({
     memberships,

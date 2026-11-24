@@ -67,4 +67,6 @@ export interface NewPlatformAdmin {
 export interface PlatformAdminCredentials {
   readonly admin: PlatformAdmin;
   readonly passwordHash: string;
+  /** Segredo TOTP cifrado (spec 044); nulo = segundo fator não cadastrado. Nunca em log nem resposta. */
+  readonly totpSecretCiphertext: string | null;
 }

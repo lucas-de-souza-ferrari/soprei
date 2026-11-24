@@ -1,3 +1,7 @@
+import {
+  platformAuthController,
+  type PlatformAuthControllerOptions,
+} from '../../presentation/platform/platform-auth.controller.js';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, LogController } from 'fastify';
 import type { AccountService } from '../../application/auth/account.service.js';
 import { accountController, accountCookie } from '../../presentation/auth/account.controller.js';
@@ -182,6 +186,11 @@ export interface BuildServerParams {
    * `X-Forwarded-For`; ver `trust-proxy.ts` para os demais valores.
    */
   readonly trustProxy?: TrustProxySetting;
+  /**
+   * Admin da plataforma (spec 044, `PLATFORM_ADMIN_ENABLED`): registra `/platform/*`. Sem isto essas rotas
+   * não existem (404).
+   */
+  readonly platform?: PlatformAuthControllerOptions;
 }
 
 /** O Fastify quer `string[]` mutável; a config entrega `readonly string[]`. */
@@ -203,6 +212,7 @@ export function buildServer({
   trustProxy = false,
   accounts,
   billing,
+  platform,
 }: BuildServerParams): FastifyInstance {
   const app = Fastify({
     loggerInstance: logger,
@@ -306,6 +316,9 @@ export function buildServer({
       browserAccounts: accounts !== undefined,
       ...(membershipAdmin === undefined ? {} : { membershipAdmin }),
     });
+  }
+  if (platform !== undefined) {
+    void app.register(platformAuthController, { prefix: '/platform', ...platform });
   }
   if (admin !== undefined) {
     // Rota /admin sem verificação de token nunca sobe: falha o boot, não vira rota aberta.

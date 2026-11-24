@@ -63,6 +63,17 @@ export { canManageRole, hasPermission, PERMISSIONS, ROLE_PERMISSIONS } from './p
 export type { Permission } from './permissions.js';
 export type { AuditRepository } from './repositories/audit.repository.js';
 export {
+  PLATFORM_ACTION_REASONS,
+  PLATFORM_AUDIT_ACTIONS,
+} from './entities/platform-audit-event.js';
+export type {
+  NewPlatformAuditEvent,
+  PlatformActionReason,
+  PlatformAuditAction,
+  PlatformAuditEvent,
+} from './entities/platform-audit-event.js';
+export type { PlatformAuditRepository } from './repositories/platform-audit.repository.js';
+export {
   CHANNEL_CONNECTION_MODES,
   CHANNEL_CONNECTION_STATUSES,
   WABA_ID_PATTERN,

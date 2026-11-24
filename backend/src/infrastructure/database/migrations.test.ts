@@ -59,7 +59,8 @@ describe('migration da spec 008 (RBAC e auditoria)', () => {
       ) {
         continue;
       }
-      assert.doesNotMatch(file.sql, /audit_events|audit_action|'VIEWER'/);
+      // Palavra inteira: a trilha da plataforma (spec 044, `platform_audit_events`) é outra tabela.
+      assert.doesNotMatch(file.sql, /\baudit_events\b|\baudit_action\b|'VIEWER'/);
     }
   });
 });
@@ -196,5 +197,44 @@ describe('migration da spec 025 (convites por e-mail)', () => {
       statements,
       /FOREIGN KEY \("invitation_id", "company_id"\) REFERENCES "company_invitations"/,
     );
+  });
+});
+
+describe('migration da spec 044 (segundo fator e trilha da plataforma)', () => {
+  const migration = migrationFiles().find((file) =>
+    file.name.endsWith('_platform_admin_second_factor'),
+  );
+  const statements = (migration?.sql ?? '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+
+  it('é aditiva: colunas anuláveis, tipos e tabela novos; nada apagado, renomeado nem reescrito', () => {
+    assert.ok(migration !== undefined, 'migration _platform_admin_second_factor existe');
+    for (const forbidden of [
+      /\bDROP\b/i,
+      /\bDELETE\s+FROM\b/i,
+      /\bTRUNCATE\b/i,
+      /\bRENAME\b/i,
+      /\bUPDATE\s+"/i,
+      /SET NOT NULL/i,
+      /ALTER COLUMN/i,
+    ]) {
+      assert.doesNotMatch(statements, forbidden);
+    }
+    assert.match(statements, /ADD COLUMN\s+"totp_last_step" INTEGER,/);
+    assert.match(statements, /ADD COLUMN\s+"totp_secret_ciphertext" TEXT;/);
+    assert.match(statements, /CREATE TABLE "platform_audit_events"/);
+    // A trilha não segura o expurgo de contas (spec 021): o sujeito vira nulo.
+    assert.match(
+      statements,
+      /"subject_account_id"\) REFERENCES "accounts"\("id"\) ON DELETE SET NULL/,
+    );
+    assert.match(
+      statements,
+      /"admin_id"\) REFERENCES "platform_admins"\("id"\) ON DELETE RESTRICT/,
+    );
+    // Sem coluna company_id: a trilha é global (MODEL_SCOPES) e não entra no escopo de tenant.
+    assert.doesNotMatch(statements, /"company_id"/);
   });
 });

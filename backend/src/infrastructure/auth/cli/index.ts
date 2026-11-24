@@ -3,7 +3,7 @@ import { loadConfig } from '../../config/index.js';
 import { createDatabase, PrismaCompanyRepository } from '../../database/index.js';
 import { createLogger } from '../../logger/logger.js';
 import { createAuthRedis } from '../auth-redis.js';
-import { createAuthComponents } from '../create-auth.js';
+import { createAuthComponents, createPlatformSecretCipher } from '../create-auth.js';
 import { type AuthCliDeps, runAuthCli } from './auth-cli.js';
 
 /** Lê uma linha do terminal sem eco (modo raw); Ctrl+C cancela. */
@@ -83,6 +83,7 @@ async function main(): Promise<number> {
       platformAdmins: auth.platformAdmins,
       hasher: auth.hasher,
       sessions: auth.sessions,
+      platformCipher: createPlatformSecretCipher(config),
       interactive,
       readSecret: (label) => (interactive ? readHidden(label) : readFirstLine()),
       out: (line) => {

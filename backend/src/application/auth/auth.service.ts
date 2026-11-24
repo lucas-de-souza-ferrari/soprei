@@ -21,6 +21,7 @@ import { isUuid } from '../../shared/utils/index.js';
 import type { AccessTokenService } from '../ports/access-token-service.js';
 import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { SessionStore } from '../ports/session-store.js';
+import type { PlatformSecondFactor } from '../platform/totp-second-factor.js';
 import {
   type AuthIdentity,
   PLATFORM_SCOPE,
@@ -86,6 +87,17 @@ export interface AuthServiceDeps {
    * chave do Redis permitiria testar candidatos offline; com o HMAC isso exige o segredo.
    */
   readonly loginLockSecret: string | Buffer;
+  /**
+   * Segundo fator do administrador da plataforma (spec 044, E1). Presente (`PLATFORM_ADMIN_ENABLED=true`),
+   * `POST /auth/platform/login` também exige o código e a entrada pelo cookie do admin existe.
+   */
+  readonly platformSecondFactor?: PlatformSecondFactor | undefined;
+}
+
+/** Administrador conferido por senha e segundo fator (spec 044), sem sessão criada. */
+export interface VerifiedPlatformAdmin {
+  readonly adminId: PlatformAdminId;
+  readonly totpSecretCiphertext: string;
 }
 
 /** Chave do HMAC do contador de login: HMAC do segredo do JWT com um rótulo fixo (separação de domínio). */
@@ -129,7 +141,12 @@ interface LoginAccount {
   readonly passwordHash: string;
   readonly active: boolean;
   readonly identity: MembershipIdentity | PlatformIdentity;
+  /** Só do administrador da plataforma (spec 044). */
+  readonly totpSecretCiphertext?: string | null;
 }
+
+/** Conferência extra depois da senha certa (o segundo fator); `false` vira a mesma falha de credencial. */
+type ExtraCheck = (account: LoginAccount) => Promise<boolean>;
 
 /**
  * Login, renovação, logout e verificação de access token (spec 007). Os erros esperados voltam
@@ -146,8 +163,10 @@ export class AuthService {
   private readonly logger: FastifyBaseLogger;
   private readonly metrics: AuthMetrics | undefined;
   private readonly loginLockSecret: string | Buffer;
+  private readonly platformSecondFactor: PlatformSecondFactor | undefined;
 
   constructor(deps: AuthServiceDeps) {
+    this.platformSecondFactor = deps.platformSecondFactor;
     this.loginLockSecret = deps.loginLockSecret;
     this.companies = deps.companies;
     this.memberships = deps.memberships;
@@ -189,25 +208,78 @@ export class AuthService {
     );
   }
 
-  /** Login de operador da plataforma. */
+  /**
+   * Login Bearer de operador da plataforma. Com o segundo fator ligado (spec 044), `code` é exigido:
+   * ausente ou errado, a mesma 401 de senha errada (e o `verify` da senha roda uma vez do mesmo jeito).
+   */
   loginPlatform(input: {
     readonly email: string;
     readonly password: string;
+    readonly code?: string | undefined;
   }): Promise<Result<AuthTokens, LoginFailure>> {
     return this.loginFlow(
       'platform',
       loginLockKey(this.loginLockSecret, ['p', input.email]),
       input.password,
-      async () => {
-        const found = await this.platformAdmins.findCredentialsByEmail(input.email);
-        if (found === null) return undefined;
-        return {
-          passwordHash: found.passwordHash,
-          active: found.admin.status === 'ACTIVE',
-          identity: { kind: 'platform', adminId: found.admin.id, sessionId: '' },
-        };
-      },
+      () => this.lookupPlatformAdmin(input.email),
+      this.platformSecondFactor === undefined ? undefined : this.secondFactorCheck(input.code),
     );
+  }
+
+  /**
+   * Confere senha e segundo fator do administrador da plataforma **sem** criar sessão Bearer (a entrada
+   * pelo cookie do admin, spec 044). Mesmo bloqueio por conta, mesma falha uniforme e o `verify` da
+   * senha uma vez em todos os caminhos.
+   */
+  async verifyPlatformCredentials(input: {
+    readonly email: string;
+    readonly password: string;
+    readonly code: string;
+  }): Promise<Result<VerifiedPlatformAdmin, LoginFailure>> {
+    // Sem segundo fator configurado a entrada pelo cookie não existe; nunca entra só com a senha.
+    if (this.platformSecondFactor === undefined) return Result.err({ reason: 'unavailable' });
+    const checked = await this.checkCredentials(
+      'platform',
+      loginLockKey(this.loginLockSecret, ['p', input.email]),
+      input.password,
+      () => this.lookupPlatformAdmin(input.email),
+      this.secondFactorCheck(input.code),
+    );
+    if (!checked.ok) return checked;
+    const { identity, totpSecretCiphertext } = checked.value;
+    if (
+      identity.kind !== 'platform' ||
+      totpSecretCiphertext === undefined ||
+      totpSecretCiphertext === null
+    ) {
+      return Result.err({ reason: 'invalid_credentials' });
+    }
+    this.metrics?.countAuthLogin('platform', 'ok');
+    return Result.ok({ adminId: identity.adminId, totpSecretCiphertext });
+  }
+
+  private async lookupPlatformAdmin(email: string): Promise<LoginAccount | undefined> {
+    const found = await this.platformAdmins.findCredentialsByEmail(email);
+    if (found === null) return undefined;
+    return {
+      passwordHash: found.passwordHash,
+      active: found.admin.status === 'ACTIVE',
+      identity: { kind: 'platform', adminId: found.admin.id, sessionId: '' },
+      totpSecretCiphertext: found.totpSecretCiphertext,
+    };
+  }
+
+  private secondFactorCheck(code: string | undefined): ExtraCheck {
+    return async (account) => {
+      if (account.identity.kind !== 'platform' || this.platformSecondFactor === undefined) {
+        return false;
+      }
+      return this.platformSecondFactor.verify(
+        account.identity.adminId,
+        account.totpSecretCiphertext ?? null,
+        code,
+      );
+    };
   }
 
   async refresh(refreshToken: string): Promise<Result<AuthTokens, RefreshFailure>> {
@@ -351,35 +423,18 @@ export class AuthService {
     }
   }
 
-  /**
-   * O mesmo trabalho em todos os caminhos: com ou sem conta, o `verify` roda **uma vez** (contra
-   * um hash fictício quando não há conta). Bloqueada, a conta responde 429 antes de gastar hash.
-   */
+  /** Confere as credenciais (`checkCredentials`) e cria a sessão Bearer. */
   private async loginFlow(
     kind: 'membership' | 'platform',
     lockKey: string,
     password: string,
     lookup: () => Promise<LoginAccount | undefined>,
+    extraCheck?: ExtraCheck,
   ): Promise<Result<AuthTokens, LoginFailure>> {
+    const checked = await this.checkCredentials(kind, lockKey, password, lookup, extraCheck);
+    if (!checked.ok) return checked;
+    const account = checked.value;
     try {
-      const lock = await this.sessions.loginLockState(lockKey);
-      if (lock.locked) {
-        this.metrics?.countAuthLogin(kind, 'locked');
-        this.logger.warn({ kind }, 'login bloqueado por excesso de falhas na conta');
-        return Result.err({ reason: 'locked', retryAfterSeconds: lock.retryAfterSeconds });
-      }
-
-      const account = await lookup();
-      const storedHash = account?.passwordHash ?? (await this.hasher.dummyHash());
-      const matches = await this.hasher.verify(password, storedHash);
-      if (account === undefined || !account.active || !matches) {
-        await this.sessions.recordLoginFailure(lockKey);
-        this.metrics?.countAuthLogin(kind, 'invalid');
-        this.logger.info({ kind, result: 'invalid' }, 'login recusado');
-        return Result.err({ reason: 'invalid_credentials' });
-      }
-      await this.sessions.resetLoginFailures(lockKey);
-
       const sessionId = randomUUID();
       const secret = randomBytes(48).toString('base64url');
       const identity: AuthIdentity = { ...account.identity, sessionId };
@@ -407,6 +462,49 @@ export class AuthService {
         tokenType: 'Bearer',
         expiresIn: access.expiresIn,
       });
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) return Result.err({ reason: 'unavailable' });
+      throw error;
+    }
+  }
+
+  /**
+   * Bloqueio, conta e senha (e a conferência extra, se houver), sem criar sessão. O mesmo trabalho em
+   * todos os caminhos: com ou sem conta, o `verify` roda **uma vez** (contra um hash fictício quando não
+   * há conta); a conferência extra só roda depois da senha certa. Bloqueada, a conta responde 429
+   * antes de gastar hash.
+   */
+  private async checkCredentials(
+    kind: 'membership' | 'platform',
+    lockKey: string,
+    password: string,
+    lookup: () => Promise<LoginAccount | undefined>,
+    extraCheck?: ExtraCheck,
+  ): Promise<Result<LoginAccount, LoginFailure>> {
+    try {
+      const lock = await this.sessions.loginLockState(lockKey);
+      if (lock.locked) {
+        this.metrics?.countAuthLogin(kind, 'locked');
+        this.logger.warn({ kind }, 'login bloqueado por excesso de falhas na conta');
+        return Result.err({ reason: 'locked', retryAfterSeconds: lock.retryAfterSeconds });
+      }
+
+      const account = await lookup();
+      const storedHash = account?.passwordHash ?? (await this.hasher.dummyHash());
+      const matches = await this.hasher.verify(password, storedHash);
+      const accepted =
+        account !== undefined &&
+        account.active &&
+        matches &&
+        (extraCheck === undefined || (await extraCheck(account)));
+      if (!accepted) {
+        await this.sessions.recordLoginFailure(lockKey);
+        this.metrics?.countAuthLogin(kind, 'invalid');
+        this.logger.info({ kind, result: 'invalid' }, 'login recusado');
+        return Result.err({ reason: 'invalid_credentials' });
+      }
+      await this.sessions.resetLoginFailures(lockKey);
+      return Result.ok(account);
     } catch (error) {
       if (error instanceof ServiceUnavailableError) return Result.err({ reason: 'unavailable' });
       throw error;
