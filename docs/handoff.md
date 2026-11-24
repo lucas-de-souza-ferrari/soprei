@@ -24,7 +24,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): depois do merge da [spec 043](specs/043-backup-externo.md), os passos de `docs/ops/backup.md` (chaves, bucket do R2, instalar, primeiro backup, aviso, teste de restauração).
 4. **Anthropic:** termos de dados (LGPD) e limite de gasto mensal na Console.
 5. **Spec 028, E0** (roteiro na spec): obrigatório antes de ligar `SCHEDULE_AI_ENABLED` e a opção "A IA pode solicitar, cancelar e remarcar horários" com empresa real.
-6. **Spec 041 (falta no servidor, conferido em 2026-11-24):** o worker do pdf.js (`/assets/pdf.worker.min-*.mjs`) sai como `application/octet-stream`, então a leitura de PDF da aba Conhecimento falha na produção. Acrescentar o `location ~* .mjs$` de `deploy/nginx/production.conf.example` no bloco do `www.soprei.com`, `nginx -t` e `systemctl reload nginx`; depois o teste manual em computador, iPhone e Android.
+6. **Spec 041:** o `location ~* .mjs$` foi acrescentado ao nginx do site em 2026-11-24 (o worker do pdf.js sai como `text/javascript`); falta o teste manual da leitura de PDF em computador, iPhone e Android.
 7. **Spec 040 (conferir):** revisar a Política de Privacidade versão 2; pedido de teste em `/fale-conosco`; pedidos `PENDING` e assinaturas anuais antigas; `BILLING_TRIAL_TOKENS` ausente ou 600000 no `.env` do servidor.
 8. **Spec 032 (conferir):** `pm2-logrotate` com 30 dias, `try_files` e log sem query no nginx, campo "URL dos Termos de Serviço" no app da Meta; conferir se o Gmail do SMTP é Workspace.
 9. **Spec 030 (conferir):** revisar a redação de `PERSONA_TEMPLATE` (`frontend/src/company/onboarding-steps.ts`).

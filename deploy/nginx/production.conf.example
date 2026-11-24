@@ -1,7 +1,7 @@
 # nginx da PRODUÇÃO do Soprei: /etc/nginx/sites-available/soprei (ligado em sites-enabled/soprei).
 #
 # CONFERIDO com o arquivo real do servidor em 2026-11-24 (spec 044, publicação do admin): este exemplo é o
-# arquivo de lá, com duas diferenças marcadas "FALTA NO SERVIDOR" abaixo, que o dono acrescenta à mão. Ao
+# arquivo de lá, já com o /api/platform/ e o .mjs acrescentados pelo dono no mesmo dia. Ao
 # mudar o servidor, mude este exemplo junto (e vice-versa); ele substitui o reconstruído da spec 037 (S20).
 #
 # Certificado pelo `certbot --nginx` (as linhas "managed by Certbot" são dele): um certificado só, em
@@ -70,9 +70,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # FALTA NO SERVIDOR (conferido em 2026-11-24: o worker sai como application/octet-stream e o navegador
-    # recusa, então a leitura de PDF da aba Conhecimento falha). Worker do pdf.js (spec 041): o .mjs precisa
-    # sair como JavaScript. Location por regex: vence o prefixo /assets/ abaixo.
+    # Worker do pdf.js (spec 041): o .mjs precisa sair como JavaScript (sem isto saía como
+    # application/octet-stream e a leitura de PDF da aba Conhecimento falhava; acrescentado no servidor em
+    # 2026-11-24). Location por regex: vence o prefixo /assets/ abaixo.
     location ~* \.mjs$ {
         types { text/javascript mjs; }
         try_files $uri =404;
