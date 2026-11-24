@@ -153,6 +153,12 @@ async function viaChannel(
   const response = await service.respondToPending(company.id, contactRef, BATCH);
   assert.equal(response.outcome, 'answered');
   assert.ok(response.reply !== null);
+  // Como o processador do canal depois do envio (spec 035, D6: resposta sem `sentAt` seria reenviada
+  // antes da próxima, em vez de o próximo turno responder).
+  await new PrismaMessageRepository(database.prisma).markSent(company.id, response.reply.id, {
+    channelMessageId: `wamid.out.${response.reply.id}`,
+    sentAt: new Date(),
+  });
   return response.reply;
 }
 
