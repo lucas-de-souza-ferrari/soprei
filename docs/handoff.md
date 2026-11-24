@@ -4,15 +4,15 @@
 
 ## Última sessão
 
-2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), admin da plataforma:** a spec (PR #21) e a **E1** (PR #22, entrada do dono com TOTP, sessão por cookie no Redis, trilha `PlatformAuditEvent`) estão na `main` com o CI verde. O `reviewer` revisou a E1 depois do merge: nada bloqueante.
+2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md), E2** na branch `spec/044-e2-leituras` (a E1 e os ajustes da revisão já estão na `main`): leituras agregadas em `/platform/*` (overview, empresas com filtro `attention`, detalhe, contas, detalhe com e-mail auditado, pedidos, avisos, saúde), suspender e reativar com trilha na mesma transação, módulo único de SQL `platform-read-model.ts` e o D8 em `/admin/companies` (`hasPersona`). Contratos de resposta exportados de `presentation/platform/platform-monitor.controller.ts` para a E3.
 
-- **Branch `spec/044-e1-ajustes-da-revisao`:** corrige o I1 da revisão (`enroll-platform-totp` revoga as sessões Bearer da plataforma abertas só com a senha), o M2 (formato de `PLATFORM_TOTP_KEYS` conferido mesmo com o admin desligado), o M4/M5 (comentários das métricas) e o M6 (`TestTenants.cleanup` apaga a trilha da plataforma das empresas que criou). Detalhe e o que ficou só registrado (M1, M3, M7) no Registro da spec.
-- **Falta:** CI e merge dessa branch; depois a E2 (leituras agregadas e suspender/reativar). Migration da E1 (`pnpm db:migrate:deploy`) quando houver servidor. Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
+- **Verde localmente:** typecheck, lint, format e os unitários. **Falta:** CI (inclui `platform-admin.integration.test.ts`, que não rodou aqui por falta de `soprei_test`), `reviewer` e merge; depois E3 (app, em outra cópia) e E4. Pendente do dono, sem bloquear: conferir se a Política de Privacidade e os Termos cobrem o uso do e-mail da conta (D7).
+- **Armadilha:** "respostas sem `sentAt`" conta também o teste do site numa empresa com número (limitação registrada na spec).
 
 ## Onde estamos
 
 - **Não há servidor de produção hoje** (informado pelo dono em 2026-11-23). Tudo o que as specs dizem estar pronto está na `main`, com o CI verde, e nada está publicado. Passos que dependem de servidor (staging, backup, nginx, `pm2-logrotate`, Cloudflare) ficam parados até existir um.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na `main`). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Em implementação: 044 (admin da plataforma; E1 na `main`, E2 em branch). Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes
