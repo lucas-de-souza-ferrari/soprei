@@ -145,7 +145,7 @@ async function companyEvents(company: Company) {
 async function companyIds(siteCookie: string): Promise<string[]> {
   const response = await app.inject({ url: '/account/companies', headers: { cookie: siteCookie } });
   assert.equal(response.statusCode, 200, response.body);
-  return response.json<{ items: { id: string }[] }>().items.map((item) => item.id);
+  return response.json<{ items: { companyId: string }[] }>().items.map((item) => item.companyId);
 }
 
 before(async () => {
