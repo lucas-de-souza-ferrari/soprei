@@ -9,6 +9,7 @@ import { OverviewScreen } from './screens/OverviewScreen';
 import { CompaniesScreen } from './screens/CompaniesScreen';
 import { CompanyDetailScreen } from './screens/CompanyDetailScreen';
 import { AccountsScreen } from './screens/AccountsScreen';
+import { AccountDetailScreen } from './screens/AccountDetailScreen';
 import { BillingScreen } from './screens/BillingScreen';
 import { ChannelScreen } from './screens/ChannelScreen';
 import { HealthScreen } from './screens/HealthScreen';
@@ -28,9 +29,11 @@ const NAV: readonly (readonly [View['name'], string])[] = [
   ['health', 'Saúde'],
 ];
 
-/** Tela da seção ativa no menu (o detalhe de uma empresa fica sob "Empresas"). */
+/** Tela da seção ativa no menu (o detalhe de uma empresa fica sob "Empresas"; o de uma conta, "Contas"). */
 function section(view: View): View['name'] {
-  return view.name === 'company' ? 'companies' : view.name;
+  if (view.name === 'company') return 'companies';
+  if (view.name === 'account') return 'accounts';
+  return view.name;
 }
 
 /**
@@ -179,7 +182,17 @@ function Screen({ view }: { readonly view: View }) {
         <CompanyDetailScreen key={view.companyId} companyId={view.companyId} from={view.from} />
       );
     case 'accounts':
-      return <AccountsScreen />;
+      return (
+        <AccountsScreen
+          key={`${view.status ?? ''}|${view.verified ?? ''}`}
+          initialStatus={view.status}
+          initialVerified={view.verified}
+        />
+      );
+    case 'account':
+      return (
+        <AccountDetailScreen key={view.accountId} accountId={view.accountId} from={view.from} />
+      );
     case 'billing':
       return <BillingScreen />;
     case 'channel':

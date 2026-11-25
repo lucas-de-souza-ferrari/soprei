@@ -25,6 +25,9 @@ import { z } from 'zod';
  *    `ran`/`not_run`/`disabled`; a limpeza da fila vem dentro da execução da retomada); os contadores são
  *    um objeto de chaves fixas.
  * 6. **Datas:** texto ISO 8601 em UTC (`toISOString()` do servidor); ids: UUID.
+ * 7. **E-mail (spec 045, D3):** listas, pessoas da empresa e detalhe da conta trazem só `emailMasked`; o
+ *    completo vem só de `GET /platform/accounts/:accountId/email` (`PlatformAccountEmailResponse`), que o
+ *    servidor audita.
  *
  * Os objetos não são `strict` (campo a mais do servidor é ignorado, nunca mostrado); campo que falta ou
  * com tipo errado faz a tela mostrar "resposta inesperada", nunca o texto do servidor.
@@ -36,6 +39,14 @@ const count = z.number().int().nonnegative();
 const cents = z.number().int();
 const shortText = z.string().max(200);
 const cursor = z.string().min(1).max(512).nullable();
+/**
+ * E-mail mascarado no banco (`l***@exemplo.com`: primeira letra e domínio). O formato é conferido aqui
+ * também: um e-mail inteiro no lugar do mascarado é "resposta inesperada", nunca aparece na tela.
+ */
+const maskedEmail = z
+  .string()
+  .max(320)
+  .regex(/^[^@]\*\*\*@[^@]*$/);
 
 /** Objeto com um valor para cada chave da lista (todas presentes; chave a mais é descartada). */
 function fixedKeys<const K extends readonly [string, ...string[]], V extends z.ZodType>(
@@ -189,6 +200,10 @@ export const companyListItemSchema = z.object({
   channelState: channelStateSchema,
   activeMembers: count,
   messages7d: count,
+  /** O dono ativo mais antigo (spec 045, E1); `null` sem dono ativo. `accountId` nulo: vínculo da CLI. */
+  owner: z.object({ accountId: id.nullable(), emailMasked: maskedEmail }).nullable(),
+  /** Quantos donos ativos (vínculo e conta ativos); `0` = "Sem dono ativo". */
+  owners: count,
 });
 export type CompanyListItem = z.infer<typeof companyListItemSchema>;
 
@@ -234,6 +249,19 @@ const windowSchema = z.object({
 
 const quotaSchema = z.object({ used: count, limit: count });
 
+/** Uma pessoa (vínculo) no detalhe da empresa (spec 045, E1). */
+export const personSchema = z.object({
+  membershipId: id,
+  /** `null`: vínculo antigo da CLI, sem conta (sem "Abrir conta"). */
+  accountId: id.nullable(),
+  emailMasked: maskedEmail,
+  role: membershipRoleSchema,
+  status: accessStatusSchema,
+  createdAt: instant,
+  account: z.object({ status: accessStatusSchema, verified: z.boolean() }).nullable(),
+});
+export type Person = z.infer<typeof personSchema>;
+
 /** `GET /platform/companies/:companyId` (`PlatformCompanyDetailResponse`). */
 export const companyDetailSchema = z.object({
   billingEnabled: z.boolean(),
@@ -258,7 +286,14 @@ export const companyDetailSchema = z.object({
   memberships: z
     .array(z.object({ role: membershipRoleSchema, status: accessStatusSchema, count }))
     .max(20),
-  /** Titular da assinatura, sem e-mail. */
+  /** Pessoas da empresa (spec 045, E1): até 50, dono primeiro, e-mail mascarado. */
+  people: z.array(personSchema).max(50),
+  /** Todas as pessoas (vínculos) da empresa, além das 50 listadas. */
+  peopleTotal: count,
+  /** Donos ativos; `0` = aviso "Empresa sem dono ativo". */
+  owners: count,
+  pendingInvitations: count,
+  /** Titular da ASSINATURA (quem paga), sem e-mail; não é o dono da empresa. */
   holder: z
     .object({
       accountId: id,
@@ -296,7 +331,7 @@ export type CompanyDetail = z.infer<typeof companyDetailSchema>;
 
 export const accountListItemSchema = z.object({
   id,
-  emailMasked: z.string().max(320),
+  emailMasked: maskedEmail,
   status: accessStatusSchema,
   verified: z.boolean(),
   createdAt: instant,
@@ -313,13 +348,13 @@ export const accountPageSchema = z.object({
 export type AccountPage = z.infer<typeof accountPageSchema>;
 
 /**
- * `GET /platform/accounts/:accountId` (`PlatformAccountDetailResponse`), com o e-mail completo: cada
- * leitura é auditada (D7).
+ * `GET /platform/accounts/:accountId` (`PlatformAccountDetailResponse`), com o e-mail MASCARADO: abrir a
+ * conta não grava nada (spec 045, D3).
  */
 export const accountDetailSchema = z.object({
   billingEnabled: z.boolean(),
   id,
-  email: z.string().max(320),
+  emailMasked: maskedEmail,
   status: accessStatusSchema,
   verified: z.boolean(),
   createdAt: instant,
@@ -338,6 +373,13 @@ export const accountDetailSchema = z.object({
   subscription: subscriptionSchema.nullable(),
 });
 export type AccountDetail = z.infer<typeof accountDetailSchema>;
+
+/**
+ * `GET /platform/accounts/:accountId/email` (`PlatformAccountEmailResponse`): o e-mail completo, só pelo
+ * botão "Mostrar e-mail"; cada leitura grava `ACCOUNT_EMAIL_VIEWED` (D7 da 044, D3 da 045).
+ */
+export const accountEmailSchema = z.object({ email: z.string().min(3).max(320) });
+export type AccountEmail = z.infer<typeof accountEmailSchema>;
 
 // --- E2: cobrança --------------------------------------------------------------------------------
 

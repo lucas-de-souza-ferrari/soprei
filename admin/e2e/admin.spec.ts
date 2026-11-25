@@ -208,23 +208,91 @@ test('login aceito (204) mas sessão 401 em seguida: aviso de cookie não guarda
   expect(api.callsTo('POST', '/platform/auth/login')).toHaveLength(1);
 });
 
-test('"Mostrar e-mail" chama a rota de detalhe da conta; a lista só tem o e-mail mascarado', async ({
+test('conta: o detalhe abre mascarado; só "Mostrar e-mail" chama a rota auditada (spec 045, D3)', async ({
   page,
 }) => {
   const api = await installFakeApi(page, { signedIn: true });
   await page.goto('/');
   await nav(page, 'Contas').click();
+  await page.getByRole('combobox', { name: 'Estado' }).selectOption({ label: 'Ativas' });
   await expect(page.getByText('l***@exemplo.test')).toBeVisible();
   await page.getByRole('button', { name: 'Abrir conta l***@exemplo.test' }).click();
+  await expect(page.getByRole('heading', { name: 'Conta', level: 1 })).toBeVisible();
+  // O detalhe (mascarado) já traz as empresas e a assinatura; o e-mail completo não.
+  await expect(page.getByRole('button', { name: 'Abrir Padaria Aurora' })).toBeVisible();
+  await expect(page.getByText('l***@exemplo.test')).toBeVisible();
   await expect(page.getByText(FULL_EMAIL)).toHaveCount(0);
-  expect(api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}`)).toHaveLength(0);
+  await expect
+    .poll(() => api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}`).length)
+    .toBeGreaterThan(0);
+  expect(api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}/email`)).toHaveLength(0);
 
   await page.getByRole('button', { name: 'Mostrar e-mail' }).click();
   await expect(page.getByText(FULL_EMAIL)).toBeVisible();
-  expect(api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}`)).toHaveLength(1);
-  await expect(page.getByRole('button', { name: 'Abrir Padaria Aurora' })).toBeVisible();
+  expect(api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}/email`)).toHaveLength(1);
+  await expect(page.getByRole('button', { name: 'Mostrar e-mail' })).toHaveCount(0);
   expect(page.url()).not.toContain(ACCOUNT_A);
   expect(await page.title()).toBe('Soprei Admin');
+  expect(await storageSizes(page)).toEqual([0, 0]);
+
+  // Voltar devolve a lista com o filtro de antes.
+  await page.getByRole('button', { name: 'Voltar' }).click();
+  await expect(page.getByRole('combobox', { name: 'Estado' })).toHaveValue('active');
+  await expect(page.getByText(FULL_EMAIL)).toHaveCount(0);
+});
+
+test('empresa: o dono em destaque, a seção Pessoas e "Abrir conta" sem ler o e-mail completo (spec 045, E1)', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await nav(page, 'Empresas').click();
+  // Coluna Dono na lista; a empresa sem dono ativo tem o selo.
+  const rowA = page.getByRole('button', { name: 'Abrir Padaria Aurora' });
+  await expect(rowA).toContainText('Dono: l***@exemplo.test');
+  const rowB = page.getByRole('button', { name: 'Abrir Oficina Boa Vista' });
+  await expect(rowB).toContainText('Sem dono ativo');
+  await expect(rowB).toContainText('Dono: —');
+
+  await rowA.click();
+  await expect(page.getByRole('heading', { name: 'Padaria Aurora', level: 1 })).toBeVisible();
+  await expect(page.locator('main p', { hasText: 'Dono:' })).toHaveText('Dono: l***@exemplo.test');
+  await expect(page.getByText('Empresa sem dono ativo', { exact: false })).toHaveCount(0);
+  const people = page.getByRole('list', { name: 'Pessoas da empresa' });
+  await expect(people.getByRole('listitem')).toHaveCount(3);
+  await expect(people.getByRole('listitem').first()).toContainText('l***@exemplo.test');
+  await expect(people.getByRole('listitem').first()).toContainText('Dono');
+  await expect(people.getByRole('listitem').nth(1)).toContainText('Conta desativada');
+  await expect(people.getByRole('listitem').nth(1)).toContainText('E-mail não confirmado');
+  await expect(people.getByRole('listitem').nth(2)).toContainText('Sem conta (vínculo antigo)');
+  // Vínculo antigo sem conta: sem "Abrir conta".
+  await expect(people.getByRole('button', { name: /^Abrir conta/ })).toHaveCount(2);
+  await expect(page.getByText('Convites pendentes')).toBeVisible();
+
+  await people.getByRole('button', { name: 'Abrir conta l***@exemplo.test' }).click();
+  await expect(page.getByRole('heading', { name: 'Conta', level: 1 })).toBeVisible();
+  await expect(page.getByText(FULL_EMAIL)).toHaveCount(0);
+  await expect
+    .poll(() => api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}`).length)
+    .toBeGreaterThan(0);
+  expect(api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}/email`)).toHaveLength(0);
+  expect(await hasHorizontalScroll(page), 'detalhe da conta').toBe(false);
+
+  // Voltar leva de novo à empresa.
+  await page.getByRole('button', { name: 'Voltar' }).click();
+  await expect(page.getByRole('heading', { name: 'Padaria Aurora', level: 1 })).toBeVisible();
+  await page.getByRole('button', { name: 'Voltar' }).click();
+  await expect(page.getByRole('heading', { name: 'Empresas', level: 1 })).toBeVisible();
+
+  // Empresa sem dono ativo: o aviso aparece (a cobrança desligada não esconde as pessoas).
+  await page.getByRole('button', { name: 'Abrir Oficina Boa Vista' }).click();
+  await expect(page.getByText('Empresa sem dono ativo.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Pessoas da empresa' })).toContainText(
+    'o***@exemplo.test',
+  );
+  expect(await hasHorizontalScroll(page), 'empresa sem dono').toBe(false);
+  expect(api.calls.some((call) => call.path.endsWith('/email'))).toBe(false);
+  expect(await storageSizes(page)).toEqual([0, 0]);
 });
 
 test('"Precisa de atenção" leva à lista de empresas filtrada', async ({ page }) => {

@@ -1,149 +1,29 @@
 import { useState } from 'react';
-import { ArrowLeft, Eye } from 'lucide-react';
-import { ApiError, query } from '../api';
-import { useAdmin, usePaged } from '../admin-context';
-import {
-  accountDetailSchema,
-  accountPageSchema,
-  type AccountDetail,
-  type AccountListItem,
-  type AccountStatusFilter,
-  type VerifiedFilter,
-} from '../contracts';
-import { errorMessage, formatCount, formatDate, formatDateTime, label } from '../format';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Facts,
-  List,
-  Loading,
-  PageHeader,
-  RowButton,
-  Select,
-} from '../ui';
-import { subscriptionFacts } from './subscription-facts';
+import { query } from '../api';
+import { useAdmin, usePaged, type View } from '../admin-context';
+import { accountPageSchema, type AccountStatusFilter, type VerifiedFilter } from '../contracts';
+import { errorMessage, formatCount, formatDate, label } from '../format';
+import { Alert, Badge, Button, List, Loading, PageHeader, RowButton, Select } from '../ui';
 
 /**
- * Detalhe de uma conta (D7): mostra o que a lista já trouxe (e-mail mascarado). O e-mail completo, as
- * empresas e a assinatura só vêm de `GET /platform/accounts/:accountId`, chamado pelo botão "Mostrar
- * e-mail": é essa leitura que o servidor audita. O e-mail fica só no estado desta tela.
+ * Contas (`GET /platform/accounts`): e-mail sempre mascarado na lista. Abrir uma conta leva ao detalhe
+ * (`AccountDetailScreen`), também mascarado; o e-mail completo só pelo "Mostrar e-mail" de lá.
  */
-function AccountDetailPanel({
-  account,
-  onBack,
+export function AccountsScreen({
+  initialStatus,
+  initialVerified,
 }: {
-  readonly account: AccountListItem;
-  readonly onBack: () => void;
+  readonly initialStatus: AccountStatusFilter | undefined;
+  readonly initialVerified: VerifiedFilter | undefined;
 }) {
-  const { api, expire, navigate } = useAdmin();
-  const [detail, setDetail] = useState<AccountDetail | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(undefined);
-
-  async function reveal() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      setDetail(
-        await api.get(`/platform/accounts/${encodeURIComponent(account.id)}`, accountDetailSchema),
-      );
-    } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 401) return expire();
-      setError(failure);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="mb-2">
-        <Button variant="ghost" onClick={onBack}>
-          <ArrowLeft aria-hidden className="size-4" />
-          Voltar
-        </Button>
-      </div>
-      <h1 className="mb-4 text-xl font-semibold">Conta</h1>
-      <div className="flex flex-col gap-4">
-        <Card>
-          <Facts
-            items={[
-              ['E-mail', detail?.email ?? account.emailMasked],
-              ['Estado', label(detail?.status ?? account.status)],
-              ['E-mail confirmado', (detail?.verified ?? account.verified) ? 'Sim' : 'Não'],
-              ['Criada em', formatDateTime(account.createdAt)],
-              ['Empresas', formatCount(detail?.companies.length ?? account.companies)],
-              ['Tem assinatura', account.hasSubscription ? 'Sim' : 'Não'],
-            ]}
-          />
-          {detail === undefined ? (
-            <div className="mt-3 flex flex-col gap-1">
-              <div>
-                <Button onClick={() => void reveal()} disabled={busy}>
-                  <Eye aria-hidden className="size-4" />
-                  Mostrar e-mail
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                A leitura do e-mail completo fica registrada na auditoria.
-              </p>
-            </div>
-          ) : null}
-          {error === undefined ? null : <Alert>{errorMessage(error)}</Alert>}
-        </Card>
-        {detail === undefined ? null : (
-          <>
-            <Card title="Empresas da conta">
-              {detail.companies.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhuma empresa.</p>
-              ) : (
-                <List label="Empresas da conta">
-                  {detail.companies.map((company) => (
-                    <RowButton
-                      key={company.id}
-                      ariaLabel={`Abrir ${company.name}`}
-                      onOpen={() =>
-                        navigate({
-                          name: 'company',
-                          companyId: company.id,
-                          from: { name: 'accounts' },
-                        })
-                      }
-                    >
-                      <span className="font-semibold">{company.name}</span>
-                      <span className="text-sm text-muted-foreground">
-                        {company.slug} · {label(company.role)}
-                        {company.membershipStatus === 'DISABLED' ? ' (vínculo desativado)' : ''}
-                        {company.status === 'SUSPENDED' ? ' · empresa suspensa' : ''}
-                      </span>
-                    </RowButton>
-                  ))}
-                </List>
-              )}
-            </Card>
-            <Card title="Assinatura">
-              {!detail.billingEnabled ? (
-                <p className="text-sm text-muted-foreground">Cobrança desligada.</p>
-              ) : detail.subscription === null ? (
-                <p className="text-sm text-muted-foreground">Sem assinatura.</p>
-              ) : (
-                <Facts items={subscriptionFacts(detail.subscription)} />
-              )}
-            </Card>
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
-/** Contas (`GET /platform/accounts`): e-mail sempre mascarado na lista. */
-export function AccountsScreen() {
-  const [status, setStatus] = useState<AccountStatusFilter | ''>('');
-  const [verified, setVerified] = useState<VerifiedFilter | ''>('');
-  const [selected, setSelected] = useState<AccountListItem | undefined>(undefined);
+  const { navigate } = useAdmin();
+  const [status, setStatus] = useState<AccountStatusFilter | ''>(initialStatus ?? '');
+  const [verified, setVerified] = useState<VerifiedFilter | ''>(initialVerified ?? '');
+  const from: View = {
+    name: 'accounts',
+    ...(status === '' ? {} : { status }),
+    ...(verified === '' ? {} : { verified }),
+  };
   const page = usePaged(
     (api, cursor) =>
       api.get(
@@ -156,15 +36,6 @@ export function AccountsScreen() {
       ),
     `${status}|${verified}`,
   );
-
-  if (selected !== undefined)
-    return (
-      <AccountDetailPanel
-        key={selected.id}
-        account={selected}
-        onBack={() => setSelected(undefined)}
-      />
-    );
 
   return (
     <>
@@ -205,7 +76,7 @@ export function AccountsScreen() {
               <RowButton
                 key={account.id}
                 ariaLabel={`Abrir conta ${account.emailMasked}`}
-                onOpen={() => setSelected(account)}
+                onOpen={() => navigate({ name: 'account', accountId: account.id, from })}
               >
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{account.emailMasked}</span>

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ApiError, type ApiClient } from './api';
-import type { AttentionFilter } from './contracts';
+import type { AccountStatusFilter, AttentionFilter, VerifiedFilter } from './contracts';
 
 /** Telas do admin. A navegação fica só em memória: nada de id, filtro ou busca na barra de endereço. */
 export type View =
@@ -11,7 +11,12 @@ export type View =
       readonly attention?: AttentionFilter;
     }
   | { readonly name: 'company'; readonly companyId: string; readonly from: View }
-  | { readonly name: 'accounts' }
+  | {
+      readonly name: 'accounts';
+      readonly status?: AccountStatusFilter;
+      readonly verified?: VerifiedFilter;
+    }
+  | { readonly name: 'account'; readonly accountId: string; readonly from: View }
   | { readonly name: 'billing' }
   | { readonly name: 'channel' }
   | { readonly name: 'health' };

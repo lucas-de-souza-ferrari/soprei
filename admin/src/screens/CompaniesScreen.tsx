@@ -21,6 +21,18 @@ export const ATTENTION_LABELS: Record<AttentionFilter, string> = {
   open_handoffs: 'Atendimento humano aberto',
 };
 
+/**
+ * O dono na lista (spec 045, E1): o dono ativo mais antigo, mascarado, e "+N" quando há mais de um;
+ * "—" sem dono ativo (a linha também leva o selo "Sem dono ativo").
+ */
+export function ownerText(company: Pick<CompanyListItem, 'owner' | 'owners'>): string {
+  if (company.owner === null) return '—';
+  const others = company.owners - 1;
+  return others > 0
+    ? `${company.owner.emailMasked} (+${String(others)})`
+    : company.owner.emailMasked;
+}
+
 /** Linhas de empresa, usadas também pela tela Canal. */
 export function CompanyRows({
   items,
@@ -47,8 +59,10 @@ export function CompanyRows({
             <Badge tone={company.status === 'SUSPENDED' ? 'bad' : 'neutral'}>
               {label(company.status)}
             </Badge>
+            {company.owners === 0 ? <Badge tone="bad">Sem dono ativo</Badge> : null}
           </span>
           <span className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+            <span className="break-all">Dono: {ownerText(company)}</span>
             <span>Plano: {company.plan === null ? '—' : label(company.plan)}</span>
             <span>Acesso: {company.access === null ? '—' : label(company.access)}</span>
             <span>Canal: {label(company.channelState)}</span>
