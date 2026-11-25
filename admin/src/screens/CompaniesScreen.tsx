@@ -9,6 +9,7 @@ import {
   type CompanyListItem,
 } from '../contracts';
 import { errorMessage, formatCount, formatDateTime, label } from '../format';
+import { NewCompany } from './InvitationActions';
 import { Alert, Badge, Button, List, Loading, PageHeader, RowButton, Select } from '../ui';
 
 type StatusFilter = '' | 'active' | 'suspended' | 'removed';
@@ -87,6 +88,7 @@ export function CompaniesScreen({
   readonly initialStatus: 'active' | 'suspended' | 'removed' | undefined;
   readonly initialAttention: AttentionFilter | undefined;
 }) {
+  const { navigate } = useAdmin();
   const [status, setStatus] = useState<StatusFilter>(initialStatus ?? '');
   const [attention, setAttention] = useState<AttentionFilter | ''>(initialAttention ?? '');
   const [draft, setDraft] = useState('');
@@ -118,7 +120,9 @@ export function CompaniesScreen({
 
   return (
     <>
-      <PageHeader title="Empresas" onRefresh={page.reload} busy={page.loading} />
+      <PageHeader title="Empresas" onRefresh={page.reload} busy={page.loading}>
+        <NewCompany onCreated={(companyId) => navigate({ name: 'company', companyId, from })} />
+      </PageHeader>
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <form onSubmit={search} role="search" className="flex min-w-0 flex-1 items-end gap-2">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">

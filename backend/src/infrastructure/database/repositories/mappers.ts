@@ -133,6 +133,7 @@ export function toCompanyInvitation(row: CompanyInvitationRow): CompanyInvitatio
     status: row.status,
     tokenHash: row.tokenHash,
     invitedByMembershipId: row.invitedByMembershipId,
+    invitedByAdminId: row.invitedByAdminId,
     acceptedMembershipId: row.acceptedMembershipId,
     expiresAt: row.expiresAt,
     lastSentAt: row.lastSentAt,

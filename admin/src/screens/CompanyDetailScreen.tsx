@@ -34,6 +34,7 @@ import {
   StatGrid,
 } from '../ui';
 import { CompanyActions, MembershipActions } from './CompanyActions';
+import { Invitations } from './InvitationActions';
 import { modulesText, subscriptionFacts } from './subscription-facts';
 
 const ONBOARDING_STEPS = [
@@ -409,6 +410,9 @@ export function CompanyDetailScreen({
           </Card>
           <Card title="Pessoas">
             <People detail={data} self={self} onDone={reload} />
+            <div className="mt-4">
+              <Invitations detail={data} onDone={reload} />
+            </div>
           </Card>
           <Card title="Assinatura e uso">
             <Subscription detail={data} />

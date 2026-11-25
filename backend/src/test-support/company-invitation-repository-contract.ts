@@ -35,12 +35,16 @@ export function describeInvitationRepositoryContract(
   world: () => Promise<InvitationContractWorld>,
 ): void {
   void describe(`contrato do repositório de convites: ${name}`, () => {
-    function input(w: InvitationContractWorld, address: string): NewCompanyInvitation {
+    function input(
+      w: InvitationContractWorld,
+      address: string,
+      inviter: string = w.inviterA,
+    ): NewCompanyInvitation {
       return {
         email: address,
         role: 'AGENT',
         tokenHash: `hash-${randomUUID()}`,
-        invitedByMembershipId: w.inviterA,
+        invitedByMembershipId: inviter,
         expiresAt: new Date(T0.getTime() + 7 * DAY),
         now: T0,
       };
@@ -72,10 +76,7 @@ export function describeInvitationRepositoryContract(
       const first = await w.repository.create(w.companyA, input(w, address));
       await assert.rejects(w.repository.create(w.companyA, input(w, address)), ConflictError);
       // Mesmo e-mail em outra empresa é permitido.
-      await w.repository.create(w.companyB, {
-        ...input(w, address),
-        invitedByMembershipId: w.inviterB,
-      });
+      await w.repository.create(w.companyB, input(w, address, w.inviterB));
       // Depois de fechado, o e-mail volta a ser convidável.
       assert.equal(
         await w.repository.close(w.companyA, first.id, { status: 'REVOKED', closedAt: T0 }),

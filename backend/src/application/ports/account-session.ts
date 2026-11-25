@@ -36,7 +36,8 @@ export type AccountMailer = VerificationMailer & PasswordResetMailer;
 /** Dados do e-mail de convite (spec 025). O nome da empresa ainda não está sanitizado. */
 export interface CompanyInvitationMail {
   readonly companyName: string;
-  readonly role: 'ADMIN' | 'AGENT' | 'VIEWER';
+  /** `OWNER` só no convite da plataforma (spec 045, E3b). */
+  readonly role: 'OWNER' | 'ADMIN' | 'AGENT' | 'VIEWER';
   /** `${APP_ORIGIN}/convite#t=...`: nunca vai a log. */
   readonly link: string;
   readonly validDays: number;

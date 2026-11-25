@@ -46,7 +46,12 @@ export interface CompanyInvitation {
   readonly role: MembershipRole;
   readonly status: InvitationStatus;
   readonly tokenHash: string | null;
-  readonly invitedByMembershipId: string;
+  /**
+   * Quem convidou (spec 045, E3b): exatamente um dos dois (CHECK no banco). O vínculo da empresa (025) ou o
+   * administrador da plataforma (que também pode convidar `OWNER`).
+   */
+  readonly invitedByMembershipId: string | null;
+  readonly invitedByAdminId: string | null;
   readonly acceptedMembershipId: string | null;
   readonly expiresAt: Date;
   readonly lastSentAt: Date;
@@ -55,16 +60,21 @@ export interface CompanyInvitation {
   readonly closedAt: Date | null;
 }
 
+/** Quem convida: um vínculo da empresa (025) ou o administrador da plataforma (spec 045, E3b). */
+export type InvitationInviter =
+  | { readonly invitedByMembershipId: string; readonly invitedByAdminId?: never }
+  | { readonly invitedByAdminId: string; readonly invitedByMembershipId?: never };
+
 /** Dados de criação; sem `companyId` (vem do parâmetro do repositório). */
-export interface NewCompanyInvitation extends WithoutCompanyId {
-  readonly email: string;
-  readonly role: MembershipRole;
-  readonly tokenHash: string;
-  readonly invitedByMembershipId: string;
-  readonly expiresAt: Date;
-  /** Instante da criação (e do primeiro envio). */
-  readonly now: Date;
-}
+export type NewCompanyInvitation = WithoutCompanyId &
+  InvitationInviter & {
+    readonly email: string;
+    readonly role: MembershipRole;
+    readonly tokenHash: string;
+    readonly expiresAt: Date;
+    /** Instante da criação (e do primeiro envio). */
+    readonly now: Date;
+  };
 
 export interface InvitationRenewal {
   readonly tokenHash: string;

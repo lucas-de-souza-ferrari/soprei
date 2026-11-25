@@ -38,7 +38,7 @@ export function digestsMatch(expectedHex: string, actualHex: string): boolean {
  */
 export function invitationQuotaDigest(
   key: Buffer,
-  kind: 'recipient' | 'account',
+  kind: 'recipient' | 'account' | 'admin',
   value: string,
 ): string {
   return createHmac('sha256', key).update(`invite-quota:${kind}:${value}`).digest('hex');

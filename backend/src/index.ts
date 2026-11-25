@@ -501,28 +501,35 @@ async function main(): Promise<void> {
         })
       : undefined;
 
+  // Convites por e-mail (spec 025): uma instância só, usada pelo site e pelo admin da plataforma (045, E3b),
+  // para que o desligamento espere os envios dos dois caminhos.
+  const invitationService =
+    accountService !== undefined && accountMailer !== undefined
+      ? new InvitationService({
+          invitations: new PrismaCompanyInvitationRepository(prisma),
+          companies: companyRepository,
+          accounts: new PrismaAccountRepository(prisma),
+          unitOfWork: new PrismaInvitationUnitOfWork(prisma),
+          hasher: auth.hasher,
+          mailer: accountMailer,
+          quota: new RedisInvitationQuotaStore(
+            authRedis.client,
+            versionedAuthPrefix(config.AUTH_REDIS_PREFIX, true),
+          ),
+          logger,
+          metrics,
+          loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
+          appOrigin: config.APP_ORIGIN ?? '',
+        })
+      : undefined;
+
   const app = buildServer({
     ...(accountService !== undefined && accountMailer !== undefined
       ? {
           accounts: {
             service: accountService,
             // Convites por e-mail (spec 025): sem variável nova; só id e enum em log e métrica.
-            invitations: new InvitationService({
-              invitations: new PrismaCompanyInvitationRepository(prisma),
-              companies: companyRepository,
-              accounts: new PrismaAccountRepository(prisma),
-              unitOfWork: new PrismaInvitationUnitOfWork(prisma),
-              hasher: auth.hasher,
-              mailer: accountMailer,
-              quota: new RedisInvitationQuotaStore(
-                authRedis.client,
-                versionedAuthPrefix(config.AUTH_REDIS_PREFIX, true),
-              ),
-              logger,
-              metrics,
-              loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
-              appOrigin: config.APP_ORIGIN ?? '',
-            }),
+            invitations: invitationService,
             // Contato comercial (spec 040, E4): nada no banco; e-mail em segundo plano para a caixa comercial.
             salesContact: new SalesContactService({
               mailer: accountMailer,
@@ -594,6 +601,8 @@ async function main(): Promise<void> {
                     logger,
                     metrics,
                   }),
+            // Convites da plataforma e "Nova empresa" (spec 045, E3b): só com as contas ligadas.
+            invitations: invitationService,
             // Ações sobre empresas e vínculos (spec 045, E3a).
             companies: new PlatformCompanyService({
               companies: new PrismaPlatformCompanyUnitOfWork(prisma),

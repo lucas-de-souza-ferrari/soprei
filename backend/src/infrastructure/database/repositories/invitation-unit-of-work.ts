@@ -4,13 +4,15 @@ import type {
   InvitationTransaction,
   InvitationUnitOfWork,
 } from '../../../application/ports/invitation-unit-of-work.js';
-import type { CompanyId, CompanyStatus, MembershipRole } from '../../../domain/index.js';
-import { NotFoundError } from '../../../shared/errors/index.js';
+import { type CompanyId, type CompanyStatus, type MembershipRole } from '../../../domain/index.js';
+import { ConflictError, NotFoundError } from '../../../shared/errors/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
 import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
 import { PrismaAuditRepository } from './audit.repository.js';
 import { PrismaCompanyInvitationRepository } from './company-invitation.repository.js';
+import { PrismaCompanyRepository } from './company.repository.js';
+import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
 
 /** Valor fixo do `password_hash` do vínculo de conta global (o mesmo que a 017 grava). */
 const ACCOUNT_MANAGED = 'account-managed';
@@ -135,6 +137,39 @@ export class PrismaInvitationUnitOfWork implements InvitationUnitOfWork {
             AND status = 'ACTIVE'
           RETURNING id`;
         return rows.length === 1;
+      },
+      adminStatus: async (adminId) => {
+        if (!isUuid(adminId)) return null;
+        const row = await db.platformAdmin.findFirst({
+          where: { id: adminId },
+          select: { status: true },
+        });
+        return row?.status ?? null;
+      },
+      countPlatformSends: (companyId, since) =>
+        db.platformAuditEvent.count({
+          where: {
+            subjectCompanyId: companyId,
+            action: { in: ['INVITATION_CREATED_BY_PLATFORM', 'INVITATION_RESENT_BY_PLATFORM'] },
+            createdAt: { gte: since },
+          },
+        }),
+      platformAudit: async (event) => {
+        await new PrismaPlatformAuditRepository(db).create(event);
+      },
+      createCompany: async ({ name, slug }) => {
+        // O slug é único em todas as linhas (removidas inclusive): repetido vira ConflictError no repositório.
+        try {
+          return (await new PrismaCompanyRepository(db).create({ name, slug })).id;
+        } catch (error) {
+          if (error instanceof ConflictError) {
+            throw new ConflictError('Já existe uma empresa com este slug', {
+              code: 'SLUG_TAKEN',
+              cause: error,
+            });
+          }
+          throw error;
+        }
       },
       createMembership: async (
         companyId,

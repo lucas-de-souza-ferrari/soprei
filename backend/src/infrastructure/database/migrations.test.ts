@@ -338,3 +338,60 @@ describe('migration da spec 045, E3a (ações sobre empresas e vínculos na tril
     );
   });
 });
+
+describe('migration da spec 045, E3b (convidador da plataforma)', () => {
+  const migration = migrationFiles().find((file) => file.name.endsWith('_platform_invitations'));
+  const sql = migration?.sql ?? '';
+  const statements = sql
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+
+  it('leva a marca breaking-approved exigida pelo deploy.sh e só relaxa o que a spec pede', () => {
+    assert.ok(migration !== undefined, 'migration _platform_invitations existe');
+    assert.match(sql, /^-- breaking-approved: .+/m);
+    // O que o deploy.sh vê como destrutivo é só relaxar o NOT NULL e trocar o CHECK do papel.
+    const drops = [...statements.matchAll(/\bDROP\b[^;]*/gi)].map((match) => match[0].trim());
+    assert.deepEqual(drops, ['DROP NOT NULL', 'DROP CONSTRAINT "company_invitations_role_check"']);
+    for (const forbidden of [
+      /\bDELETE\s+FROM\b/i,
+      /\bTRUNCATE\b/i,
+      /\bRENAME\b/i,
+      /(^|;)\s*UPDATE\b/im,
+      /SET NOT NULL/i,
+      /ALTER COLUMN[^;]*TYPE\b/i,
+    ]) {
+      assert.doesNotMatch(statements, forbidden);
+    }
+  });
+
+  it('exatamente um convidador, OWNER só do admin, FK do admin e o convite na trilha da plataforma', () => {
+    assert.match(
+      statements,
+      /CHECK \(\s*\("invited_by_membership_id" IS NULL\) <> \("invited_by_admin_id" IS NULL\)\s*\)/,
+    );
+    assert.match(
+      statements,
+      /CHECK \(\s*"role" <> 'OWNER' OR "invited_by_admin_id" IS NOT NULL\s*\)/,
+    );
+    assert.match(
+      statements,
+      /FOREIGN KEY \("invited_by_admin_id"\) REFERENCES "platform_admins"\("id"\) ON DELETE RESTRICT/,
+    );
+    assert.match(
+      statements,
+      /FOREIGN KEY \("subject_invitation_id"\) REFERENCES "company_invitations"\("id"\) ON DELETE RESTRICT/,
+    );
+    const added = [
+      ...statements.matchAll(
+        /ALTER TYPE "platform_audit_action" ADD VALUE IF NOT EXISTS '(\w+)';/g,
+      ),
+    ].map((match) => match[1]);
+    assert.deepEqual(added, [
+      'COMPANY_CREATED',
+      'INVITATION_CREATED_BY_PLATFORM',
+      'INVITATION_RESENT_BY_PLATFORM',
+      'INVITATION_REVOKED_BY_PLATFORM',
+    ]);
+  });
+});

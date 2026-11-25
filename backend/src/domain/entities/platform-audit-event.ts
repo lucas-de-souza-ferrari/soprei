@@ -26,6 +26,11 @@ export const PLATFORM_AUDIT_ACTIONS = [
   'MEMBERSHIP_ROLE_CHANGED_BY_PLATFORM',
   'MEMBERSHIP_DISABLED_BY_PLATFORM',
   'MEMBERSHIP_ENABLED_BY_PLATFORM',
+  // Spec 045, E3b: convites da plataforma e criar empresa com o convite do dono.
+  'COMPANY_CREATED',
+  'INVITATION_CREATED_BY_PLATFORM',
+  'INVITATION_RESENT_BY_PLATFORM',
+  'INVITATION_REVOKED_BY_PLATFORM',
 ] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 
@@ -46,6 +51,8 @@ export interface PlatformAuditEvent {
   readonly subjectAccountId: AccountId | null;
   /** Spec 045, E3a: o vínculo alvo e os papéis de antes e de depois (só nas ações sobre vínculos). */
   readonly subjectMembershipId: MembershipId | null;
+  /** Spec 045, E3b: o convite alvo (convidar, reenviar, revogar pela plataforma). */
+  readonly subjectInvitationId: string | null;
   readonly fromRole: MembershipRole | null;
   readonly toRole: MembershipRole | null;
   readonly reason: PlatformActionReason | null;
@@ -58,6 +65,7 @@ export interface NewPlatformAuditEvent {
   readonly subjectCompanyId?: CompanyId | null;
   readonly subjectAccountId?: AccountId | null;
   readonly subjectMembershipId?: MembershipId | null;
+  readonly subjectInvitationId?: string | null;
   readonly fromRole?: MembershipRole | null;
   readonly toRole?: MembershipRole | null;
   readonly reason?: PlatformActionReason | null;

@@ -242,6 +242,14 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           changeRole: () => Promise.reject(new Error('inventário')),
           setMembershipStatus: () => Promise.reject(new Error('inventário')),
         },
+        // Spec 045, E3b: convites da plataforma e "Nova empresa".
+        invitations: {
+          listForCompany: () => Promise.reject(new Error('inventário')),
+          createByPlatform: () => Promise.reject(new Error('inventário')),
+          resendByPlatform: () => Promise.reject(new Error('inventário')),
+          revokeByPlatform: () => Promise.reject(new Error('inventário')),
+          createCompanyWithOwner: () => Promise.reject(new Error('inventário')),
+        },
       },
       // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
       accounts: {
@@ -433,6 +441,9 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/platform/companies/:companyId/memberships/:membershipId/role',
       '/platform/companies/:companyId/memberships/:membershipId/disable',
       '/platform/companies/:companyId/memberships/:membershipId/enable',
+      '/platform/companies/:companyId/invitations',
+      '/platform/companies/:companyId/invitations/:invitationId/resend',
+      '/platform/companies/:companyId/invitations/:invitationId/revoke',
       '/platform/billing/orders',
       '/platform/billing/notices',
       '/platform/health',
