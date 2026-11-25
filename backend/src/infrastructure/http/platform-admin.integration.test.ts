@@ -17,6 +17,7 @@ import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { PLATFORM_COOKIE } from '../../presentation/platform/platform-auth.controller.js';
 import type {
   PlatformAccountDetailResponse,
+  PlatformAccountEmailResponse,
   PlatformAccountListResponse,
   PlatformCompanyDetailResponse,
   PlatformCompanyListResponse,
@@ -800,26 +801,185 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
     assert.equal(health.redis, 'up');
   });
 
-  it('GET /platform/accounts/:accountId: e-mail completo e um ACCOUNT_EMAIL_VIEWED com o admin e a conta', async () => {
-    const before = await db().platformAuditEvent.count({
-      where: { adminId, action: 'ACCOUNT_EMAIL_VIEWED' },
-    });
+  it('GET /platform/accounts/:accountId (spec 045, D3): só o e-mail mascarado e nada gravado; GET .../email: o completo e um ACCOUNT_EMAIL_VIEWED', async () => {
+    const viewed = () =>
+      db().platformAuditEvent.count({ where: { adminId, action: 'ACCOUNT_EMAIL_VIEWED' } });
+    const before = await viewed();
     const response = await get(`/platform/accounts/${accountA}`);
     assert.equal(response.statusCode, 200);
     const detail = response.json<PlatformAccountDetailResponse>();
-    assert.equal(detail.email, ACCOUNT_EMAIL);
+    assert.equal(detail.emailMasked, 's***@exemplo.test');
+    assert.ok(!response.body.includes(ACCOUNT_EMAIL));
     assert.deepEqual(
       detail.companies.map((company) => [company.id, company.role]),
       [[companyA.id, 'OWNER']],
     );
     assert.equal(detail.subscription?.id, subscriptionA);
+    assert.equal(await viewed(), before, 'abrir a conta não grava leitura do e-mail');
+
+    const email = await get(`/platform/accounts/${accountA}/email`);
+    assert.equal(email.statusCode, 200);
+    assert.deepEqual(email.json<PlatformAccountEmailResponse>(), { email: ACCOUNT_EMAIL });
     const events = await db().platformAuditEvent.findMany({
       where: { adminId, action: 'ACCOUNT_EMAIL_VIEWED' },
       orderBy: { createdAt: 'desc' },
     });
     assert.equal(events.length, before + 1);
     assert.equal(events[0]?.subjectAccountId, accountA);
+    assert.equal(events[0].subjectCompanyId, null);
     assert.equal((await get(`/platform/accounts/${randomUUID()}`)).statusCode, 404);
+    assert.equal((await get(`/platform/accounts/${randomUUID()}/email`)).statusCode, 404);
+    assert.equal(await viewed(), before + 1, '404 não grava');
+  });
+
+  it('pessoas e dono (spec 045, E1): o detalhe de A lista só as pessoas de A, dono primeiro e mascarado; a lista traz o dono e owners = 0 sem dono ativo', async () => {
+    const now = new Date();
+    const lower = tag.toLowerCase();
+    // Em A, além do dono (conta A): uma atendente mais antiga que o dono, com conta não confirmada, e um
+    // administrador desativado, vínculo antigo da CLI (sem conta). Dois convites pendentes, um já vencido.
+    const agentAccount = await db().account.create({
+      data: { email: `zeca-${lower}@exemplo.test`, passwordHash: 'x' },
+    });
+    createdAccounts.push(agentAccount.id);
+    const agent = await db().membership.create({
+      data: {
+        companyId: companyA.id,
+        email: `zeca-${lower}@exemplo.test`,
+        passwordHash: 'x',
+        role: 'AGENT',
+        accountId: agentAccount.id,
+        createdAt: new Date(now.getTime() - 2 * DAY),
+      },
+    });
+    const legacy = await db().membership.create({
+      data: {
+        companyId: companyA.id,
+        email: `velho-${lower}@exemplo.test`,
+        passwordHash: 'x',
+        role: 'ADMIN',
+        status: 'DISABLED',
+      },
+    });
+    const ownerA = await db().membership.findFirst({
+      where: { companyId: companyA.id, role: 'OWNER' },
+      select: { id: true },
+    });
+    assert.ok(ownerA !== null);
+    for (const [email, expiresAt] of [
+      [`convite-${lower}@exemplo.test`, new Date(now.getTime() + DAY)],
+      [`vencido-${lower}@exemplo.test`, new Date(now.getTime() - HOUR)],
+    ] as const) {
+      await db().companyInvitation.create({
+        data: {
+          companyId: companyA.id,
+          email,
+          role: 'AGENT',
+          tokenHash: randomBytes(32).toString('hex'),
+          invitedByMembershipId: ownerA.id,
+          expiresAt,
+          lastSentAt: now,
+        },
+      });
+    }
+    // Empresa E: o único dono tem a conta DESATIVADA (não conta como dono ativo).
+    const companyE = await tenants.createCompany('plat-e');
+    const disabledAccount = await db().account.create({
+      data: { email: `dono-off-${lower}@exemplo.test`, passwordHash: 'x', status: 'DISABLED' },
+    });
+    createdAccounts.push(disabledAccount.id);
+    await db().membership.create({
+      data: {
+        companyId: companyE.id,
+        email: `dono-off-${lower}@exemplo.test`,
+        passwordHash: 'x',
+        role: 'OWNER',
+        accountId: disabledAccount.id,
+      },
+    });
+
+    const a = (
+      await get(`/platform/companies/${companyA.id}`)
+    ).json<PlatformCompanyDetailResponse>();
+    assert.deepEqual(
+      a.people.map((person) => [
+        person.membershipId,
+        person.role,
+        person.status,
+        person.emailMasked,
+        person.accountId,
+        person.account,
+      ]),
+      [
+        [
+          ownerA.id,
+          'OWNER',
+          'ACTIVE',
+          's***@exemplo.test',
+          accountA,
+          { status: 'ACTIVE', verified: true },
+        ],
+        [legacy.id, 'ADMIN', 'DISABLED', 'v***@exemplo.test', null, null],
+        [
+          agent.id,
+          'AGENT',
+          'ACTIVE',
+          'z***@exemplo.test',
+          agentAccount.id,
+          { status: 'ACTIVE', verified: false },
+        ],
+      ],
+    );
+    assert.equal(a.peopleTotal, 3);
+    assert.equal(a.owners, 1);
+    assert.deepEqual(a.owner, { accountId: accountA, emailMasked: 's***@exemplo.test' });
+    assert.equal(a.pendingInvitations, 1, 'o convite vencido não conta');
+    assert.equal(a.holder?.accountId, accountA, 'o titular da assinatura continua');
+
+    // B não vê ninguém de A (e vice-versa): o dono de B é o vínculo antigo sem conta, sem assinatura.
+    const b = (
+      await get(`/platform/companies/${companyB.id}`)
+    ).json<PlatformCompanyDetailResponse>();
+    assert.deepEqual(
+      b.people.map((person) => [person.role, person.emailMasked, person.accountId]),
+      [['OWNER', 'b***@exemplo.test', null]],
+    );
+    assert.equal(b.holder, null, 'sem assinatura...');
+    assert.equal(b.owners, 1, '...o dono aparece pelos vínculos');
+    assert.deepEqual(b.owner, { accountId: null, emailMasked: 'b***@exemplo.test' });
+    assert.equal(b.pendingInvitations, 0);
+    const aIds = new Set(a.people.map((person) => person.membershipId));
+    assert.ok(b.people.every((person) => !aIds.has(person.membershipId)));
+
+    const e = (
+      await get(`/platform/companies/${companyE.id}`)
+    ).json<PlatformCompanyDetailResponse>();
+    assert.equal(e.owners, 0);
+    assert.equal(e.owner, null, 'conta desativada não é dono ativo');
+    assert.deepEqual(
+      e.people.map((person) => [person.role, person.account?.status]),
+      [['OWNER', 'DISABLED']],
+    );
+
+    const list = async (q: string) =>
+      (await get(`/platform/companies?q=${q}`)).json<PlatformCompanyListResponse>().items[0];
+    const listA = await list(companyA.slug);
+    assert.deepEqual(listA?.owner, { accountId: accountA, emailMasked: 's***@exemplo.test' });
+    assert.equal(listA.owners, 1);
+    const listB = await list(companyB.slug);
+    assert.deepEqual(listB?.owner, { accountId: null, emailMasked: 'b***@exemplo.test' });
+    assert.equal(listB.owners, 1);
+    for (const company of [companyC, companyE]) {
+      const item = await list(company.slug);
+      assert.equal(item?.owner, null, company.slug);
+      assert.equal(item.owners, 0, company.slug);
+    }
+    // Ler pessoas e dono não grava nada na trilha da plataforma.
+    assert.equal(
+      await db().platformAuditEvent.count({
+        where: { adminId, subjectCompanyId: { in: [companyA.id, companyB.id, companyE.id] } },
+      }),
+      0,
+    );
   });
 
   it('suspender e reativar: 204, estado e evento com o motivo na mesma transação; repetir e concorrer não duplicam', async () => {
@@ -881,7 +1041,7 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
     }
   });
 
-  it('privacidade: nenhum sentinela em resposta de /platform/*, log nem /metrics; o e-mail completo só no detalhe da conta', async () => {
+  it('privacidade: nenhum sentinela em resposta de /platform/*, log nem /metrics; o e-mail completo só sai em /email', async () => {
     assert.ok(platformBodies.length >= 15, 'as rotas foram exercitadas antes desta varredura');
     const metricsBody = (
       await app.inject({
@@ -901,8 +1061,19 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
     const withEmail = platformBodies
       .filter(({ body }) => body.includes(ACCOUNT_EMAIL))
       .map(({ url }) => url);
-    assert.deepEqual([...new Set(withEmail)], [`/platform/accounts/${accountA}`]);
+    // Spec 045, D3: o e-mail completo sai só da rota auditada, nunca do detalhe da conta nem da empresa.
+    assert.deepEqual([...new Set(withEmail)], [`/platform/accounts/${accountA}/email`]);
     assert.ok(!raw.includes(ACCOUNT_EMAIL), 'e-mail no log');
     assert.ok(!metricsBody.includes(ACCOUNT_EMAIL));
+    // As pessoas (spec 045, E1) aparecem só mascaradas: nenhum e-mail completo de vínculo ou de conta.
+    const lower = tag.toLowerCase();
+    for (const local of ['zeca', 'velho', 'convite', 'vencido', 'dono-off', 'b']) {
+      const full = `${local}-${lower}@exemplo.test`;
+      for (const { url, body } of platformBodies) {
+        assert.ok(!body.includes(full), `${full} em ${url}`);
+      }
+      assert.ok(!raw.includes(full), `${full} no log`);
+      assert.ok(!metricsBody.includes(full), `${full} no /metrics`);
+    }
   });
 });

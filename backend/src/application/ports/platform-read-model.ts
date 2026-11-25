@@ -151,6 +151,37 @@ export interface PlatformCompanyRow {
   readonly messages7d: number;
   /** Assinatura ligada à empresa; `null` sem assinatura (empresa anterior à cobrança). */
   readonly subscription: PlatformSubscriptionSnapshot | null;
+  /** O dono ativo mais antigo, com o e-mail mascarado no banco; `null` sem dono ativo (spec 045, E1). */
+  readonly owner: PlatformCompanyOwner | null;
+  /** Quantos donos ativos a empresa tem (a regra está em `PlatformCompanyOwner`). */
+  readonly owners: number;
+}
+
+/**
+ * Dono da empresa (spec 045, E1): vínculo `OWNER` com o vínculo `ACTIVE` e a conta `ACTIVE` (vínculo antigo
+ * da CLI, sem conta, vale pelo vínculo). Conta desativada não conta como dono ativo (caso de borda da spec:
+ * a empresa cujo único dono teve a conta desativada aparece "sem dono ativo").
+ */
+export interface PlatformCompanyOwner {
+  /** `null`: vínculo antigo da CLI, sem conta. */
+  readonly accountId: string | null;
+  /** Primeira letra e domínio (`l***@exemplo.com`), montado no banco. */
+  readonly emailMasked: string;
+}
+
+/** Até quantas pessoas o detalhe da empresa lista (spec 045, E1). */
+export const PLATFORM_PEOPLE_LIMIT = 50;
+
+/** Uma pessoa (vínculo) da empresa no detalhe (spec 045, E1). Nunca o e-mail inteiro. */
+export interface PlatformCompanyPerson {
+  readonly membershipId: string;
+  /** `null`: vínculo antigo da CLI, sem conta (o e-mail mascarado vem do vínculo). */
+  readonly accountId: string | null;
+  readonly emailMasked: string;
+  readonly role: MembershipRole;
+  readonly status: AccessStatus;
+  readonly createdAt: Date;
+  readonly account: { readonly status: AccessStatus; readonly verified: boolean } | null;
 }
 
 /** Atendimento de UMA empresa numa janela. */
@@ -188,6 +219,19 @@ export interface PlatformCompanyDetailFacts {
     readonly status: AccessStatus;
     readonly count: number;
   }[];
+  /**
+   * Até `PLATFORM_PEOPLE_LIMIT` vínculos da empresa: `OWNER` primeiro, depois por papel, por `createdAt` e
+   * por id (spec 045, E1).
+   */
+  readonly people: readonly PlatformCompanyPerson[];
+  /** Todos os vínculos da empresa (qualquer papel e estado). */
+  readonly peopleTotal: number;
+  /** O dono ativo mais antigo (a mesma consulta da lista); `null` sem dono ativo. */
+  readonly owner: PlatformCompanyOwner | null;
+  /** Quantos donos ativos (a mesma regra da lista; ver `PlatformCompanyOwner`). */
+  readonly owners: number;
+  /** Convites `PENDING` ainda dentro da validade. */
+  readonly pendingInvitations: number;
   /** A conta titular da assinatura da empresa, **sem e-mail**; `null` sem assinatura. */
   readonly holder: {
     readonly accountId: string;
@@ -253,8 +297,8 @@ export interface PlatformAccountCompany {
 
 export interface PlatformAccountDetailFacts {
   readonly id: string;
-  /** E-mail completo (D7): só aqui, e cada leitura é auditada pelo serviço. */
-  readonly email: string;
+  /** Mascarado no banco (spec 045, D3): o detalhe da conta não lê mais o e-mail completo. */
+  readonly emailMasked: string;
   readonly status: AccessStatus;
   readonly verified: boolean;
   readonly createdAt: Date;
@@ -316,6 +360,11 @@ export interface PlatformReadModel {
     page: PlatformPageRequest,
   ): Promise<PlatformPage<PlatformAccountRow>>;
   accountDetail(accountId: string): Promise<PlatformAccountDetailFacts | null>;
+  /**
+   * O e-mail completo de uma conta (spec 045, D3): a ÚNICA leitura dele no admin, só para a rota auditada
+   * `GET /platform/accounts/:accountId/email`. `null` se a conta não existe.
+   */
+  accountEmail(accountId: string): Promise<string | null>;
   listOrders(
     filter: PlatformOrderFilter,
     page: PlatformPageRequest,

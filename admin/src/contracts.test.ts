@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import {
   accountDetailSchema,
+  accountEmailSchema,
   accountPageSchema,
   actionBodySchema,
   companyDetailSchema,
@@ -14,9 +15,11 @@ import {
 } from './contracts';
 import {
   accountDetail,
+  accountEmail,
   accountPage,
   billingOffPage,
   companyDetail,
+  companyDetailB,
   companyPage,
   health,
   noticePage,
@@ -34,6 +37,8 @@ describe('contratos do admin (spec 044, E3)', () => {
       [companyDetailSchema, companyDetail('SUSPENDED')],
       [accountPageSchema, accountPage],
       [accountDetailSchema, accountDetail],
+      [accountEmailSchema, accountEmail],
+      [companyDetailSchema, companyDetailB()],
       [orderPageSchema, orderPage],
       [noticePageSchema, noticePage],
       [healthSchema, health],
@@ -52,6 +57,41 @@ describe('contratos do admin (spec 044, E3)', () => {
       items: accountPage.items.map((item) => ({ ...item, email: 'completo@exemplo.test' })),
     });
     assert.equal(JSON.stringify(list).includes('completo@exemplo.test'), false);
+  });
+
+  it('e-mail inteiro no lugar do mascarado (pessoas, dono, contas) é recusado: nunca chega à tela (spec 045, E1)', () => {
+    const full = 'lucia@exemplo.test';
+    const detail = companyDetail();
+    const [first, ...rest] = detail.people;
+    assert.ok(first !== undefined);
+    assert.equal(
+      companyDetailSchema.safeParse({
+        ...detail,
+        people: [{ ...first, emailMasked: full }, ...rest],
+      }).success,
+      false,
+    );
+    const [item] = companyPage.items;
+    assert.ok(item !== undefined);
+    assert.equal(
+      companyPageSchema.safeParse({
+        ...companyPage,
+        items: [{ ...item, owner: { accountId: null, emailMasked: full } }],
+      }).success,
+      false,
+    );
+    assert.equal(
+      companyDetailSchema.safeParse({ ...detail, owner: { accountId: null, emailMasked: full } })
+        .success,
+      false,
+    );
+    assert.equal(
+      accountDetailSchema.safeParse({ ...accountDetail, emailMasked: full }).success,
+      false,
+    );
+    // O detalhe da conta não traz mais o e-mail completo; se vier, é descartado.
+    const parsed = accountDetailSchema.parse({ ...accountDetail, email: full });
+    assert.equal(JSON.stringify(parsed).includes(full), false);
   });
 
   it('campo faltando ou de tipo errado é recusado', () => {

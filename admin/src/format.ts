@@ -74,7 +74,8 @@ const LABELS: Record<string, string> = {
   API_ONLY: 'Só API',
   COEXISTENCE: 'Coexistência',
   // Papéis
-  OWNER: 'Titular',
+  // "Dono" (spec 045, E1): quem administra a empresa; "titular" fica para quem paga a assinatura.
+  OWNER: 'Dono',
   ADMIN: 'Administrador',
   AGENT: 'Atendente',
   VIEWER: 'Leitura',

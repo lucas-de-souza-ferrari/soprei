@@ -46,8 +46,12 @@ export type PlatformCompanyListResponse = Jsonified<PlatformPage<PlatformCompany
 export type PlatformCompanyDetailResponse = Jsonified<PlatformCompanyDetail>;
 /** `GET /platform/accounts`. */
 export type PlatformAccountListResponse = Jsonified<PlatformPage<PlatformAccountListItem>>;
-/** `GET /platform/accounts/:accountId` (grava `ACCOUNT_EMAIL_VIEWED`). */
+/** `GET /platform/accounts/:accountId` (e-mail mascarado; não grava nada, spec 045, D3). */
 export type PlatformAccountDetailResponse = Jsonified<PlatformAccountDetail>;
+/** `GET /platform/accounts/:accountId/email` (grava `ACCOUNT_EMAIL_VIEWED` antes de responder). */
+export interface PlatformAccountEmailResponse {
+  readonly email: string;
+}
 /** `GET /platform/billing/orders`. */
 export type PlatformOrderListResponse = Jsonified<PlatformBillingPage<PlatformOrderRow>>;
 /** `GET /platform/billing/notices`. */
@@ -62,6 +66,7 @@ export type PlatformMonitorRoutes = Pick<
   | 'companyDetail'
   | 'listAccounts'
   | 'accountDetail'
+  | 'accountEmail'
   | 'listOrders'
   | 'listNotices'
   | 'setCompanyStatus'
@@ -145,10 +150,19 @@ export const platformMonitorController: FastifyPluginCallback<PlatformMonitorCon
   });
 
   app.get('/accounts/:accountId', route, async (request) => {
-    const identity = platformIdentity(request);
     const { accountId } = platformAccountParamsSchema.parse(request.params);
-    return monitor.accountDetail(identity, accountId);
+    return monitor.accountDetail(accountId);
   });
+
+  app.get(
+    '/accounts/:accountId/email',
+    route,
+    async (request): Promise<PlatformAccountEmailResponse> => {
+      const identity = platformIdentity(request);
+      const { accountId } = platformAccountParamsSchema.parse(request.params);
+      return monitor.accountEmail(identity, accountId);
+    },
+  );
 
   app.get('/billing/orders', route, async (request) => {
     const query = platformOrdersQuerySchema.parse(request.query);

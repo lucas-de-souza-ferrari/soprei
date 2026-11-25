@@ -42,6 +42,8 @@ import type {
   PlatformChannelView,
   PlatformCompanyAttendance,
   PlatformCompanyListFilter,
+  PlatformCompanyOwner,
+  PlatformCompanyPerson,
   PlatformNoticeRow,
   PlatformOrderFilter,
   PlatformOrderRow,
@@ -112,6 +114,10 @@ export interface PlatformCompanyListItem {
   readonly activeMembers: number;
   /** Mensagens do contato nos últimos 7 dias. */
   readonly messages7d: number;
+  /** O dono ativo mais antigo, mascarado; `null` sem dono ativo (spec 045, E1). */
+  readonly owner: PlatformCompanyOwner | null;
+  /** Quantos donos ativos (`0`: empresa sem dono ativo). */
+  readonly owners: number;
 }
 
 export interface PlatformSubscriptionView {
@@ -165,6 +171,15 @@ export interface PlatformCompanyDetail {
     readonly status: AccessStatus;
     readonly count: number;
   }[];
+  /** Pessoas da empresa (spec 045, E1): até 50, dono primeiro, e-mail mascarado. */
+  readonly people: readonly PlatformCompanyPerson[];
+  readonly peopleTotal: number;
+  /** O dono ativo mais antigo, mascarado (o app só exibe; a regra é a do servidor). */
+  readonly owner: PlatformCompanyOwner | null;
+  /** Quantos donos ativos (`0`: o app avisa "Empresa sem dono ativo"). */
+  readonly owners: number;
+  readonly pendingInvitations: number;
+  /** Titular da ASSINATURA (quem paga), não o dono da empresa. */
   readonly holder: {
     readonly accountId: string;
     readonly emailVerified: boolean;
@@ -199,8 +214,8 @@ export type PlatformAccountListItem = PlatformAccountRow;
 export interface PlatformAccountDetail {
   readonly billingEnabled: boolean;
   readonly id: string;
-  /** Completo (D7); cada leitura grava `ACCOUNT_EMAIL_VIEWED`. */
-  readonly email: string;
+  /** Mascarado (spec 045, D3); o completo só por `GET .../email`, que grava `ACCOUNT_EMAIL_VIEWED`. */
+  readonly emailMasked: string;
   readonly status: AccessStatus;
   readonly verified: boolean;
   readonly createdAt: Date;
@@ -281,6 +296,10 @@ function companyNotFound(): NotFoundError {
   return new NotFoundError('Empresa não encontrada', { context: { entity: 'Company' } });
 }
 
+function accountNotFound(): NotFoundError {
+  return new NotFoundError('Conta não encontrada', { context: { entity: 'Account' } });
+}
+
 /**
  * O estado efetivo de um grupo de assinaturas, pela regra do domínio (`resolveAccess`). O grupo diz só de
  * que lado de cada prazo `now` está; aqui viram instantes representativos (antes ou depois de `now`) que
@@ -351,8 +370,9 @@ function readUnavailable(operation: string): (error: unknown) => never {
 }
 
 /**
- * Leituras e ações do admin da plataforma (spec 044, E2). Não conhece Fastify nem Prisma. Só números,
- * estados, datas, ids, nome e slug de empresa e (D7) o e-mail da conta no detalhe, com trilha. Nunca loga
+ * Leituras e ações do admin da plataforma (spec 044, E2; pessoas e dono na 045, E1). Não conhece Fastify
+ * nem Prisma. Só números, estados, datas, ids, nome e slug de empresa, e-mails mascarados e (D7) o e-mail
+ * completo da conta só em `accountEmail`, com trilha. Nunca loga
  * e-mail, nome nem conteúdo: só ids, ação e motivo.
  */
 export class PlatformMonitorService {
@@ -420,6 +440,8 @@ export class PlatformMonitorService {
           channelState: row.channelState,
           activeMembers: row.activeMembers,
           messages7d: row.messages7d,
+          owner: row.owner,
+          owners: row.owners,
         };
       }),
       nextCursor: result.nextCursor,
@@ -464,6 +486,11 @@ export class PlatformMonitorService {
       },
       modules,
       memberships: facts.memberships,
+      people: facts.people,
+      peopleTotal: facts.peopleTotal,
+      owner: facts.owner,
+      owners: facts.owners,
+      pendingInvitations: facts.pendingInvitations,
       holder: facts.holder,
       subscription,
       usage: subscriptionFacts === null ? null : this.usageView(subscriptionFacts),
@@ -490,39 +517,49 @@ export class PlatformMonitorService {
   }
 
   /**
-   * Detalhe da conta com o e-mail completo (D7). Cada leitura grava `ACCOUNT_EMAIL_VIEWED` ANTES de
-   * devolver: sem registro, o e-mail não sai. Id malformado ou inexistente: 404 (e nada gravado).
+   * Detalhe da conta com o e-mail MASCARADO (spec 045, D3): não grava nada, para que abrir a conta a
+   * partir da empresa não conte como leitura do e-mail. Id malformado ou inexistente: 404.
    */
-  async accountDetail(
-    identity: PlatformIdentity,
-    accountId: string,
-  ): Promise<PlatformAccountDetail> {
-    const notFound = (): NotFoundError =>
-      new NotFoundError('Conta não encontrada', { context: { entity: 'Account' } });
-    if (!isUuid(accountId)) throw notFound();
+  async accountDetail(accountId: string): Promise<PlatformAccountDetail> {
+    if (!isUuid(accountId)) throw accountNotFound();
     const now = this.now();
     const account = await this.deps.reads.accountDetail(accountId);
-    if (account === null) throw notFound();
+    if (account === null) throw accountNotFound();
     const subscriptionFacts =
       this.deps.billing === undefined
         ? null
         : await this.deps.reads.subscription({ accountId: account.id }, now);
-    await this.deps.audit.create({
-      adminId: identity.adminId,
-      action: 'ACCOUNT_EMAIL_VIEWED',
-      subjectAccountId: AccountId.parse(account.id),
-    });
-    this.countAction('account_email_viewed');
-    this.deps.logger.info(
-      { adminId: identity.adminId, accountId: account.id },
-      'admin da plataforma leu o e-mail de uma conta',
-    );
     return {
       billingEnabled: this.deps.billing !== undefined,
       ...account,
       subscription:
         subscriptionFacts === null ? null : this.subscriptionView(subscriptionFacts, now),
     };
+  }
+
+  /**
+   * O e-mail completo da conta (D7 da 044, D3 da 045): a única saída dele no admin. Grava
+   * `ACCOUNT_EMAIL_VIEWED` ANTES de devolver: sem registro, o e-mail não sai. Id malformado ou inexistente:
+   * 404 (e nada gravado). O log leva só `adminId` e `accountId`.
+   */
+  async accountEmail(
+    identity: PlatformIdentity,
+    accountId: string,
+  ): Promise<{ readonly email: string }> {
+    if (!isUuid(accountId)) throw accountNotFound();
+    const email = await this.deps.reads.accountEmail(accountId);
+    if (email === null) throw accountNotFound();
+    await this.deps.audit.create({
+      adminId: identity.adminId,
+      action: 'ACCOUNT_EMAIL_VIEWED',
+      subjectAccountId: AccountId.parse(accountId),
+    });
+    this.countAction('account_email_viewed');
+    this.deps.logger.info(
+      { adminId: identity.adminId, accountId },
+      'admin da plataforma leu o e-mail de uma conta',
+    );
+    return { email };
   }
 
   async listOrders(

@@ -25,6 +25,7 @@ import {
   PLATFORM_ATTENTION_MIN_AGE_MS,
   PLATFORM_ATTENTION_WINDOW_MS,
   PLATFORM_MAX_WINDOW_MS,
+  PLATFORM_PEOPLE_LIMIT,
   PLATFORM_READ_TIMEOUT_MS,
   PLATFORM_TOKEN_EXPIRY_SOON_MS,
 } from '../../../application/ports/platform-read-model.js';
@@ -63,9 +64,11 @@ import { withRepositoryErrors } from './repository-errors.js';
  * `platform-read-model.columns.test.ts` confere parte delas):
  *
  * - toda consulta é parametrizada (`$queryRaw` com template: nenhum valor concatenado) e lê uma lista
- *   fixa de colunas: ids, estados, datas, contagens, nome e slug de EMPRESA e, só em `accountDetail`, o
- *   e-mail da conta (D7). Nenhuma coluna de conteúdo é citada (texto de mensagem, contato, persona,
- *   documento, produto, serviço, token, PIN, referência de pagamento);
+ *   fixa de colunas: ids, estados, datas, contagens, nome e slug de EMPRESA e o e-mail de conta ou de
+ *   vínculo SÓ mascarado no banco (`PERSON_EMAIL_MASKED` e a máscara da lista de contas); o e-mail
+ *   completo sai só de `accountEmail`, a leitura da rota auditada (spec 045, D3). Nenhuma coluna de
+ *   conteúdo é citada (texto de mensagem, contato, persona, documento, produto, serviço, token, PIN,
+ *   referência de pagamento);
  * - o detalhe de uma empresa filtra `company_id = $id` em TODA consulta (inclusive nas junções);
  * - janelas de tempo limitadas a 30 dias e apoiadas nos índices existentes, SEMPRE por empresa: as
  *   consultas que somam várias empresas partem de `companies co` e descem por empresa (`CROSS JOIN
@@ -221,6 +224,31 @@ function attentionFilter(attention: PlatformAttentionFilter | undefined, now: Da
   }
 }
 
+/**
+ * O e-mail mascarado de uma pessoa (spec 045, E1), montado NO BANCO: primeira letra e domínio, a mesma
+ * expressão da lista de contas. Da conta quando o vínculo tem conta; do vínculo antigo da CLI quando não
+ * tem. Exige os aliases `mb` (`memberships`) e `a` (`accounts`, por `LEFT JOIN a.id = mb.account_id`). O
+ * teste de colunas aceita `mb.email` e `a.email` só dentro desta expressão.
+ */
+const PERSON_EMAIL_MASKED = Prisma.sql`CASE WHEN a.id IS NULL
+                 THEN substr(mb.email, 1, 1) || '***@' || split_part(mb.email, '@', 2)
+                 ELSE substr(a.email, 1, 1) || '***@' || split_part(a.email, '@', 2) END`;
+
+/**
+ * `FROM ... WHERE ...` dos donos ativos de uma empresa (spec 045, E1): vínculo `OWNER` e `ACTIVE`, com a
+ * conta `ACTIVE` (ou sem conta: vínculo antigo da CLI). `company` é `co.id` (lista) ou o parâmetro do
+ * detalhe; o filtro por empresa vale em toda chamada.
+ */
+function activeOwnersFrom(company: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
+      FROM memberships mb
+      LEFT JOIN accounts a ON a.id = mb.account_id
+     WHERE mb.company_id = ${company}
+       AND mb.role = 'OWNER'
+       AND mb.status = 'ACTIVE'
+       AND (mb.account_id IS NULL OR a.status = 'ACTIVE')`;
+}
+
 interface CompanyListSqlRow {
   readonly id: string;
   readonly name: string;
@@ -237,6 +265,10 @@ interface CompanyListSqlRow {
   readonly current_period_end: Date | null;
   readonly trial_ends_at: Date | null;
   readonly cancel_at_period_end: boolean | null;
+  readonly owner_membership_id: string | null;
+  readonly owner_account_id: string | null;
+  readonly owner_email_masked: string | null;
+  readonly owners: number;
 }
 
 interface AttendanceSqlRow {
@@ -510,11 +542,23 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
                s.status::text AS sub_status,
                s.current_period_end,
                s.trial_ends_at,
-               s.cancel_at_period_end
+               s.cancel_at_period_end,
+               ow.membership_id AS owner_membership_id,
+               ow.account_id AS owner_account_id,
+               ow.email_masked AS owner_email_masked,
+               (SELECT COUNT(*)::int ${activeOwnersFrom(Prisma.sql`co.id`)}) AS owners
           FROM companies co
           LEFT JOIN channel_connections cc ON cc.company_id = co.id
           LEFT JOIN subscriptions s ON s.id = co.subscription_id
           LEFT JOIN plans p ON p.id = s.plan_id
+          -- O dono ativo mais antigo (spec 045, E1), por empresa: company_id = co.id.
+          LEFT JOIN LATERAL (
+            SELECT mb.id::text AS membership_id,
+                   mb.account_id::text AS account_id,
+                   ${PERSON_EMAIL_MASKED} AS email_masked
+              ${activeOwnersFrom(Prisma.sql`co.id`)}
+             ORDER BY mb.created_at, mb.id
+             LIMIT 1) ow ON TRUE
          WHERE co.deleted_at IS NULL
            ${filter.status === undefined ? Prisma.empty : Prisma.sql`AND co.status = ${filter.status}::company_status`}
            ${
@@ -546,6 +590,11 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
                 trialEndsAt: row.trial_ends_at,
                 cancelAtPeriodEnd: row.cancel_at_period_end === true,
               },
+        owner:
+          row.owner_membership_id === null || row.owner_email_masked === null
+            ? null
+            : { accountId: row.owner_account_id, emailMasked: row.owner_email_masked },
+        owners: num(row.owners),
       }));
     });
   }
@@ -586,6 +635,50 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
          WHERE mb.company_id = ${companyId}::uuid
          GROUP BY mb.role, mb.status
          ORDER BY mb.role, mb.status`;
+
+      // Pessoas (spec 045, E1): só desta empresa, dono primeiro, e-mail mascarado no banco.
+      const people = await db.$queryRaw<
+        {
+          membership_id: string;
+          account_id: string | null;
+          email_masked: string;
+          role: MembershipRole;
+          status: AccessStatus;
+          created_at: Date;
+          account_status: AccessStatus | null;
+          account_verified: boolean | null;
+        }[]
+      >`
+        SELECT mb.id::text AS membership_id,
+               mb.account_id::text AS account_id,
+               ${PERSON_EMAIL_MASKED} AS email_masked,
+               mb.role::text AS role,
+               mb.status::text AS status,
+               (mb.created_at AT TIME ZONE 'UTC') AS created_at,
+               a.status::text AS account_status,
+               CASE WHEN a.id IS NULL THEN NULL ELSE (a.email_verified_at IS NOT NULL) END AS account_verified
+          FROM memberships mb
+          LEFT JOIN accounts a ON a.id = mb.account_id
+         WHERE mb.company_id = ${companyId}::uuid
+         ORDER BY CASE mb.role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 WHEN 'AGENT' THEN 2 ELSE 3 END,
+                  mb.created_at, mb.id
+         LIMIT ${PLATFORM_PEOPLE_LIMIT}`;
+
+      // O dono ativo mais antigo: a mesma regra e a mesma ordem do LATERAL da lista, nesta empresa.
+      const [owner] = await db.$queryRaw<{ account_id: string | null; email_masked: string }[]>`
+        SELECT mb.account_id::text AS account_id,
+               ${PERSON_EMAIL_MASKED} AS email_masked
+          ${activeOwnersFrom(Prisma.sql`${companyId}::uuid`)}
+         ORDER BY mb.created_at, mb.id
+         LIMIT 1`;
+
+      const [peopleCounts] = await db.$queryRaw<{ owners: number; pending_invitations: number }[]>`
+        SELECT (SELECT COUNT(*)::int ${activeOwnersFrom(Prisma.sql`${companyId}::uuid`)}) AS owners,
+               (SELECT COUNT(*)::int
+                  FROM company_invitations ci
+                 WHERE ci.company_id = ${companyId}::uuid
+                   AND ci.status = 'PENDING'
+                   AND ci.expires_at > ${tz(now)}) AS pending_invitations`;
 
       const [holder] =
         company.subscription_id === null
@@ -754,6 +847,25 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
           status: row.status,
           count: num(row.n),
         })),
+        people: people.map((row) => ({
+          membershipId: row.membership_id,
+          accountId: row.account_id,
+          emailMasked: row.email_masked,
+          role: row.role,
+          status: row.status,
+          createdAt: row.created_at,
+          account:
+            row.account_status === null
+              ? null
+              : { status: row.account_status, verified: row.account_verified === true },
+        })),
+        peopleTotal: memberships.reduce((total, row) => total + num(row.n), 0),
+        owner:
+          owner === undefined
+            ? null
+            : { accountId: owner.account_id, emailMasked: owner.email_masked },
+        owners: num(peopleCounts?.owners),
+        pendingInvitations: num(peopleCounts?.pending_invitations),
         holder:
           holder === undefined
             ? null
@@ -867,9 +979,17 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
     return this.read('PlatformRead.accountDetail', async (db) => {
       if (!isUuid(accountId)) return null;
       const [account] = await db.$queryRaw<
-        { id: string; email: string; status: AccessStatus; verified: boolean; created_at: Date }[]
+        {
+          id: string;
+          email_masked: string;
+          status: AccessStatus;
+          verified: boolean;
+          created_at: Date;
+        }[]
       >`
-        SELECT a.id::text AS id, a.email, a.status::text AS status,
+        SELECT a.id::text AS id,
+               substr(a.email, 1, 1) || '***@' || split_part(a.email, '@', 2) AS email_masked,
+               a.status::text AS status,
                (a.email_verified_at IS NOT NULL) AS verified, a.created_at
           FROM accounts a
          WHERE a.id = ${accountId}::uuid`;
@@ -892,7 +1012,7 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
          ORDER BY co.id`;
       return {
         id: account.id,
-        email: account.email,
+        emailMasked: account.email_masked,
         status: account.status,
         verified: account.verified,
         createdAt: account.created_at,
@@ -905,6 +1025,21 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
           membershipStatus: row.membership_status,
         })),
       };
+    });
+  }
+
+  /**
+   * O e-mail completo (spec 045, D3): a única leitura de `a.email` sem máscara neste arquivo. Só a rota
+   * auditada chama (o serviço grava `ACCOUNT_EMAIL_VIEWED` antes de devolver).
+   */
+  accountEmail(accountId: string): Promise<string | null> {
+    return this.read('PlatformRead.accountEmail', async (db) => {
+      if (!isUuid(accountId)) return null;
+      const [row] = await db.$queryRaw<{ email: string }[]>`
+        SELECT a.email
+          FROM accounts a
+         WHERE a.id = ${accountId}::uuid`;
+      return row?.email ?? null;
     });
   }
 

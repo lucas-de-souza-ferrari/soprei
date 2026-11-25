@@ -281,6 +281,11 @@ export class FakePlatformReadModel implements PlatformReadModel {
     return this.overrides.accountDetail?.(...args) ?? Promise.resolve(null);
   }
 
+  accountEmail(...args: Parameters<PlatformReadModel['accountEmail']>) {
+    this.record('accountEmail', args);
+    return this.overrides.accountEmail?.(...args) ?? Promise.resolve(null);
+  }
+
   listOrders(...args: Parameters<PlatformReadModel['listOrders']>) {
     this.record('listOrders', args);
     return this.overrides.listOrders?.(...args) ?? Promise.resolve({ items: [], nextCursor: null });

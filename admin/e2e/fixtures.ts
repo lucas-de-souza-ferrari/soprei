@@ -1,5 +1,6 @@
 import type {
   AccountDetail,
+  AccountEmail,
   AccountPage,
   CompanyDetail,
   CompanyPage,
@@ -18,7 +19,12 @@ export const ADMIN_EMAIL = 'dono@exemplo.test';
 export const COMPANY_A = '0193a1b2-0000-7000-8000-00000000000a';
 export const COMPANY_B = '0193a1b2-0000-7000-8000-00000000000b';
 export const ACCOUNT_A = '0193a1b2-0000-7000-8000-0000000000a1';
+export const ACCOUNT_B = '0193a1b2-0000-7000-8000-0000000000b1';
 export const FULL_EMAIL = 'lucia.titular@exemplo.test';
+const MEMBERSHIP_OWNER = '0193a1b2-0000-7000-8000-0000000000d1';
+const MEMBERSHIP_AGENT = '0193a1b2-0000-7000-8000-0000000000d2';
+const MEMBERSHIP_LEGACY = '0193a1b2-0000-7000-8000-0000000000d3';
+const MEMBERSHIP_B_OWNER = '0193a1b2-0000-7000-8000-0000000000d4';
 const ORDER_ID = '0193a1b2-0000-7000-8000-0000000000f1';
 const SUBSCRIPTION_ID = '0193a1b2-0000-7000-8000-0000000000c1';
 
@@ -70,6 +76,8 @@ export const companyA = {
   channelState: 'CONNECTED',
   activeMembers: 3,
   messages7d: 420,
+  owner: { accountId: ACCOUNT_A, emailMasked: 'l***@exemplo.test' },
+  owners: 1,
 } as const satisfies CompanyPage['items'][number];
 
 export const companyB = {
@@ -84,6 +92,8 @@ export const companyB = {
   channelState: 'TOKEN_INVALID',
   activeMembers: 1,
   messages7d: 0,
+  owner: null,
+  owners: 0,
 } as const satisfies CompanyPage['items'][number];
 
 export const companyPage: CompanyPage = { items: [companyA, companyB], nextCursor: null };
@@ -139,6 +149,39 @@ export function companyDetail(status: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE'): Compan
       { role: 'OWNER', status: 'ACTIVE', count: 1 },
       { role: 'AGENT', status: 'ACTIVE', count: 2 },
     ],
+    people: [
+      {
+        membershipId: MEMBERSHIP_OWNER,
+        accountId: ACCOUNT_A,
+        emailMasked: 'l***@exemplo.test',
+        role: 'OWNER',
+        status: 'ACTIVE',
+        createdAt: '2026-10-01T12:00:00.000Z',
+        account: { status: 'ACTIVE', verified: true },
+      },
+      {
+        membershipId: MEMBERSHIP_AGENT,
+        accountId: ACCOUNT_B,
+        emailMasked: 'm***@exemplo.test',
+        role: 'AGENT',
+        status: 'ACTIVE',
+        createdAt: '2026-10-03T12:00:00.000Z',
+        account: { status: 'DISABLED', verified: false },
+      },
+      {
+        membershipId: MEMBERSHIP_LEGACY,
+        accountId: null,
+        emailMasked: 'v***@exemplo.test',
+        role: 'AGENT',
+        status: 'ACTIVE',
+        createdAt: '2026-10-04T12:00:00.000Z',
+        account: null,
+      },
+    ],
+    peopleTotal: 3,
+    owner: { accountId: ACCOUNT_A, emailMasked: 'l***@exemplo.test' },
+    owners: 1,
+    pendingInvitations: 2,
     holder: {
       accountId: ACCOUNT_A,
       emailVerified: true,
@@ -184,6 +227,39 @@ export function companyDetail(status: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE'): Compan
   };
 }
 
+/**
+ * Empresa B (spec 045, E1): sem dono ativo (o único dono é um vínculo desativado, da CLI, sem conta), sem
+ * assinatura e com a cobrança desligada: o aviso "Empresa sem dono ativo" aparece.
+ */
+export function companyDetailB(): CompanyDetail {
+  return {
+    ...companyDetail(),
+    billingEnabled: false,
+    id: COMPANY_B,
+    name: 'Oficina Boa Vista',
+    slug: 'oficina-boa-vista',
+    memberships: [{ role: 'OWNER', status: 'DISABLED', count: 1 }],
+    people: [
+      {
+        membershipId: MEMBERSHIP_B_OWNER,
+        accountId: null,
+        emailMasked: 'o***@exemplo.test',
+        role: 'OWNER',
+        status: 'DISABLED',
+        createdAt: '2026-10-05T12:00:00.000Z',
+        account: null,
+      },
+    ],
+    peopleTotal: 1,
+    owner: null,
+    owners: 0,
+    pendingInvitations: 0,
+    holder: null,
+    subscription: null,
+    usage: null,
+  };
+}
+
 export const accountPage: AccountPage = {
   items: [
     {
@@ -199,10 +275,11 @@ export const accountPage: AccountPage = {
   nextCursor: null,
 };
 
+/** `GET /platform/accounts/:accountId`: mascarado, não grava nada (spec 045, D3). */
 export const accountDetail: AccountDetail = {
   billingEnabled: true,
   id: ACCOUNT_A,
-  email: FULL_EMAIL,
+  emailMasked: 'l***@exemplo.test',
   status: 'ACTIVE',
   verified: true,
   createdAt: '2026-10-01T12:00:00.000Z',
@@ -218,6 +295,9 @@ export const accountDetail: AccountDetail = {
   ],
   subscription,
 };
+
+/** `GET /platform/accounts/:accountId/email`: o completo, só pelo "Mostrar e-mail" (auditado). */
+export const accountEmail: AccountEmail = { email: FULL_EMAIL };
 
 export const orderPage: OrderPage = {
   billingEnabled: true,

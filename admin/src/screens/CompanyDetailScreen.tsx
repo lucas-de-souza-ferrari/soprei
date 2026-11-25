@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import { ApiError } from '../api';
 import { useAdmin, useLoad, type View } from '../admin-context';
 import {
@@ -26,7 +26,9 @@ import {
   Dialog,
   Facts,
   Loading,
+  List,
   PageHeader,
+  Row,
   Select,
   Stat,
   StatGrid,
@@ -96,6 +98,108 @@ function usageFacts(usage: NonNullable<CompanyDetail['usage']>) {
     ['Tokens na janela', formatUsage(usage.tokens.used, usage.tokens.limit)],
     ['Janela de uso', `${formatDate(usage.windowStart)} a ${formatDate(usage.windowEnd)}`],
   ] as const;
+}
+
+/**
+ * O dono em destaque no topo, ou o aviso de empresa sem dono ativo. Quem é dono ativo (vínculo `OWNER`
+ * ativo com a conta ativa ou sem conta) é decidido só no servidor (`owner` e `owners`); o app só exibe.
+ */
+function OwnerLine({ detail }: { readonly detail: CompanyDetail }) {
+  const owner = detail.owner;
+  if (owner === null || detail.owners === 0)
+    return (
+      <p className="flex items-start gap-2 rounded-md border border-destructive p-3 text-sm text-destructive">
+        <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+        <span>
+          Empresa sem dono ativo. Ninguém administra a equipe nem a assinatura desta empresa.
+        </span>
+      </p>
+    );
+  const others = detail.owners - 1;
+  return (
+    <p className="min-w-0 text-base">
+      <span className="text-muted-foreground">Dono: </span>
+      <strong className="break-all">{owner.emailMasked}</strong>
+      {others > 0 ? (
+        <span className="text-muted-foreground">
+          {' '}
+          (e mais {formatCount(others)} {others === 1 ? 'dono' : 'donos'})
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
+/**
+ * Pessoas da empresa (spec 045, E1): papel, estado, e-mail mascarado e a situação da conta. "Abrir conta"
+ * leva ao detalhe da conta (mascarado, sem auditoria); vínculo antigo sem conta não tem esse botão.
+ */
+function People({ detail, self }: { readonly detail: CompanyDetail; readonly self: View }) {
+  const { navigate } = useAdmin();
+  const holder = detail.holder;
+  return (
+    <div className="flex flex-col gap-3">
+      <Facts
+        items={[
+          ['Pessoas', formatCount(detail.peopleTotal)],
+          ['Convites pendentes', formatCount(detail.pendingInvitations)],
+          [
+            'Titular da assinatura',
+            holder === null
+              ? '—'
+              : `${label(holder.status)} · e-mail ${holder.emailVerified ? 'confirmado' : 'não confirmado'} · desde ${formatDate(holder.createdAt)}`,
+          ],
+        ]}
+      />
+      {detail.people.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nenhuma pessoa.</p>
+      ) : (
+        <List label="Pessoas da empresa">
+          {detail.people.map((person) => (
+            <Row key={person.membershipId}>
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 break-all font-semibold">{person.emailMasked}</span>
+                <Badge tone={person.role === 'OWNER' ? 'good' : 'neutral'}>
+                  {label(person.role)}
+                </Badge>
+                {person.status === 'DISABLED' ? <Badge tone="bad">Vínculo desativado</Badge> : null}
+                {person.account === null ? (
+                  <Badge>Sem conta (vínculo antigo)</Badge>
+                ) : (
+                  <>
+                    {person.account.status === 'DISABLED' ? (
+                      <Badge tone="bad">Conta desativada</Badge>
+                    ) : null}
+                    {person.account.verified ? null : <Badge>E-mail não confirmado</Badge>}
+                  </>
+                )}
+              </span>
+              <span className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                <span>Desde {formatDate(person.createdAt)}</span>
+                {person.accountId === null ? null : (
+                  <Button
+                    ariaLabel={`Abrir conta ${person.emailMasked}`}
+                    onClick={() => {
+                      if (person.accountId !== null)
+                        navigate({ name: 'account', accountId: person.accountId, from: self });
+                    }}
+                  >
+                    Abrir conta
+                  </Button>
+                )}
+              </span>
+            </Row>
+          ))}
+        </List>
+      )}
+      {detail.peopleTotal > detail.people.length ? (
+        <p className="text-xs text-muted-foreground">
+          Mostrando {formatCount(detail.people.length)} de {formatCount(detail.peopleTotal)} pessoas
+          (dono primeiro).
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -199,6 +303,7 @@ export function CompanyDetailScreen({
     (api) => api.get(`/platform/companies/${encodeURIComponent(companyId)}`, companyDetailSchema),
     companyId,
   );
+  const self: View = { name: 'company', companyId, from };
 
   return (
     <>
@@ -218,6 +323,7 @@ export function CompanyDetailScreen({
         ) : null
       ) : (
         <div className="flex flex-col gap-4">
+          <OwnerLine detail={data} />
           <Card title="Empresa">
             <Facts
               items={[
@@ -275,24 +381,8 @@ export function CompanyDetailScreen({
               ]}
             />
           </Card>
-          <Card title="Equipe">
-            <Facts
-              items={[
-                ...data.memberships.map(
-                  (m) =>
-                    [
-                      `${label(m.role)} (${label(m.status).toLowerCase()})`,
-                      formatCount(m.count),
-                    ] as const,
-                ),
-                [
-                  'Titular',
-                  data.holder === null
-                    ? '—'
-                    : `${label(data.holder.status)} · e-mail ${data.holder.emailVerified ? 'confirmado' : 'não confirmado'} · desde ${formatDate(data.holder.createdAt)}`,
-                ],
-              ]}
-            />
+          <Card title="Pessoas">
+            <People detail={data} self={self} />
           </Card>
           <Card title="Assinatura e uso">
             <Subscription detail={data} />

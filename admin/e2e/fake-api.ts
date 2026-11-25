@@ -141,10 +141,14 @@ export class FakeApi {
         }
         case `/platform/companies/${fx.COMPANY_A}`:
           return { status: 200, json: fx.companyDetail(this.companyStatus) };
+        case `/platform/companies/${fx.COMPANY_B}`:
+          return { status: 200, json: fx.companyDetailB() };
         case '/platform/accounts':
           return { status: 200, json: fx.accountPage };
         case `/platform/accounts/${fx.ACCOUNT_A}`:
           return { status: 200, json: fx.accountDetail };
+        case `/platform/accounts/${fx.ACCOUNT_A}/email`:
+          return { status: 200, json: fx.accountEmail };
         case '/platform/billing/orders':
           return { status: 200, json: billing ? fx.orderPage : fx.billingOffPage };
         case '/platform/billing/notices':
