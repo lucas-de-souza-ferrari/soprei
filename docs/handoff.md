@@ -4,7 +4,7 @@
 
 ## Última sessão
 
-2026-11-24, Claude Code (Opus 5.5, implementer). **[Spec 044](specs/044-admin-da-plataforma.md) concluída e publicada:** o admin da plataforma está no ar em `https://soadm.soprei.com` (nginx, certificado, `.env`, admin e segundo fator criados pelo dono no servidor, seguindo `docs/ops/admin.md`). Branch `spec/044-producao` (PR aberto): o `deploy.sh` passa a dar `chmod 755` na pasta do app (a `admin/` nasceu só do `root` e o nginx dava 403), `deploy/nginx/production.conf.example` agora espelha o arquivo real do servidor, `ADMIN_HOST` ligado no alvo de produção e `docs/ops/admin.md` com o que se aprendeu.
+2026-11-25, Claude Code (Opus 5.5, implementer). **[Spec 045](specs/045-admin-gestao-da-plataforma.md), E1 ("quem é dono e quem faz parte", só leitura, sem migration)** na branch `spec/045-e1-pessoas`, feita a partir de `spec/045-admin-gestao` (PR #29, só a spec, ainda fora da `main`): pessoas, dono e convites pendentes no detalhe da empresa, dono e `owners` na lista, detalhe da conta mascarado e a rota auditada nova `GET /platform/accounts/:accountId/email`; no app, seção Pessoas, "Dono: ...", aviso "Empresa sem dono ativo", coluna Dono e a conta como tela própria. Verde localmente (Node 26, o único da máquina): `typecheck`, `lint`, `format:check`, unitários tocados e Playwright do admin 64/64. **Falta:** push, CI (a integração `platform-admin.integration.test.ts` não rodou aqui: sem `.env.test`), `reviewer` e merge (depois do PR #29); marcar o primeiro critério da E1 com o CI verde.
 
 - **Admin local (máquina do dono):** `PLATFORM_ADMIN_ENABLED=true`, `ADMIN_ORIGIN=http://127.0.0.1:5175` e as chaves `PLATFORM_TOTP_*` no `backend/.env`, `pnpm dev` e `pnpm dev:admin`; o admin local é outro usuário, no banco `soprei`.
 
@@ -33,7 +33,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E4 prontas nas branches (falta CI). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
+Spec 045: CI e revisão da E1 (`spec/045-e1-pessoas`), depois a E2 (contas) numa branch nova a partir da `main` atualizada. Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E4 prontas nas branches (falta CI). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
 
 ## Decisões do dono que não são óbvias no código
 
