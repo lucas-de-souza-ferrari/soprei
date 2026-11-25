@@ -201,6 +201,20 @@ export function companyActionErrorMessage(error: unknown, action?: string): stri
         return 'O slug digitado não confere com o da empresa.';
       case 'LAST_OWNER':
         return 'A empresa ficaria sem dono ativo. Promova outra pessoa a dono antes.';
+      case 'BILLING_DISABLED':
+        return 'A cobrança está desligada neste servidor.';
+      case 'NO_SUBSCRIPTION':
+        return 'A conta não tem assinatura. Inicie o teste gratuito antes.';
+      case 'SUBSCRIPTION_EXISTS':
+        return 'A conta já tem assinatura (o teste gratuito é um só por conta).';
+      case 'ORDER_PENDING':
+        return 'Há um pagamento pendente desta assinatura. Espere ele vencer ou ser pago antes de mudar.';
+      case 'PLAN_DOWNGRADE_BLOCKED':
+        return 'O plano escolhido não comporta as empresas da conta.';
+      case 'PLAN_CHANGE_UNAVAILABLE':
+        return 'Só uma assinatura paga e em vigor pode ser cancelada ou reativada.';
+      case 'PLAN_UNAVAILABLE':
+        return 'Este plano não está no catálogo vigente para o ciclo da assinatura.';
       case 'SLUG_TAKEN':
         return 'Já existe uma empresa com este slug (inclusive entre as removidas). Escolha outro.';
       case 'MEMBER_ALREADY_EXISTS':

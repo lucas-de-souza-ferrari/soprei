@@ -250,6 +250,15 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           revokeByPlatform: () => Promise.reject(new Error('inventário')),
           createCompanyWithOwner: () => Promise.reject(new Error('inventário')),
         },
+        // Spec 045, E4: assinatura da conta.
+        subscriptions: {
+          startTrial: () => Promise.reject(new Error('inventário')),
+          extend: () => Promise.reject(new Error('inventário')),
+          setModules: () => Promise.reject(new Error('inventário')),
+          changePlan: () => Promise.reject(new Error('inventário')),
+          setCancelAtPeriodEnd: () => Promise.reject(new Error('inventário')),
+          end: () => Promise.reject(new Error('inventário')),
+        },
       },
       // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
       accounts: {
@@ -444,6 +453,13 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/platform/companies/:companyId/invitations',
       '/platform/companies/:companyId/invitations/:invitationId/resend',
       '/platform/companies/:companyId/invitations/:invitationId/revoke',
+      '/platform/accounts/:accountId/subscription/trial',
+      '/platform/accounts/:accountId/subscription/extend',
+      '/platform/accounts/:accountId/subscription/modules',
+      '/platform/accounts/:accountId/subscription/plan',
+      '/platform/accounts/:accountId/subscription/cancel',
+      '/platform/accounts/:accountId/subscription/reactivate',
+      '/platform/accounts/:accountId/subscription/end',
       '/platform/billing/orders',
       '/platform/billing/notices',
       '/platform/health',

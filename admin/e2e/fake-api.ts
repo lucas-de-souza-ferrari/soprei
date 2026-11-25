@@ -3,7 +3,11 @@ import {
   actionBodySchema,
   confirmedActionBodySchema,
   createCompanyBodySchema,
+  extendBodySchema,
   inviteBodySchema,
+  modulesBodySchema,
+  planBodySchema,
+  type Subscription,
   type Invitation,
   removeCompanyBodySchema,
   renameBodySchema,
@@ -83,6 +87,10 @@ export class FakeApi {
   readonly people = new Map<string, { role: MembershipRole; status: 'ACTIVE' | 'DISABLED' }>();
   /** Spec 045, E3b: convites pendentes da empresa A (o e-mail só mascarado, como o servidor devolve). */
   readonly invitations: Invitation[] = [fx.pendingInvitation];
+  /** Spec 045, E4: a assinatura da conta A (as ações mudam, a tela relê); `null` = sem assinatura. */
+  accountSubscription: Subscription | null = { ...fx.accountDetail.subscription! };
+  /** Um pedido de pagamento pendente: toda ação da assinatura responde 409 `ORDER_PENDING`. */
+  orderPending = false;
   /** Caminhos que passam a responder 401 (sessão vencida no servidor). */
   readonly expired = new Set<string>();
   /** Caminhos que respondem com este status de erro antes de qualquer outra regra (logout com 503...). */
@@ -220,6 +228,7 @@ export class FakeApi {
             status: 200,
             json: {
               ...fx.accountDetail,
+              subscription: this.accountSubscription,
               status: this.accountStatus,
               verified: this.accountVerified,
             },
@@ -381,12 +390,83 @@ export class FakeApi {
     return { status: 200, json: resent };
   }
 
+  /** Assinatura da conta A (spec 045, E4), com as regras que a tela percebe e corpo `strict`. */
+  private subscriptionAction(action: string, body: unknown): { status: number; json?: unknown } {
+    const error = (status: number, code: string) => ({
+      status,
+      json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
+    });
+    const sub = this.accountSubscription;
+    if (action === 'trial') {
+      if (!actionBodySchema.safeParse(body).success) return error(400, 'VALIDATION_ERROR');
+      if (sub !== null) return error(409, 'SUBSCRIPTION_EXISTS');
+      this.accountSubscription = {
+        ...fx.accountDetail.subscription!,
+        status: 'TRIAL',
+        state: 'TRIAL',
+        pendingChange: null,
+      };
+      return { status: 204 };
+    }
+    if (sub === null) return error(409, 'NO_SUBSCRIPTION');
+    const parsers = {
+      extend: extendBodySchema,
+      modules: modulesBodySchema,
+      plan: planBodySchema,
+      cancel: actionBodySchema,
+      reactivate: actionBodySchema,
+      end: confirmedActionBodySchema,
+    } as const;
+    const parser = parsers[action as keyof typeof parsers] as
+      (typeof parsers)[keyof typeof parsers] | undefined;
+    if (parser === undefined) return error(404, 'NOT_FOUND');
+    const parsed = parser.safeParse(body);
+    if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+    if (action === 'end' && (parsed.data as Record<string, unknown>).code !== FRESH_CODE)
+      return error(400, 'CONFIRMATION_INVALID');
+    if (this.orderPending) return error(409, 'ORDER_PENDING');
+    const data = parsed.data as Record<string, unknown>;
+    switch (action) {
+      case 'extend':
+        this.accountSubscription = { ...sub, currentPeriodEnd: '2027-01-01T03:00:00.000Z' };
+        break;
+      case 'modules':
+        this.accountSubscription = {
+          ...sub,
+          modules: { schedule: data.agenda === true, inventory: data.stock === true },
+        };
+        break;
+      case 'plan':
+        if (data.planCode === 'ESSENTIAL') return error(409, 'PLAN_DOWNGRADE_BLOCKED');
+        this.accountSubscription = {
+          ...sub,
+          plan: { code: data.planCode as Subscription['plan']['code'], name: 'Escala' },
+          pendingChange: null,
+        };
+        break;
+      case 'cancel':
+      case 'reactivate':
+        this.accountSubscription = { ...sub, cancelAtPeriodEnd: action === 'cancel' };
+        break;
+      case 'end':
+        this.accountSubscription = {
+          ...sub,
+          status: 'EXPIRED',
+          state: 'EXPIRED',
+          access: 'blocked',
+        };
+        break;
+    }
+    return { status: 204 };
+  }
+
   /** Ações sobre a conta A (spec 045, E2), com as regras que a tela percebe; corpo `strict` como no servidor. */
   private accountAction(action: string, body: unknown): { status: number; json?: unknown } {
     const error = (status: number, code: string) => ({
       status,
       json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
     });
+    if (action.startsWith('subscription/')) return this.subscriptionAction(action.slice(13), body);
     if (action === 'disable') {
       const parsed = confirmedActionBodySchema.safeParse(body);
       if (!parsed.success) return error(400, 'VALIDATION_ERROR');

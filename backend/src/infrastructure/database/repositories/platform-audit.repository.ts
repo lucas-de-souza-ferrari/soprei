@@ -26,6 +26,10 @@ function toPlatformAuditEvent(row: PlatformAuditEventRow): PlatformAuditEvent {
     subjectInvitationId: row.subjectInvitationId,
     fromRole: row.fromRole,
     toRole: row.toRole,
+    planCode: row.planCode,
+    days: row.days,
+    moduleSchedule: row.moduleSchedule,
+    moduleInventory: row.moduleInventory,
     reason: row.reason,
     createdAt: row.createdAt,
   };
@@ -50,6 +54,10 @@ export class PrismaPlatformAuditRepository implements PlatformAuditRepository {
           subjectInvitationId: data.subjectInvitationId ?? null,
           fromRole: data.fromRole ?? null,
           toRole: data.toRole ?? null,
+          planCode: data.planCode ?? null,
+          days: data.days ?? null,
+          moduleSchedule: data.moduleSchedule ?? null,
+          moduleInventory: data.moduleInventory ?? null,
           reason: data.reason ?? null,
         },
       });

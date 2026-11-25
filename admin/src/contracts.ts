@@ -121,6 +121,7 @@ export const QUEUE_JOB_STATES = ['waiting', 'active', 'delayed', 'completed', 'f
 export const companyStatusSchema = z.enum(COMPANY_STATUSES);
 export const accessStatusSchema = z.enum(ACCESS_STATUSES);
 export const planSchema = z.enum(PLAN_CODES);
+export type PlanCode = (typeof PLAN_CODES)[number];
 export const cycleSchema = z.enum(BILLING_CYCLES);
 export const subscriptionStateSchema = z.enum(SUBSCRIPTION_STATES);
 export const accessLevelSchema = z.enum(ACCESS_LEVELS);
@@ -559,6 +560,23 @@ export const createCompanyResponseSchema = z.object({
   companyId: id,
   invitation: invitationSchema,
 });
+
+// --- Spec 045, E4: assinatura da conta ------------------------------------------------------------
+
+/** `POST /platform/accounts/:accountId/subscription/extend` (204): 1 a 90 dias. */
+export const extendBodySchema = z
+  .object({ days: z.number().int().min(1).max(90), reason: z.enum(ACTION_REASONS) })
+  .strict();
+
+/** `POST .../subscription/modules` (204): Agenda e Estoque. */
+export const modulesBodySchema = z
+  .object({ agenda: z.boolean(), stock: z.boolean(), reason: z.enum(ACTION_REASONS) })
+  .strict();
+
+/** `POST .../subscription/plan` (204): o plano novo, no mesmo ciclo. */
+export const planBodySchema = z
+  .object({ planCode: planSchema, reason: z.enum(ACTION_REASONS) })
+  .strict();
 
 /** `POST /platform/companies/:companyId/rename` (204): o nome (1 a 120) e o motivo. */
 export const renameBodySchema = z

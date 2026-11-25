@@ -1,6 +1,7 @@
 import type { AccountId, PlatformAdminId } from '../value-objects/account-id.js';
 import type { CompanyId } from '../value-objects/company-id.js';
 import type { MembershipId } from '../value-objects/membership-id.js';
+import type { PlanCode } from '../billing.js';
 import type { MembershipRole } from './membership.js';
 
 /**
@@ -31,6 +32,14 @@ export const PLATFORM_AUDIT_ACTIONS = [
   'INVITATION_CREATED_BY_PLATFORM',
   'INVITATION_RESENT_BY_PLATFORM',
   'INVITATION_REVOKED_BY_PLATFORM',
+  // Spec 045, E4: assinatura e módulos da conta.
+  'SUBSCRIPTION_TRIAL_STARTED',
+  'SUBSCRIPTION_EXTENDED',
+  'SUBSCRIPTION_MODULES_CHANGED',
+  'SUBSCRIPTION_PLAN_CHANGED',
+  'SUBSCRIPTION_CANCELLED',
+  'SUBSCRIPTION_REACTIVATED',
+  'SUBSCRIPTION_ENDED',
 ] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 
@@ -55,6 +64,11 @@ export interface PlatformAuditEvent {
   readonly subjectInvitationId: string | null;
   readonly fromRole: MembershipRole | null;
   readonly toRole: MembershipRole | null;
+  /** Spec 045, E4: plano trocado, dias concedidos e módulos ligados (só nas ações da assinatura). */
+  readonly planCode: PlanCode | null;
+  readonly days: number | null;
+  readonly moduleSchedule: boolean | null;
+  readonly moduleInventory: boolean | null;
   readonly reason: PlatformActionReason | null;
   readonly createdAt: Date;
 }
@@ -68,5 +82,9 @@ export interface NewPlatformAuditEvent {
   readonly subjectInvitationId?: string | null;
   readonly fromRole?: MembershipRole | null;
   readonly toRole?: MembershipRole | null;
+  readonly planCode?: PlanCode | null;
+  readonly days?: number | null;
+  readonly moduleSchedule?: boolean | null;
+  readonly moduleInventory?: boolean | null;
   readonly reason?: PlatformActionReason | null;
 }
