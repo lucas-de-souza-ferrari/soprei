@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { AccountService } from '../../application/auth/account.service.js';
+import type { PlatformCompanyUnitOfWork } from '../../application/ports/platform-company-unit-of-work.js';
 import { PlatformAuthService } from '../../application/platform/platform-auth.service.js';
 import { PlatformCompanyService } from '../../application/platform/platform-company.service.js';
 import { factorFingerprint } from '../../application/platform/totp-second-factor.js';
@@ -460,6 +461,54 @@ describe('ações do admin da plataforma sobre empresas e vínculos com Postgres
     assert.ok((await companyIds(y.cookie)).includes(companyA.id));
     const actions = (await companyEvents(companyA)).map((event) => event.action);
     assert.deepEqual(actions.slice(-2), ['COMPANY_REMOVED', 'COMPANY_RESTORED']);
+  });
+
+  it('falha forçada na gravação da trilha ao remover: empresa, número, conexão e convite ficam como estavam (rollback real)', async () => {
+    const company = await tenants.createCompany('pe3-f', `8${String(Date.now()).slice(-12)}`);
+    const inviter = await member(company, x.id, 'OWNER', 'xf');
+    await db().channelConnection.create({
+      data: { companyId: company.id, wabaId: '5647382910', tokenCiphertext: 'v1.k1.cifrado' },
+    });
+    const invitation = await db().companyInvitation.create({
+      data: {
+        companyId: company.id,
+        email: email('falha'),
+        role: 'AGENT',
+        tokenHash: 'f'.repeat(64),
+        invitedByMembershipId: inviter,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        lastSentAt: new Date(),
+      },
+    });
+    const real = new PrismaPlatformCompanyUnitOfWork(database.prisma);
+    const broken: PlatformCompanyUnitOfWork = {
+      run: (fn) =>
+        real.run((tx) =>
+          fn({ ...tx, audit: () => Promise.reject(new Error('trilha indisponível')) }),
+        ),
+    };
+    const service = new PlatformCompanyService({
+      companies: broken,
+      confirmer: { confirmPlatformCode: () => Promise.resolve(Result.ok(undefined)) },
+      bearerSessions: { revokeAllSessions: () => Promise.resolve() },
+      logger: logs.logger,
+    });
+    const identity = { kind: 'platform', adminId, sessionId: randomUUID() } as const;
+    await assert.rejects(service.remove(identity, company.id, company.slug, 'OTHER', CODE));
+    const row = await db().company.findFirst({
+      where: { id: company.id },
+      select: { deletedAt: true, whatsappPhoneNumberId: true },
+    });
+    assert.ok(row);
+    assert.equal(row.deletedAt, null);
+    assert.equal(row.whatsappPhoneNumberId, company.whatsappPhoneNumberId);
+    assert.equal(await db().channelConnection.count({ where: { companyId: company.id } }), 1);
+    const pending = await db().companyInvitation.findFirst({
+      where: { id: invitation.id, companyId: company.id },
+      select: { status: true },
+    });
+    assert.equal(pending?.status, 'PENDING');
+    assert.deepEqual(await companyEvents(company), []);
   });
 
   it('privacidade: nenhum nome de empresa, slug, e-mail ou código em resposta ou log; a trilha não tem texto livre', () => {

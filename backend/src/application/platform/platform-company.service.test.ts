@@ -241,7 +241,7 @@ describe('PlatformCompanyService: remover e restaurar (spec 045, E3a)', () => {
     assert.deepEqual(world.calls, []);
   });
 
-  it('restaura com código e trilha; não removida = 204 sem evento; inexistente = 404', async () => {
+  it('restaura com código e trilha; não removida = 204 sem evento e sem gastar o código; inexistente = 404', async () => {
     const world = setup();
     await world.service.remove(ADMIN, world.company, SLUG, 'OTHER', CODE);
     await assert.rejects(
@@ -254,8 +254,10 @@ describe('PlatformCompanyService: remover e restaurar (spec 045, E3a)', () => {
     // O canal não volta: o OWNER reconecta.
     assert.equal(world.uow.channels.has(world.company), false);
     assert.equal(world.audit.events.at(-1)?.action, 'COMPANY_RESTORED');
+    const spent = world.confirmCodes.length;
     assert.equal(await world.service.restore(ADMIN, world.company, 'OWNER_REQUEST', CODE), false);
     assert.equal(world.audit.events.length, 2);
+    assert.equal(world.confirmCodes.length, spent);
     await assert.rejects(world.service.restore(ADMIN, randomUUID(), 'OTHER', CODE), NotFoundError);
   });
 });
@@ -297,7 +299,9 @@ describe('PlatformCompanyService: papel do vínculo (spec 045, E3a)', () => {
       false,
     );
     assert.equal(world.audit.events.length, 1);
-    assert.equal(world.calls.length, 1);
+    // A repetição refaz a revogação (regra comum 6), sem evento e sem pedir código.
+    assert.equal(world.calls.length, 2);
+    assert.deepEqual(world.confirmCodes, []);
   });
 
   it('promover a OWNER ou rebaixar OWNER exige o código', async () => {
@@ -411,6 +415,37 @@ describe('PlatformCompanyService: papel do vínculo (spec 045, E3a)', () => {
     );
     assert.equal(world.uow.membership(world.company, world.agent)?.role, 'VIEWER');
     assert.equal(world.audit.events.length, 1);
+    // Revisão da E3a (I1): repetir com o Redis de volta conclui a revogação, sem evento novo.
+    world.redisDown = false;
+    assert.equal(
+      await world.service.changeRole(
+        ADMIN,
+        world.company,
+        world.agent,
+        'VIEWER',
+        'OTHER',
+        undefined,
+      ),
+      false,
+    );
+    assert.equal(world.audit.events.length, 1);
+    assert.equal(world.calls.at(-1), `bearer:${world.company}:${world.agent}:events=1`);
+    assert.equal(world.calls.length, 2);
+  });
+
+  it('rebaixar um dono com o Redis fora: repetir conclui a revogação sem gastar outro código', async () => {
+    const world = setup();
+    await world.service.changeRole(ADMIN, world.company, world.agent, 'OWNER', 'OTHER', CODE);
+    world.redisDown = true;
+    await assert.rejects(
+      world.service.changeRole(ADMIN, world.company, world.owner, 'ADMIN', 'OTHER', CODE),
+      ServiceUnavailableError,
+    );
+    world.redisDown = false;
+    await world.service.changeRole(ADMIN, world.company, world.owner, 'ADMIN', 'OTHER', undefined);
+    assert.deepEqual(world.confirmCodes, [CODE, CODE]);
+    assert.equal(world.calls.at(-1), `bearer:${world.company}:${world.owner}:events=2`);
+    assert.equal(world.audit.events.length, 2);
   });
 });
 
@@ -446,7 +481,9 @@ describe('PlatformCompanyService: desativar e reativar vínculo (spec 045, E3a)'
       true,
     );
     assert.equal(world.audit.events[1]?.action, 'MEMBERSHIP_ENABLED_BY_PLATFORM');
-    assert.equal(world.calls.length, 1);
+    // Desativar de novo (mesmo estado) refaz a revogação sem evento; reativar não revoga.
+    assert.equal(world.calls.length, 2);
+    assert.equal(world.audit.events.length, 2);
     assert.deepEqual(world.metrics, [
       'membership_disabled_by_platform',
       'membership_enabled_by_platform',

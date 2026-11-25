@@ -226,7 +226,7 @@ export function CompanyActions({
     restore: {
       title: `Restaurar ${detail.name}?`,
       effect:
-        'A empresa volta a aparecer para a equipe. O canal não volta: o dono precisa reconectar o WhatsApp pelo site.',
+        'A empresa volta a aparecer para a equipe. O canal não volta: o dono precisa reconectar o WhatsApp pelo site. Com a cobrança ligada, ela volta a contar no limite de empresas do plano do titular, mesmo que passe dele.',
       confirm: 'Confirmar restauração',
       danger: false,
       code: true,

@@ -159,7 +159,7 @@ export class PlatformCompanyService {
 
   /**
    * Restaura a empresa removida (**[código]**): limpa o `deletedAt`; o canal não volta (o `OWNER`
-   * reconecta). Não removida: 204 sem evento. Inexistente: 404. Devolve se restaurou.
+   * reconecta). Não removida: 204 sem evento e sem gastar o código. Inexistente: 404. Devolve se restaurou.
    */
   async restore(
     identity: PlatformIdentity,
@@ -170,6 +170,7 @@ export class PlatformCompanyService {
     const id = this.parseCompanyId(companyId);
     const state = await this.deps.companies.run((tx) => tx.state(id));
     if (state === null) throw companyNotFound();
+    if (!state.removed) return false;
     await confirmPlatformAction(this.deps.confirmer, identity, code);
     const action = 'COMPANY_RESTORED';
     const restored = await this.deps.companies.run(async (tx) => {
@@ -184,8 +185,9 @@ export class PlatformCompanyService {
   /**
    * Muda o papel de um vínculo (**[código]** quando o papel de origem ou o de destino é `OWNER`), sem a
    * hierarquia de vínculo (a plataforma está acima dela), com a regra do último dono sob a trava da
-   * empresa. Promover a `OWNER` exige vínculo `ACTIVE` e conta `ACTIVE` e confirmada. Mesmo papel: 204 sem
-   * evento. Depois do commit, revoga as sessões Bearer do vínculo (Redis fora = 503 com a mudança gravada).
+   * empresa. Promover a `OWNER` exige vínculo `ACTIVE` e conta `ACTIVE` e confirmada. Depois do commit,
+   * revoga as sessões Bearer do vínculo (Redis fora = 503 com a mudança gravada). Mesmo papel: 204 sem evento
+   * e sem gastar o código, mas a revogação é refeita (regra comum 6: repetir depois de um 503 a conclui).
    */
   async changeRole(
     identity: PlatformIdentity,
@@ -203,6 +205,10 @@ export class PlatformCompanyService {
       return tx.membership(id, target);
     });
     if (before === null) throw membershipNotFound();
+    if (before.role === role) {
+      await this.revokeAfterCommit(id, target);
+      return false;
+    }
     const confirmed = before.role === 'OWNER' || role === 'OWNER';
     if (confirmed) await confirmPlatformAction(this.deps.confirmer, identity, code);
     const action = 'MEMBERSHIP_ROLE_CHANGED_BY_PLATFORM';
@@ -237,7 +243,10 @@ export class PlatformCompanyService {
       });
       return current.role;
     });
-    if (outcome === null) return false;
+    if (outcome === null) {
+      await this.revokeAfterCommit(id, target);
+      return false;
+    }
     this.recorded(identity, id, action, reason, target);
     await this.revokeAfterCommit(id, target);
     return true;
@@ -246,7 +255,8 @@ export class PlatformCompanyService {
   /**
    * Desativa (`DISABLED`: "remover a pessoa da empresa"; o vínculo nunca é apagado) ou reativa (`ACTIVE`,
    * exige a conta `ACTIVE`) um vínculo. O último dono ativo não é desativado (409 `LAST_OWNER`). Mesmo
-   * estado: 204 sem evento. Desativar revoga as sessões Bearer do vínculo depois do commit.
+   * estado: 204 sem evento. Desativar revoga as sessões Bearer do vínculo depois do commit, também na
+   * repetição (regra comum 6: repetir depois de um 503 conclui a revogação).
    */
   async setMembershipStatus(
     identity: PlatformIdentity,
@@ -278,7 +288,7 @@ export class PlatformCompanyService {
       return true;
     });
     if (changed) this.recorded(identity, id, action, reason, target);
-    if (changed && disabling) await this.revokeAfterCommit(id, target);
+    if (disabling) await this.revokeAfterCommit(id, target);
     return changed;
   }
 
