@@ -64,6 +64,8 @@ export class FakeApi {
   /** Estado da conta A (spec 045, E2): as ações mudam e o detalhe relê. */
   accountStatus: 'ACTIVE' | 'DISABLED' = 'ACTIVE';
   accountVerified = true;
+  /** Redis das sessões fora: desativar grava a mudança e responde 503, como o servidor (regra comum 6). */
+  revocationDown = false;
   /** Caminhos que passam a responder 401 (sessão vencida no servidor). */
   readonly expired = new Set<string>();
   /** Caminhos que respondem com este status de erro antes de qualquer outra regra (logout com 503...). */
@@ -99,7 +101,10 @@ export class FakeApi {
     if (method === 'POST' && headers['x-soprei-app'] !== 'admin') return error(403, 'FORBIDDEN');
     const failure = this.failures.get(path);
     if (failure !== undefined)
-      return error(failure, failure === 401 ? 'UNAUTHORIZED' : 'SERVICE_UNAVAILABLE');
+      return error(
+        failure,
+        failure === 401 ? 'UNAUTHORIZED' : failure === 429 ? 'RATE_LIMITED' : 'SERVICE_UNAVAILABLE',
+      );
 
     if (path === '/platform/auth/login' && method === 'POST') {
       const { email, password, code } = (body ?? {}) as Record<string, unknown>;
@@ -203,7 +208,7 @@ export class FakeApi {
       if (parsed.data.code !== FRESH_CODE) return error(400, 'CONFIRMATION_INVALID');
       if (this.options.lastOwner === true) return error(409, 'LAST_OWNER');
       this.accountStatus = 'DISABLED';
-      return { status: 204 };
+      return this.revocationDown ? error(503, 'SERVICE_UNAVAILABLE') : { status: 204 };
     }
     if (!actionBodySchema.safeParse(body).success) return error(400, 'VALIDATION_ERROR');
     switch (action) {
@@ -211,7 +216,7 @@ export class FakeApi {
         this.accountStatus = 'ACTIVE';
         return { status: 204 };
       case 'sessions/revoke':
-        return { status: 204 };
+        return this.revocationDown ? error(503, 'SERVICE_UNAVAILABLE') : { status: 204 };
       case 'password-reset':
         return { status: 202 };
       case 'verification/resend':

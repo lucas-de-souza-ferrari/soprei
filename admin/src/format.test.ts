@@ -99,5 +99,15 @@ describe('formatação do admin (spec 044, E3)', () => {
       'Muitas tentativas. Aguarde antes de tentar novamente.',
     );
     assert.equal(accountActionErrorMessage(new Error('x')), 'Algo deu errado. Tente novamente.');
+    // 503 em desativar e encerrar sessões: a mudança pode ter sido gravada sem a revogação.
+    for (const action of ['disable', 'revokeSessions'])
+      assert.match(
+        accountActionErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE'), action),
+        /registrada sem que as sessões tenham sido encerradas: repita para concluir/,
+      );
+    assert.equal(
+      accountActionErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE'), 'passwordReset'),
+      'Serviço indisponível no momento. Tente novamente em instantes.',
+    );
   });
 });

@@ -403,6 +403,65 @@ test('conta não confirmada: só ela mostra "Reenviar código de confirmação";
   ).toEqual([{ reason: 'OWNER_REQUEST' }]);
 });
 
+test('conta: 503 em desativar ou encerrar sessões relê o detalhe e diz que a ação pode ter sido registrada sem encerrar as sessões (revisão da E2)', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.revocationDown = true;
+  await page.goto('/');
+  await openAccount(page);
+  const detailPath = `/platform/accounts/${ACCOUNT_A}`;
+  const partial =
+    'A ação pode ter sido registrada sem que as sessões tenham sido encerradas: repita para concluir.';
+
+  const reads = api.callsTo('GET', detailPath).length;
+  await page.getByRole('button', { name: 'Desativar conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desativar a conta?' });
+  await dialog.getByLabel('Código novo do autenticador').fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Confirmar desativação' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText(partial);
+  // O detalhe foi relido: a conta aparece desativada (a mudança foi gravada).
+  await expect.poll(() => api.callsTo('GET', detailPath).length).toBeGreaterThan(reads);
+  await expect(page.getByText('Desativada', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByRole('alert')).toHaveText(partial);
+
+  const before = api.callsTo('GET', detailPath).length;
+  await page.getByRole('button', { name: 'Encerrar sessões' }).click();
+  const sessions = page.getByRole('dialog', { name: 'Encerrar as sessões da conta?' });
+  await sessions.getByRole('button', { name: 'Encerrar sessões' }).click();
+  await expect(sessions.getByRole('alert')).toHaveText(partial);
+  await expect.poll(() => api.callsTo('GET', detailPath).length).toBeGreaterThan(before);
+});
+
+test('conta: 429 no diálogo de desativar e 409 ALREADY_VERIFIED no reenvio aparecem com a mensagem própria', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.accountVerified = false;
+  const disablePath = `/platform/accounts/${ACCOUNT_A}/disable`;
+  api.failures.set(disablePath, 429);
+  await page.goto('/');
+  await openAccount(page);
+
+  await page.getByRole('button', { name: 'Desativar conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desativar a conta?' });
+  await dialog.getByLabel('Código novo do autenticador').fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Confirmar desativação' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'Muitas tentativas. Aguarde antes de tentar novamente.',
+  );
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByRole('button', { name: 'Desativar conta' })).toBeVisible();
+
+  // A conta foi confirmada por outro caminho depois de a tela abrir: o servidor recusa o reenvio.
+  api.accountVerified = true;
+  await page.getByRole('button', { name: 'Reenviar código de confirmação' }).click();
+  const resend = page.getByRole('dialog', { name: 'Reenviar o código de confirmação?' });
+  await resend.getByRole('button', { name: 'Reenviar código' }).click();
+  await expect(resend.getByRole('alert')).toHaveText('O e-mail desta conta já está confirmado.');
+});
+
 test('conta: 401 numa ação volta à tela Entrar sem nada no navegador', async ({ page }) => {
   const api = await installFakeApi(page, { signedIn: true });
   api.expired.add(`/platform/accounts/${ACCOUNT_A}/sessions/revoke`);

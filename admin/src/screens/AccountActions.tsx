@@ -102,6 +102,8 @@ export function AccountActions({
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(undefined);
+  /** A ação que falhou (o texto do 503 depende dela). */
+  const [failed, setFailed] = useState<AccountAction | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const action = current === null ? undefined : ACCOUNT_ACTIONS[current];
   const copy = current === null ? undefined : COPY[current];
@@ -131,6 +133,16 @@ export function AccountActions({
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 401) return expire();
       setError(failure);
+      setFailed(current);
+      // 503 em desativar ou encerrar sessões: a mudança e a trilha podem já estar gravadas e só a revogação
+      // ter falhado (regra comum 6). Relê o detalhe para mostrar o estado real; repetir conclui.
+      if (
+        failure instanceof ApiError &&
+        failure.status === 503 &&
+        (current === 'disable' || current === 'revokeSessions')
+      ) {
+        onDone();
+      }
     } finally {
       setBusy(false);
     }
@@ -155,7 +167,7 @@ export function AccountActions({
       {notice === undefined ? null : <Alert tone="info">{notice}</Alert>}
       {/* Se o navegador fechar o diálogo à força no meio da ação, o erro aparece aqui fora. */}
       {current !== null || error === undefined ? null : (
-        <Alert>{accountActionErrorMessage(error)}</Alert>
+        <Alert>{accountActionErrorMessage(error, failed)}</Alert>
       )}
       <Dialog
         open={current !== null}
@@ -191,7 +203,7 @@ export function AccountActions({
             </label>
           ) : null}
         </div>
-        {error === undefined ? null : <Alert>{accountActionErrorMessage(error)}</Alert>}
+        {error === undefined ? null : <Alert>{accountActionErrorMessage(error, failed)}</Alert>}
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button onClick={() => setCurrent(null)} disabled={busy}>
             Cancelar
