@@ -1,5 +1,12 @@
 import type { Page, Request } from '@playwright/test';
-import { actionBodySchema, confirmedActionBodySchema } from '../src/contracts';
+import {
+  actionBodySchema,
+  confirmedActionBodySchema,
+  removeCompanyBodySchema,
+  renameBodySchema,
+  roleBodySchema,
+  type MembershipRole,
+} from '../src/contracts';
 import * as fx from './fixtures';
 
 /**
@@ -19,7 +26,7 @@ const PAGE = { limit: /^([1-9]|[1-4][0-9]|50)$/, cursor: /^.{1,512}$/ };
 const QUERY_RULES: Record<string, Record<string, RegExp>> = {
   '/platform/companies': {
     ...PAGE,
-    status: /^(active|suspended)$/,
+    status: /^(active|suspended|removed)$/,
     q: /^.{0,64}$/,
     attention: /^(pending_messages|unsent_replies|token_invalid|token_expiring|open_handoffs)$/,
   },
@@ -66,6 +73,10 @@ export class FakeApi {
   accountVerified = true;
   /** Redis das sessões fora: desativar grava a mudança e responde 503, como o servidor (regra comum 6). */
   revocationDown = false;
+  /** Spec 045, E3a: nome, remoção e papéis/estados das pessoas da empresa A (as ações mudam, a tela relê). */
+  companyName = 'Padaria Aurora';
+  companyRemovedAt: string | null = null;
+  readonly people = new Map<string, { role: MembershipRole; status: 'ACTIVE' | 'DISABLED' }>();
   /** Caminhos que passam a responder 401 (sessão vencida no servidor). */
   readonly expired = new Set<string>();
   /** Caminhos que respondem com este status de erro antes de qualquer outra regra (logout com 503...). */
@@ -75,6 +86,33 @@ export class FakeApi {
 
   constructor(private readonly options: FakeApiOptions) {
     this.signedIn = options.signedIn ?? false;
+    for (const person of fx.companyDetail().people)
+      this.people.set(person.membershipId, { role: person.role, status: person.status });
+  }
+
+  /** O detalhe da empresa A com o estado atual das ações (nome, remoção, papéis e donos). */
+  private detailA() {
+    const base = fx.companyDetail(this.companyStatus, this.companyRemovedAt);
+    const people = base.people.map((person) => ({
+      ...person,
+      ...this.people.get(person.membershipId),
+    }));
+    const owners = people.filter(
+      (person) =>
+        person.role === 'OWNER' &&
+        person.status === 'ACTIVE' &&
+        (person.account === null || person.account.status === 'ACTIVE'),
+    );
+    return {
+      ...base,
+      name: this.companyName,
+      people,
+      owners: owners.length,
+      owner:
+        owners[0] === undefined
+          ? null
+          : { accountId: owners[0].accountId, emailMasked: owners[0].emailMasked },
+    };
   }
 
   callsTo(method: string, path: string): Call[] {
@@ -136,24 +174,33 @@ export class FakeApi {
           };
         case '/platform/companies': {
           const attention = url.searchParams.get('attention');
-          const items =
-            attention === 'token_invalid'
+          const removed = url.searchParams.get('status') === 'removed';
+          const removedA = this.companyRemovedAt !== null;
+          const items = removed
+            ? removedA
+              ? [{ ...fx.companyA, removedAt: this.companyRemovedAt }]
+              : []
+            : attention === 'token_invalid'
               ? [fx.companyB]
               : attention === null
-                ? [fx.companyA, fx.companyB]
+                ? removedA
+                  ? [fx.companyB]
+                  : [fx.companyA, fx.companyB]
                 : [];
           return {
             status: 200,
             json: {
               items: items.map((c) =>
-                c.id === fx.COMPANY_A ? { ...c, status: this.companyStatus } : c,
+                c.id === fx.COMPANY_A
+                  ? { ...c, status: this.companyStatus, name: this.companyName }
+                  : c,
               ),
               nextCursor: null,
             },
           };
         }
         case `/platform/companies/${fx.COMPANY_A}`:
-          return { status: 200, json: fx.companyDetail(this.companyStatus) };
+          return { status: 200, json: this.detailA() };
         case `/platform/companies/${fx.COMPANY_B}`:
           return { status: 200, json: fx.companyDetailB() };
         case '/platform/accounts':
@@ -190,10 +237,88 @@ export class FakeApi {
       this.companyStatus = 'ACTIVE';
       return { status: 204 };
     }
+    if (method === 'POST' && path.startsWith(`/platform/companies/${fx.COMPANY_A}/`)) {
+      const action = this.companyAction(
+        path.slice(`/platform/companies/${fx.COMPANY_A}/`.length),
+        body,
+      );
+      if (action !== undefined) return action;
+    }
     if (method === 'POST' && path.startsWith(`/platform/accounts/${fx.ACCOUNT_A}/`)) {
       return this.accountAction(path.slice(`/platform/accounts/${fx.ACCOUNT_A}/`.length), body);
     }
     return error(404, 'NOT_FOUND');
+  }
+
+  /**
+   * Ações sobre a empresa A e as pessoas dela (spec 045, E3a), com as regras que a tela percebe: corpo
+   * `strict`, código novo (`FRESH_CODE`) nas ações **[código]**, slug digitado, último dono ativo.
+   * `undefined` = não é uma ação desta etapa (suspender e reativar seguem acima).
+   */
+  private companyAction(
+    action: string,
+    body: unknown,
+  ): { status: number; json?: unknown } | undefined {
+    const error = (status: number, code: string) => ({
+      status,
+      json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
+    });
+    const removedOnly = (): boolean => this.companyRemovedAt !== null;
+    if (action === 'rename') {
+      const parsed = renameBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (removedOnly()) return error(404, 'NOT_FOUND');
+      this.companyName = parsed.data.name;
+      return { status: 204 };
+    }
+    if (action === 'remove') {
+      const parsed = removeCompanyBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (removedOnly()) return error(404, 'NOT_FOUND');
+      if (parsed.data.slug !== fx.companyDetail().slug) return error(400, 'CONFIRMATION_MISMATCH');
+      if (parsed.data.code !== FRESH_CODE) return error(400, 'CONFIRMATION_INVALID');
+      this.companyRemovedAt = '2026-11-25T15:00:00.000Z';
+      return { status: 204 };
+    }
+    if (action === 'restore') {
+      const parsed = confirmedActionBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (parsed.data.code !== FRESH_CODE) return error(400, 'CONFIRMATION_INVALID');
+      this.companyRemovedAt = null;
+      return { status: 204 };
+    }
+    const match = /^memberships\/([^/]+)\/(role|disable|enable)$/.exec(action);
+    if (match === null) return undefined;
+    const [, membershipId = '', kind] = match;
+    const person = this.people.get(membershipId);
+    if (person === undefined || removedOnly()) return error(404, 'NOT_FOUND');
+    const activeOwners = this.detailA().owners;
+    const isActiveOwner = this.detailA().people.some(
+      (p) =>
+        p.membershipId === membershipId &&
+        p.role === 'OWNER' &&
+        p.status === 'ACTIVE' &&
+        (p.account === null || p.account.status === 'ACTIVE'),
+    );
+    if (kind === 'role') {
+      const parsed = roleBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      const involvesOwner = person.role === 'OWNER' || parsed.data.role === 'OWNER';
+      if (involvesOwner && parsed.data.code !== FRESH_CODE)
+        return error(400, 'CONFIRMATION_INVALID');
+      if (parsed.data.role !== 'OWNER' && isActiveOwner && activeOwners <= 1)
+        return error(409, 'LAST_OWNER');
+      person.role = parsed.data.role;
+      return this.revocationDown ? error(503, 'SERVICE_UNAVAILABLE') : { status: 204 };
+    }
+    if (!actionBodySchema.safeParse(body).success) return error(400, 'VALIDATION_ERROR');
+    if (kind === 'disable') {
+      if (isActiveOwner && activeOwners <= 1) return error(409, 'LAST_OWNER');
+      person.status = 'DISABLED';
+      return { status: 204 };
+    }
+    person.status = 'ACTIVE';
+    return { status: 204 };
   }
 
   /** Ações sobre a conta A (spec 045, E2), com as regras que a tela percebe; corpo `strict` como no servidor. */

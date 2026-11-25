@@ -279,6 +279,18 @@ export async function soleActiveOwnerCompanyCount(
   return num(rows[0]?.n);
 }
 
+/**
+ * Quantos donos ativos a empresa tem agora (spec 045, E3a, regra comum 11): o MESMO `activeOwnersFrom` da
+ * E1 e da E2, filtrado pelo `companyId` do parâmetro. Usado pela regra do último dono ao mudar o papel ou
+ * desativar um vínculo, dentro da transação que trava a empresa (como `soleActiveOwnerCompanyCount`, fora do
+ * `read` deste módulo de propósito).
+ */
+export async function activeOwnerCount(db: TenantScopedDb, companyId: string): Promise<number> {
+  const rows = await db.$queryRaw<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n ${activeOwnersFrom(Prisma.sql`${companyId}::uuid`)}`;
+  return num(rows[0]?.n);
+}
+
 interface CompanyListSqlRow {
   readonly id: string;
   readonly name: string;
@@ -299,6 +311,7 @@ interface CompanyListSqlRow {
   readonly owner_account_id: string | null;
   readonly owner_email_masked: string | null;
   readonly owners: number;
+  readonly removed_at: Date | null;
 }
 
 interface AttendanceSqlRow {
@@ -576,7 +589,8 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
                ow.membership_id AS owner_membership_id,
                ow.account_id AS owner_account_id,
                ow.email_masked AS owner_email_masked,
-               (SELECT COUNT(*)::int ${activeOwnersFrom(Prisma.sql`co.id`)}) AS owners
+               (SELECT COUNT(*)::int ${activeOwnersFrom(Prisma.sql`co.id`)}) AS owners,
+               (co.deleted_at AT TIME ZONE 'UTC') AS removed_at
           FROM companies co
           LEFT JOIN channel_connections cc ON cc.company_id = co.id
           LEFT JOIN subscriptions s ON s.id = co.subscription_id
@@ -589,7 +603,8 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
               ${activeOwnersFrom(Prisma.sql`co.id`)}
              ORDER BY mb.created_at, mb.id
              LIMIT 1) ow ON TRUE
-         WHERE co.deleted_at IS NULL
+         -- Removidas só com o filtro próprio (spec 045, E3a: para restaurar); nunca junto das outras.
+         WHERE ${filter.removed === true ? Prisma.sql`co.deleted_at IS NOT NULL` : Prisma.sql`co.deleted_at IS NULL`}
            ${filter.status === undefined ? Prisma.empty : Prisma.sql`AND co.status = ${filter.status}::company_status`}
            ${
              q === ''
@@ -625,6 +640,7 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
             ? null
             : { accountId: row.owner_account_id, emailMasked: row.owner_email_masked },
         owners: num(row.owners),
+        removedAt: row.removed_at,
       }));
     });
   }
@@ -641,15 +657,17 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
           updated_at: Date;
           subscription_id: string | null;
           phone_number_id: string | null;
+          removed_at: Date | null;
         }[]
       >`
         SELECT co.id::text AS id, co.name AS name, co.slug AS slug, co.status::text AS status,
                (co.created_at AT TIME ZONE 'UTC') AS created_at,
                (co.updated_at AT TIME ZONE 'UTC') AS updated_at,
                co.subscription_id::text AS subscription_id,
-               co.whatsapp_phone_number_id AS phone_number_id
+               co.whatsapp_phone_number_id AS phone_number_id,
+               (co.deleted_at AT TIME ZONE 'UTC') AS removed_at
           FROM companies co
-         WHERE co.id = ${companyId}::uuid AND co.deleted_at IS NULL`;
+         WHERE co.id = ${companyId}::uuid`;
       if (company === undefined) return null;
 
       const s24 = since(now, DAY_MS);
@@ -870,6 +888,7 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
           status: company.status,
           createdAt: company.created_at,
           updatedAt: company.updated_at,
+          removedAt: company.removed_at,
         },
         subscriptionId: company.subscription_id,
         memberships: memberships.map((row) => ({

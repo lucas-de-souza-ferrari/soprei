@@ -594,6 +594,15 @@ async function main(): Promise<void> {
                     logger,
                     metrics,
                   }),
+            // Ações sobre empresas e vínculos (spec 045, E3a).
+            companies: new PlatformCompanyService({
+              companies: new PrismaPlatformCompanyUnitOfWork(prisma),
+              confirmer: auth.service,
+              bearerSessions: auth.sessions,
+              channel: channelService,
+              logger,
+              metrics,
+            }),
           },
         }
       : {}),
@@ -629,6 +638,9 @@ async function main(): Promise<void> {
     },
     admin: {
       companies: new CompanyService(companyRepository),
+      // D12 da spec 045: com o admin ligado, criar, editar e remover empresa só pelo /platform/* (motivo e
+      // trilha); o Bearer da plataforma em /admin/companies recebe 403 USE_PLATFORM_ADMIN nas escritas.
+      companyWritesClosed: config.PLATFORM_ADMIN_ENABLED,
       onboarding: new OnboardingService(new PrismaOnboardingStore(prisma)),
       attendance,
       notifications,
@@ -778,6 +790,7 @@ import {
 import { PlatformAuthService } from './application/platform/platform-auth.service.js';
 import { PlatformMonitorService } from './application/platform/platform-monitor.service.js';
 import { PlatformAccountService } from './application/platform/platform-account.service.js';
+import { PlatformCompanyService } from './application/platform/platform-company.service.js';
 import { RedisPlatformSessionStore } from './infrastructure/auth/redis-platform-session-store.js';
 import { InvitationExpiryPurger } from './application/invitations/invitation-expiry-purger.js';
 import { InvitationService } from './application/invitations/invitation.service.js';

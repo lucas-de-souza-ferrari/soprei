@@ -185,6 +185,29 @@ export function accountActionErrorMessage(error: unknown, action?: string): stri
   return errorMessage(error);
 }
 
+/**
+ * Mensagem de uma ação sobre a empresa ou um vínculo (spec 045, E3a): os códigos de regra que a tela
+ * explica; o resto é `errorMessage`. Nunca o texto do servidor.
+ */
+export function companyActionErrorMessage(error: unknown, action?: string): string {
+  if (error instanceof ApiError) {
+    // Mudar papel e desativar gravam a mudança e a trilha antes de encerrar as sessões do vínculo.
+    if (error.status === 503 && (action === 'role' || action === 'disable'))
+      return 'A ação pode ter sido registrada sem que as sessões tenham sido encerradas: repita para concluir.';
+    switch (error.code) {
+      case 'CONFIRMATION_INVALID':
+        return 'Código do autenticador inválido ou já usado. Espere o próximo código (até 30 s) e tente de novo.';
+      case 'CONFIRMATION_MISMATCH':
+        return 'O slug digitado não confere com o da empresa.';
+      case 'LAST_OWNER':
+        return 'A empresa ficaria sem dono ativo. Promova outra pessoa a dono antes.';
+      case 'MEMBER_NOT_ELIGIBLE':
+        return 'A pessoa não pode receber isso: o vínculo e a conta precisam estar ativos (e, para dono, com o e-mail confirmado).';
+    }
+  }
+  return errorMessage(error);
+}
+
 /** Mensagem da tela Entrar (o 401 é a falha uniforme de credenciais). */
 export function loginErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 401)

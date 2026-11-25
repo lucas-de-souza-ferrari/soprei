@@ -6,16 +6,8 @@ import {
   type PlatformAuditAction,
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
-import {
-  ConflictError,
-  NotFoundError,
-  RateLimitError,
-  ServiceUnavailableError,
-  ValidationError,
-} from '../../shared/errors/index.js';
-import type { Result } from '../../shared/types/index.js';
+import { ConflictError, NotFoundError } from '../../shared/errors/index.js';
 import { isUuid } from '../../shared/utils/index.js';
-import type { LoginFailure } from '../auth/auth.service.js';
 import type { PlatformIdentity } from '../auth/identity.js';
 import type { AccountSessionStore } from '../ports/account-session.js';
 import type {
@@ -24,16 +16,10 @@ import type {
 } from '../ports/platform-account-unit-of-work.js';
 import type { SessionStore } from '../ports/session-store.js';
 
-/** Código da recusa de uma confirmação reforçada (spec 045, regra comum 3). */
-export const CONFIRMATION_INVALID = 'CONFIRMATION_INVALID';
+import { confirmPlatformAction, type PlatformActionConfirmer } from './platform-confirmation.js';
 
-/** Conferência do código novo do autenticador (o `AuthService.confirmPlatformCode`). */
-export interface PlatformActionConfirmer {
-  confirmPlatformCode(
-    adminId: PlatformIdentity['adminId'],
-    code: string | undefined,
-  ): Promise<Result<void, LoginFailure>>;
-}
+// Reexportados para quem já os importava daqui (a conferência é a mesma das ações da E3).
+export { CONFIRMATION_INVALID, type PlatformActionConfirmer } from './platform-confirmation.js';
 
 /** Os e-mails da 020 e da 021 disparados pelo id da conta (o `AccountService`). */
 export interface PlatformAccountMail {
@@ -195,25 +181,8 @@ export class PlatformAccountService {
     return AccountId.parse(accountId);
   }
 
-  /**
-   * Confirmação reforçada (D2): código novo do autenticador do próprio admin. Sem código, a mesma recusa
-   * sem consultar nada (como o formato inválido, não conta no bloqueio); errado ou já usado, a recusa e
-   * uma falha no bloqueio por conta do login da plataforma; bloqueado, 429 antes de conferir.
-   */
-  private async confirm(identity: PlatformIdentity, code: string | undefined): Promise<void> {
-    const invalid = (): ValidationError =>
-      new ValidationError('Código de confirmação inválido', { code: CONFIRMATION_INVALID });
-    if (code === undefined) throw invalid();
-    const result = await this.deps.confirmer.confirmPlatformCode(identity.adminId, code);
-    if (result.ok) return;
-    switch (result.error.reason) {
-      case 'locked':
-        throw new RateLimitError(result.error.retryAfterSeconds);
-      case 'unavailable':
-        throw new ServiceUnavailableError('Serviço de autenticação indisponível');
-      case 'invalid_credentials':
-        throw invalid();
-    }
+  private confirm(identity: PlatformIdentity, code: string | undefined): Promise<void> {
+    return confirmPlatformAction(this.deps.confirmer, identity, code);
   }
 
   /**

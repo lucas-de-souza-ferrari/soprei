@@ -4,6 +4,7 @@ import type { Company } from '../../domain/index.js';
 import type { AuthService } from '../../application/auth/auth.service.js';
 import { authenticateHook, requirePlatform } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
+import { ForbiddenError } from '../../shared/errors/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import {
   companyParamsSchema,
@@ -17,6 +18,11 @@ export interface AdminCompaniesControllerOptions {
   readonly auth: Pick<AuthService, 'authenticate'>;
   readonly metrics?: Pick<Metrics, 'countAuthTokenRejection'> | undefined;
   readonly companies: CompanyService;
+  /**
+   * D12 da spec 045: com o admin da plataforma ligado, as escritas daqui (sem motivo nem trilha) ficam
+   * fechadas: 403 `USE_PLATFORM_ADMIN` depois de confirmar que quem pede é a plataforma.
+   */
+  readonly writesClosed?: boolean;
 }
 
 /**
@@ -53,15 +59,25 @@ function toResponse(company: Company): {
  */
 export const adminCompaniesController: FastifyPluginCallback<AdminCompaniesControllerOptions> = (
   app,
-  { auth, metrics, companies },
+  { auth, metrics, companies, writesClosed = false },
   done,
 ) => {
   app.addHook('onRequest', authenticateHook({ auth, metrics }));
   // Rate limit por perfil (spec 005): todas as rotas daqui são `admin`.
   const config = rateLimitProfile('admin');
   const onRequest = requirePlatform();
+  // Escritas: a mesma autorização e, com o admin ligado, o 403 que manda usar o /platform/*.
+  const write = writesClosed
+    ? [
+        onRequest,
+        async (): Promise<void> => {
+          await Promise.resolve();
+          throw new ForbiddenError('Use o admin da plataforma', { code: 'USE_PLATFORM_ADMIN' });
+        },
+      ]
+    : onRequest;
 
-  app.post('/', { config, onRequest }, async (request, reply) => {
+  app.post('/', { config, onRequest: write }, async (request, reply) => {
     const body = createCompanyBodySchema.parse(request.body);
     const company = await companies.create(body);
     request.log.info({ companyId: company.id, slug: company.slug }, 'empresa criada');
@@ -82,7 +98,7 @@ export const adminCompaniesController: FastifyPluginCallback<AdminCompaniesContr
     return toResponse(await companies.getById(id));
   });
 
-  app.patch('/:id', { config, onRequest }, async (request) => {
+  app.patch('/:id', { config, onRequest: write }, async (request) => {
     const { id } = companyParamsSchema.parse(request.params);
     const body = updateCompanyBodySchema.parse(request.body);
     const company = await companies.update(id, body);
@@ -90,7 +106,7 @@ export const adminCompaniesController: FastifyPluginCallback<AdminCompaniesContr
     return toResponse(company);
   });
 
-  app.delete('/:id', { config, onRequest }, async (request, reply) => {
+  app.delete('/:id', { config, onRequest: write }, async (request, reply) => {
     const { id } = companyParamsSchema.parse(request.params);
     await companies.remove(id);
     request.log.info({ companyId: id }, 'empresa removida');

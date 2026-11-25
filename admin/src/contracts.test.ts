@@ -13,6 +13,9 @@ import {
   noticePageSchema,
   orderPageSchema,
   overviewSchema,
+  removeCompanyBodySchema,
+  renameBodySchema,
+  roleBodySchema,
   sessionSchema,
 } from './contracts';
 import {
@@ -177,5 +180,37 @@ describe('contratos do admin (spec 044, E3)', () => {
       { reason: 'BORED', code: '123456' },
     ])
       assert.equal(confirmedActionBodySchema.safeParse(body).success, false, JSON.stringify(body));
+  });
+
+  it('empresa e vínculos (spec 045, E3a): removedAt nas respostas; corpos strict, código de 6 dígitos', () => {
+    assert.ok(
+      companyDetailSchema.safeParse(companyDetail('ACTIVE', '2026-11-25T15:00:00.000Z')).success,
+    );
+    const withoutRemovedAt: Record<string, unknown> = { ...companyDetail() };
+    delete withoutRemovedAt.removedAt;
+    assert.equal(companyDetailSchema.safeParse(withoutRemovedAt).success, false);
+    assert.ok(renameBodySchema.safeParse({ name: 'Nome', reason: 'OTHER' }).success);
+    for (const body of [
+      { name: '   ', reason: 'OTHER' },
+      { name: 'x'.repeat(121), reason: 'OTHER' },
+      { name: 'Nome', reason: 'OTHER', slug: 'x' },
+    ])
+      assert.equal(renameBodySchema.safeParse(body).success, false, JSON.stringify(body));
+    assert.ok(
+      removeCompanyBodySchema.safeParse({ reason: 'ABUSE', slug: 'padaria', code: '123456' })
+        .success,
+    );
+    assert.equal(
+      removeCompanyBodySchema.safeParse({ reason: 'ABUSE', slug: 'padaria' }).success,
+      false,
+    );
+    assert.ok(roleBodySchema.safeParse({ role: 'ADMIN', reason: 'OTHER' }).success);
+    assert.ok(roleBodySchema.safeParse({ role: 'OWNER', reason: 'OTHER', code: '123456' }).success);
+    for (const body of [
+      { role: 'DONO', reason: 'OTHER' },
+      { role: 'ADMIN', reason: 'OTHER', code: '12345' },
+      { role: 'ADMIN', reason: 'OTHER', note: 'x' },
+    ])
+      assert.equal(roleBodySchema.safeParse(body).success, false, JSON.stringify(body));
   });
 });

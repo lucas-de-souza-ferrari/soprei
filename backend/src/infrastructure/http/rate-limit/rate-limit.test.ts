@@ -234,6 +234,14 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           sendPasswordReset: () => Promise.reject(new Error('inventário')),
           resendVerification: () => Promise.reject(new Error('inventário')),
         },
+        // Spec 045, E3a: ações sobre empresas e vínculos.
+        companies: {
+          rename: () => Promise.reject(new Error('inventário')),
+          remove: () => Promise.reject(new Error('inventário')),
+          restore: () => Promise.reject(new Error('inventário')),
+          changeRole: () => Promise.reject(new Error('inventário')),
+          setMembershipStatus: () => Promise.reject(new Error('inventário')),
+        },
       },
       // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
       accounts: {
@@ -419,6 +427,12 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/platform/accounts/:accountId/sessions/revoke',
       '/platform/accounts/:accountId/password-reset',
       '/platform/accounts/:accountId/verification/resend',
+      '/platform/companies/:companyId/rename',
+      '/platform/companies/:companyId/remove',
+      '/platform/companies/:companyId/restore',
+      '/platform/companies/:companyId/memberships/:membershipId/role',
+      '/platform/companies/:companyId/memberships/:membershipId/disable',
+      '/platform/companies/:companyId/memberships/:membershipId/enable',
       '/platform/billing/orders',
       '/platform/billing/notices',
       '/platform/health',

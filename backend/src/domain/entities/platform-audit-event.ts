@@ -1,5 +1,7 @@
 import type { AccountId, PlatformAdminId } from '../value-objects/account-id.js';
 import type { CompanyId } from '../value-objects/company-id.js';
+import type { MembershipId } from '../value-objects/membership-id.js';
+import type { MembershipRole } from './membership.js';
 
 /**
  * Ações da trilha da plataforma (spec 044). A E1 grava entrada e saída; as outras são das etapas
@@ -17,6 +19,13 @@ export const PLATFORM_AUDIT_ACTIONS = [
   'ACCOUNT_SESSIONS_REVOKED',
   'ACCOUNT_PASSWORD_RESET_SENT',
   'ACCOUNT_VERIFICATION_SENT',
+  // Spec 045, E3a: ações sobre empresa e vínculos.
+  'COMPANY_RENAMED',
+  'COMPANY_REMOVED',
+  'COMPANY_RESTORED',
+  'MEMBERSHIP_ROLE_CHANGED_BY_PLATFORM',
+  'MEMBERSHIP_DISABLED_BY_PLATFORM',
+  'MEMBERSHIP_ENABLED_BY_PLATFORM',
 ] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 
@@ -35,6 +44,10 @@ export interface PlatformAuditEvent {
   readonly action: PlatformAuditAction;
   readonly subjectCompanyId: CompanyId | null;
   readonly subjectAccountId: AccountId | null;
+  /** Spec 045, E3a: o vínculo alvo e os papéis de antes e de depois (só nas ações sobre vínculos). */
+  readonly subjectMembershipId: MembershipId | null;
+  readonly fromRole: MembershipRole | null;
+  readonly toRole: MembershipRole | null;
   readonly reason: PlatformActionReason | null;
   readonly createdAt: Date;
 }
@@ -44,5 +57,8 @@ export interface NewPlatformAuditEvent {
   readonly action: PlatformAuditAction;
   readonly subjectCompanyId?: CompanyId | null;
   readonly subjectAccountId?: AccountId | null;
+  readonly subjectMembershipId?: MembershipId | null;
+  readonly fromRole?: MembershipRole | null;
+  readonly toRole?: MembershipRole | null;
   readonly reason?: PlatformActionReason | null;
 }

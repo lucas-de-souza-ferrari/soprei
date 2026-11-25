@@ -63,6 +63,11 @@ import { type RateLimitParams, registerRateLimit } from './rate-limit/rate-limit
 
 export interface AdminRoutesParams {
   readonly companies: CompanyService;
+  /**
+   * D12 da spec 045 (`PLATFORM_ADMIN_ENABLED`): `POST`, `PATCH` e `DELETE /admin/companies[/:id]` respondem
+   * 403 `USE_PLATFORM_ADMIN` (a leitura continua). Sem isto (admin desligado), o comportamento de sempre.
+   */
+  readonly companyWritesClosed?: boolean;
   /** Sem isto as rotas de mensagens e conversas (spec 010) não são registradas. */
   readonly attendance?: AttendanceService;
   /**
@@ -330,6 +335,7 @@ export function buildServer({
       auth,
       metrics,
       companies: admin.companies,
+      writesClosed: admin.companyWritesClosed === true,
     });
     if (membershipAdmin !== undefined) {
       void app.register(adminMembershipsController, {

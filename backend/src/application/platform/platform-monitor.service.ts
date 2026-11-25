@@ -118,6 +118,8 @@ export interface PlatformCompanyListItem {
   readonly owner: PlatformCompanyOwner | null;
   /** Quantos donos ativos (`0`: empresa sem dono ativo). */
   readonly owners: number;
+  /** Spec 045, E3a: quando foi removida (só no filtro `status=removed`); `null` nas outras. */
+  readonly removedAt: Date | null;
 }
 
 export interface PlatformSubscriptionView {
@@ -357,6 +359,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * Falha do banco numa leitura que não passa pelo `PlatformReadModel` (o Primeiros passos do detalhe): o
  * mesmo 503 sem detalhe das leituras agregadas (revisão da E2, M2), em vez do 500 do `DatabaseError`.
  */
+/** Primeiros passos de uma empresa removida: não são lidos (a leitura da 030 só vê as não removidas). */
+const REMOVED_ONBOARDING = {
+  dismissed: false,
+  persona: false,
+  knowledge: false,
+  schedule: false,
+  inventory: false,
+} as const;
+
 function readUnavailable(operation: string): (error: unknown) => never {
   return (error: unknown) => {
     if (error instanceof DatabaseError) {
@@ -442,13 +453,17 @@ export class PlatformMonitorService {
           messages7d: row.messages7d,
           owner: row.owner,
           owners: row.owners,
+          removedAt: row.removedAt,
         };
       }),
       nextCursor: result.nextCursor,
     };
   }
 
-  /** Detalhe de uma empresa; id malformado, inexistente ou removido: 404. */
+  /**
+   * Detalhe de uma empresa; id malformado ou inexistente: 404. A removida também responde, com `removedAt`
+   * (spec 045, E3a: para restaurar); os primeiros passos dela não são lidos (vêm todos falsos).
+   */
   async companyDetail(companyId: string): Promise<PlatformCompanyDetail> {
     if (!isUuid(companyId)) throw companyNotFound();
     const now = this.now();
@@ -456,9 +471,11 @@ export class PlatformMonitorService {
     if (facts === null) throw companyNotFound();
     const id = facts.company.id;
     const [onboarding, subscriptionFacts] = await Promise.all([
-      this.deps.onboarding
-        .read(id, { persona: true, knowledge: true, schedule: true, inventory: true })
-        .catch(readUnavailable('PlatformMonitor.onboarding')),
+      facts.company.removedAt === null
+        ? this.deps.onboarding
+            .read(id, { persona: true, knowledge: true, schedule: true, inventory: true })
+            .catch(readUnavailable('PlatformMonitor.onboarding'))
+        : Promise.resolve(REMOVED_ONBOARDING),
       this.deps.billing === undefined || facts.subscriptionId === null
         ? Promise.resolve(null)
         : this.deps.reads.subscription({ subscriptionId: facts.subscriptionId }, now),
