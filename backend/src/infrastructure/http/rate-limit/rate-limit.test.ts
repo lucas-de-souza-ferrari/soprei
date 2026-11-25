@@ -227,6 +227,13 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           setCompanyStatus: () => Promise.reject(new Error('inventário')),
           health: () => Promise.reject(new Error('inventário')),
         },
+        // Spec 045, E2: ações sobre contas.
+        accounts: {
+          setStatus: () => Promise.reject(new Error('inventário')),
+          revokeSessions: () => Promise.reject(new Error('inventário')),
+          sendPasswordReset: () => Promise.reject(new Error('inventário')),
+          resendVerification: () => Promise.reject(new Error('inventário')),
+        },
       },
       // Contas globais (spec 017/021): as rotas do navegador também declaram o perfil.
       accounts: {
@@ -407,6 +414,11 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/platform/accounts',
       '/platform/accounts/:accountId',
       '/platform/accounts/:accountId/email',
+      '/platform/accounts/:accountId/disable',
+      '/platform/accounts/:accountId/enable',
+      '/platform/accounts/:accountId/sessions/revoke',
+      '/platform/accounts/:accountId/password-reset',
+      '/platform/accounts/:accountId/verification/resend',
       '/platform/billing/orders',
       '/platform/billing/notices',
       '/platform/health',

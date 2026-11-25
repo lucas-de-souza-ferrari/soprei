@@ -136,7 +136,13 @@ export type PlatformActionMetric =
   | 'platform_logout'
   | 'company_suspended'
   | 'company_reactivated'
-  | 'account_email_viewed';
+  | 'account_email_viewed'
+  // Spec 045, E2.
+  | 'account_disabled'
+  | 'account_enabled'
+  | 'account_sessions_revoked'
+  | 'account_password_reset_sent'
+  | 'account_verification_sent';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {

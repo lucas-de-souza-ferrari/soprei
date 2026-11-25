@@ -22,6 +22,7 @@ import type { AccessTokenService } from '../ports/access-token-service.js';
 import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { SessionStore } from '../ports/session-store.js';
 import type { PlatformSecondFactor } from '../platform/totp-second-factor.js';
+import { normalizeEmail } from './credentials.js';
 import {
   type AuthIdentity,
   PLATFORM_SCOPE,
@@ -256,6 +257,44 @@ export class AuthService {
     }
     this.metrics?.countAuthLogin('platform', 'ok');
     return Result.ok({ adminId: identity.adminId, totpSecretCiphertext });
+  }
+
+  /**
+   * Confirmação reforçada de uma ação de impacto do admin da plataforma (spec 045, regra comum 3, D2): um
+   * código TOTP **novo** do próprio administrador, conferido pelo mesmo segundo fator do login
+   * (`claimTotpStep`: o passo já usado, inclusive no login, não vale de novo). Usa o **mesmo** bloqueio por
+   * conta do login da plataforma (`['p', e-mail]`): bloqueada, responde `locked` antes de conferir; código
+   * errado conta uma falha. Sem segundo fator configurado, nunca confirma. Redis fora: `unavailable`.
+   */
+  async confirmPlatformCode(
+    adminId: PlatformAdminId,
+    code: string | undefined,
+  ): Promise<Result<void, LoginFailure>> {
+    const secondFactor = this.platformSecondFactor;
+    if (secondFactor === undefined) return Result.err({ reason: 'invalid_credentials' });
+    try {
+      const admin = await this.platformAdmins.findById(adminId);
+      const lockKey = loginLockKey(this.loginLockSecret, ['p', normalizeEmail(admin.email)]);
+      const lock = await this.sessions.loginLockState(lockKey);
+      if (lock.locked) {
+        this.logger.warn({ adminId }, 'confirmação da plataforma bloqueada por excesso de falhas');
+        return Result.err({ reason: 'locked', retryAfterSeconds: lock.retryAfterSeconds });
+      }
+      const ciphertext = await this.platformAdmins.findTotpSecret(adminId);
+      const confirmed =
+        admin.status === 'ACTIVE' && (await secondFactor.verify(adminId, ciphertext, code));
+      if (!confirmed) {
+        await this.sessions.recordLoginFailure(lockKey);
+        this.logger.info({ adminId, result: 'invalid' }, 'confirmação da plataforma recusada');
+        return Result.err({ reason: 'invalid_credentials' });
+      }
+      await this.sessions.resetLoginFailures(lockKey);
+      return Result.ok(undefined);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) return Result.err({ reason: 'unavailable' });
+      if (error instanceof NotFoundError) return Result.err({ reason: 'invalid_credentials' });
+      throw error;
+    }
   }
 
   private async lookupPlatformAdmin(email: string): Promise<LoginAccount | undefined> {

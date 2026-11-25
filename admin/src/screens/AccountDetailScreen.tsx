@@ -5,13 +5,15 @@ import { useAdmin, useLoad, type View } from '../admin-context';
 import { accountDetailSchema, accountEmailSchema } from '../contracts';
 import { errorMessage, formatCount, formatDateTime, label } from '../format';
 import { Alert, Button, Card, Facts, List, Loading, PageHeader, RowButton } from '../ui';
+import { AccountActions } from './AccountActions';
 import { subscriptionFacts } from './subscription-facts';
 
 /**
  * Detalhe de uma conta (spec 045, D3). Abre por `GET /platform/accounts/:accountId`, que traz só o e-mail
  * mascarado e não grava nada (abrir a conta a partir da empresa não conta como leitura do e-mail). O
  * e-mail completo só vem do botão "Mostrar e-mail" (`GET .../email`), leitura que o servidor audita; ele
- * fica só no estado desta tela, nunca no endereço, no título nem no armazenamento do navegador.
+ * fica só no estado desta tela, nunca no endereço, no título nem no armazenamento do navegador. As ações
+ * sobre a conta (spec 045, E2) ficam em `AccountActions`.
  */
 export function AccountDetailScreen({
   accountId,
@@ -94,6 +96,7 @@ export function AccountDetailScreen({
             ) : null}
             {revealError === undefined ? null : <Alert>{errorMessage(revealError)}</Alert>}
           </Card>
+          <AccountActions detail={data} onDone={reload} />
           <Card title="Empresas da conta">
             {data.companies.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nenhuma empresa.</p>

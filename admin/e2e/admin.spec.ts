@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { ACCOUNT_A, ADMIN_EMAIL, COMPANY_A, FULL_EMAIL } from './fixtures';
 import {
+  FRESH_CODE,
   GOOD,
   hasHorizontalScroll,
   installFakeApi,
@@ -255,6 +256,224 @@ test('conta: 401 em "Mostrar e-mail" volta à tela Entrar sem nada no navegador'
   await expect(page.getByRole('status')).toHaveText('Sessão encerrada. Entre novamente.');
   await expect(page.getByText(FULL_EMAIL)).toHaveCount(0);
   expect(api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}/email`)).toHaveLength(1);
+  expect(await storageSizes(page)).toEqual([0, 0]);
+});
+
+/** Abre o detalhe da conta A pela lista de contas. */
+async function openAccount(page: Page): Promise<void> {
+  await nav(page, 'Contas').click();
+  await page.getByRole('button', { name: 'Abrir conta l***@exemplo.test' }).click();
+  await expect(page.getByRole('heading', { name: 'Conta', level: 1 })).toBeVisible();
+}
+
+test('conta: desativar pede motivo e código novo (o do login é recusado), envia o corpo esperado e relê; reativar não pede código (spec 045, E2)', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await openAccount(page);
+  const path = `/platform/accounts/${ACCOUNT_A}`;
+  // Conta ativa e confirmada: sem "Reenviar código de confirmação".
+  await expect(
+    page.getByRole('button', { name: 'Enviar código de recuperação de senha' }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reenviar código de confirmação' })).toHaveCount(0);
+
+  // Cancelar não chama a rota.
+  await page.getByRole('button', { name: 'Desativar conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desativar a conta?' });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByText('A pessoa perde o acesso a todas as empresas na hora', { exact: false }),
+  ).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(dialog).toBeHidden();
+  expect(api.callsTo('POST', `${path}/disable`)).toHaveLength(0);
+
+  await page.getByRole('button', { name: 'Desativar conta' }).click();
+  const confirm = dialog.getByRole('button', { name: 'Confirmar desativação' });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel('Motivo').selectOption({ label: 'Abuso' });
+  const code = dialog.getByLabel('Código novo do autenticador');
+  await code.fill(GOOD.code);
+  await confirm.click();
+  await expect(dialog.getByRole('alert')).toContainText(
+    'Código do autenticador inválido ou já usado',
+  );
+  await expect(code).toHaveValue('');
+  expect(await hasHorizontalScroll(page)).toBe(false);
+
+  await code.fill(FRESH_CODE);
+  await confirm.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status')).toHaveText('Conta desativada e sessões encerradas.');
+  await expect(page.getByText('Desativada', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reativar conta' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Enviar código de recuperação de senha' }),
+  ).toHaveCount(0);
+  const calls = api.callsTo('POST', `${path}/disable`);
+  expect(calls.map((call) => call.body)).toEqual([
+    { reason: 'ABUSE', code: GOOD.code },
+    { reason: 'ABUSE', code: FRESH_CODE },
+  ]);
+  expect(calls[1]?.headers['x-soprei-app']).toBe('admin');
+  await expect(page.getByText(FRESH_CODE)).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Reativar conta' }).click();
+  const enable = page.getByRole('dialog', { name: 'Reativar a conta?' });
+  await expect(enable.getByLabel('Código novo do autenticador')).toHaveCount(0);
+  await enable.getByRole('button', { name: 'Confirmar reativação' }).click();
+  await expect(enable).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Desativar conta' })).toBeVisible();
+  expect(api.callsTo('POST', `${path}/enable`).map((call) => call.body)).toEqual([
+    { reason: 'OWNER_REQUEST' },
+  ]);
+  expect(await storageSizes(page)).toEqual([0, 0]);
+});
+
+test('conta: única dona ativa de empresa ativa, desativar mostra o motivo da recusa (409 LAST_OWNER) e nada muda', async ({
+  page,
+}) => {
+  await installFakeApi(page, { signedIn: true, lastOwner: true });
+  await page.goto('/');
+  await openAccount(page);
+  await page.getByRole('button', { name: 'Desativar conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desativar a conta?' });
+  await dialog.getByLabel('Código novo do autenticador').fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Confirmar desativação' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'Esta conta é a única dona ativa de uma empresa ativa. Suspenda a empresa ou transfira a propriedade antes.',
+  );
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByRole('button', { name: 'Desativar conta' })).toBeVisible();
+});
+
+test('conta: encerrar sessões e enviar código de recuperação com motivo; o aviso diz o que acontece', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await openAccount(page);
+  const path = `/platform/accounts/${ACCOUNT_A}`;
+
+  await page.getByRole('button', { name: 'Encerrar sessões' }).click();
+  const sessions = page.getByRole('dialog', { name: 'Encerrar as sessões da conta?' });
+  await sessions.getByLabel('Motivo').selectOption({ label: 'Outro' });
+  await sessions.getByRole('button', { name: 'Encerrar sessões' }).click();
+  await expect(sessions).toBeHidden();
+  await expect(page.getByRole('status')).toHaveText('Sessões encerradas.');
+  expect(api.callsTo('POST', `${path}/sessions/revoke`).map((call) => call.body)).toEqual([
+    { reason: 'OTHER' },
+  ]);
+
+  await page.getByRole('button', { name: 'Enviar código de recuperação de senha' }).click();
+  const reset = page.getByRole('dialog', { name: 'Enviar código de recuperação de senha?' });
+  await expect(
+    reset.getByText('Você não vê o código nem a senha.', { exact: false }),
+  ).toBeVisible();
+  await reset.getByRole('button', { name: 'Enviar código' }).click();
+  await expect(reset).toBeHidden();
+  await expect(page.getByRole('status')).toHaveText(
+    'Pedido registrado: o código sai por e-mail se a conta estiver apta.',
+  );
+  expect(api.callsTo('POST', `${path}/password-reset`).map((call) => call.body)).toEqual([
+    { reason: 'OWNER_REQUEST' },
+  ]);
+});
+
+test('conta não confirmada: só ela mostra "Reenviar código de confirmação"; o pedido vai com o motivo', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.accountVerified = false;
+  await page.goto('/');
+  await openAccount(page);
+  await expect(
+    page.getByRole('button', { name: 'Enviar código de recuperação de senha' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reenviar código de confirmação' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Reenviar o código de confirmação?' });
+  await dialog.getByRole('button', { name: 'Reenviar código' }).click();
+  await expect(dialog).toBeHidden();
+  expect(
+    api
+      .callsTo('POST', `/platform/accounts/${ACCOUNT_A}/verification/resend`)
+      .map((call) => call.body),
+  ).toEqual([{ reason: 'OWNER_REQUEST' }]);
+});
+
+test('conta: 503 em desativar ou encerrar sessões relê o detalhe e diz que a ação pode ter sido registrada sem encerrar as sessões (revisão da E2)', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.revocationDown = true;
+  await page.goto('/');
+  await openAccount(page);
+  const detailPath = `/platform/accounts/${ACCOUNT_A}`;
+  const partial =
+    'A ação pode ter sido registrada sem que as sessões tenham sido encerradas: repita para concluir.';
+
+  const reads = api.callsTo('GET', detailPath).length;
+  await page.getByRole('button', { name: 'Desativar conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desativar a conta?' });
+  await dialog.getByLabel('Código novo do autenticador').fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Confirmar desativação' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText(partial);
+  // O detalhe foi relido: a conta aparece desativada (a mudança foi gravada).
+  await expect.poll(() => api.callsTo('GET', detailPath).length).toBeGreaterThan(reads);
+  await expect(page.getByText('Desativada', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByRole('alert')).toHaveText(partial);
+
+  const before = api.callsTo('GET', detailPath).length;
+  await page.getByRole('button', { name: 'Encerrar sessões' }).click();
+  const sessions = page.getByRole('dialog', { name: 'Encerrar as sessões da conta?' });
+  await sessions.getByRole('button', { name: 'Encerrar sessões' }).click();
+  await expect(sessions.getByRole('alert')).toHaveText(partial);
+  await expect.poll(() => api.callsTo('GET', detailPath).length).toBeGreaterThan(before);
+});
+
+test('conta: 429 no diálogo de desativar e 409 ALREADY_VERIFIED no reenvio aparecem com a mensagem própria', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.accountVerified = false;
+  const disablePath = `/platform/accounts/${ACCOUNT_A}/disable`;
+  api.failures.set(disablePath, 429);
+  await page.goto('/');
+  await openAccount(page);
+
+  await page.getByRole('button', { name: 'Desativar conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desativar a conta?' });
+  await dialog.getByLabel('Código novo do autenticador').fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Confirmar desativação' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'Muitas tentativas. Aguarde antes de tentar novamente.',
+  );
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByRole('button', { name: 'Desativar conta' })).toBeVisible();
+
+  // A conta foi confirmada por outro caminho depois de a tela abrir: o servidor recusa o reenvio.
+  api.accountVerified = true;
+  await page.getByRole('button', { name: 'Reenviar código de confirmação' }).click();
+  const resend = page.getByRole('dialog', { name: 'Reenviar o código de confirmação?' });
+  await resend.getByRole('button', { name: 'Reenviar código' }).click();
+  await expect(resend.getByRole('alert')).toHaveText('O e-mail desta conta já está confirmado.');
+});
+
+test('conta: 401 numa ação volta à tela Entrar sem nada no navegador', async ({ page }) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.expired.add(`/platform/accounts/${ACCOUNT_A}/sessions/revoke`);
+  await page.goto('/');
+  await openAccount(page);
+  await page.getByRole('button', { name: 'Encerrar sessões' }).click();
+  await page
+    .getByRole('dialog', { name: 'Encerrar as sessões da conta?' })
+    .getByRole('button', { name: 'Encerrar sessões' })
+    .click();
+  await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Sessão encerrada. Entre novamente.');
   expect(await storageSizes(page)).toEqual([0, 0]);
 });
 

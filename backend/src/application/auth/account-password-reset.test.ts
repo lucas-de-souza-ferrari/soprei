@@ -476,3 +476,66 @@ test('observador que falha não derruba o pedido nem a redefinição', async () 
   await h.service.confirmPasswordReset(A, code, NEW_PASSWORD);
   assert.equal(await h.service.login(A, NEW_PASSWORD), 'sessao');
 });
+
+// Spec 045, E2: os mesmos caminhos da 020 e da 021 disparados pelo admin da plataforma, pelo id da conta.
+
+test('admin da plataforma: código de recuperação pelo id segue o caminho da 021 (só conta apta, 60 s entre pedidos) e o código troca a senha', async () => {
+  const h = harness();
+  await h.confirmed(A);
+  const account = await h.accounts.findByEmail(A);
+  assert.ok(account);
+  await h.service.requestPasswordResetFor(account.id);
+  await h.service.drain();
+  assert.equal(h.codeMails.length, 1);
+  assert.equal(h.codeMails[0]?.email, A);
+  const code = h.codeMails.at(0)?.code;
+  assert.ok(code !== undefined);
+  // Segundo pedido em menos de 60 s: nada sai.
+  h.advance(30_000);
+  await h.service.requestPasswordResetFor(account.id);
+  await h.service.drain();
+  assert.equal(h.codeMails.length, 1);
+  assert.deepEqual(h.requests, ['issued', 'ignored']);
+  // O código enviado funciona no confirm da 021.
+  await h.service.confirmPasswordReset(A, code, NEW_PASSWORD);
+  assert.deepEqual(h.attempts.at(-1), ['reset', account.id]);
+
+  // Não confirmada e desativada: nada sai.
+  await h.service.register(B, PASSWORD);
+  await h.service.drain();
+  const unverified = await h.accounts.findByEmail(B);
+  assert.ok(unverified);
+  const disabled = 'desativada@example.test';
+  await h.confirmed(disabled);
+  h.accounts.patch(disabled, { status: 'DISABLED' });
+  const off = await h.accounts.findByEmail(disabled);
+  assert.ok(off);
+  h.advance(2 * MINUTE);
+  for (const id of [unverified.id, off.id]) await h.service.requestPasswordResetFor(id);
+  await h.service.drain();
+  assert.equal(h.codeMails.length, 1);
+});
+
+test('admin da plataforma: reenviar confirmação pelo id (sem a senha), com o intervalo de 60 s; o código confirma; confirmada não muda', async () => {
+  const h = harness();
+  await h.service.register(B, PASSWORD);
+  await h.service.drain();
+  const account = await h.accounts.findByEmail(B);
+  assert.ok(account);
+  assert.equal(h.verificationMails.length, 1);
+  // Cedo demais desde o cadastro.
+  assert.equal(await h.service.resendVerificationFor(account.id), 'ignored');
+  h.advance(MINUTE);
+  assert.equal(await h.service.resendVerificationFor(account.id), 'sent');
+  await h.service.drain();
+  assert.equal(h.verificationMails.length, 2);
+  const mail = h.verificationMails.at(-1);
+  assert.equal(mail?.email, B);
+  // O código anterior morreu; o novo confirma pelo fluxo da 020.
+  assert.ok(mail);
+  await h.service.verify(B, PASSWORD, mail.code);
+  assert.equal(await h.service.resendVerificationFor(account.id), 'already_verified');
+  assert.equal(h.verificationMails.length, 2);
+  const missing = await h.accounts.findByEmail('ninguem@example.test');
+  assert.equal(missing, null);
+});

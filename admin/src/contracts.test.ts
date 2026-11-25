@@ -4,7 +4,9 @@ import {
   accountDetailSchema,
   accountEmailSchema,
   accountPageSchema,
+  ACCOUNT_ACTIONS,
   actionBodySchema,
+  confirmedActionBodySchema,
   companyDetailSchema,
   companyPageSchema,
   healthSchema,
@@ -159,5 +161,21 @@ describe('contratos do admin (spec 044, E3)', () => {
       assert.ok(actionBodySchema.safeParse({ reason }).success, reason);
     assert.equal(actionBodySchema.safeParse({ reason: 'BORED' }).success, false);
     assert.equal(actionBodySchema.safeParse({ reason: 'ABUSE', note: 'x' }).success, false);
+  });
+
+  it('ações da conta (spec 045, E2): só desativar pede código; o código são 6 dígitos e nada mais', () => {
+    const withCode = Object.entries(ACCOUNT_ACTIONS)
+      .filter(([, action]) => action.code)
+      .map(([name]) => name);
+    assert.deepEqual(withCode, ['disable']);
+    assert.ok(confirmedActionBodySchema.safeParse({ reason: 'ABUSE', code: '012345' }).success);
+    for (const body of [
+      { reason: 'ABUSE' },
+      { reason: 'ABUSE', code: '12345' },
+      { reason: 'ABUSE', code: '12345a' },
+      { reason: 'ABUSE', code: '123456', note: 'x' },
+      { reason: 'BORED', code: '123456' },
+    ])
+      assert.equal(confirmedActionBodySchema.safeParse(body).success, false, JSON.stringify(body));
   });
 });

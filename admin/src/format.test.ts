@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import { ApiError } from './api';
 import {
+  accountActionErrorMessage,
   errorMessage,
   formatCents,
   formatCount,
@@ -81,5 +82,32 @@ describe('formatação do admin (spec 044, E3)', () => {
     assert.equal(normalizeCode('123 456'), '123456');
     assert.equal(normalizeCode('12a3-4'), '1234');
     assert.equal(normalizeCode('12345678'), '123456');
+  });
+
+  it('ações da conta (spec 045, E2): códigos de regra explicados; o resto como qualquer erro', () => {
+    assert.match(
+      accountActionErrorMessage(new ApiError(400, 'CONFIRMATION_INVALID')),
+      /^Código do autenticador inválido ou já usado/,
+    );
+    assert.match(accountActionErrorMessage(new ApiError(409, 'LAST_OWNER')), /única dona ativa/);
+    assert.equal(
+      accountActionErrorMessage(new ApiError(409, 'ALREADY_VERIFIED')),
+      'O e-mail desta conta já está confirmado.',
+    );
+    assert.equal(
+      accountActionErrorMessage(new ApiError(429, 'RATE_LIMITED')),
+      'Muitas tentativas. Aguarde antes de tentar novamente.',
+    );
+    assert.equal(accountActionErrorMessage(new Error('x')), 'Algo deu errado. Tente novamente.');
+    // 503 em desativar e encerrar sessões: a mudança pode ter sido gravada sem a revogação.
+    for (const action of ['disable', 'revokeSessions'])
+      assert.match(
+        accountActionErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE'), action),
+        /registrada sem que as sessões tenham sido encerradas: repita para concluir/,
+      );
+    assert.equal(
+      accountActionErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE'), 'passwordReset'),
+      'Serviço indisponível no momento. Tente novamente em instantes.',
+    );
   });
 });

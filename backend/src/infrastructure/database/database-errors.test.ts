@@ -4,6 +4,8 @@ import { Prisma } from '../../generated/prisma/client.js';
 import { DatabaseError, ValidationError } from '../../shared/errors/index.js';
 import {
   isDatabaseFailure,
+  isDeadlock,
+  isExclusionViolation,
   isRecoverableTransactionError,
   toDatabaseError,
   withDatabaseErrors,
@@ -52,6 +54,28 @@ describe('isRecoverableTransactionError', () => {
     assert.ok(isRecoverableTransactionError(prismaError('P2028')));
     assert.equal(isRecoverableTransactionError(prismaError('P2002')), false);
     assert.equal(isRecoverableTransactionError(new Error('P2034')), false);
+  });
+});
+
+/** Erro do Prisma 7 com o SQLSTATE do Postgres no `driverAdapterError` (como chega de um `$queryRaw`). */
+function adapterError(sqlState: string): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('falha', {
+    code: 'P2010',
+    clientVersion: 'test',
+    meta: { driverAdapterError: { cause: { originalCode: sqlState } } },
+  });
+}
+
+describe('isDeadlock e isExclusionViolation (SQLSTATE do Postgres)', () => {
+  it('reconhecem o código no adaptador do Prisma 7, no erro do driver e dentro de um DatabaseError', () => {
+    assert.ok(isDeadlock(adapterError('40P01')));
+    assert.ok(isDeadlock(Object.assign(new Error('x'), { code: '40P01' })));
+    assert.ok(isDeadlock(toDatabaseError(adapterError('40P01'), 'transaction')));
+    assert.equal(isDeadlock(adapterError('23P01')), false);
+    assert.equal(isDeadlock(prismaError('P2034')), false);
+    assert.equal(isDeadlock(new Error('40P01')), false);
+    assert.ok(isExclusionViolation(adapterError('23P01')));
+    assert.equal(isExclusionViolation(adapterError('40P01')), false);
   });
 });
 

@@ -163,6 +163,28 @@ export function errorMessage(error: unknown): string {
   }
 }
 
+/**
+ * Mensagem de uma ação sobre a conta (spec 045, E2): os códigos de regra que a tela explica; o resto é
+ * `errorMessage`. Nunca o texto do servidor.
+ */
+export function accountActionErrorMessage(error: unknown, action?: string): string {
+  if (error instanceof ApiError) {
+    // Desativar e encerrar sessões gravam a mudança e a trilha antes de revogar as sessões; o 503 pode ser
+    // só da revogação (Redis fora). Repetir é seguro e conclui.
+    if (error.status === 503 && (action === 'disable' || action === 'revokeSessions'))
+      return 'A ação pode ter sido registrada sem que as sessões tenham sido encerradas: repita para concluir.';
+    switch (error.code) {
+      case 'CONFIRMATION_INVALID':
+        return 'Código do autenticador inválido ou já usado. Espere o próximo código (até 30 s) e tente de novo.';
+      case 'LAST_OWNER':
+        return 'Esta conta é a única dona ativa de uma empresa ativa. Suspenda a empresa ou transfira a propriedade antes.';
+      case 'ALREADY_VERIFIED':
+        return 'O e-mail desta conta já está confirmado.';
+    }
+  }
+  return errorMessage(error);
+}
+
 /** Mensagem da tela Entrar (o 401 é a falha uniforme de credenciais). */
 export function loginErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 401)

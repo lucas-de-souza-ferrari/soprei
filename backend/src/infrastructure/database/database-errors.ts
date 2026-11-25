@@ -36,9 +36,24 @@ export function isRecoverableTransactionError(error: unknown): boolean {
  * `meta.driverAdapterError.cause.originalCode`. Também aceita o erro cru do `pg` e olha a cadeia de `cause`.
  * É o **único** lugar que conhece essa forma (spec 027: dupla reserva).
  */
-export function isExclusionViolation(error: unknown, depth = 0): boolean {
+export function isExclusionViolation(error: unknown): boolean {
+  return hasPostgresCode(error, '23P01');
+}
+
+/**
+ * Deadlock detectado pelo Postgres (SQLSTATE 40P01), na mesma forma do Prisma 7 com o adaptador `pg` (ou
+ * dentro de um `DatabaseError`, pela cadeia de `cause`). Em SQL cru ele não chega como P2034, então o
+ * `runInTransaction` não o repete sozinho; quem tem travas em ordem que pode cruzar com outro caminho
+ * (spec 045, E2: desativar conta x `createCompany`) repete a transação inteira.
+ */
+export function isDeadlock(error: unknown): boolean {
+  return hasPostgresCode(error, '40P01');
+}
+
+/** O SQLSTATE do erro do driver, direto, no `driverAdapterError` do Prisma 7 ou na cadeia de `cause`. */
+function hasPostgresCode(error: unknown, sqlState: string, depth = 0): boolean {
   if (depth > 4 || typeof error !== 'object' || error === null) return false;
-  if (errorCode(error) === '23P01') return true;
+  if (errorCode(error) === sqlState) return true;
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     const meta: unknown = error.meta;
     if (typeof meta === 'object' && meta !== null && 'driverAdapterError' in meta) {
@@ -47,12 +62,12 @@ export function isExclusionViolation(error: unknown, depth = 0): boolean {
         const cause: unknown = adapter.cause;
         if (typeof cause === 'object' && cause !== null) {
           const record = cause as Record<string, unknown>;
-          if (record['originalCode'] === '23P01' || record['code'] === '23P01') return true;
+          if (record['originalCode'] === sqlState || record['code'] === sqlState) return true;
         }
       }
     }
   }
-  return 'cause' in error && isExclusionViolation(error.cause, depth + 1);
+  return 'cause' in error && hasPostgresCode(error.cause, sqlState, depth + 1);
 }
 
 /** Erro que veio do Prisma ou do driver `pg` (e não de regra de negócio). */

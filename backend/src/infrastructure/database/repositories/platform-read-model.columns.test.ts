@@ -203,6 +203,16 @@ describe('platform-read-model.ts: SQL sem conteúdo (spec 044, E2)', () => {
     assert.equal(invitations.length, (sql.match(/\bcompany_invitations\b/g) ?? []).length);
   });
 
+  it('a regra do último dono da E2 usa o mesmo "dono ativo" da E1 (activeOwnersFrom), regra comum 11 da spec 045', () => {
+    const source = readFileSync(MODULE, 'utf8');
+    const start = source.indexOf('export async function soleActiveOwnerCompanyCount(');
+    assert.ok(start > 0, 'a função existe');
+    const body = source.slice(start, source.indexOf('\n}\n', start));
+    assert.equal(body.split('${activeOwnersFrom(Prisma.sql`co.id`)}').length - 1, 2);
+    assert.match(body, /co\.deleted_at IS NULL/);
+    assert.match(body, /co\.status = 'ACTIVE'/);
+  });
+
   it('é o único arquivo novo com SQL cru: a lista de módulos com $queryRaw/$executeRaw não cresce sem revisão', () => {
     const withRaw = sourceFiles(SRC)
       .filter((path) => /\$(queryRaw|executeRaw)/.test(readFileSync(path, 'utf8')))
