@@ -1,6 +1,6 @@
 # 045 — Admin da plataforma: quem é dono e gestão completa (CRUD) de contas, empresas, vínculos, assinatura e canal
 
-- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 na `main` (PR #30); E2 implementada na branch `spec/045-e2-contas` (aguarda CI e `reviewer`); E3 a E6 por fazer, na ordem
+- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 e E2 na `main` (PRs #30 e #31); E3 em implementação na branch `spec/045-e3-empresas`; E4 a E6 por fazer, na ordem
 - **Branch:** `spec/045-admin-gestao` (esta spec); cada etapa em branch própria a partir da `main` (`spec/045-e1-pessoas`, `spec/045-e2-contas`, ...)
 - **Depende de:** 044 (admin, sessão com segundo fator, `PlatformAuditEvent`, leitura agregada), 008 (papéis, regra do último `OWNER`, trava da empresa), 017/020/021 (contas, confirmação, recuperação de senha, `revokeAll`), 025 (convites), 015/023/039 (canal), 031/040 (assinatura), 032 (E7 excluir conta e E8 excluir empresa, ainda não implementadas: esta spec cruza com as duas).
 - **Spec de segurança:** cada etapa passa pelo `reviewer` antes do merge. Ela abre as **primeiras escritas da plataforma sobre contas, vínculos, assinatura e canal**, muda o contrato do convite (convidador que não é vínculo) e amplia as decisões D1 e D7 da 044.
@@ -136,17 +136,17 @@ Comuns (provados em cada etapa para as rotas dela):
 
 E1:
 
-- [ ] O detalhe da empresa A lista as pessoas de A (com o `OWNER` primeiro e o e-mail mascarado) e nunca as de B; a lista de empresas traz o dono de cada uma e `owners = 0` para empresa sem dono ativo (integração com duas empresas, Postgres real). _Teste escrito em `platform-admin.integration.test.ts`; não rodou localmente (sem `.env.test` nesta máquina): marcar depois do CI verde._
+- [x] O detalhe da empresa A lista as pessoas de A (com o `OWNER` primeiro e o e-mail mascarado) e nunca as de B; a lista de empresas traz o dono de cada uma e `owners = 0` para empresa sem dono ativo (integração com duas empresas, Postgres real). _(CI verde no PR #30.)_
 - [x] Com `BILLING_ENABLED=false`, o dono aparece (o pedido do dono: o titular deixa de depender da assinatura).
 - [x] `GET /platform/accounts/:accountId` traz só `emailMasked` e não grava nada; `GET .../email` grava um `ACCOUNT_EMAIL_VIEWED` antes de responder e, com a gravação falhando, não devolve o e-mail.
 - [x] O teste de colunas de `platform-read-model.ts` aceita `email` só dentro da expressão de máscara (e na leitura da rota auditada) e continua recusando as colunas de conteúdo.
 
 E2:
 
-- [ ] Desativar conta: status gravado, trilha, `revokeAll` e sessões Bearer dos vínculos revogadas depois do commit; o cookie dela recebe 401 na requisição seguinte; conta única `OWNER` ativa de empresa ativa = 409 `LAST_OWNER` sem efeito; com a empresa suspensa, desativa. _Unidade e rota verdes (`platform-account.service.test.ts`, `platform-account.controller.test.ts`, `account-password-reset.test.ts`); a prova de ponta a ponta com Postgres e Redis está em `platform-accounts.integration.test.ts`, que não rodou localmente (sem `.env.test`): marcar depois do CI verde._
+- [x] Desativar conta: status gravado, trilha, `revokeAll` e sessões Bearer dos vínculos revogadas depois do commit; o cookie dela recebe 401 na requisição seguinte; conta única `OWNER` ativa de empresa ativa = 409 `LAST_OWNER` sem efeito; com a empresa suspensa, desativa. _(CI verde no PR #31.)_
 - [x] Redis fora na revogação = 503 com a conta já desativada e a trilha gravada; repetir refaz só a revogação. _(`platform-account.service.test.ts`; também em `platform-accounts.integration.test.ts`.)_
-- [ ] Código de recuperação pelo admin: 202 sempre; conta confirmada e ativa recebe o e-mail (mailer falso) e o código funciona em `POST /auth/password-reset/confirm`; um segundo pedido em menos de 60 s não envia; conta não confirmada ou desativada não recebe nada. _Unidade e rota verdes (`platform-account.service.test.ts`, `platform-account.controller.test.ts`, `account-password-reset.test.ts`); a prova de ponta a ponta com Postgres e Redis está em `platform-accounts.integration.test.ts`, que não rodou localmente (sem `.env.test`): marcar depois do CI verde._
-- [ ] Reenviar confirmação: só conta não confirmada (409 `ALREADY_VERIFIED` na confirmada); o código enviado confirma pelo `POST /auth/verify-email`. _Unidade e rota verdes (`platform-account.service.test.ts`, `platform-account.controller.test.ts`, `account-password-reset.test.ts`); a prova de ponta a ponta com Postgres e Redis está em `platform-accounts.integration.test.ts`, que não rodou localmente (sem `.env.test`): marcar depois do CI verde._
+- [x] Código de recuperação pelo admin: 202 sempre; conta confirmada e ativa recebe o e-mail (mailer falso) e o código funciona em `POST /auth/password-reset/confirm`; um segundo pedido em menos de 60 s não envia; conta não confirmada ou desativada não recebe nada. _(CI verde no PR #31.)_
+- [x] Reenviar confirmação: só conta não confirmada (409 `ALREADY_VERIFIED` na confirmada); o código enviado confirma pelo `POST /auth/verify-email`. _(CI verde no PR #31.)_
 
 E3:
 
