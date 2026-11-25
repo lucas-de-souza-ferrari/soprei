@@ -19,6 +19,7 @@ import {
   testPlatformCipher,
 } from '../../test-support/in-memory-platform.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
+import { ACCOUNT_COOKIE } from '../auth/account.controller.js';
 import { PLATFORM_COOKIE } from './platform-auth.controller.js';
 
 // Spec 045, E2: as ações do admin da plataforma sobre uma conta, de ponta a ponta pelo Fastify (cookie com
@@ -191,7 +192,7 @@ describe('/platform/accounts/:accountId/* ações sobre a conta (spec 045, E2)',
     }
   });
 
-  it('sem o cookie, com Bearer de plataforma ou de vínculo: 401 e nada gravado; sem origem ou cabeçalho: 403 e nada gravado', async () => {
+  it('sem o cookie do admin, com Bearer de plataforma ou de vínculo ou com o cookie da conta do site: 401 e nada gravado; sem origem ou cabeçalho: 403 e nada gravado', async () => {
     const world = await setup();
     try {
       const other = await enrollTestAdmin(world.auth, world.cipher);
@@ -210,6 +211,8 @@ describe('/platform/accounts/:accountId/* ações sobre a conta (spec 045, E2)',
         {},
         bearer(issued.value.accessToken),
         bearer(membership.accessToken),
+        // O cookie da conta do site (mesmo válido no formato) nunca é lido em /platform/*.
+        { cookie: `${ACCOUNT_COOKIE}=${'a'.repeat(43)}` },
       ]) {
         for (const [url, payload] of routes(world.accountId)) {
           const response = await world.app.inject({
