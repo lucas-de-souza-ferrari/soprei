@@ -30,6 +30,8 @@ interface InvitationResponse {
   expiresAt: string;
   lastSentAt: string;
   sendCount: number;
+  /** Spec 045, E3b: convite feito pela plataforma (a empresa revoga, não reenvia). */
+  fromPlatform: boolean;
 }
 
 function toInvitationResponse(invitation: InvitationView): InvitationResponse {
@@ -42,6 +44,7 @@ function toInvitationResponse(invitation: InvitationView): InvitationResponse {
     expiresAt: invitation.expiresAt.toISOString(),
     lastSentAt: invitation.lastSentAt.toISOString(),
     sendCount: invitation.sendCount,
+    fromPlatform: invitation.fromPlatform,
   };
 }
 

@@ -37,7 +37,9 @@ export function Invitations({
   } | null>(null);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<MembershipRole>('AGENT');
+  // Convidar e reenviar só na ativa (suspensa = 409 COMPANY_INACTIVE); revogar também na suspensa.
   const active = detail.status === 'ACTIVE' && detail.removedAt === null;
+  const canRevoke = detail.removedAt === null;
 
   function open(action: InvitationAction, invitation?: Invitation) {
     setEmail('');
@@ -143,14 +145,16 @@ export function Invitations({
                   {formatCount(invitation.sendCount)}{' '}
                   {invitation.sendCount === 1 ? 'envio' : 'envios'}
                 </span>
-                {active ? (
+                {canRevoke ? (
                   <span className="flex flex-wrap gap-2">
-                    <Button
-                      ariaLabel={`Reenviar convite ${invitation.emailMasked}`}
-                      onClick={() => open('resend', invitation)}
-                    >
-                      Reenviar
-                    </Button>
+                    {active ? (
+                      <Button
+                        ariaLabel={`Reenviar convite ${invitation.emailMasked}`}
+                        onClick={() => open('resend', invitation)}
+                      >
+                        Reenviar
+                      </Button>
+                    ) : null}
                     <Button
                       variant="danger"
                       ariaLabel={`Revogar convite ${invitation.emailMasked}`}

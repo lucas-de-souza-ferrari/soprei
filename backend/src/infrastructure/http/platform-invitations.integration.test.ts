@@ -214,6 +214,86 @@ describe('convite da plataforma e "Nova empresa" com Postgres e Redis reais (spe
     assert.ok(!listed.items.some((entry) => entry.id === item.id));
   });
 
+  it('a empresa vê o convite da plataforma (fromPlatform) e pode revogá-lo, mas não reenviá-lo (revisão da E3b, I1)', async () => {
+    const { owner, company } = await w.setup('Empresa E3b G');
+    const email = w.freshEmail('dono-pela-plataforma');
+    const view = await w.invitations.createByPlatform(
+      admin,
+      company,
+      { email, role: 'OWNER' },
+      reason,
+    );
+    const list = await w.request('GET', `/admin/companies/${company}/invitations`, {
+      cookie: owner.cookie,
+    });
+    assert.equal(list.statusCode, 200, list.body);
+    const items = list.json<{ items: { id: string; role: string; fromPlatform: boolean }[] }>()
+      .items;
+    assert.deepEqual(
+      items.map((item) => [item.id, item.role, item.fromPlatform]),
+      [[view.id, 'OWNER', true]],
+    );
+    w.control.offsetMs = 61_000;
+    try {
+      const resend = await w.request(
+        'POST',
+        `/admin/companies/${company}/invitations/${view.id}/resend`,
+        { cookie: owner.cookie, payload: {} },
+      );
+      assert.equal(resend.statusCode, 403);
+      assert.equal(errorOf(resend).code, 'INVITATION_FROM_PLATFORM');
+    } finally {
+      w.control.offsetMs = 0;
+    }
+    const row = await w.db.prisma.companyInvitation.findFirst({
+      where: { id: view.id, companyId: company },
+      select: { sendCount: true, status: true },
+    });
+    assert.deepEqual(row, { sendCount: 1, status: 'PENDING' });
+    const revoke = await w.request('DELETE', `/admin/companies/${company}/invitations/${view.id}`, {
+      cookie: owner.cookie,
+    });
+    assert.equal(revoke.statusCode, 204);
+  });
+
+  it('trilha recusada em convidar, reenviar e revogar pela plataforma: nada muda (rollback real)', async () => {
+    const real = w.unitOfWork;
+    const broken: InvitationUnitOfWork = {
+      run: (fn) =>
+        real.run((tx) =>
+          fn({ ...tx, platformAudit: () => Promise.reject(new Error('trilha indisponível')) }),
+        ),
+    };
+    const service = w.buildInvitations({ unitOfWork: broken });
+    const { company } = await w.setup('Empresa E3b H');
+    const blocked = w.freshEmail('sem-trilha');
+    await assert.rejects(
+      service.createByPlatform(admin, company, { email: blocked, role: 'AGENT' }, reason),
+    );
+    assert.equal(
+      await w.db.prisma.companyInvitation.count({ where: { companyId: company, email: blocked } }),
+      0,
+    );
+    const view = await w.invitations.createByPlatform(
+      admin,
+      company,
+      { email: w.freshEmail('com-trilha'), role: 'AGENT' },
+      reason,
+    );
+    w.control.offsetMs = 61_000;
+    try {
+      await assert.rejects(service.resendByPlatform(admin, company, view.id, reason));
+    } finally {
+      w.control.offsetMs = 0;
+    }
+    await assert.rejects(service.revokeByPlatform(admin, company, view.id, reason));
+    const row = await w.db.prisma.companyInvitation.findFirst({
+      where: { id: view.id, companyId: company },
+      select: { sendCount: true, status: true },
+    });
+    assert.deepEqual(row, { sendCount: 1, status: 'PENDING' });
+  });
+
   it('"Nova empresa" grava a empresa e o convite de OWNER na mesma transação; slug repetido (inclusive de removida) = 409 SLUG_TAKEN', async () => {
     const slug = `e3b-${randomUUID().slice(0, 8)}`;
     const ownerEmail = w.freshEmail('dono-novo');
@@ -230,7 +310,7 @@ describe('convite da plataforma e "Nova empresa" com Postgres e Redis reais (spe
     assert.deepEqual(company, { status: 'ACTIVE', slug, subscriptionId: null });
     assert.equal(created.invitation.role, 'OWNER');
     assert.deepEqual(
-      (await platformEvents(created.companyId)).map((event) => event.action),
+      (await platformEvents(created.companyId)).map((event) => event.action).sort(),
       ['COMPANY_CREATED', 'INVITATION_CREATED_BY_PLATFORM'],
     );
     const mail = await lastMailTo(ownerEmail);
@@ -287,11 +367,20 @@ describe('convite da plataforma e "Nova empresa" com Postgres e Redis reais (spe
     assert.equal(await w.db.prisma.company.count({ where: { slug } }), 0);
   });
 
-  it('privacidade: nenhum e-mail de convidado, token ou link no log', () => {
+  it('privacidade: nenhum e-mail de convidado, token, link ou nome de empresa no log nem no /metrics', async () => {
     const raw = w.logs.raw();
+    const metrics = await w.app.inject({
+      method: 'GET',
+      url: '/metrics',
+      headers: { authorization: `Bearer ${'m'.repeat(32)}` },
+    });
+    assert.equal(metrics.statusCode, 200);
+    assert.match(metrics.body, /action="invitation_created_by_platform"/);
     for (const entry of w.sent) {
-      assert.ok(!logContains(raw, entry.email), 'e-mail no log');
-      assert.ok(!logContains(raw, entry.mail.link), 'link no log');
+      for (const secret of [entry.email, entry.mail.link, entry.mail.companyName]) {
+        assert.ok(!logContains(raw, secret), 'no log');
+        assert.ok(!metrics.body.includes(secret), 'no /metrics');
+      }
     }
   });
 });

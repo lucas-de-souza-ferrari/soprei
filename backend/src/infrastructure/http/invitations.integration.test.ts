@@ -49,6 +49,7 @@ describe('criar convite: permissão, hierarquia e papéis', () => {
         'createdAt',
         'email',
         'expiresAt',
+        'fromPlatform',
         'id',
         'lastSentAt',
         'role',

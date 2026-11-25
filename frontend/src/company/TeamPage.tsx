@@ -481,6 +481,7 @@ export function TeamPage({ companyId, actor, permissions, settle, onChanged }: T
                   <strong className="[overflow-wrap:anywhere]">{item.email}</strong>
                   <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                     <span>{ROLE_LABELS[item.role]}</span>
+                    {item.fromPlatform && <Chip tone="muted">Convite da equipe do Soprei</Chip>}
                     <Chip tone={expired ? 'danger' : 'primary'}>
                       {INVITATION_STATE_LABELS[item.state]}
                     </Chip>
@@ -493,18 +494,21 @@ export function TeamPage({ companyId, actor, permissions, settle, onChanged }: T
                     memberActions(actor.role, actor.membershipId, { id: '', role: item.role })
                       .manage && (
                       <div className="flex flex-wrap gap-2 pt-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy || wait > 0}
-                          onClick={() =>
-                            void act(async () => {
-                              await teamApi.resend(companyId, item.id);
-                            }, 'Convite reenviado.')
-                          }
-                        >
-                          {wait > 0 ? `Reenviar (${String(wait)} s)` : 'Reenviar'}
-                        </Button>
+                        {/* O convite da plataforma só é reenviado por ela (spec 045, E3b); a equipe revoga. */}
+                        {!item.fromPlatform && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy || wait > 0}
+                            onClick={() =>
+                              void act(async () => {
+                                await teamApi.resend(companyId, item.id);
+                              }, 'Convite reenviado.')
+                            }
+                          >
+                            {wait > 0 ? `Reenviar (${String(wait)} s)` : 'Reenviar'}
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"

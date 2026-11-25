@@ -388,3 +388,23 @@ test('nenhuma requisição fora de /api e nenhum texto do servidor em respostas 
   await expect(page.getByText(SENTINEL)).toHaveCount(0);
   expect(api.external.filter((url) => !url.includes('fonts.g'))).toEqual([]);
 });
+
+test('convite de dono feito pela plataforma (spec 045, E3b): aparece na lista, sem "Reenviar", e pode ser revogado', async ({
+  page,
+}) => {
+  await open(page, 'OWNER', (api, team) => {
+    team.invitations[companyIdOf(api)] = [
+      invitation('futuro.dono@example.test', 'OWNER', { fromPlatform: true }),
+      invitation('atendente@example.test', 'AGENT'),
+    ];
+  });
+  await expect(rows(page, 'convite')).toHaveCount(2);
+  const fromPlatform = rows(page, 'convite').filter({ hasText: 'futuro.dono@example.test' });
+  await expect(fromPlatform).toContainText('Convite da equipe do Soprei');
+  await expect(fromPlatform.getByRole('button', { name: /Reenviar/ })).toHaveCount(0);
+  await expect(fromPlatform.getByRole('button', { name: 'Revogar' })).toBeVisible();
+  const own = rows(page, 'convite').filter({ hasText: 'atendente@example.test' });
+  await expect(own.getByRole('button', { name: /Reenviar/ })).toBeVisible();
+  // Os membros continuam na tela (antes, o convite de dono quebrava a Equipe inteira).
+  await expect(rows(page, 'membro')).toHaveCount(1);
+});

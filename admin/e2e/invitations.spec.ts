@@ -116,3 +116,23 @@ test('"Nova empresa": nome, slug e e-mail do dono; slug repetido mostra a recusa
   expect(await hasHorizontalScroll(page)).toBe(false);
   expect(await storageSizes(page)).toEqual([0, 0]);
 });
+
+test('convites: empresa suspensa só revoga (sem convidar nem reenviar); removida não mostra a seção', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.companyStatus = 'SUSPENDED';
+  await page.goto('/');
+  await openCompanyA(page);
+  const list = page.getByRole('list', { name: 'Convites pendentes' });
+  await expect(list.getByText(pendingInvitation.emailMasked)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Convidar pessoa' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Reenviar convite/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Revogar convite/ })).toBeVisible();
+
+  api.companyStatus = 'ACTIVE';
+  api.companyRemovedAt = '2026-11-25T15:00:00.000Z';
+  await page.getByRole('button', { name: 'Atualizar' }).click();
+  await expect(page.getByText('Empresa removida em', { exact: false })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Convites pendentes' })).toHaveCount(0);
+});

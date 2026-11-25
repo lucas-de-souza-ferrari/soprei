@@ -82,6 +82,8 @@ export interface InvitationView {
   readonly expiresAt: Date;
   readonly lastSentAt: Date;
   readonly sendCount: number;
+  /** Spec 045, E3b: convite feito pela plataforma (a empresa revoga, mas não reenvia). */
+  readonly fromPlatform: boolean;
 }
 
 /**
@@ -177,6 +179,7 @@ function toView(invitation: CompanyInvitation, now: Date): InvitationView {
     expiresAt: invitation.expiresAt,
     lastSentAt: invitation.lastSentAt,
     sendCount: invitation.sendCount,
+    fromPlatform: invitation.invitedByAdminId !== null,
   };
 }
 
@@ -325,6 +328,17 @@ export class InvitationService {
         if (company.status !== 'ACTIVE') this.deny(actor, 'company_suspended', actor.role);
         const manager = await this.loadManager(tx, actor);
         const invitation = await tx.invitations.findById(actor.companyId, invitationId);
+        // Spec 045, E3b (revisão, I1): o convite da plataforma (inclusive o de dono) só é reenviado pela
+        // plataforma; a empresa pode revogá-lo, não prolongá-lo.
+        if (invitation.invitedByAdminId !== null) {
+          this.deps.logger.warn(
+            { actorMembershipId: actor.membershipId, reason: 'platform_invitation' },
+            'reenvio de convite da plataforma recusado',
+          );
+          throw new ForbiddenError('Convite feito pela equipe do Soprei', {
+            code: 'INVITATION_FROM_PLATFORM',
+          });
+        }
         this.requireHierarchy(actor, manager.role, invitation.role, 'resend');
         if (invitation.status !== 'PENDING') throw this.notPending();
         const now = this.now();

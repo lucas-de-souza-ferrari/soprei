@@ -7,6 +7,10 @@
 -- dá a falha uniforme INVITATION_INVALID nesse intervalo, caso de borda da spec). Os valores novos de enum
 -- não são usados nesta migration (um valor recém-acrescentado não pode ser usado na mesma transação).
 
+-- O DDL abaixo trava company_invitations e platform_audit_events com a versão anterior no ar: espera no
+-- máximo 5 s por uma trava em vez de enfileirar convites e aceites atrás dele (falha = deploy para, nada muda).
+SET lock_timeout = '5s';
+
 -- AlterEnum (só acrescenta)
 ALTER TYPE "platform_audit_action" ADD VALUE IF NOT EXISTS 'COMPANY_CREATED';
 ALTER TYPE "platform_audit_action" ADD VALUE IF NOT EXISTS 'INVITATION_CREATED_BY_PLATFORM';

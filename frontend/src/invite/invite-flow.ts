@@ -37,6 +37,8 @@ export const INVITE_ACCOUNT_CREATED_MESSAGE = 'Conta criada. Entre com a senha q
 export const INVITE_RATE_MESSAGE = 'Muitas tentativas. Aguarde antes de tentar novamente.';
 
 export const INVITE_ROLE_LABELS = {
+  // Spec 045, E3b: o admin da plataforma convida também o dono (ex.: empresa criada pelo admin).
+  OWNER: 'Dono',
   ADMIN: 'Administrador',
   AGENT: 'Atendente',
   VIEWER: 'Somente leitura',
@@ -44,7 +46,7 @@ export const INVITE_ROLE_LABELS = {
 
 export const invitePreviewSchema = z.strictObject({
   companyName: z.string().min(1).max(200),
-  role: z.enum(['ADMIN', 'AGENT', 'VIEWER']),
+  role: z.enum(['OWNER', 'ADMIN', 'AGENT', 'VIEWER']),
   email: z.string().min(1).max(254),
   accountState: z.enum(['NEW', 'EXISTS']),
 });

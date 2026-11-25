@@ -410,9 +410,12 @@ export function CompanyDetailScreen({
           </Card>
           <Card title="Pessoas">
             <People detail={data} self={self} onDone={reload} />
-            <div className="mt-4">
-              <Invitations detail={data} onDone={reload} />
-            </div>
+            {/* A removida não tem convites (a remoção revoga os pendentes; a lista dela é 404). */}
+            {data.removedAt === null ? (
+              <div className="mt-4">
+                <Invitations detail={data} onDone={reload} />
+              </div>
+            ) : null}
           </Card>
           <Card title="Assinatura e uso">
             <Subscription detail={data} />
