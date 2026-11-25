@@ -241,6 +241,23 @@ test('conta: o detalhe abre mascarado; só "Mostrar e-mail" chama a rota auditad
   await expect(page.getByText(FULL_EMAIL)).toHaveCount(0);
 });
 
+test('conta: 401 em "Mostrar e-mail" volta à tela Entrar sem nada no navegador', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.expired.add(`/platform/accounts/${ACCOUNT_A}/email`);
+  await page.goto('/');
+  await nav(page, 'Contas').click();
+  await page.getByRole('button', { name: 'Abrir conta l***@exemplo.test' }).click();
+  await expect(page.getByRole('heading', { name: 'Conta', level: 1 })).toBeVisible();
+  await page.getByRole('button', { name: 'Mostrar e-mail' }).click();
+  await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Sessão encerrada. Entre novamente.');
+  await expect(page.getByText(FULL_EMAIL)).toHaveCount(0);
+  expect(api.callsTo('GET', `/platform/accounts/${ACCOUNT_A}/email`)).toHaveLength(1);
+  expect(await storageSizes(page)).toEqual([0, 0]);
+});
+
 test('empresa: o dono em destaque, a seção Pessoas e "Abrir conta" sem ler o e-mail completo (spec 045, E1)', async ({
   page,
 }) => {
