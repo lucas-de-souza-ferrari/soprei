@@ -348,3 +348,23 @@ test('a tela de convite aguenta o tema escuro e a largura de 360 px', async ({
   await noHorizontalScroll(page);
   await page.screenshot({ path: testInfo.outputPath('convite-escuro.png'), fullPage: true });
 });
+
+test('convite de dono feito pela plataforma (spec 045, E3b): o preview mostra "Dono" e o aceite segue', async ({
+  page,
+}) => {
+  const token = newToken();
+  const { invite } = await install(page, {
+    preview: {
+      companyName: COMPANY_NAME,
+      role: 'OWNER',
+      email: SESSION_EMAIL,
+      accountState: 'EXISTS',
+    },
+  });
+  await page.goto(`/convite#t=${token}`);
+  await expect(page.getByText('Você foi convidado para a empresa')).toContainText(COMPANY_NAME);
+  await expect(page.getByText('Dono', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: `Entrar na empresa ${COMPANY_NAME}` }).click();
+  await expect(page).toHaveURL(/\/painel\/conversas$/);
+  expect(inviteCalls(invite).some((call) => call.path.endsWith('/accept'))).toBe(true);
+});

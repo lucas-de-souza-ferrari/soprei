@@ -37,12 +37,14 @@ export const membersPageSchema = z.strictObject({
 export const invitationSchema = z.strictObject({
   id: z.uuid(),
   email: z.string().min(1).max(254),
-  role: z.enum(['ADMIN', 'AGENT', 'VIEWER']),
+  // Spec 045, E3b: o convite da plataforma pode ser de dono e vem marcado (a equipe revoga, não reenvia).
+  role: z.enum(['OWNER', 'ADMIN', 'AGENT', 'VIEWER']),
   state: z.enum(['PENDING', 'EXPIRED']),
   createdAt: isoDate,
   expiresAt: isoDate,
   lastSentAt: isoDate,
   sendCount: z.number().int().min(1).max(6),
+  fromPlatform: z.boolean(),
 });
 export type InvitationItem = z.infer<typeof invitationSchema>;
 

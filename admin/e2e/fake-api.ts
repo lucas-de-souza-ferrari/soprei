@@ -2,6 +2,9 @@ import type { Page, Request } from '@playwright/test';
 import {
   actionBodySchema,
   confirmedActionBodySchema,
+  createCompanyBodySchema,
+  inviteBodySchema,
+  type Invitation,
   removeCompanyBodySchema,
   renameBodySchema,
   roleBodySchema,
@@ -40,7 +43,8 @@ const QUERY_RULES: Record<string, Record<string, RegExp>> = {
 };
 
 function queryAccepted(path: string, search: URLSearchParams): boolean {
-  const rules = QUERY_RULES[path] ?? {};
+  // Spec 045, E3b: a lista de convites aceita só limit e cursor, como o validador do servidor.
+  const rules = QUERY_RULES[path] ?? (path.endsWith('/invitations') ? PAGE : {});
   for (const [key, value] of search) {
     const rule = rules[key];
     if (rule === undefined || !rule.test(value)) return false;
@@ -77,6 +81,8 @@ export class FakeApi {
   companyName = 'Padaria Aurora';
   companyRemovedAt: string | null = null;
   readonly people = new Map<string, { role: MembershipRole; status: 'ACTIVE' | 'DISABLED' }>();
+  /** Spec 045, E3b: convites pendentes da empresa A (o e-mail só mascarado, como o servidor devolve). */
+  readonly invitations: Invitation[] = [fx.pendingInvitation];
   /** Caminhos que passam a responder 401 (sessão vencida no servidor). */
   readonly expired = new Set<string>();
   /** Caminhos que respondem com este status de erro antes de qualquer outra regra (logout com 503...). */
@@ -201,6 +207,10 @@ export class FakeApi {
         }
         case `/platform/companies/${fx.COMPANY_A}`:
           return { status: 200, json: this.detailA() };
+        case `/platform/companies/${fx.COMPANY_A}/invitations`:
+          return { status: 200, json: { items: this.invitations, nextCursor: null } };
+        case `/platform/companies/${fx.COMPANY_B}/invitations`:
+          return { status: 200, json: { items: [], nextCursor: null } };
         case `/platform/companies/${fx.COMPANY_B}`:
           return { status: 200, json: fx.companyDetailB() };
         case '/platform/accounts':
@@ -236,6 +246,21 @@ export class FakeApi {
     if (method === 'POST' && path === `/platform/companies/${fx.COMPANY_A}/reactivate`) {
       this.companyStatus = 'ACTIVE';
       return { status: 204 };
+    }
+    if (method === 'POST' && path === '/platform/companies') {
+      const parsed = createCompanyBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (parsed.data.slug === fx.companyA.slug) return error(409, 'SLUG_TAKEN');
+      return {
+        status: 201,
+        json: { companyId: fx.COMPANY_B, invitation: { ...fx.pendingInvitation, role: 'OWNER' } },
+      };
+    }
+    if (method === 'POST' && path.startsWith(`/platform/companies/${fx.COMPANY_A}/invitations`)) {
+      return this.invitationAction(
+        path.slice(`/platform/companies/${fx.COMPANY_A}/invitations`.length),
+        body,
+      );
     }
     if (method === 'POST' && path.startsWith(`/platform/companies/${fx.COMPANY_A}/`)) {
       const action = this.companyAction(
@@ -319,6 +344,41 @@ export class FakeApi {
     }
     person.status = 'ACTIVE';
     return { status: 204 };
+  }
+
+  /** Convites da empresa A (spec 045, E3b): convidar, reenviar e revogar, com corpo `strict`. */
+  private invitationAction(rest: string, body: unknown): { status: number; json?: unknown } {
+    const error = (status: number, code: string) => ({
+      status,
+      json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
+    });
+    if (rest === '') {
+      const parsed = inviteBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (parsed.data.email === fx.MEMBER_EMAIL) return error(409, 'MEMBER_ALREADY_EXISTS');
+      const created: Invitation = {
+        ...fx.pendingInvitation,
+        id: '0193a1b2-0000-7000-8000-0000000000f2',
+        emailMasked: `${parsed.data.email.slice(0, 1)}***@${parsed.data.email.split('@')[1] ?? ''}`,
+        role: parsed.data.role,
+        invitedBy: 'platform',
+      };
+      this.invitations.push(created);
+      return { status: 201, json: created };
+    }
+    const match = /^\/([^/]+)\/(resend|revoke)$/.exec(rest);
+    if (match === null) return error(404, 'NOT_FOUND');
+    if (!actionBodySchema.safeParse(body).success) return error(400, 'VALIDATION_ERROR');
+    const index = this.invitations.findIndex((item) => item.id === match[1]);
+    const invitation = this.invitations[index];
+    if (invitation === undefined) return error(404, 'NOT_FOUND');
+    if (match[2] === 'revoke') {
+      this.invitations.splice(index, 1);
+      return { status: 204 };
+    }
+    const resent = { ...invitation, sendCount: invitation.sendCount + 1 };
+    this.invitations[index] = resent;
+    return { status: 200, json: resent };
   }
 
   /** Ações sobre a conta A (spec 045, E2), com as regras que a tela percebe; corpo `strict` como no servidor. */

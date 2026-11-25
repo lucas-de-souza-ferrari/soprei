@@ -23,6 +23,7 @@ function toPlatformAuditEvent(row: PlatformAuditEventRow): PlatformAuditEvent {
     subjectAccountId: row.subjectAccountId === null ? null : AccountId.parse(row.subjectAccountId),
     subjectMembershipId:
       row.subjectMembershipId === null ? null : MembershipId.parse(row.subjectMembershipId),
+    subjectInvitationId: row.subjectInvitationId,
     fromRole: row.fromRole,
     toRole: row.toRole,
     reason: row.reason,
@@ -46,6 +47,7 @@ export class PrismaPlatformAuditRepository implements PlatformAuditRepository {
           subjectCompanyId: data.subjectCompanyId ?? null,
           subjectAccountId: data.subjectAccountId ?? null,
           subjectMembershipId: data.subjectMembershipId ?? null,
+          subjectInvitationId: data.subjectInvitationId ?? null,
           fromRole: data.fromRole ?? null,
           toRole: data.toRole ?? null,
           reason: data.reason ?? null,

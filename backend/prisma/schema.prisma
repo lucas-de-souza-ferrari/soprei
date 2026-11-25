@@ -287,7 +287,9 @@ model CompanyInvitation {
   role                  MembershipRole
   status                InvitationStatus @default(PENDING)
   tokenHash             String?          @map("token_hash")
-  invitedByMembershipId String           @map("invited_by_membership_id") @db.Uuid
+  /// Spec 045, E3b: exatamente um dos dois convidadores (CHECK). O vínculo (025) ou o admin da plataforma.
+  invitedByMembershipId String?          @map("invited_by_membership_id") @db.Uuid
+  invitedByAdminId      String?          @map("invited_by_admin_id") @db.Uuid
   acceptedMembershipId  String?          @map("accepted_membership_id") @db.Uuid
   expiresAt             DateTime         @map("expires_at") @db.Timestamptz(6)
   lastSentAt            DateTime         @map("last_sent_at") @db.Timestamptz(6)
@@ -295,10 +297,12 @@ model CompanyInvitation {
   createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   closedAt              DateTime?        @map("closed_at") @db.Timestamptz(6)
 
-  company            Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  invitedBy          Membership   @relation("InvitationInviter", fields: [invitedByMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
-  acceptedMembership Membership?  @relation("InvitationAccepted", fields: [acceptedMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
-  auditEvents        AuditEvent[]
+  company             Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  invitedBy           Membership?          @relation("InvitationInviter", fields: [invitedByMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  invitedByAdmin      PlatformAdmin?       @relation(fields: [invitedByAdminId], references: [id], onDelete: Restrict)
+  platformAuditEvents PlatformAuditEvent[]
+  acceptedMembership  Membership?          @relation("InvitationAccepted", fields: [acceptedMembershipId, companyId], references: [id, companyId], onDelete: Restrict)
+  auditEvents         AuditEvent[]
 
   @@unique([id, companyId])
   @@index([companyId, status, createdAt, id])
@@ -319,7 +323,8 @@ model PlatformAdmin {
   /// Último passo TOTP aceito: o mesmo código não entra duas vezes.
   totpLastStep         Int?         @map("totp_last_step")
 
-  auditEvents PlatformAuditEvent[]
+  auditEvents     PlatformAuditEvent[]
+  invitationsSent CompanyInvitation[]
 
   @@map("platform_admins")
 }
@@ -341,6 +346,10 @@ enum PlatformAuditAction {
   MEMBERSHIP_ROLE_CHANGED_BY_PLATFORM
   MEMBERSHIP_DISABLED_BY_PLATFORM
   MEMBERSHIP_ENABLED_BY_PLATFORM
+  COMPANY_CREATED
+  INVITATION_CREATED_BY_PLATFORM
+  INVITATION_RESENT_BY_PLATFORM
+  INVITATION_REVOKED_BY_PLATFORM
 
   @@map("platform_audit_action")
 }
@@ -364,18 +373,22 @@ model PlatformAuditEvent {
   subjectAccountId    String?               @map("subject_account_id") @db.Uuid
   /// Spec 045, E3: o vínculo alvo (mudar papel, desativar ou reativar) e os papéis de antes e de depois.
   subjectMembershipId String?               @map("subject_membership_id") @db.Uuid
+  /// Spec 045, E3b: o convite alvo (convidar, reenviar, revogar pela plataforma).
+  subjectInvitationId String?               @map("subject_invitation_id") @db.Uuid
   fromRole            MembershipRole?       @map("from_role")
   toRole              MembershipRole?       @map("to_role")
   reason              PlatformActionReason?
   createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  admin             PlatformAdmin @relation(fields: [adminId], references: [id], onDelete: Restrict)
-  subjectCompany    Company?      @relation(fields: [subjectCompanyId], references: [id], onDelete: Restrict)
-  subjectAccount    Account?      @relation(fields: [subjectAccountId], references: [id], onDelete: SetNull)
-  subjectMembership Membership?   @relation(fields: [subjectMembershipId], references: [id], onDelete: Restrict)
+  admin             PlatformAdmin      @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  subjectCompany    Company?           @relation(fields: [subjectCompanyId], references: [id], onDelete: Restrict)
+  subjectAccount    Account?           @relation(fields: [subjectAccountId], references: [id], onDelete: SetNull)
+  subjectMembership Membership?        @relation(fields: [subjectMembershipId], references: [id], onDelete: Restrict)
+  subjectInvitation CompanyInvitation? @relation(fields: [subjectInvitationId], references: [id], onDelete: Restrict)
 
   @@index([createdAt, id])
   @@index([subjectMembershipId])
+  @@index([subjectInvitationId])
   @@index([subjectCompanyId])
   @@index([subjectAccountId])
   @@map("platform_audit_events")

@@ -149,7 +149,12 @@ export type PlatformActionMetric =
   | 'company_restored'
   | 'membership_role_changed_by_platform'
   | 'membership_disabled_by_platform'
-  | 'membership_enabled_by_platform';
+  | 'membership_enabled_by_platform'
+  // Spec 045, E3b.
+  | 'company_created'
+  | 'invitation_created_by_platform'
+  | 'invitation_resent_by_platform'
+  | 'invitation_revoked_by_platform';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {

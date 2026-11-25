@@ -38,6 +38,8 @@ type Fetch = typeof fetch;
 export interface ApiClient {
   get<T>(path: string, schema: z.ZodType<T>): Promise<T>;
   post(path: string, body?: unknown): Promise<void>;
+  /** `POST` cuja resposta interessa (spec 045, E3b: "Nova empresa" devolve o id): conferida pelo contrato. */
+  postFor<T>(path: string, body: unknown, schema: z.ZodType<T>): Promise<T>;
 }
 
 /** Cliente da API; `fetchImpl` existe para os testes unitários. */
@@ -62,21 +64,27 @@ export function createApi(fetchImpl: Fetch = (...args) => fetch(...args)): ApiCl
     return response;
   }
 
+  async function parse<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      throw new ApiError(0, 'INVALID_RESPONSE');
+    }
+    const parsed = schema.safeParse(json);
+    if (!parsed.success) throw new ApiError(0, 'INVALID_RESPONSE');
+    return parsed.data;
+  }
+
   return {
     async get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
-      const response = await send('GET', path);
-      let json: unknown;
-      try {
-        json = await response.json();
-      } catch {
-        throw new ApiError(0, 'INVALID_RESPONSE');
-      }
-      const parsed = schema.safeParse(json);
-      if (!parsed.success) throw new ApiError(0, 'INVALID_RESPONSE');
-      return parsed.data;
+      return parse(await send('GET', path), schema);
     },
     async post(path: string, body?: unknown): Promise<void> {
       await send('POST', path, body);
+    },
+    async postFor<T>(path: string, body: unknown, schema: z.ZodType<T>): Promise<T> {
+      return parse(await send('POST', path, body), schema);
     },
   };
 }

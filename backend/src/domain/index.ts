@@ -124,6 +124,7 @@ export type {
   InvitationRenewal,
   InvitationStatus,
   NewCompanyInvitation,
+  InvitationInviter,
 } from './entities/company-invitation.js';
 export type {
   CompanyInvitationRepository,

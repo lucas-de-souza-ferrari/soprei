@@ -201,6 +201,18 @@ export function companyActionErrorMessage(error: unknown, action?: string): stri
         return 'O slug digitado não confere com o da empresa.';
       case 'LAST_OWNER':
         return 'A empresa ficaria sem dono ativo. Promova outra pessoa a dono antes.';
+      case 'SLUG_TAKEN':
+        return 'Já existe uma empresa com este slug (inclusive entre as removidas). Escolha outro.';
+      case 'MEMBER_ALREADY_EXISTS':
+        return 'Esta pessoa já faz parte da empresa.';
+      case 'INVITATION_ALREADY_PENDING':
+        return 'Já há um convite pendente para este e-mail. Reenvie o que existe.';
+      case 'COMPANY_INACTIVE':
+        return 'A empresa está suspensa: reative antes de convidar.';
+      case 'INVITATION_LIMIT_REACHED':
+        return 'Limite de convites atingido (pendentes, envios do dia ou intervalo entre reenvios). Tente mais tarde.';
+      case 'INVITATION_NOT_PENDING':
+        return 'Este convite já não está pendente.';
       case 'MEMBER_NOT_ELIGIBLE':
         return 'A pessoa não pode receber isso: o vínculo e a conta precisam estar ativos (e, para dono, com o e-mail confirmado).';
     }

@@ -161,6 +161,7 @@ export class InMemoryPlatformAuditRepository implements PlatformAuditRepository 
       subjectCompanyId: data.subjectCompanyId ?? null,
       subjectAccountId: data.subjectAccountId ?? null,
       subjectMembershipId: data.subjectMembershipId ?? null,
+      subjectInvitationId: data.subjectInvitationId ?? null,
       fromRole: data.fromRole ?? null,
       toRole: data.toRole ?? null,
       reason: data.reason ?? null,

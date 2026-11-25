@@ -5,6 +5,7 @@ import type {
   CompanyDetail,
   CompanyPage,
   Health,
+  Invitation,
   NoticePage,
   OrderPage,
   Overview,
@@ -381,3 +382,19 @@ export const health: Health = {
     },
   },
 };
+
+/** Spec 045, E3b: um convite pendente da empresa A, feito pela equipe (e-mail mascarado). */
+export const pendingInvitation = {
+  id: '0193a1b2-0000-7000-8000-0000000000f1',
+  emailMasked: 'r***@exemplo.test',
+  role: 'AGENT',
+  state: 'PENDING',
+  invitedBy: 'membership',
+  createdAt: '2026-11-24T12:00:00.000Z',
+  expiresAt: '2026-12-01T12:00:00.000Z',
+  lastSentAt: '2026-11-24T12:00:00.000Z',
+  sendCount: 1,
+} as const satisfies Invitation;
+
+/** E-mail que já é de uma pessoa da empresa A: convidar dá 409 `MEMBER_ALREADY_EXISTS`. */
+export const MEMBER_EMAIL = 'membro.existente@exemplo.test';

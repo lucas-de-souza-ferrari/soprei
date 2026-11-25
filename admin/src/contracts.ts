@@ -512,6 +512,54 @@ export const confirmedActionBodySchema = z
 /** Papel de um vínculo (`MEMBERSHIP_ROLES`, na ordem da tela: dono primeiro). */
 export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
 
+// --- Spec 045, E3b: convites da plataforma e "Nova empresa" -----------------------------------------
+
+/**
+ * Convite pendente como o admin o vê (`GET /platform/companies/:companyId/invitations`): o e-mail só
+ * mascarado (conferido pelo formato), nunca o inteiro, o token nem o link.
+ */
+export const invitationSchema = z.object({
+  id,
+  emailMasked: maskedEmail,
+  role: membershipRoleSchema,
+  state: z.enum(['PENDING', 'EXPIRED']),
+  invitedBy: z.enum(['membership', 'platform']),
+  createdAt: instant,
+  expiresAt: instant,
+  lastSentAt: instant,
+  sendCount: count,
+});
+export type Invitation = z.infer<typeof invitationSchema>;
+
+export const invitationPageSchema = z.object({
+  items: z.array(invitationSchema).max(50),
+  nextCursor: cursor,
+});
+
+/** `POST /platform/companies/:companyId/invitations` (201): qualquer papel, inclusive `OWNER`. */
+export const inviteBodySchema = z
+  .object({
+    email: z.string().trim().min(3).max(254).includes('@'),
+    role: z.enum(MEMBERSHIP_ROLES),
+    reason: z.enum(ACTION_REASONS),
+  })
+  .strict();
+
+/** `POST /platform/companies` (201): a empresa e o convite de `OWNER` para `ownerEmail`. */
+export const createCompanyBodySchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    slug: z.string().regex(/^[a-z0-9-]{3,63}$/),
+    ownerEmail: z.string().trim().min(3).max(254).includes('@'),
+    reason: z.enum(ACTION_REASONS),
+  })
+  .strict();
+
+export const createCompanyResponseSchema = z.object({
+  companyId: id,
+  invitation: invitationSchema,
+});
+
 /** `POST /platform/companies/:companyId/rename` (204): o nome (1 a 120) e o motivo. */
 export const renameBodySchema = z
   .object({ name: z.string().trim().min(1).max(120), reason: z.enum(ACTION_REASONS) })

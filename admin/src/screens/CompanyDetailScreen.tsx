@@ -34,6 +34,7 @@ import {
   StatGrid,
 } from '../ui';
 import { CompanyActions, MembershipActions } from './CompanyActions';
+import { Invitations } from './InvitationActions';
 import { modulesText, subscriptionFacts } from './subscription-facts';
 
 const ONBOARDING_STEPS = [
@@ -409,6 +410,12 @@ export function CompanyDetailScreen({
           </Card>
           <Card title="Pessoas">
             <People detail={data} self={self} onDone={reload} />
+            {/* A removida não tem convites (a remoção revoga os pendentes; a lista dela é 404). */}
+            {data.removedAt === null ? (
+              <div className="mt-4">
+                <Invitations detail={data} onDone={reload} />
+              </div>
+            ) : null}
           </Card>
           <Card title="Assinatura e uso">
             <Subscription detail={data} />

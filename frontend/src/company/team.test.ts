@@ -186,9 +186,18 @@ test('contratos estritos: campo desconhecido é recusado (a tela falha em vez de
     expiresAt: '2026-11-11T12:00:00.000Z',
     lastSentAt: '2026-11-04T12:00:00.000Z',
     sendCount: 1,
+    fromPlatform: false,
   };
   assert.equal(invitationSchema.safeParse(invitation).success, true);
   assert.equal(invitationSchema.safeParse({ ...invitation, tokenHash: 'x' }).success, false);
-  assert.equal(invitationSchema.safeParse({ ...invitation, role: 'OWNER' }).success, false);
+  // Spec 045, E3b: o convite de dono feito pela plataforma aparece na Equipe (sem ele, a tela quebrava).
+  assert.equal(
+    invitationSchema.safeParse({ ...invitation, role: 'OWNER', fromPlatform: true }).success,
+    true,
+  );
+  assert.equal(invitationSchema.safeParse({ ...invitation, role: 'ROOT' }).success, false);
+  const withoutOrigin: Record<string, unknown> = { ...invitation };
+  delete withoutOrigin.fromPlatform;
+  assert.equal(invitationSchema.safeParse(withoutOrigin).success, false);
   assert.equal(invitationSchema.safeParse({ ...invitation, sendCount: 7 }).success, false);
 });

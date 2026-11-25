@@ -5,6 +5,7 @@ import type {
   CompanyInvitationRepository,
   CompanyStatus,
   MembershipRole,
+  NewPlatformAuditEvent,
 } from '../../domain/index.js';
 
 /** O vínculo que age (ou que convidou), com papel e estado **do banco** (não do token). */
@@ -64,6 +65,20 @@ export interface InvitationTransaction {
    * confirmação e de recuperação pendentes. `false` se ela deixou de estar nesse estado.
    */
   confirmUnverifiedAccount(id: string, passwordHash: string, now: Date): Promise<boolean>;
+  /** Estado do administrador da plataforma que convidou (spec 045, E3b); `null` se não existe. */
+  adminStatus(adminId: string): Promise<AccessStatus | null>;
+  /**
+   * Envios (convidar e reenviar) feitos pela plataforma para esta empresa desde `since` (spec 045, E3b):
+   * somam na cota de envios por empresa, junto com os da própria empresa.
+   */
+  countPlatformSends(companyId: CompanyId, since: Date): Promise<number>;
+  /** Grava um evento da trilha da plataforma nesta transação (spec 045, E3b). */
+  platformAudit(event: NewPlatformAuditEvent): Promise<void>;
+  /**
+   * Cria a empresa `ACTIVE` nesta transação (spec 045, E3b, "Nova empresa"). Slug repetido, inclusive de
+   * empresa removida (fica reservado), é 409 `SLUG_TAKEN`.
+   */
+  createCompany(input: { readonly name: string; readonly slug: string }): Promise<CompanyId>;
   /** Cria o vínculo da conta na empresa (`passwordHash` fixo `account-managed`). */
   createMembership(
     companyId: CompanyId,

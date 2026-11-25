@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ApiError } from '../api';
+import { ApiError, type ApiClient } from '../api';
 import { useAdmin } from '../admin-context';
 import {
   ACTION_REASONS,
@@ -15,7 +15,7 @@ import { Alert, Button, Dialog, Select } from '../ui';
 const FIELD = 'min-h-10 w-full rounded-md border border-input bg-card px-3 text-card-foreground';
 
 /** O que um diálogo de ação precisa (regra comum 10 da spec 045). */
-interface ActionSpec {
+export interface ActionSpec {
   readonly title: string;
   /** O efeito, em português, dito antes de confirmar. */
   readonly effect: string;
@@ -31,6 +31,8 @@ interface ActionSpec {
   /** Campos próprios (nome novo, slug, papel); `ready` diz se o envio pode sair. */
   readonly fields?: ReactNode;
   readonly ready?: boolean;
+  /** Envio próprio (ex.: "Nova empresa", que lê a resposta); sem ele, `api.post(path, corpo)`. */
+  readonly submit?: (api: ApiClient, body: Record<string, unknown>) => Promise<void>;
 }
 
 /**
@@ -39,7 +41,7 @@ interface ActionSpec {
  * ocupado durante o envio; erro só por `status` e `error.code`; 401 volta a Entrar; sucesso relê a tela.
  * Quem usa passa uma `key` por ação: cada diálogo aberto começa limpo (motivo padrão, sem código nem erro).
  */
-function ActionDialog({
+export function ActionDialog({
   spec,
   onClose,
   onDone,
@@ -61,7 +63,9 @@ function ActionDialog({
     const sent = code;
     setCode('');
     try {
-      await api.post(spec.path, { ...spec.body, reason, ...(spec.code ? { code: sent } : {}) });
+      const body = { ...spec.body, reason, ...(spec.code ? { code: sent } : {}) };
+      if (spec.submit === undefined) await api.post(spec.path, body);
+      else await spec.submit(api, body);
       onClose();
       onDone();
     } catch (failure) {
@@ -123,7 +127,7 @@ function ActionDialog({
   );
 }
 
-function TextInput({
+export function TextInput({
   label: text,
   name,
   value,

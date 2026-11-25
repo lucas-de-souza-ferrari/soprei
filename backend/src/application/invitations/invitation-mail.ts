@@ -22,6 +22,7 @@ export function sanitizeCompanyName(name: string): string {
 }
 
 const ROLE_LABELS: Readonly<Record<CompanyInvitationMail['role'], string>> = {
+  OWNER: 'Dono',
   ADMIN: 'Administrador',
   AGENT: 'Atendente',
   VIEWER: 'Somente leitura',

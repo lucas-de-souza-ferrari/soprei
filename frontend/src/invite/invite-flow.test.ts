@@ -55,7 +55,7 @@ test('a falha de qualquer convite é uma só; o texto do servidor nunca importa'
   assert.equal(inviteFailureKind(undefined, undefined), 'unavailable');
 });
 
-test('o preview é estrito: campo desconhecido e papel OWNER são recusados', () => {
+test('o preview é estrito: campo desconhecido é recusado; o papel OWNER (convite da plataforma, spec 045) é aceito', () => {
   const body = {
     companyName: 'Padaria',
     role: 'AGENT',
@@ -64,7 +64,8 @@ test('o preview é estrito: campo desconhecido e papel OWNER são recusados', ()
   };
   assert.equal(invitePreviewSchema.safeParse(body).success, true);
   assert.equal(invitePreviewSchema.safeParse({ ...body, invitationId: 'x' }).success, false);
-  assert.equal(invitePreviewSchema.safeParse({ ...body, role: 'OWNER' }).success, false);
+  assert.equal(invitePreviewSchema.safeParse({ ...body, role: 'OWNER' }).success, true);
+  assert.equal(invitePreviewSchema.safeParse({ ...body, role: 'DONO' }).success, false);
   assert.equal(invitePreviewSchema.safeParse({ ...body, accountState: 'MAYBE' }).success, false);
 });
 

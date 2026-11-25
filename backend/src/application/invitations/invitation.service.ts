@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import {
   type AuditAction,
   type AccountRepository,
+  COMPANY_SLUG_PATTERN,
   canManageRole,
   CompanyId,
   type CompanyInvitation,
@@ -21,6 +22,8 @@ import {
   type MembershipRole,
   type Page,
   type Permission,
+  type PlatformActionReason,
+  type PlatformAuditAction,
 } from '../../domain/index.js';
 import type {
   InvitationEmailResult,
@@ -35,8 +38,10 @@ import {
   RateLimitError,
   ValidationError,
 } from '../../shared/errors/index.js';
+import { isUuid } from '../../shared/utils/index.js';
 import { normalizeEmail } from '../auth/credentials.js';
-import type { MembershipIdentity } from '../auth/identity.js';
+import type { MembershipIdentity, PlatformIdentity } from '../auth/identity.js';
+import { COMPANY_NAME_MAX_LENGTH } from '../companies/company.service.js';
 import type { InvitationMailer } from '../ports/account-session.js';
 import type { InvitationQuotaStore } from '../ports/invitation-quota.js';
 import type {
@@ -77,6 +82,37 @@ export interface InvitationView {
   readonly expiresAt: Date;
   readonly lastSentAt: Date;
   readonly sendCount: number;
+  /** Spec 045, E3b: convite feito pela plataforma (a empresa revoga, mas não reenvia). */
+  readonly fromPlatform: boolean;
+}
+
+/**
+ * Convite pendente como o admin da plataforma o vê (spec 045, E3b): o e-mail só **mascarado** (primeira
+ * letra e domínio, o mesmo formato da E1); nunca o e-mail inteiro, o hash nem o segredo.
+ */
+export interface PlatformInvitationView {
+  readonly id: string;
+  readonly emailMasked: string;
+  readonly role: MembershipRole;
+  readonly state: 'PENDING' | 'EXPIRED';
+  readonly invitedBy: 'membership' | 'platform';
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+  readonly lastSentAt: Date;
+  readonly sendCount: number;
+}
+
+/** "Nova empresa" pelo admin (spec 045, E3b): a empresa e o convite de `OWNER`. */
+export interface PlatformCreateCompanyInput {
+  readonly name: string;
+  readonly slug: string;
+  readonly ownerEmail: string;
+}
+
+/** `l***@exemplo.com`: a mesma máscara das leituras do admin (spec 045, E1). */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  return `${email.slice(0, 1)}***@${at < 0 ? '' : email.slice(at + 1)}`;
 }
 
 export interface InvitationPreview {
@@ -103,7 +139,10 @@ export interface InvitationServiceDeps {
   readonly mailer: InvitationMailer;
   readonly quota: InvitationQuotaStore;
   readonly logger: FastifyBaseLogger;
-  readonly metrics?: Pick<Metrics, 'countCompanyInvitation' | 'countCompanyInvitationEmail'>;
+  readonly metrics?: Pick<
+    Metrics,
+    'countCompanyInvitation' | 'countCompanyInvitationEmail' | 'countPlatformAction'
+  >;
   /** Chave derivada do `JWT_SECRET` (a mesma dos códigos da 020/021); o rótulo é próprio. */
   readonly loginSecret: string | Buffer;
   /** `APP_ORIGIN` exatamente como está (sem barra final). */
@@ -140,7 +179,35 @@ function toView(invitation: CompanyInvitation, now: Date): InvitationView {
     expiresAt: invitation.expiresAt,
     lastSentAt: invitation.lastSentAt,
     sendCount: invitation.sendCount,
+    fromPlatform: invitation.invitedByAdminId !== null,
   };
+}
+
+function toPlatformView(invitation: CompanyInvitation, now: Date): PlatformInvitationView {
+  return {
+    id: invitation.id,
+    emailMasked: maskEmail(invitation.email ?? ''),
+    role: invitation.role,
+    state: invitation.expiresAt.getTime() <= now.getTime() ? 'EXPIRED' : 'PENDING',
+    invitedBy: invitation.invitedByAdminId === null ? 'membership' : 'platform',
+    createdAt: invitation.createdAt,
+    expiresAt: invitation.expiresAt,
+    lastSentAt: invitation.lastSentAt,
+    sendCount: invitation.sendCount,
+  };
+}
+
+type PlatformActionMetric = Parameters<Metrics['countPlatformAction']>[0];
+
+const PLATFORM_METRIC: Partial<Record<PlatformAuditAction, PlatformActionMetric>> = {
+  COMPANY_CREATED: 'company_created',
+  INVITATION_CREATED_BY_PLATFORM: 'invitation_created_by_platform',
+  INVITATION_RESENT_BY_PLATFORM: 'invitation_resent_by_platform',
+  INVITATION_REVOKED_BY_PLATFORM: 'invitation_revoked_by_platform',
+};
+
+function companyNotFound(): NotFoundError {
+  return new NotFoundError('Empresa não encontrada', { context: { entity: 'Company' } });
 }
 
 function resultOf(error: unknown): InvitationMetricResult {
@@ -240,11 +307,10 @@ export class InvitationService {
 
       this.afterCommit(actor, 'INVITATION_CREATED', created.invitation.id, created.invitation.role);
       this.dispatch({
-        actor,
         invitation: created.invitation,
         companyName: created.companyName,
         secret,
-        accountId: created.accountId,
+        quotaOwner: created.accountId === null ? null : { kind: 'account', id: created.accountId },
       });
       return toView(created.invitation, this.now());
     });
@@ -262,6 +328,17 @@ export class InvitationService {
         if (company.status !== 'ACTIVE') this.deny(actor, 'company_suspended', actor.role);
         const manager = await this.loadManager(tx, actor);
         const invitation = await tx.invitations.findById(actor.companyId, invitationId);
+        // Spec 045, E3b (revisão, I1): o convite da plataforma (inclusive o de dono) só é reenviado pela
+        // plataforma; a empresa pode revogá-lo, não prolongá-lo.
+        if (invitation.invitedByAdminId !== null) {
+          this.deps.logger.warn(
+            { actorMembershipId: actor.membershipId, reason: 'platform_invitation' },
+            'reenvio de convite da plataforma recusado',
+          );
+          throw new ForbiddenError('Convite feito pela equipe do Soprei', {
+            code: 'INVITATION_FROM_PLATFORM',
+          });
+        }
         this.requireHierarchy(actor, manager.role, invitation.role, 'resend');
         if (invitation.status !== 'PENDING') throw this.notPending();
         const now = this.now();
@@ -287,11 +364,10 @@ export class InvitationService {
 
       this.afterCommit(actor, 'INVITATION_RESENT', renewed.invitation.id, renewed.invitation.role);
       this.dispatch({
-        actor,
         invitation: renewed.invitation,
         companyName: renewed.companyName,
         secret,
-        accountId: renewed.accountId,
+        quotaOwner: renewed.accountId === null ? null : { kind: 'account', id: renewed.accountId },
       });
       return toView(renewed.invitation, this.now());
     });
@@ -325,6 +401,331 @@ export class InvitationService {
         this.afterCommit(actor, 'INVITATION_REVOKED', outcome.invitationId, outcome.role);
       }
     });
+  }
+
+  // --- admin da plataforma (spec 045, E3b) ---
+
+  /**
+   * Convites pendentes de uma empresa para o admin (e-mail mascarado). Empresa inexistente ou removida: 404.
+   */
+  async listForCompany(
+    companyId: string,
+    options?: ListOptions,
+  ): Promise<Page<PlatformInvitationView>> {
+    const id = this.platformCompanyId(companyId);
+    try {
+      await this.deps.companies.findById(id);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw companyNotFound();
+      throw error;
+    }
+    const page = await this.deps.invitations.listPending(id, options);
+    const now = this.now();
+    return {
+      items: page.items.map((item) => toPlatformView(item, now)),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  /**
+   * O admin convida qualquer papel, inclusive `OWNER` (D8): mesmas regras da 025 (membro existente,
+   * pendente repetido, 20 pendentes e 30 envios por empresa contados sob a trava, 3 e-mails por
+   * destinatário por dia no Redis), com a cota do convidador trocada por 50 por admin por dia. Não consulta
+   * contas. Trilha `INVITATION_CREATED_BY_PLATFORM` na transação (a da empresa não é tocada, D9).
+   */
+  createByPlatform(
+    identity: PlatformIdentity,
+    companyId: string,
+    input: CreateInvitationInput,
+    reason: PlatformActionReason,
+  ): Promise<PlatformInvitationView> {
+    return this.track('create', async () => {
+      const id = this.platformCompanyId(companyId);
+      const email = normalizeEmail(input.email);
+      await this.deps.quota.ping();
+      const secret = generateInvitationSecret(this.deps.randomBytes);
+      const tokenHash = invitationDigest(this.key, secret);
+      const created = await this.deps.unitOfWork.run(async (tx) => {
+        const company = await tx.lockCompany(id);
+        if (company.status !== 'ACTIVE') throw this.companyInactive();
+        const invitation = await this.platformInvite(
+          tx,
+          identity,
+          id,
+          email,
+          input.role,
+          tokenHash,
+        );
+        await tx.platformAudit({
+          adminId: identity.adminId,
+          action: 'INVITATION_CREATED_BY_PLATFORM',
+          subjectCompanyId: id,
+          subjectInvitationId: invitation.id,
+          toRole: invitation.role,
+          reason,
+        });
+        return { invitation, companyName: company.name };
+      });
+      this.platformRecorded(
+        identity,
+        id,
+        'INVITATION_CREATED_BY_PLATFORM',
+        reason,
+        created.invitation.id,
+      );
+      this.dispatch({
+        invitation: created.invitation,
+        companyName: created.companyName,
+        secret,
+        quotaOwner: { kind: 'admin', id: identity.adminId },
+      });
+      return toPlatformView(created.invitation, this.now());
+    });
+  }
+
+  /**
+   * "Nova empresa" (D4): cria a empresa `ACTIVE` e, na MESMA transação, o convite de `OWNER` para
+   * `ownerEmail`. Slug repetido (inclusive de removida) = 409 `SLUG_TAKEN`; falha no convite = nenhuma
+   * empresa. Trilha `COMPANY_CREATED` e `INVITATION_CREATED_BY_PLATFORM`.
+   */
+  createCompanyWithOwner(
+    identity: PlatformIdentity,
+    input: PlatformCreateCompanyInput,
+    reason: PlatformActionReason,
+  ): Promise<{ readonly companyId: CompanyId; readonly invitation: PlatformInvitationView }> {
+    return this.track('create', async () => {
+      const name = input.name.trim();
+      if (name.length === 0 || name.length > COMPANY_NAME_MAX_LENGTH) {
+        throw new ValidationError(
+          `name deve ter de 1 a ${String(COMPANY_NAME_MAX_LENGTH)} caracteres`,
+        );
+      }
+      if (!COMPANY_SLUG_PATTERN.test(input.slug)) {
+        throw new ValidationError(
+          'slug deve ter de 3 a 63 caracteres: letras minúsculas, dígitos e hífen',
+        );
+      }
+      const email = normalizeEmail(input.ownerEmail);
+      await this.deps.quota.ping();
+      const secret = generateInvitationSecret(this.deps.randomBytes);
+      const tokenHash = invitationDigest(this.key, secret);
+      const created = await this.deps.unitOfWork.run(async (tx) => {
+        const companyId = await tx.createCompany({ name, slug: input.slug });
+        const company = await tx.lockCompany(companyId);
+        await tx.platformAudit({
+          adminId: identity.adminId,
+          action: 'COMPANY_CREATED',
+          subjectCompanyId: companyId,
+          reason,
+        });
+        const invitation = await this.platformInvite(
+          tx,
+          identity,
+          companyId,
+          email,
+          'OWNER',
+          tokenHash,
+        );
+        await tx.platformAudit({
+          adminId: identity.adminId,
+          action: 'INVITATION_CREATED_BY_PLATFORM',
+          subjectCompanyId: companyId,
+          subjectInvitationId: invitation.id,
+          toRole: 'OWNER',
+          reason,
+        });
+        return { companyId, invitation, companyName: company.name };
+      });
+      this.platformRecorded(identity, created.companyId, 'COMPANY_CREATED', reason);
+      this.platformRecorded(
+        identity,
+        created.companyId,
+        'INVITATION_CREATED_BY_PLATFORM',
+        reason,
+        created.invitation.id,
+      );
+      this.dispatch({
+        invitation: created.invitation,
+        companyName: created.companyName,
+        secret,
+        quotaOwner: { kind: 'admin', id: identity.adminId },
+      });
+      return {
+        companyId: created.companyId,
+        invitation: toPlatformView(created.invitation, this.now()),
+      };
+    });
+  }
+
+  /** Reenvia qualquer convite pendente da empresa (60 s entre envios, até 6): trilha `..._RESENT_BY_PLATFORM`. */
+  resendByPlatform(
+    identity: PlatformIdentity,
+    companyId: string,
+    invitationId: string,
+    reason: PlatformActionReason,
+  ): Promise<PlatformInvitationView> {
+    return this.track('resend', async () => {
+      const id = this.platformCompanyId(companyId);
+      await this.deps.quota.ping();
+      const secret = generateInvitationSecret(this.deps.randomBytes);
+      const tokenHash = invitationDigest(this.key, secret);
+      const renewed = await this.deps.unitOfWork.run(async (tx) => {
+        const company = await tx.lockCompany(id);
+        if (company.status !== 'ACTIVE') throw this.companyInactive();
+        const invitation = await tx.invitations.findById(id, invitationId);
+        if (invitation.status !== 'PENDING') throw this.notPending();
+        const now = this.now();
+        const wait =
+          invitation.lastSentAt.getTime() + INVITATION_RESEND_INTERVAL_MS - now.getTime();
+        if (wait > 0) throw this.limit(Math.ceil(wait / 1000));
+        if (invitation.sendCount >= INVITATION_MAX_SENDS) throw this.limit(LIMIT_RETRY_SECONDS);
+        await this.enforceCompanySends(tx, id, now);
+        const updated = await tx.invitations.renew(id, invitation.id, {
+          tokenHash,
+          expiresAt: new Date(now.getTime() + INVITATION_VALIDITY_MS),
+          lastSentAt: now,
+        });
+        if (updated === null) throw this.notPending();
+        await tx.platformAudit({
+          adminId: identity.adminId,
+          action: 'INVITATION_RESENT_BY_PLATFORM',
+          subjectCompanyId: id,
+          subjectInvitationId: updated.id,
+          toRole: updated.role,
+          reason,
+        });
+        return { invitation: updated, companyName: company.name };
+      });
+      this.platformRecorded(
+        identity,
+        id,
+        'INVITATION_RESENT_BY_PLATFORM',
+        reason,
+        renewed.invitation.id,
+      );
+      this.dispatch({
+        invitation: renewed.invitation,
+        companyName: renewed.companyName,
+        secret,
+        quotaOwner: { kind: 'admin', id: identity.adminId },
+      });
+      return toPlatformView(renewed.invitation, this.now());
+    });
+  }
+
+  /** Revoga qualquer convite pendente da empresa; já revogado = 204 sem evento; aceito ou vencido = 409. */
+  revokeByPlatform(
+    identity: PlatformIdentity,
+    companyId: string,
+    invitationId: string,
+    reason: PlatformActionReason,
+  ): Promise<void> {
+    return this.track('revoke', async () => {
+      const id = this.platformCompanyId(companyId);
+      const outcome = await this.deps.unitOfWork.run(async (tx) => {
+        await tx.lockCompany(id);
+        const invitation = await tx.invitations.findById(id, invitationId);
+        if (invitation.status === 'REVOKED') return null;
+        if (invitation.status !== 'PENDING') throw this.notPending();
+        const closed = await tx.invitations.close(id, invitation.id, {
+          status: 'REVOKED',
+          closedAt: this.now(),
+        });
+        if (!closed) throw this.notPending();
+        await tx.platformAudit({
+          adminId: identity.adminId,
+          action: 'INVITATION_REVOKED_BY_PLATFORM',
+          subjectCompanyId: id,
+          subjectInvitationId: invitation.id,
+          toRole: invitation.role,
+          reason,
+        });
+        return invitation.id;
+      });
+      if (outcome !== null) {
+        this.platformRecorded(identity, id, 'INVITATION_REVOKED_BY_PLATFORM', reason, outcome);
+      }
+    });
+  }
+
+  /** O convite da plataforma sob a trava da empresa (a parte comum de convidar e de criar empresa). */
+  private async platformInvite(
+    tx: InvitationTransaction,
+    identity: PlatformIdentity,
+    companyId: CompanyId,
+    email: string,
+    role: MembershipRole,
+    tokenHash: string,
+  ): Promise<CompanyInvitation> {
+    if (await tx.hasMemberWithEmail(companyId, email)) {
+      throw new ConflictError('Já existe um membro com este e-mail', {
+        code: 'MEMBER_ALREADY_EXISTS',
+      });
+    }
+    const now = this.now();
+    const existing = await tx.invitations.findPendingByEmail(companyId, email);
+    if (existing !== null) {
+      if (existing.expiresAt.getTime() > now.getTime()) {
+        throw new ConflictError('Já existe um convite pendente para este e-mail', {
+          code: 'INVITATION_ALREADY_PENDING',
+        });
+      }
+      await tx.invitations.close(companyId, existing.id, { status: 'EXPIRED', closedAt: now });
+    }
+    if ((await tx.invitations.countPending(companyId, now)) >= INVITATION_MAX_PENDING) {
+      throw this.limit(LIMIT_RETRY_SECONDS);
+    }
+    await this.enforceCompanySends(tx, companyId, now);
+    return tx.invitations.create(companyId, {
+      email,
+      role,
+      tokenHash,
+      invitedByAdminId: identity.adminId,
+      expiresAt: new Date(now.getTime() + INVITATION_VALIDITY_MS),
+      now,
+    });
+  }
+
+  /** 30 envios por empresa em 24 h (os da empresa e os da plataforma), contados sob a trava. */
+  private async enforceCompanySends(
+    tx: InvitationTransaction,
+    companyId: CompanyId,
+    now: Date,
+  ): Promise<void> {
+    const since = new Date(now.getTime() - INVITATION_QUOTA_WINDOW_MS);
+    const sent =
+      (await tx.audit.countSince(companyId, { actions: SEND_ACTIONS, since })) +
+      (await tx.countPlatformSends(companyId, since));
+    if (sent >= INVITATION_COMPANY_SENDS_PER_DAY) throw this.limit(LIMIT_RETRY_SECONDS);
+  }
+
+  private platformCompanyId(companyId: string): CompanyId {
+    if (!isUuid(companyId)) throw companyNotFound();
+    return CompanyId.parse(companyId);
+  }
+
+  private companyInactive(): ConflictError {
+    return new ConflictError('A empresa está suspensa', { code: 'COMPANY_INACTIVE' });
+  }
+
+  /** Métrica da plataforma e log só com ids, ação e motivo (nunca e-mail, nome, token ou link). */
+  private platformRecorded(
+    identity: PlatformIdentity,
+    companyId: CompanyId,
+    action: PlatformAuditAction,
+    reason: PlatformActionReason,
+    invitationId?: string,
+  ): void {
+    const metric = PLATFORM_METRIC[action];
+    try {
+      if (metric !== undefined) this.deps.metrics?.countPlatformAction(metric);
+    } catch (error) {
+      this.deps.logger.warn({ err: error }, 'falha ao registrar métrica da plataforma');
+    }
+    this.deps.logger.info(
+      { adminId: identity.adminId, companyId, invitationId: invitationId ?? null, action, reason },
+      'admin da plataforma agiu sobre convites',
+    );
   }
 
   // --- rotas públicas (token) ---
@@ -498,14 +899,19 @@ export class InvitationService {
     invitation: CompanyInvitation,
     now: Date,
   ): Promise<AcceptOutcome | null> {
-    const inviter = await tx.actor(companyId, invitation.invitedByMembershipId);
-    if (
-      inviter !== null &&
-      inviter.status === 'ACTIVE' &&
-      hasPermission(inviter.role, 'membership:manage') &&
-      canManageRole(inviter.role, invitation.role)
-    ) {
-      return null;
+    // Spec 045, E3b: convite da plataforma vale enquanto o admin que convidou estiver ativo.
+    if (invitation.invitedByAdminId !== null) {
+      if ((await tx.adminStatus(invitation.invitedByAdminId)) === 'ACTIVE') return null;
+    } else if (invitation.invitedByMembershipId !== null) {
+      const inviter = await tx.actor(companyId, invitation.invitedByMembershipId);
+      if (
+        inviter !== null &&
+        inviter.status === 'ACTIVE' &&
+        hasPermission(inviter.role, 'membership:manage') &&
+        canManageRole(inviter.role, invitation.role)
+      ) {
+        return null;
+      }
     }
     await tx.invitations.close(companyId, invitation.id, { status: 'REVOKED', closedAt: now });
     return { ok: false, result: 'forbidden' };
@@ -657,10 +1063,9 @@ export class InvitationService {
       }
     }
     const since = new Date(now.getTime() - INVITATION_QUOTA_WINDOW_MS);
-    const sentByCompany = await tx.audit.countSince(actor.companyId, {
-      actions: SEND_ACTIONS,
-      since,
-    });
+    const sentByCompany =
+      (await tx.audit.countSince(actor.companyId, { actions: SEND_ACTIONS, since })) +
+      (await tx.countPlatformSends(actor.companyId, since));
     if (sentByCompany >= INVITATION_COMPANY_SENDS_PER_DAY) throw this.limit(LIMIT_RETRY_SECONDS);
     const sentByInviter = await tx.audit.countSince(actor.companyId, {
       actions: SEND_ACTIONS,
@@ -778,11 +1183,11 @@ export class InvitationService {
    * convite fica gravado e a resposta é a mesma, sem envio. O resultado vai só à métrica e ao log.
    */
   private dispatch(input: {
-    readonly actor: MembershipIdentity;
     readonly invitation: CompanyInvitation;
     readonly companyName: string;
     readonly secret: string;
-    readonly accountId: string | null;
+    /** Dono da cota de 50 envios por dia (Redis): a conta convidadora (025) ou o admin (045, E3b). */
+    readonly quotaOwner: { readonly kind: 'account' | 'admin'; readonly id: string } | null;
   }): void {
     const { invitation } = input;
     const email = invitation.email;
@@ -792,9 +1197,9 @@ export class InvitationService {
       try {
         const allowed = await this.deps.quota.take(
           invitationQuotaDigest(this.key, 'recipient', email),
-          input.accountId === null
+          input.quotaOwner === null
             ? null
-            : invitationQuotaDigest(this.key, 'account', input.accountId),
+            : invitationQuotaDigest(this.key, input.quotaOwner.kind, input.quotaOwner.id),
         );
         if (!allowed) {
           result = 'skipped';
@@ -802,7 +1207,7 @@ export class InvitationService {
           const token = buildInvitationToken(invitation.companyId, invitation.id, input.secret);
           await this.deps.mailer.sendCompanyInvitation(email, {
             companyName: input.companyName,
-            role: invitation.role as 'ADMIN' | 'AGENT' | 'VIEWER',
+            role: invitation.role,
             link: buildInvitationLink(this.deps.appOrigin, token),
             validDays: INVITATION_VALIDITY_DAYS,
           });

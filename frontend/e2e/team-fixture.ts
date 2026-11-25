@@ -15,12 +15,13 @@ export interface FakeMember {
 export interface FakeInvitation {
   id: string;
   email: string;
-  role: 'ADMIN' | 'AGENT' | 'VIEWER';
+  role: 'OWNER' | 'ADMIN' | 'AGENT' | 'VIEWER';
   state: 'PENDING' | 'EXPIRED';
   createdAt: string;
   expiresAt: string;
   lastSentAt: string;
   sendCount: number;
+  fromPlatform: boolean;
 }
 
 /** Estado da API falsa da equipe (spec 025): camada por cima da API falsa da área da empresa. */
@@ -69,6 +70,7 @@ export function invitation(
     expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
     lastSentAt: sent,
     sendCount: 1,
+    fromPlatform: false,
     ...extra,
   };
 }
