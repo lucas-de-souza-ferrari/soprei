@@ -305,6 +305,20 @@ export class ChannelConnectionService {
     if (outcome.old !== undefined) await this.unsubscribe(actor.companyId, outcome.old);
   }
 
+  /**
+   * Spec 045, E3a: a plataforma removeu a empresa (a conexão já foi apagada na transação dela); aqui só a
+   * desassinatura do app da WABA, em melhor esforço, como no `disconnect`. Falha vai só ao log e à métrica.
+   */
+  async unsubscribeRemoved(
+    companyId: CompanyId,
+    removed: { readonly wabaId: string; readonly tokenCiphertext: string },
+  ): Promise<void> {
+    await this.unsubscribe(companyId, {
+      wabaId: removed.wabaId,
+      ciphertext: removed.tokenCiphertext,
+    });
+  }
+
   // --- internos ---
 
   private requirePermission(actor: MembershipIdentity, permission: Permission): void {

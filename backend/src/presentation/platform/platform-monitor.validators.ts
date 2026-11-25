@@ -6,10 +6,12 @@ import {
 } from '../../application/ports/platform-read-model.js';
 import {
   BILLING_NOTICE_KINDS,
+  MEMBERSHIP_ROLES,
   PAYMENT_ORDER_KINDS,
   PAYMENT_ORDER_STATUSES,
   PLATFORM_ACTION_REASONS,
 } from '../../domain/index.js';
+import { COMPANY_NAME_MAX_LENGTH } from '../../application/companies/company.service.js';
 import { totpCodeSchema } from '../auth/auth.validators.js';
 
 /** Valores das consultas em minúsculas (como `status=active`); as respostas trazem os enums em maiúsculas. */
@@ -31,7 +33,8 @@ const pageShape = {
 export const platformCompaniesQuerySchema = z
   .object({
     ...pageShape,
-    status: z.enum(['active', 'suspended']).optional(),
+    // `removed` (spec 045, E3a): só as removidas, para restaurar.
+    status: z.enum(['active', 'suspended', 'removed']).optional(),
     // O Postgres recusa o caractere NUL num texto (viraria 503): recusado aqui, 400 (revisão da E2, M1).
     q: z
       .string()
@@ -79,4 +82,41 @@ export const platformActionBodySchema = z
  */
 export const platformConfirmedActionBodySchema = z
   .object({ reason: z.enum(PLATFORM_ACTION_REASONS), code: totpCodeSchema.optional() })
+  .strict();
+
+/** Spec 045, E3a: vínculo de uma empresa (o id vai cru ao serviço: malformado = 404 uniforme). */
+export const platformMembershipParamsSchema = z.object({
+  companyId: z.string(),
+  membershipId: z.string(),
+});
+
+/** Renomear a empresa: as regras de nome do `CompanyService` (1 a 120, sem NUL). */
+export const platformRenameBodySchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(COMPANY_NAME_MAX_LENGTH)
+      .refine((value) => !value.includes('\u0000'), 'Nome inválido'),
+    reason: z.enum(PLATFORM_ACTION_REASONS),
+  })
+  .strict();
+
+/** Remover a empresa (**[código]**): o slug digitado e o código novo do autenticador. */
+export const platformRemoveCompanyBodySchema = z
+  .object({
+    reason: z.enum(PLATFORM_ACTION_REASONS),
+    slug: z.string().max(63),
+    code: totpCodeSchema.optional(),
+  })
+  .strict();
+
+/** Mudar o papel de um vínculo (**[código]** quando envolve `OWNER`). */
+export const platformRoleBodySchema = z
+  .object({
+    role: z.enum(MEMBERSHIP_ROLES),
+    reason: z.enum(PLATFORM_ACTION_REASONS),
+    code: totpCodeSchema.optional(),
+  })
   .strict();

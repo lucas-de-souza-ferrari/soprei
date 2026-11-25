@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { ApiError } from './api';
 import {
   accountActionErrorMessage,
+  companyActionErrorMessage,
   errorMessage,
   formatCents,
   formatCount,
@@ -109,5 +110,31 @@ describe('formatação do admin (spec 044, E3)', () => {
       accountActionErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE'), 'passwordReset'),
       'Serviço indisponível no momento. Tente novamente em instantes.',
     );
+  });
+
+  it('ações de empresa e vínculos (spec 045, E3a): códigos de regra explicados; 503 de papel e desativar', () => {
+    assert.match(
+      companyActionErrorMessage(new ApiError(400, 'CONFIRMATION_MISMATCH')),
+      /slug digitado não confere/,
+    );
+    assert.match(
+      companyActionErrorMessage(new ApiError(400, 'CONFIRMATION_INVALID')),
+      /^Código do autenticador inválido ou já usado/,
+    );
+    assert.match(companyActionErrorMessage(new ApiError(409, 'LAST_OWNER')), /sem dono ativo/);
+    assert.match(
+      companyActionErrorMessage(new ApiError(409, 'MEMBER_NOT_ELIGIBLE')),
+      /precisam estar ativos/,
+    );
+    for (const action of ['role', 'disable'])
+      assert.match(
+        companyActionErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE'), action),
+        /registrada sem que as sessões tenham sido encerradas/,
+      );
+    assert.equal(
+      companyActionErrorMessage(new ApiError(503, 'SERVICE_UNAVAILABLE'), 'rename'),
+      'Serviço indisponível no momento. Tente novamente em instantes.',
+    );
+    assert.equal(companyActionErrorMessage(new ApiError(404, 'NOT_FOUND')), 'Não encontrado.');
   });
 });

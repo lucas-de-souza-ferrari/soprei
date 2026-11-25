@@ -8,6 +8,8 @@ import type {
 import type {
   PlatformCompanyTransaction,
   PlatformCompanyUnitOfWork,
+  PlatformLockedMembership,
+  PlatformRemovedChannel,
 } from '../application/ports/platform-company-unit-of-work.js';
 import type {
   PlatformOverviewFacts,
@@ -158,6 +160,9 @@ export class InMemoryPlatformAuditRepository implements PlatformAuditRepository 
       action: data.action,
       subjectCompanyId: data.subjectCompanyId ?? null,
       subjectAccountId: data.subjectAccountId ?? null,
+      subjectMembershipId: data.subjectMembershipId ?? null,
+      fromRole: data.fromRole ?? null,
+      toRole: data.toRole ?? null,
       reason: data.reason ?? null,
       createdAt: new Date(),
     };
@@ -175,40 +180,133 @@ export class InMemoryPlatformAuditRepository implements PlatformAuditRepository 
 }
 
 /**
- * `PlatformCompanyUnitOfWork` em memória (spec 044, E2): estado das empresas num mapa, trilha no
- * repositório em memória e transações serializadas (como a trava da linha no Postgres).
+ * `PlatformCompanyUnitOfWork` em memória (spec 044, E2; spec 045, E3a): estado das empresas e dos vínculos
+ * em mapas, trilha no repositório em memória e transações serializadas (como a trava da linha no
+ * Postgres). Cada transação trabalha numa cópia e só grava no fim (como o commit): falha no meio não muda
+ * nada. `failAudit` faz a gravação da trilha falhar; `activeOwnerCount` segue a regra comum 11.
  */
 export class InMemoryPlatformCompanyUnitOfWork implements PlatformCompanyUnitOfWork {
   readonly statuses = new Map<string, CompanyStatus>();
+  readonly names = new Map<string, string>();
+  readonly slugs = new Map<string, string>();
+  readonly removed = new Set<string>();
+  readonly channels = new Map<string, PlatformRemovedChannel>();
+  /** Chave `<companyId>:<membershipId>`. */
+  readonly memberships = new Map<string, PlatformLockedMembership>();
+  /** Empresas cujos convites pendentes foram revogados pela remoção. */
+  readonly invitationsRevoked: string[] = [];
+  failAudit = false;
   private chain: Promise<unknown> = Promise.resolve();
 
   constructor(
     readonly audit: InMemoryPlatformAuditRepository = new InMemoryPlatformAuditRepository(),
   ) {}
 
+  /** Põe uma empresa no mundo (ativa, sem remoção). */
+  addCompany(id: string, slug = 'empresa', name = 'Empresa'): void {
+    this.statuses.set(id, 'ACTIVE');
+    this.slugs.set(id, slug);
+    this.names.set(id, name);
+  }
+
+  addMembership(
+    companyId: string,
+    membershipId: string,
+    membership: PlatformLockedMembership,
+  ): void {
+    this.memberships.set(`${companyId}:${membershipId}`, membership);
+  }
+
+  membership(companyId: string, membershipId: string): PlatformLockedMembership | undefined {
+    return this.memberships.get(`${companyId}:${membershipId}`);
+  }
+
   run<T>(fn: (tx: PlatformCompanyTransaction) => Promise<T>): Promise<T> {
     const next = this.chain.then(async () => {
-      const pending = new Map<string, CompanyStatus>();
+      const statuses = new Map(this.statuses);
+      const names = new Map(this.names);
+      const removed = new Set(this.removed);
+      const channels = new Map(this.channels);
+      const memberships = new Map(this.memberships);
+      const revoked: string[] = [];
       const events: NewPlatformAuditEvent[] = [];
+      const live = (companyId: string): CompanyStatus => {
+        const status = statuses.get(companyId);
+        if (status === undefined || removed.has(companyId)) {
+          throw new NotFoundError('Empresa não encontrada');
+        }
+        return status;
+      };
       const result = await fn({
-        lockCompany: (companyId) => {
-          const status = pending.get(companyId) ?? this.statuses.get(companyId);
-          if (status === undefined) {
-            return Promise.reject(new NotFoundError('Empresa não encontrada'));
-          }
-          return Promise.resolve(status);
-        },
+        lockCompany: (companyId) => Promise.resolve().then(() => live(companyId)),
+        company: (companyId) =>
+          Promise.resolve().then(() => ({
+            status: live(companyId),
+            name: names.get(companyId) ?? '',
+            slug: this.slugs.get(companyId) ?? '',
+          })),
         setStatus: (companyId, status) => {
-          pending.set(companyId, status);
+          statuses.set(companyId, status);
           return Promise.resolve();
         },
+        rename: (companyId, name) => {
+          names.set(companyId, name);
+          return Promise.resolve();
+        },
+        remove: (companyId) => {
+          const channel = channels.get(companyId) ?? null;
+          removed.add(companyId);
+          channels.delete(companyId);
+          revoked.push(companyId);
+          return Promise.resolve(channel);
+        },
+        state: (companyId) => {
+          const slug = this.slugs.get(companyId);
+          return Promise.resolve(
+            slug === undefined ? null : { slug, removed: removed.has(companyId) },
+          );
+        },
+        restore: (companyId) => Promise.resolve(removed.delete(companyId)),
+        membership: (companyId, membershipId) =>
+          Promise.resolve(memberships.get(`${companyId}:${membershipId}`) ?? null),
+        setMembershipRole: (companyId, membershipId, role) => {
+          const key = `${companyId}:${membershipId}`;
+          const current = memberships.get(key);
+          if (current !== undefined) memberships.set(key, { ...current, role });
+          return Promise.resolve();
+        },
+        setMembershipStatus: (companyId, membershipId, status) => {
+          const key = `${companyId}:${membershipId}`;
+          const current = memberships.get(key);
+          if (current !== undefined) memberships.set(key, { ...current, status });
+          return Promise.resolve();
+        },
+        activeOwners: (companyId) =>
+          Promise.resolve(
+            [...memberships]
+              .filter(([key]) => key.startsWith(`${companyId}:`))
+              .filter(
+                ([, m]) =>
+                  m.role === 'OWNER' &&
+                  m.status === 'ACTIVE' &&
+                  (m.account === null || m.account.status === 'ACTIVE'),
+              ).length,
+          ),
         audit: (event) => {
+          if (this.failAudit) return Promise.reject(new Error('trilha indisponível'));
           events.push(event);
           return Promise.resolve();
         },
       });
-      // Só no fim, como o commit: falha no meio não grava nada.
-      for (const [id, status] of pending) this.statuses.set(id, status);
+      // Só no fim, como o commit.
+      for (const [id, status] of statuses) this.statuses.set(id, status);
+      for (const [id, name] of names) this.names.set(id, name);
+      this.removed.clear();
+      for (const id of removed) this.removed.add(id);
+      this.channels.clear();
+      for (const [id, channel] of channels) this.channels.set(id, channel);
+      for (const [key, membership] of memberships) this.memberships.set(key, membership);
+      this.invitationsRevoked.push(...revoked);
       for (const event of events) await this.audit.create(event);
       return result;
     });

@@ -33,6 +33,7 @@ import {
   Stat,
   StatGrid,
 } from '../ui';
+import { CompanyActions, MembershipActions } from './CompanyActions';
 import { modulesText, subscriptionFacts } from './subscription-facts';
 
 const ONBOARDING_STEPS = [
@@ -134,7 +135,15 @@ function OwnerLine({ detail }: { readonly detail: CompanyDetail }) {
  * Pessoas da empresa (spec 045, E1): papel, estado, e-mail mascarado e a situação da conta. "Abrir conta"
  * leva ao detalhe da conta (mascarado, sem auditoria); vínculo antigo sem conta não tem esse botão.
  */
-function People({ detail, self }: { readonly detail: CompanyDetail; readonly self: View }) {
+function People({
+  detail,
+  self,
+  onDone,
+}: {
+  readonly detail: CompanyDetail;
+  readonly self: View;
+  readonly onDone: () => void;
+}) {
   const { navigate } = useAdmin();
   const holder = detail.holder;
   return (
@@ -176,17 +185,23 @@ function People({ detail, self }: { readonly detail: CompanyDetail; readonly sel
               </span>
               <span className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
                 <span>Desde {formatDate(person.createdAt)}</span>
-                {person.accountId === null ? null : (
-                  <Button
-                    ariaLabel={`Abrir conta ${person.emailMasked}`}
-                    onClick={() => {
-                      if (person.accountId !== null)
-                        navigate({ name: 'account', accountId: person.accountId, from: self });
-                    }}
-                  >
-                    Abrir conta
-                  </Button>
-                )}
+                <span className="flex flex-wrap gap-2">
+                  {/* Empresa removida: as pessoas só são vistas (restaure antes de mexer). */}
+                  {detail.removedAt === null ? (
+                    <MembershipActions detail={detail} person={person} onDone={onDone} />
+                  ) : null}
+                  {person.accountId === null ? null : (
+                    <Button
+                      ariaLabel={`Abrir conta ${person.emailMasked}`}
+                      onClick={() => {
+                        if (person.accountId !== null)
+                          navigate({ name: 'account', accountId: person.accountId, from: self });
+                      }}
+                    >
+                      Abrir conta
+                    </Button>
+                  )}
+                </span>
               </span>
             </Row>
           ))}
@@ -314,7 +329,12 @@ export function CompanyDetailScreen({
         </Button>
       </div>
       <PageHeader title={data?.name ?? 'Empresa'} onRefresh={reload} busy={loading}>
-        {data === undefined ? null : <StatusAction detail={data} onDone={reload} />}
+        {data === undefined ? null : (
+          <>
+            {data.removedAt === null ? <StatusAction detail={data} onDone={reload} /> : null}
+            <CompanyActions detail={data} onDone={reload} />
+          </>
+        )}
       </PageHeader>
       {error === undefined ? null : <Alert>{errorMessage(error)}</Alert>}
       {data === undefined ? (
@@ -323,6 +343,12 @@ export function CompanyDetailScreen({
         ) : null
       ) : (
         <div className="flex flex-col gap-4">
+          {data.removedAt === null ? null : (
+            <Alert>
+              Empresa removida em {formatDateTime(data.removedAt)}. A equipe não a vê; restaure para
+              voltar a mexer nela.
+            </Alert>
+          )}
           <OwnerLine detail={data} />
           <Card title="Empresa">
             <Facts
@@ -382,7 +408,7 @@ export function CompanyDetailScreen({
             />
           </Card>
           <Card title="Pessoas">
-            <People detail={data} self={self} />
+            <People detail={data} self={self} onDone={reload} />
           </Card>
           <Card title="Assinatura e uso">
             <Subscription detail={data} />

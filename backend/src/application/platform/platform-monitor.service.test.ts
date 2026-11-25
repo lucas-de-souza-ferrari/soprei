@@ -164,6 +164,7 @@ function companyFacts(id: CompanyId, overrides: Partial<PlatformCompanyDetailFac
       status: 'ACTIVE',
       createdAt: new Date('2026-11-01T00:00:00.000Z'),
       updatedAt: new Date('2026-11-02T00:00:00.000Z'),
+      removedAt: null,
     },
     subscriptionId: randomUUID(),
     memberships: [{ role: 'OWNER', status: 'ACTIVE', count: 1 }],
@@ -314,6 +315,7 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
               messages7d: 0,
               owner: null,
               owners: 0,
+              removedAt: null,
               subscription: {
                 planCode: 'ESSENTIAL',
                 status: 'TRIAL',
@@ -377,6 +379,7 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
               messages7d: 9,
               owner: { accountId: null, emailMasked: 'v***@exemplo.com' },
               owners: 2,
+              removedAt: null,
               subscription: {
                 planCode: 'SCALE',
                 status: 'ACTIVE',

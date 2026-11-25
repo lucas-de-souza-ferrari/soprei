@@ -11,7 +11,7 @@ import {
 import { errorMessage, formatCount, formatDateTime, label } from '../format';
 import { Alert, Badge, Button, List, Loading, PageHeader, RowButton, Select } from '../ui';
 
-type StatusFilter = '' | 'active' | 'suspended';
+type StatusFilter = '' | 'active' | 'suspended' | 'removed';
 
 export const ATTENTION_LABELS: Record<AttentionFilter, string> = {
   pending_messages: 'Mensagens pendentes',
@@ -59,7 +59,10 @@ export function CompanyRows({
             <Badge tone={company.status === 'SUSPENDED' ? 'bad' : 'neutral'}>
               {label(company.status)}
             </Badge>
-            {company.owners === 0 ? <Badge tone="bad">Sem dono ativo</Badge> : null}
+            {company.removedAt === null ? null : <Badge tone="bad">Removida</Badge>}
+            {company.owners === 0 && company.removedAt === null ? (
+              <Badge tone="bad">Sem dono ativo</Badge>
+            ) : null}
           </span>
           <span className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span className="break-all">Dono: {ownerText(company)}</span>
@@ -81,7 +84,7 @@ export function CompaniesScreen({
   initialStatus,
   initialAttention,
 }: {
-  readonly initialStatus: 'active' | 'suspended' | undefined;
+  readonly initialStatus: 'active' | 'suspended' | 'removed' | undefined;
   readonly initialAttention: AttentionFilter | undefined;
 }) {
   const [status, setStatus] = useState<StatusFilter>(initialStatus ?? '');
@@ -140,6 +143,7 @@ export function CompaniesScreen({
             ['', 'Todas'],
             ['active', 'Ativas'],
             ['suspended', 'Suspensas'],
+            ['removed', 'Removidas'],
           ]}
         />
         <Select<AttentionFilter | ''>

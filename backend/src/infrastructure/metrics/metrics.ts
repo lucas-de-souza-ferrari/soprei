@@ -142,7 +142,14 @@ export type PlatformActionMetric =
   | 'account_enabled'
   | 'account_sessions_revoked'
   | 'account_password_reset_sent'
-  | 'account_verification_sent';
+  | 'account_verification_sent'
+  // Spec 045, E3a.
+  | 'company_renamed'
+  | 'company_removed'
+  | 'company_restored'
+  | 'membership_role_changed_by_platform'
+  | 'membership_disabled_by_platform'
+  | 'membership_enabled_by_platform';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {

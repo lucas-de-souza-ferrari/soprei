@@ -283,3 +283,58 @@ describe('migration da spec 045, E2 (ações sobre contas na trilha da plataform
     );
   });
 });
+
+describe('migration da spec 045, E3a (ações sobre empresas e vínculos na trilha da plataforma)', () => {
+  const migration = migrationFiles().find((file) =>
+    file.name.endsWith('_platform_company_actions'),
+  );
+  const statements = (migration?.sql ?? '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+
+  it('é aditiva: valores novos no enum, colunas anuláveis, a FK do vínculo e um índice; nada apagado', () => {
+    assert.ok(migration !== undefined, 'migration _platform_company_actions existe');
+    // Passa na varredura do deploy.sh sem a marca breaking-approved (deploy automático).
+    assert.doesNotMatch(migration.sql, /breaking-approved/);
+    for (const forbidden of [
+      /\bDROP\b/i,
+      /\bDELETE\s+FROM\b/i,
+      /\bTRUNCATE\b/i,
+      /\bRENAME\b/i,
+      // `ON UPDATE CASCADE` da FK é cláusula, não escrita: só conta um UPDATE no início de instrução.
+      /(^|;)\s*UPDATE\b/im,
+      /SET NOT NULL/i,
+      /\bNOT NULL\b/i,
+      /ALTER COLUMN/i,
+      /\bDEFAULT\b/i,
+    ]) {
+      assert.doesNotMatch(statements, forbidden);
+    }
+    const added = [
+      ...statements.matchAll(
+        /ALTER TYPE "platform_audit_action" ADD VALUE IF NOT EXISTS '(\w+)';/g,
+      ),
+    ].map((match) => match[1]);
+    assert.deepEqual(added, [
+      'COMPANY_RENAMED',
+      'COMPANY_REMOVED',
+      'COMPANY_RESTORED',
+      'MEMBERSHIP_ROLE_CHANGED_BY_PLATFORM',
+      'MEMBERSHIP_DISABLED_BY_PLATFORM',
+      'MEMBERSHIP_ENABLED_BY_PLATFORM',
+    ]);
+    const columns = [
+      ...statements.matchAll(/ALTER TABLE "platform_audit_events" ADD COLUMN "(\w+)" ([^;]+);/g),
+    ].map((match) => `${match[1] ?? ''} ${match[2] ?? ''}`);
+    assert.deepEqual(columns, [
+      'subject_membership_id UUID',
+      'from_role "membership_role"',
+      'to_role "membership_role"',
+    ]);
+    assert.match(
+      statements,
+      /FOREIGN KEY \("subject_membership_id"\) REFERENCES "memberships"\("id"\) ON DELETE RESTRICT/,
+    );
+  });
+});

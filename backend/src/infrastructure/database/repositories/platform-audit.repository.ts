@@ -2,6 +2,7 @@ import {
   AccountId,
   CompanyId,
   type ListOptions,
+  MembershipId,
   type NewPlatformAuditEvent,
   type Page,
   PlatformAdminId,
@@ -20,6 +21,10 @@ function toPlatformAuditEvent(row: PlatformAuditEventRow): PlatformAuditEvent {
     action: row.action,
     subjectCompanyId: row.subjectCompanyId === null ? null : CompanyId.parse(row.subjectCompanyId),
     subjectAccountId: row.subjectAccountId === null ? null : AccountId.parse(row.subjectAccountId),
+    subjectMembershipId:
+      row.subjectMembershipId === null ? null : MembershipId.parse(row.subjectMembershipId),
+    fromRole: row.fromRole,
+    toRole: row.toRole,
     reason: row.reason,
     createdAt: row.createdAt,
   };
@@ -40,6 +45,9 @@ export class PrismaPlatformAuditRepository implements PlatformAuditRepository {
           action: data.action,
           subjectCompanyId: data.subjectCompanyId ?? null,
           subjectAccountId: data.subjectAccountId ?? null,
+          subjectMembershipId: data.subjectMembershipId ?? null,
+          fromRole: data.fromRole ?? null,
+          toRole: data.toRole ?? null,
           reason: data.reason ?? null,
         },
       });

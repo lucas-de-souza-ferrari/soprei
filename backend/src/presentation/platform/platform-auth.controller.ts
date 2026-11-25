@@ -18,6 +18,10 @@ import {
   platformAccountController,
   type PlatformAccountRoutes,
 } from './platform-account.controller.js';
+import {
+  platformCompanyController,
+  type PlatformCompanyRoutes,
+} from './platform-company.controller.js';
 
 /**
  * Cookie da sessão do admin da plataforma (spec 044, E1). O prefixo `__Host-` obriga o navegador a
@@ -52,6 +56,8 @@ export interface PlatformAuthControllerOptions {
   readonly monitor?: PlatformMonitorRoutes | undefined;
   /** Ações sobre contas (spec 045, E2); só com as contas ligadas (`ACCOUNTS_ENABLED`). */
   readonly accounts?: PlatformAccountRoutes | undefined;
+  /** Ações sobre empresas e vínculos (spec 045, E3a). */
+  readonly companies?: PlatformCompanyRoutes | undefined;
 }
 
 function sessionCookie(value: string, maxAgeSeconds: number): string {
@@ -69,7 +75,7 @@ function clearCookie(reply: FastifyReply): void {
  */
 export const platformAuthController: FastifyPluginCallback<PlatformAuthControllerOptions> = (
   app,
-  { auth, origin, maxAgeSeconds, monitor, accounts },
+  { auth, origin, maxAgeSeconds, monitor, accounts, companies },
   done,
 ) => {
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -127,6 +133,7 @@ export const platformAuthController: FastifyPluginCallback<PlatformAuthControlle
   // Dentro deste plugin: herdam o hook acima (só o cookie do admin, origem conferida nas escritas).
   if (monitor !== undefined) void app.register(platformMonitorController, { monitor });
   if (accounts !== undefined) void app.register(platformAccountController, { accounts });
+  if (companies !== undefined) void app.register(platformCompanyController, { companies });
 
   done();
 };

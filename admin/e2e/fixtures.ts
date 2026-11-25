@@ -23,7 +23,7 @@ export const ACCOUNT_B = '0193a1b2-0000-7000-8000-0000000000b1';
 export const FULL_EMAIL = 'lucia.titular@exemplo.test';
 const MEMBERSHIP_OWNER = '0193a1b2-0000-7000-8000-0000000000d1';
 const MEMBERSHIP_AGENT = '0193a1b2-0000-7000-8000-0000000000d2';
-const MEMBERSHIP_LEGACY = '0193a1b2-0000-7000-8000-0000000000d3';
+export const MEMBERSHIP_LEGACY = '0193a1b2-0000-7000-8000-0000000000d3';
 const MEMBERSHIP_B_OWNER = '0193a1b2-0000-7000-8000-0000000000d4';
 const ORDER_ID = '0193a1b2-0000-7000-8000-0000000000f1';
 const SUBSCRIPTION_ID = '0193a1b2-0000-7000-8000-0000000000c1';
@@ -78,6 +78,7 @@ export const companyA = {
   messages7d: 420,
   owner: { accountId: ACCOUNT_A, emailMasked: 'l***@exemplo.test' },
   owners: 1,
+  removedAt: null,
 } as const satisfies CompanyPage['items'][number];
 
 export const companyB = {
@@ -94,6 +95,7 @@ export const companyB = {
   messages7d: 0,
   owner: null,
   owners: 0,
+  removedAt: null,
 } as const satisfies CompanyPage['items'][number];
 
 export const companyPage: CompanyPage = { items: [companyA, companyB], nextCursor: null };
@@ -130,7 +132,10 @@ const subscription = {
   pendingChange: { planCode: 'ESSENTIAL', cycle: 'MONTHLY', agenda: true, stock: false },
 } as const satisfies NonNullable<CompanyDetail['subscription']>;
 
-export function companyDetail(status: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE'): CompanyDetail {
+export function companyDetail(
+  status: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE',
+  removedAt: string | null = null,
+): CompanyDetail {
   return {
     billingEnabled: true,
     id: COMPANY_A,
@@ -139,6 +144,7 @@ export function companyDetail(status: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE'): Compan
     status,
     createdAt: '2026-10-01T12:00:00.000Z',
     updatedAt: '2026-11-20T12:00:00.000Z',
+    removedAt,
     hasPersona: true,
     onboarding: {
       dismissed: false,

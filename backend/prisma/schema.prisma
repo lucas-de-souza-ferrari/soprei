@@ -173,15 +173,16 @@ model Membership {
   accountId    String?        @map("account_id") @db.Uuid
   account      Account?       @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
-  company               Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  auditAsActor          AuditEvent[]        @relation("AuditActor")
-  auditAsTarget         AuditEvent[]        @relation("AuditTarget")
-  invitationsSent       CompanyInvitation[] @relation("InvitationInviter")
-  invitationAccepted    CompanyInvitation[] @relation("InvitationAccepted")
-  knowledgeDocuments    KnowledgeDocument[] @relation("KnowledgeDocumentCreator")
-  stockMovements        StockMovement[]     @relation("StockMovementCreator")
-  appointmentsCreated   Appointment[]       @relation("AppointmentCreator")
-  notificationsResolved Notification[]      @relation("NotificationResolver")
+  company               Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  auditAsActor          AuditEvent[]         @relation("AuditActor")
+  auditAsTarget         AuditEvent[]         @relation("AuditTarget")
+  invitationsSent       CompanyInvitation[]  @relation("InvitationInviter")
+  invitationAccepted    CompanyInvitation[]  @relation("InvitationAccepted")
+  knowledgeDocuments    KnowledgeDocument[]  @relation("KnowledgeDocumentCreator")
+  stockMovements        StockMovement[]      @relation("StockMovementCreator")
+  appointmentsCreated   Appointment[]        @relation("AppointmentCreator")
+  notificationsResolved Notification[]       @relation("NotificationResolver")
+  platformAuditEvents   PlatformAuditEvent[]
 
   // `[id, companyId]` existe só para as chaves estrangeiras compostas de AuditEvent (spec 008).
   @@unique([id, companyId])
@@ -334,6 +335,12 @@ enum PlatformAuditAction {
   ACCOUNT_SESSIONS_REVOKED
   ACCOUNT_PASSWORD_RESET_SENT
   ACCOUNT_VERIFICATION_SENT
+  COMPANY_RENAMED
+  COMPANY_REMOVED
+  COMPANY_RESTORED
+  MEMBERSHIP_ROLE_CHANGED_BY_PLATFORM
+  MEMBERSHIP_DISABLED_BY_PLATFORM
+  MEMBERSHIP_ENABLED_BY_PLATFORM
 
   @@map("platform_audit_action")
 }
@@ -350,19 +357,25 @@ enum PlatformActionReason {
 /// Trilha das ações do administrador da plataforma (GLOBAL, spec 044; imutável: só create e list).
 /// Sem texto livre, e-mail nem IP. subject_* dizem sobre quem foi a ação (não é dado da empresa).
 model PlatformAuditEvent {
-  id               String                @id @default(uuid(7)) @db.Uuid
-  adminId          String                @map("admin_id") @db.Uuid
-  action           PlatformAuditAction
-  subjectCompanyId String?               @map("subject_company_id") @db.Uuid
-  subjectAccountId String?               @map("subject_account_id") @db.Uuid
-  reason           PlatformActionReason?
-  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                  String                @id @default(uuid(7)) @db.Uuid
+  adminId             String                @map("admin_id") @db.Uuid
+  action              PlatformAuditAction
+  subjectCompanyId    String?               @map("subject_company_id") @db.Uuid
+  subjectAccountId    String?               @map("subject_account_id") @db.Uuid
+  /// Spec 045, E3: o vínculo alvo (mudar papel, desativar ou reativar) e os papéis de antes e de depois.
+  subjectMembershipId String?               @map("subject_membership_id") @db.Uuid
+  fromRole            MembershipRole?       @map("from_role")
+  toRole              MembershipRole?       @map("to_role")
+  reason              PlatformActionReason?
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  admin          PlatformAdmin @relation(fields: [adminId], references: [id], onDelete: Restrict)
-  subjectCompany Company?      @relation(fields: [subjectCompanyId], references: [id], onDelete: Restrict)
-  subjectAccount Account?      @relation(fields: [subjectAccountId], references: [id], onDelete: SetNull)
+  admin             PlatformAdmin @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  subjectCompany    Company?      @relation(fields: [subjectCompanyId], references: [id], onDelete: Restrict)
+  subjectAccount    Account?      @relation(fields: [subjectAccountId], references: [id], onDelete: SetNull)
+  subjectMembership Membership?   @relation(fields: [subjectMembershipId], references: [id], onDelete: Restrict)
 
   @@index([createdAt, id])
+  @@index([subjectMembershipId])
   @@index([subjectCompanyId])
   @@index([subjectAccountId])
   @@map("platform_audit_events")

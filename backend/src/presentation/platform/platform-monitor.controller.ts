@@ -103,11 +103,12 @@ export const platformMonitorController: FastifyPluginCallback<PlatformMonitorCon
     return monitor.listCompanies(
       {
         status:
-          query.status === undefined
+          query.status === undefined || query.status === 'removed'
             ? undefined
             : query.status === 'active'
               ? 'ACTIVE'
               : 'SUSPENDED',
+        removed: query.status === 'removed',
         q: query.q === '' ? undefined : query.q,
         attention: query.attention,
       },

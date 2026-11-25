@@ -7,7 +7,7 @@ export type View =
   | { readonly name: 'overview' }
   | {
       readonly name: 'companies';
-      readonly status?: 'active' | 'suspended';
+      readonly status?: 'active' | 'suspended' | 'removed';
       readonly attention?: AttentionFilter;
     }
   | { readonly name: 'company'; readonly companyId: string; readonly from: View }

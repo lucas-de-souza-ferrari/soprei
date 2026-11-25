@@ -461,3 +461,45 @@ describe('rotas /admin/companies', () => {
     });
   });
 });
+
+describe('rotas /admin/companies com o admin da plataforma ligado (spec 045, D12)', () => {
+  it('POST, PATCH e DELETE com o Bearer da plataforma = 403 USE_PLATFORM_ADMIN e nada muda; a leitura continua', async () => {
+    const service = new CompanyService(new InMemoryCompanyRepository());
+    const existing = await service.create({ name: 'Fechada', slug: 'empresa-d12' });
+    const app = buildTestServer(
+      undefined,
+      { companies: service, companyWritesClosed: true },
+      { auth: testAuth.service },
+    );
+    await app.ready();
+    try {
+      const headers = bearer((await testAuth.platformToken()).accessToken);
+      for (const [method, url, payload] of [
+        ['POST', '/admin/companies', { name: 'Nova', slug: 'nova-d12' }],
+        ['PATCH', `/admin/companies/${existing.id}`, { name: 'Outro nome' }],
+        ['DELETE', `/admin/companies/${existing.id}`, undefined],
+      ] as const) {
+        const response = await app.inject({ method, url, headers, payload });
+        assert.equal(response.statusCode, 403, `${method} ${url}`);
+        assert.equal(response.json<ErrorBody>().error.code, 'USE_PLATFORM_ADMIN');
+      }
+      // Sem token continua 401 (a autenticação vem antes do fechamento).
+      const anonymous = await app.inject({
+        method: 'POST',
+        url: '/admin/companies',
+        payload: { name: 'Nova', slug: 'nova-d12' },
+      });
+      assert.equal(anonymous.statusCode, 401);
+      const read = await app.inject({
+        method: 'GET',
+        url: `/admin/companies/${existing.id}`,
+        headers,
+      });
+      assert.equal(read.statusCode, 200);
+      assert.equal(read.json<CompanyBody>().name, 'Fechada');
+      await assert.rejects(service.getBySlug('nova-d12'));
+    } finally {
+      await app.close();
+    }
+  });
+});

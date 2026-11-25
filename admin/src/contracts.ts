@@ -210,6 +210,8 @@ export const companyListItemSchema = z.object({
   owner: ownerSchema.nullable(),
   /** Quantos donos ativos (vínculo e conta ativos); `0` = "Sem dono ativo". */
   owners: count,
+  /** Spec 045, E3a: quando foi removida (só no filtro `status=removed`); `null` nas outras. */
+  removedAt: instant.nullable(),
 });
 export type CompanyListItem = z.infer<typeof companyListItemSchema>;
 
@@ -277,6 +279,8 @@ export const companyDetailSchema = z.object({
   status: companyStatusSchema,
   createdAt: instant,
   updatedAt: instant,
+  /** Spec 045, E3a: o detalhe também responde para a removida (para restaurar). */
+  removedAt: instant.nullable(),
   hasPersona: z.boolean(),
   onboarding: z.object({
     dismissed: z.boolean(),
@@ -501,4 +505,35 @@ export const confirmationCodeSchema = z.string().regex(/^[0-9]{6}$/);
 /** Corpo das ações com confirmação reforçada (desativar): motivo e código. */
 export const confirmedActionBodySchema = z
   .object({ reason: z.enum(ACTION_REASONS), code: confirmationCodeSchema })
+  .strict();
+
+// --- Spec 045, E3a: empresa e vínculos ----------------------------------------------------------
+
+/** Papel de um vínculo (`MEMBERSHIP_ROLES`, na ordem da tela: dono primeiro). */
+export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
+
+/** `POST /platform/companies/:companyId/rename` (204): o nome (1 a 120) e o motivo. */
+export const renameBodySchema = z
+  .object({ name: z.string().trim().min(1).max(120), reason: z.enum(ACTION_REASONS) })
+  .strict();
+
+/** `POST /platform/companies/:companyId/remove` (**[código]**, 204): o slug digitado e o código. */
+export const removeCompanyBodySchema = z
+  .object({
+    reason: z.enum(ACTION_REASONS),
+    slug: z.string().max(63),
+    code: confirmationCodeSchema,
+  })
+  .strict();
+
+/**
+ * `POST /platform/companies/:companyId/memberships/:membershipId/role` (204): `code` só quando o papel
+ * de origem ou o de destino é `OWNER` (**[código]**).
+ */
+export const roleBodySchema = z
+  .object({
+    role: z.enum(MEMBERSHIP_ROLES),
+    reason: z.enum(ACTION_REASONS),
+    code: confirmationCodeSchema.optional(),
+  })
   .strict();

@@ -125,6 +125,8 @@ export interface PlatformCompanyListFilter {
   readonly q?: string | undefined;
   /** Só empresas com este "precisa de atenção" (os mesmos critérios do overview). */
   readonly attention?: PlatformAttentionFilter | undefined;
+  /** Spec 045, E3a: só as removidas (soft delete), para restaurar; sem ele, só as não removidas. */
+  readonly removed?: boolean | undefined;
 }
 
 /** Os itens de "precisa de atenção" que filtram a lista de empresas (cada um liga o overview à lista). */
@@ -155,6 +157,8 @@ export interface PlatformCompanyRow {
   readonly owner: PlatformCompanyOwner | null;
   /** Quantos donos ativos a empresa tem (a regra está em `PlatformCompanyOwner`). */
   readonly owners: number;
+  /** Quando foi removida (spec 045, E3a); `null` nas não removidas. */
+  readonly removedAt: Date | null;
 }
 
 /**
@@ -212,6 +216,8 @@ export interface PlatformCompanyDetailFacts {
     readonly status: CompanyStatus;
     readonly createdAt: Date;
     readonly updatedAt: Date;
+    /** Spec 045, E3a: o detalhe responde também para a removida (para restaurar). */
+    readonly removedAt: Date | null;
   };
   readonly subscriptionId: string | null;
   readonly memberships: readonly {

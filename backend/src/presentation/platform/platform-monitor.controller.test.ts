@@ -288,13 +288,22 @@ describe('/platform/* leituras e ações (spec 044, E2)', () => {
       });
       const call = world.reads.calls.find((entry) => entry.method === 'listCompanies');
       assert.deepEqual(call?.args.slice(0, 2), [
-        { status: 'SUSPENDED', q: 'acme', attention: 'token_expiring' },
+        { status: 'SUSPENDED', q: 'acme', attention: 'token_expiring', removed: false },
         { limit: 30, cursor: undefined },
       ]);
+      // Spec 045, E3a: `status=removed` lista só as removidas (sem estado de ativa ou suspensa).
+      await world.app.inject({ method: 'GET', url: '/platform/companies?status=removed', headers });
+      const removed = world.reads.calls.filter((entry) => entry.method === 'listCompanies').at(-1);
+      assert.deepEqual(removed?.args[0], {
+        status: undefined,
+        q: undefined,
+        attention: undefined,
+        removed: true,
+      });
       for (const url of [
         '/platform/companies?limit=51',
         '/platform/companies?limit=0',
-        '/platform/companies?status=removed',
+        '/platform/companies?status=deleted',
         '/platform/companies?attention=qualquer',
         `/platform/companies?q=${'x'.repeat(65)}`,
         '/platform/companies?q=acme%00',
