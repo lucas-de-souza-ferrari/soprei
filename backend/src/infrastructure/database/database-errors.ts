@@ -42,7 +42,7 @@ export function isExclusionViolation(error: unknown): boolean {
 
 /**
  * Deadlock detectado pelo Postgres (SQLSTATE 40P01), na mesma forma do Prisma 7 com o adaptador `pg` (ou
- * dentro de um `DatabaseError`, pela cadeia de `cause`). Num `$queryRaw` ele não chega como P2034, então o
+ * dentro de um `DatabaseError`, pela cadeia de `cause`). Em SQL cru ele não chega como P2034, então o
  * `runInTransaction` não o repete sozinho; quem tem travas em ordem que pode cruzar com outro caminho
  * (spec 045, E2: desativar conta x `createCompany`) repete a transação inteira.
  */

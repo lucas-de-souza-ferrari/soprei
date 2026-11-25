@@ -19,8 +19,8 @@ function adapterError(sqlState: string): Prisma.PrismaClientKnownRequestError {
   });
 }
 
-/** Cliente falso: só `$transaction`, que falha com os erros dados e depois roda o callback. */
-function fakePrisma(failures: unknown[]): { prisma: TenantScopedPrisma; calls: () => number } {
+/** Prisma falso: só `$transaction`, que falha com os erros dados e depois roda o callback. */
+function fakePrisma(failures: Error[]): { prisma: TenantScopedPrisma; calls: () => number } {
   let calls = 0;
   const prisma = {
     $transaction: async (fn: (db: unknown) => Promise<unknown>) => {
