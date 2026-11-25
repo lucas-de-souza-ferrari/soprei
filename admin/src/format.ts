@@ -163,6 +163,24 @@ export function errorMessage(error: unknown): string {
   }
 }
 
+/**
+ * Mensagem de uma ação sobre a conta (spec 045, E2): os códigos de regra que a tela explica; o resto é
+ * `errorMessage`. Nunca o texto do servidor.
+ */
+export function accountActionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'CONFIRMATION_INVALID':
+        return 'Código do autenticador inválido ou já usado. Espere o próximo código (até 30 s) e tente de novo.';
+      case 'LAST_OWNER':
+        return 'Esta conta é a única dona ativa de uma empresa ativa. Suspenda a empresa ou transfira a propriedade antes.';
+      case 'ALREADY_VERIFIED':
+        return 'O e-mail desta conta já está confirmado.';
+    }
+  }
+  return errorMessage(error);
+}
+
 /** Mensagem da tela Entrar (o 401 é a falha uniforme de credenciais). */
 export function loginErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 401)

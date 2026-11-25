@@ -480,3 +480,25 @@ export type Health = z.infer<typeof healthSchema>;
 
 /** Corpo de `POST /platform/companies/:companyId/suspend` e `.../reactivate` (204). */
 export const actionBodySchema = z.object({ reason: z.enum(ACTION_REASONS) }).strict();
+
+/**
+ * Ações sobre a conta (spec 045, E2), todas `POST /platform/accounts/:accountId/<caminho>`. `code` (o
+ * código novo do autenticador) só nas marcadas **[código]**: desativar. Respostas sem corpo: 204
+ * (desativar, reativar, encerrar sessões) ou 202 (os dois e-mails).
+ */
+export const ACCOUNT_ACTIONS = {
+  disable: { path: 'disable', code: true },
+  enable: { path: 'enable', code: false },
+  revokeSessions: { path: 'sessions/revoke', code: false },
+  passwordReset: { path: 'password-reset', code: false },
+  resendVerification: { path: 'verification/resend', code: false },
+} as const;
+export type AccountAction = keyof typeof ACCOUNT_ACTIONS;
+
+/** Código de 6 dígitos do autenticador (o mesmo formato do login). */
+export const confirmationCodeSchema = z.string().regex(/^[0-9]{6}$/);
+
+/** Corpo das ações com confirmação reforçada (desativar): motivo e código. */
+export const confirmedActionBodySchema = z
+  .object({ reason: z.enum(ACTION_REASONS), code: confirmationCodeSchema })
+  .strict();

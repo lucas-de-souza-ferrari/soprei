@@ -1,4 +1,5 @@
 import type { Page, Request } from '@playwright/test';
+import { actionBodySchema, confirmedActionBodySchema } from '../src/contracts';
 import * as fx from './fixtures';
 
 /**
@@ -8,6 +9,8 @@ import * as fx from './fixtures';
  * com valor fora da lista (os esquemas `.strict()` de `platform-monitor.validators.ts`).
  */
 export const GOOD = { email: fx.ADMIN_EMAIL, password: 'senha-do-dono-bem-longa', code: '123456' };
+/** Código NOVO do autenticador (spec 045, E2): o do login (`GOOD.code`) já foi usado e é recusado. */
+export const FRESH_CODE = '654321';
 
 /** `limit` de 1 a 50 e cursor opaco, como no `pageShape` da E2. */
 const PAGE = { limit: /^([1-9]|[1-4][0-9]|50)$/, cursor: /^.{1,512}$/ };
@@ -50,12 +53,17 @@ export interface FakeApiOptions {
   readonly signedIn?: boolean;
   readonly billingEnabled?: boolean;
   readonly queueUnavailable?: boolean;
+  /** A conta A é a única dona ativa de uma empresa ativa: desativar responde 409 `LAST_OWNER`. */
+  readonly lastOwner?: boolean;
 }
 
 export class FakeApi {
   readonly calls: Call[] = [];
   signedIn: boolean;
   companyStatus: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE';
+  /** Estado da conta A (spec 045, E2): as ações mudam e o detalhe relê. */
+  accountStatus: 'ACTIVE' | 'DISABLED' = 'ACTIVE';
+  accountVerified = true;
   /** Caminhos que passam a responder 401 (sessão vencida no servidor). */
   readonly expired = new Set<string>();
   /** Caminhos que respondem com este status de erro antes de qualquer outra regra (logout com 503...). */
@@ -146,7 +154,14 @@ export class FakeApi {
         case '/platform/accounts':
           return { status: 200, json: fx.accountPage };
         case `/platform/accounts/${fx.ACCOUNT_A}`:
-          return { status: 200, json: fx.accountDetail };
+          return {
+            status: 200,
+            json: {
+              ...fx.accountDetail,
+              status: this.accountStatus,
+              verified: this.accountVerified,
+            },
+          };
         case `/platform/accounts/${fx.ACCOUNT_A}/email`:
           return { status: 200, json: fx.accountEmail };
         case '/platform/billing/orders':
@@ -169,6 +184,38 @@ export class FakeApi {
     if (method === 'POST' && path === `/platform/companies/${fx.COMPANY_A}/reactivate`) {
       this.companyStatus = 'ACTIVE';
       return { status: 204 };
+    }
+    if (method === 'POST' && path.startsWith(`/platform/accounts/${fx.ACCOUNT_A}/`)) {
+      return this.accountAction(path.slice(`/platform/accounts/${fx.ACCOUNT_A}/`.length), body);
+    }
+    return error(404, 'NOT_FOUND');
+  }
+
+  /** Ações sobre a conta A (spec 045, E2), com as regras que a tela percebe; corpo `strict` como no servidor. */
+  private accountAction(action: string, body: unknown): { status: number; json?: unknown } {
+    const error = (status: number, code: string) => ({
+      status,
+      json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
+    });
+    if (action === 'disable') {
+      const parsed = confirmedActionBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (parsed.data.code !== FRESH_CODE) return error(400, 'CONFIRMATION_INVALID');
+      if (this.options.lastOwner === true) return error(409, 'LAST_OWNER');
+      this.accountStatus = 'DISABLED';
+      return { status: 204 };
+    }
+    if (!actionBodySchema.safeParse(body).success) return error(400, 'VALIDATION_ERROR');
+    switch (action) {
+      case 'enable':
+        this.accountStatus = 'ACTIVE';
+        return { status: 204 };
+      case 'sessions/revoke':
+        return { status: 204 };
+      case 'password-reset':
+        return { status: 202 };
+      case 'verification/resend':
+        return this.accountVerified ? error(409, 'ALREADY_VERIFIED') : { status: 202 };
     }
     return error(404, 'NOT_FOUND');
   }
