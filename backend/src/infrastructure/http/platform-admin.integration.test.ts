@@ -931,6 +931,7 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
     );
     assert.equal(a.peopleTotal, 3);
     assert.equal(a.owners, 1);
+    assert.deepEqual(a.owner, { accountId: accountA, emailMasked: 's***@exemplo.test' });
     assert.equal(a.pendingInvitations, 1, 'o convite vencido não conta');
     assert.equal(a.holder?.accountId, accountA, 'o titular da assinatura continua');
 
@@ -944,6 +945,7 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
     );
     assert.equal(b.holder, null, 'sem assinatura...');
     assert.equal(b.owners, 1, '...o dono aparece pelos vínculos');
+    assert.deepEqual(b.owner, { accountId: null, emailMasked: 'b***@exemplo.test' });
     assert.equal(b.pendingInvitations, 0);
     const aIds = new Set(a.people.map((person) => person.membershipId));
     assert.ok(b.people.every((person) => !aIds.has(person.membershipId)));
@@ -952,6 +954,7 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
       await get(`/platform/companies/${companyE.id}`)
     ).json<PlatformCompanyDetailResponse>();
     assert.equal(e.owners, 0);
+    assert.equal(e.owner, null, 'conta desativada não é dono ativo');
     assert.deepEqual(
       e.people.map((person) => [person.role, person.account?.status]),
       [['OWNER', 'DISABLED']],
@@ -1038,7 +1041,7 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
     }
   });
 
-  it('privacidade: nenhum sentinela em resposta de /platform/*, log nem /metrics; o e-mail completo só no detalhe da conta', async () => {
+  it('privacidade: nenhum sentinela em resposta de /platform/*, log nem /metrics; o e-mail completo só sai em /email', async () => {
     assert.ok(platformBodies.length >= 15, 'as rotas foram exercitadas antes desta varredura');
     const metricsBody = (
       await app.inject({
@@ -1070,6 +1073,7 @@ describe('admin da plataforma com Postgres e Redis reais (spec 044, E2)', () => 
         assert.ok(!body.includes(full), `${full} em ${url}`);
       }
       assert.ok(!raw.includes(full), `${full} no log`);
+      assert.ok(!metricsBody.includes(full), `${full} no /metrics`);
     }
   });
 });
