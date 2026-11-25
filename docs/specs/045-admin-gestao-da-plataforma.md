@@ -1,6 +1,6 @@
 # 045 — Admin da plataforma: quem é dono e gestão completa (CRUD) de contas, empresas, vínculos, assinatura e canal
 
-- **Status:** rascunho (aguarda aprovação do dono; decisões D1 a D17 abaixo)
+- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 a E6 por fazer, na ordem
 - **Branch:** `spec/045-admin-gestao` (esta spec); cada etapa em branch própria a partir da `main` (`spec/045-e1-pessoas`, `spec/045-e2-contas`, ...)
 - **Depende de:** 044 (admin, sessão com segundo fator, `PlatformAuditEvent`, leitura agregada), 008 (papéis, regra do último `OWNER`, trava da empresa), 017/020/021 (contas, confirmação, recuperação de senha, `revokeAll`), 025 (convites), 015/023/039 (canal), 031/040 (assinatura), 032 (E7 excluir conta e E8 excluir empresa, ainda não implementadas: esta spec cruza com as duas).
 - **Spec de segurança:** cada etapa passa pelo `reviewer` antes do merge. Ela abre as **primeiras escritas da plataforma sobre contas, vínculos, assinatura e canal**, muda o contrato do convite (convidador que não é vínculo) e amplia as decisões D1 e D7 da 044.
@@ -246,3 +246,5 @@ Fecho de cada etapa:
 ## Registro da implementação
 
 (vazio até a aprovação)
+
+- **2026-11-25, aprovação:** o dono aprovou D1 a D17 como recomendadas ("aprovo tudo"). Antes, confirmou o entendimento de que o dono da empresa vem dos vínculos (`OWNER`), não da assinatura (quem paga), e de que a transferência da titularidade é a E3. Pendente do dono, sem bloquear a E1: conferir a Política de Privacidade nos pontos listados nesta spec (prazo de guarda da trilha da plataforma na lista de retenção da 032).
