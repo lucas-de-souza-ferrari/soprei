@@ -255,6 +255,10 @@ function activeOwnersFrom(company: Prisma.Sql): Prisma.Sql {
  * (o "dono ativo" é uma definição só). Roda dentro da transação das ações da conta, depois das travas
  * (empresas em que a conta é dona, depois a conta), então o resultado vale até o commit. A conta entra pela
  * junção (`a.id`), nunca por e-mail.
+ *
+ * De propósito fora do `read` deste módulo: roda na transação da unidade de trabalho que segura as travas
+ * (`PrismaPlatformAccountUnitOfWork`), com o prazo da transação e do pool, e não numa transação curta com
+ * o `statement_timeout` de 3 s das leituras do admin. É uma regra sob trava, não uma leitura de tela.
  */
 export async function soleActiveOwnerCompanyCount(
   db: TenantScopedDb,

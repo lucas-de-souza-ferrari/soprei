@@ -5,11 +5,15 @@ import type {
 import { CompanyId, MembershipId } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import { isDeadlock } from '../database-errors.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
 import { lockAccountRow } from './account.repository.js';
 import { lockCompanyRow } from './membership-admin-unit-of-work.js';
 import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
 import { soleActiveOwnerCompanyCount } from './platform-read-model.js';
+
+/** Repetições depois de um deadlock (a primeira tentativa não conta). */
+export const DEADLOCK_RETRIES = 2;
 
 function accountNotFound(): NotFoundError {
   return new NotFoundError('Conta não encontrada', { context: { entity: 'Account' } });
@@ -53,7 +57,22 @@ export class PrismaPlatformAccountUnitOfWork implements PlatformAccountUnitOfWor
     private readonly options: TransactionOptions = {},
   ) {}
 
-  run<T>(fn: (tx: PlatformAccountTransaction) => Promise<T>): Promise<T> {
+  /**
+   * Repete a transação inteira em deadlock (40P01), até `DEADLOCK_RETRIES` vezes: o `createCompany` da 031
+   * trava a conta antes de atualizar empresas (o inverso da ordem empresa -> conta daqui) e o Postgres
+   * aborta uma das duas; o callback não faz nada externo, então repetir é seguro.
+   */
+  async run<T>(fn: (tx: PlatformAccountTransaction) => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.once(fn);
+      } catch (error) {
+        if (attempt >= DEADLOCK_RETRIES || !isDeadlock(error)) throw error;
+      }
+    }
+  }
+
+  private once<T>(fn: (tx: PlatformAccountTransaction) => Promise<T>): Promise<T> {
     return runInTransaction(
       this.prisma,
       (db) => {
