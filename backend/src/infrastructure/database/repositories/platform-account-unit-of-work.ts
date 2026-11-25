@@ -4,11 +4,10 @@ import type {
 } from '../../../application/ports/platform-account-unit-of-work.js';
 import { CompanyId, MembershipId } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
-import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { isDeadlock } from '../database-errors.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
-import { lockAccountRow } from './account.repository.js';
-import { lockCompanyRow } from './membership-admin-unit-of-work.js';
+import { lockAccountRow, lockOwnedCompanies } from './account.repository.js';
 import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
 import { soleActiveOwnerCompanyCount } from './platform-read-model.js';
 
@@ -17,31 +16,6 @@ export const DEADLOCK_RETRIES = 2;
 
 function accountNotFound(): NotFoundError {
   return new NotFoundError('Conta não encontrada', { context: { entity: 'Account' } });
-}
-
-/** Trava, em ordem de id, as empresas não removidas em que a conta tem vínculo `OWNER` ativo. */
-async function lockOwnedCompanies(db: TenantScopedDb, accountId: string): Promise<number> {
-  // `companies` é global; o filtro pelo vínculo é relação (`some`), como em `listMemberships`.
-  const companies = await db.company.findMany({
-    where: {
-      deletedAt: null,
-      memberships: { some: { accountId, role: 'OWNER', status: 'ACTIVE' } },
-    },
-    select: { id: true },
-    orderBy: { id: 'asc' },
-  });
-  let locked = 0;
-  for (const { id } of companies) {
-    try {
-      await lockCompanyRow(db, CompanyId.parse(id));
-      locked += 1;
-    } catch (error) {
-      // Removida entre a leitura e a trava: não conta para a regra do último dono (só empresa ativa e
-      // não removida), então segue sem ela.
-      if (!(error instanceof NotFoundError)) throw error;
-    }
-  }
-  return locked;
 }
 
 /**
@@ -58,9 +32,9 @@ export class PrismaPlatformAccountUnitOfWork implements PlatformAccountUnitOfWor
   ) {}
 
   /**
-   * Repete a transação inteira em deadlock (40P01), até `DEADLOCK_RETRIES` vezes: o `createCompany` da 031
-   * trava a conta antes de atualizar empresas (o inverso da ordem empresa -> conta daqui) e o Postgres
-   * aborta uma das duas; o callback não faz nada externo, então repetir é seguro.
+   * Repete a transação inteira em deadlock (40P01), até `DEADLOCK_RETRIES` vezes: defesa para qualquer
+   * transação que trave na ordem inversa (o `createCompany` da 031 já segue empresas -> conta); o callback
+   * não faz nada externo, então repetir é seguro.
    */
   async run<T>(fn: (tx: PlatformAccountTransaction) => Promise<T>): Promise<T> {
     for (let attempt = 0; ; attempt++) {

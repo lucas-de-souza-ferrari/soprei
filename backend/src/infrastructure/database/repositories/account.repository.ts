@@ -18,9 +18,10 @@ import {
 } from '../../../domain/index.js';
 import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction } from '../transaction.js';
+import { lockCompanyRow } from './membership-admin-unit-of-work.js';
 import { ensureTrialSubscription } from './billing.repository.js';
 import { withRepositoryErrors } from './repository-errors.js';
-import { ForbiddenError, ConflictError } from '../../../shared/errors/index.js';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../../shared/errors/index.js';
 
 /** Início da janela de 24 h do teto diário de erros de confirmação. */
 function failureWindowStart(now: Date): Date {
@@ -36,6 +37,36 @@ export async function lockAccountRow(db: TenantScopedDb, accountId: string): Pro
   const rows = await db.$queryRaw<{ id: string }[]>`
     SELECT id FROM accounts WHERE id = ${accountId}::uuid FOR NO KEY UPDATE`;
   return rows.length === 1;
+}
+
+/**
+ * Trava, em ordem de id, as empresas não removidas em que a conta tem vínculo `OWNER` ativo. Toda transação
+ * que trava empresas e a conta segue a ordem **empresas, depois a conta** (spec 045, regra comum 4): as ações
+ * da plataforma sobre a conta (E2) e a criação de empresa com a cobrança ligada (031), que adota essas
+ * empresas. Ordem invertida entre as duas dava deadlock (revisão da E2 da 045).
+ */
+export async function lockOwnedCompanies(db: TenantScopedDb, accountId: string): Promise<number> {
+  // `companies` é global; o filtro pelo vínculo é relação (`some`), como em `listMemberships`.
+  const companies = await db.company.findMany({
+    where: {
+      deletedAt: null,
+      memberships: { some: { accountId, role: 'OWNER', status: 'ACTIVE' } },
+    },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  let locked = 0;
+  for (const { id } of companies) {
+    try {
+      await lockCompanyRow(db, CompanyId.parse(id));
+      locked += 1;
+    } catch (error) {
+      // Removida entre a leitura e a trava: não conta para a regra do último dono (só empresa ativa e
+      // não removida), então segue sem ela.
+      if (!(error instanceof NotFoundError)) throw error;
+    }
+  }
+  return locked;
 }
 
 export class PrismaAccountRepository implements AccountRepository {
@@ -379,6 +410,9 @@ export class PrismaAccountRepository implements AccountRepository {
   ): Promise<AccountMembership> {
     return withRepositoryErrors('Account.createCompany', () =>
       runInTransaction(this.db, async (tx) => {
+        // Cobrança ligada: as empresas que serão adotadas (abaixo) são travadas ANTES da conta, na mesma
+        // ordem das ações da plataforma sobre a conta (spec 045, E2), para as duas nunca se cruzarem.
+        if (billing !== undefined) await lockOwnedCompanies(tx, accountId);
         await lockAccountRow(tx, accountId);
         const account = await tx.account.findUnique({ where: { id: accountId } });
         if (account?.status !== 'ACTIVE' || account.emailVerifiedAt === null)

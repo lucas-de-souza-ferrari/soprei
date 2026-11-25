@@ -7,9 +7,9 @@ import {
   PrismaPlatformAccountUnitOfWork,
 } from './platform-account-unit-of-work.js';
 
-// Spec 045, E2 (revisão): o `createCompany` da 031 trava a conta antes das empresas, o inverso da ordem
-// das ações da plataforma; no cruzamento o Postgres aborta uma das duas com 40P01, que num `$queryRaw` do
-// Prisma 7 não chega como P2034. A unidade de trabalho repete a transação inteira nesse caso (só nele).
+// Spec 045, E2 (revisão): um deadlock (40P01) num `$queryRaw` do Prisma 7 não chega como P2034. O
+// `createCompany` da 031 já trava na mesma ordem (empresas, depois a conta); como defesa, a unidade de
+// trabalho repete a transação inteira em deadlock (só nele).
 
 function adapterError(sqlState: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('falha', {
