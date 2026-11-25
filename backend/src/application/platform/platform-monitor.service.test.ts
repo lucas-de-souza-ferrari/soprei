@@ -167,6 +167,20 @@ function companyFacts(id: CompanyId, overrides: Partial<PlatformCompanyDetailFac
     },
     subscriptionId: randomUUID(),
     memberships: [{ role: 'OWNER', status: 'ACTIVE', count: 1 }],
+    people: [
+      {
+        membershipId: randomUUID(),
+        accountId: randomUUID(),
+        emailMasked: 'l***@exemplo.com',
+        role: 'OWNER',
+        status: 'ACTIVE',
+        createdAt: new Date('2026-11-01T00:00:00.000Z'),
+        account: { status: 'ACTIVE', verified: true },
+      },
+    ],
+    peopleTotal: 1,
+    owners: 1,
+    pendingInvitations: 0,
     holder: {
       accountId: randomUUID(),
       emailVerified: true,
@@ -297,6 +311,8 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
               channelState: 'NOT_CONNECTED',
               activeMembers: 1,
               messages7d: 0,
+              owner: null,
+              owners: 0,
               subscription: {
                 planCode: 'ESSENTIAL',
                 status: 'TRIAL',
@@ -310,6 +326,11 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
         }),
     });
     const { service } = setup({ reads, billing: false });
+    // Spec 045, E1: o dono vem dos vínculos, não da assinatura; com a cobrança desligada ele aparece.
+    const billingOff = await service.companyDetail(id);
+    assert.equal(billingOff.people[0]?.role, 'OWNER');
+    assert.equal(billingOff.people[0].emailMasked, 'l***@exemplo.com');
+    assert.equal(billingOff.owners, 1);
     const overview = await service.overview();
     assert.equal(overview.subscriptions, null);
     assert.equal(overview.paidOrdersThisMonth, null);
@@ -352,6 +373,8 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
               channelState: 'LEGACY',
               activeMembers: 2,
               messages7d: 9,
+              owner: { accountId: null, emailMasked: 'v***@exemplo.com' },
+              owners: 2,
               subscription: {
                 planCode: 'SCALE',
                 status: 'ACTIVE',
@@ -368,6 +391,9 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
     const page = await service.listCompanies({ status: 'SUSPENDED', q: 'a' }, { limit: 10 });
     assert.equal(page.items[0]?.plan, 'SCALE');
     assert.equal(page.items[0].access, 'grace');
+    // Spec 045, E1: o dono (mascarado) e a contagem de donos ativos passam como vieram da leitura.
+    assert.deepEqual(page.items[0].owner, { accountId: null, emailMasked: 'v***@exemplo.com' });
+    assert.equal(page.items[0].owners, 2);
     assert.equal(page.nextCursor, 'c');
     assert.deepEqual(reads.calls[0]?.args.slice(0, 2), [
       { status: 'SUSPENDED', q: 'a' },
@@ -431,7 +457,20 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
     );
   });
 
-  it('detalhe da conta: grava ACCOUNT_EMAIL_VIEWED com o admin e a conta (e a métrica); ausente é 404 sem gravar', async () => {
+  it('detalhe da empresa: pessoas, total, donos ativos e convites pendentes passam como vieram (spec 045, E1)', async () => {
+    const id = CompanyId.parse(randomUUID());
+    const facts = companyFacts(id, { owners: 0, peopleTotal: 61, pendingInvitations: 2 });
+    const reads = new FakePlatformReadModel({ companyDetail: () => Promise.resolve(facts) });
+    const { service, audit } = setup({ reads });
+    const detail = await service.companyDetail(id);
+    assert.deepEqual(detail.people, facts.people);
+    assert.equal(detail.peopleTotal, 61);
+    assert.equal(detail.owners, 0);
+    assert.equal(detail.pendingInvitations, 2);
+    assert.equal(audit.events.length, 0, 'ver as pessoas (mascaradas) não grava nada');
+  });
+
+  it('detalhe da conta (spec 045, D3): só o e-mail mascarado, sem gravar nada; ausente ou malformado é 404', async () => {
     const accountId = randomUUID();
     const reads = new FakePlatformReadModel({
       accountDetail: (id) =>
@@ -439,7 +478,7 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
           id === accountId
             ? {
                 id: accountId,
-                email: 'lucia@exemplo.com',
+                emailMasked: 'l***@exemplo.com',
                 status: 'ACTIVE',
                 verified: true,
                 createdAt: NOW,
@@ -448,10 +487,31 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
             : null,
         ),
     });
-    const { service, audit, actions, logs } = setup({ reads });
-    const detail = await service.accountDetail(ADMIN, accountId);
-    assert.equal(detail.email, 'lucia@exemplo.com');
+    const { service, audit, actions } = setup({ reads });
+    const detail = await service.accountDetail(accountId);
+    assert.equal(detail.emailMasked, 'l***@exemplo.com');
+    assert.equal('email' in detail, false);
     assert.equal(detail.subscription, null);
+    assert.equal(audit.events.length, 0);
+    assert.deepEqual(actions, []);
+    assert.ok(!reads.calls.some((call) => call.method === 'accountEmail'));
+
+    await assert.rejects(service.accountDetail(randomUUID()), NotFoundError);
+    await assert.rejects(service.accountDetail('x'), NotFoundError);
+    const list = await service.listAccounts({}, { limit: 30 });
+    assert.deepEqual(list.items, []);
+    assert.equal(audit.events.length, 0, 'nem o detalhe nem a lista gravam');
+  });
+
+  it('e-mail da conta: grava ACCOUNT_EMAIL_VIEWED com o admin e a conta (e a métrica) antes de devolver; ausente é 404 sem gravar', async () => {
+    const accountId = randomUUID();
+    const reads = new FakePlatformReadModel({
+      accountEmail: (id) => Promise.resolve(id === accountId ? 'lucia@exemplo.com' : null),
+    });
+    const { service, audit, actions, logs } = setup({ reads });
+    assert.deepEqual(await service.accountEmail(ADMIN, accountId), {
+      email: 'lucia@exemplo.com',
+    });
     assert.equal(audit.events.length, 1);
     assert.equal(audit.events[0]?.action, 'ACCOUNT_EMAIL_VIEWED');
     assert.equal(audit.events[0].adminId, ADMIN.adminId);
@@ -459,12 +519,30 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
     assert.deepEqual(actions, ['account_email_viewed']);
     assert.ok(!logContains(logs.raw(), 'lucia@exemplo.com'));
 
-    await assert.rejects(service.accountDetail(ADMIN, randomUUID()), NotFoundError);
-    await assert.rejects(service.accountDetail(ADMIN, 'x'), NotFoundError);
+    const before = reads.calls.length;
+    await assert.rejects(service.accountEmail(ADMIN, 'x'), NotFoundError);
+    assert.equal(reads.calls.length, before, 'id malformado nem chega ao banco');
+    await assert.rejects(service.accountEmail(ADMIN, randomUUID()), NotFoundError);
     assert.equal(audit.events.length, 1);
-    const list = await service.listAccounts({}, { limit: 30 });
-    assert.deepEqual(list.items, []);
-    assert.equal(audit.events.length, 1, 'a lista não grava nada');
+  });
+
+  it('e-mail da conta: com a gravação da trilha falhando, o e-mail não sai', async () => {
+    const accountId = randomUUID();
+    const reads = new FakePlatformReadModel({
+      accountEmail: () => Promise.resolve('lucia@exemplo.com'),
+    });
+    const { service, audit, actions, logs } = setup({ reads });
+    audit.create = () => Promise.reject(new DatabaseError('Falha ao gravar'));
+    let leaked = false;
+    await assert.rejects(
+      service.accountEmail(ADMIN, accountId).then((value) => {
+        leaked = value.email.length > 0;
+      }),
+      DatabaseError,
+    );
+    assert.equal(leaked, false);
+    assert.deepEqual(actions, []);
+    assert.ok(!logContains(logs.raw(), 'lucia@exemplo.com'));
   });
 
   it('suspender e reativar: estado e evento com o motivo; repetir não grava outro; concorrência grava um só', async () => {

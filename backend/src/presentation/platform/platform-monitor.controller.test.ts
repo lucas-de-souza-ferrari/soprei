@@ -22,6 +22,8 @@ import {
 import { captureLogs } from '../../test-support/log-capture.js';
 import { PLATFORM_COOKIE } from './platform-auth.controller.js';
 import type {
+  PlatformAccountDetailResponse,
+  PlatformAccountEmailResponse,
   PlatformAccountListResponse,
   PlatformHealthResponse,
   PlatformOverviewResponse,
@@ -42,6 +44,7 @@ const GET_ROUTES = [
   `/platform/companies/${COMPANY_ID}`,
   '/platform/accounts',
   `/platform/accounts/${ACCOUNT_ID}`,
+  `/platform/accounts/${ACCOUNT_ID}/email`,
   '/platform/billing/orders',
   '/platform/billing/notices',
   '/platform/health',
@@ -79,7 +82,7 @@ async function setup(options: { platform?: boolean } = {}): Promise<World> {
         id === ACCOUNT_ID
           ? {
               id,
-              email: 'lucia@exemplo.com',
+              emailMasked: 'l***@exemplo.com',
               status: 'ACTIVE',
               verified: true,
               createdAt: new Date('2026-11-01T00:00:00.000Z'),
@@ -87,6 +90,7 @@ async function setup(options: { platform?: boolean } = {}): Promise<World> {
             }
           : null,
       ),
+    accountEmail: (id) => Promise.resolve(id === ACCOUNT_ID ? 'lucia@exemplo.com' : null),
     listAccounts: () =>
       Promise.resolve({
         items: [
@@ -328,6 +332,8 @@ describe('/platform/* leituras e ações (spec 044, E2)', () => {
         `/platform/companies/${randomUUID()}`,
         '/platform/accounts/nao-uuid',
         `/platform/accounts/${randomUUID()}`,
+        '/platform/accounts/nao-uuid/email',
+        `/platform/accounts/${randomUUID()}/email`,
       ]) {
         const response = await world.app.inject({ method: 'GET', url, headers });
         assert.equal(response.statusCode, 404, url);
@@ -345,7 +351,7 @@ describe('/platform/* leituras e ações (spec 044, E2)', () => {
     }
   });
 
-  it('a lista de contas traz só o e-mail mascarado e não grava; o detalhe traz o completo e grava ACCOUNT_EMAIL_VIEWED', async () => {
+  it('lista e detalhe da conta trazem só o e-mail mascarado e não gravam; GET .../email traz o completo e grava ACCOUNT_EMAIL_VIEWED (spec 045, D3)', async () => {
     const world = await setup();
     try {
       const headers = { cookie: world.cookie };
@@ -363,7 +369,20 @@ describe('/platform/* leituras e ações (spec 044, E2)', () => {
         headers,
       });
       assert.equal(detail.statusCode, 200);
-      assert.equal(detail.json<{ email: string }>().email, 'lucia@exemplo.com');
+      assert.equal(detail.json<PlatformAccountDetailResponse>().emailMasked, 'l***@exemplo.com');
+      assert.ok(!detail.body.includes('lucia@'));
+      assert.deepEqual(actions(world), [], 'abrir a conta não conta como leitura do e-mail');
+
+      const email = await world.app.inject({
+        method: 'GET',
+        url: `/platform/accounts/${ACCOUNT_ID}/email`,
+        headers,
+      });
+      assert.equal(email.statusCode, 200);
+      assert.equal(email.headers['cache-control'], 'no-store');
+      assert.deepEqual(email.json<PlatformAccountEmailResponse>(), {
+        email: 'lucia@exemplo.com',
+      });
       assert.deepEqual(actions(world), ['ACCOUNT_EMAIL_VIEWED']);
       const event = world.audit.events.at(-1);
       assert.equal(event?.adminId, world.adminId);

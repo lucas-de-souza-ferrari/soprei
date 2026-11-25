@@ -170,13 +170,37 @@ describe('platform-read-model.ts: SQL sem conteúdo (spec 044, E2)', () => {
     assert.doesNotMatch(bare, /\bname\b/);
   });
 
-  it('o e-mail da conta sai completo só no detalhe; a lista só o mascara no banco', () => {
-    assert.match(
-      sql,
-      /substr\(a\.email, 1, 1\) \|\| '\*\*\*@' \|\| split_part\(a\.email, '@', 2\) as email_masked/,
+  it('e-mail (de conta ou de vínculo) só dentro da máscara; o completo, uma única vez, na leitura da rota auditada (spec 045, E1)', () => {
+    const MASK =
+      /substr\((a|mb)\.email, 1, 1\) \|\| '\*\*\*@' \|\| split_part\(\1\.email, '@', 2\)/g;
+    const masks = [...sql.matchAll(MASK)].map((match) => match[1]);
+    // Lista e detalhe da conta (a.email) e a expressão das pessoas (mb.email e a.email).
+    assert.ok(masks.filter((alias) => alias === 'a').length >= 3, 'máscara da conta');
+    assert.ok(masks.includes('mb'), 'máscara do vínculo antigo, sem conta');
+    const unmasked = sql.replace(MASK, ' ');
+    const plain = [...unmasked.matchAll(/(\w+)\.email\b/g)].map((match) => match[1]);
+    assert.deepEqual(plain, ['a'], 'um único a.email sem máscara (accountEmail)');
+    // Nenhum `email` sem tabela (`SELECT email`, `RETURNING email`...); `email_masked` e
+    // `email_verified_at` são outras palavras.
+    assert.doesNotMatch(unmasked.replace(/\w+\.email\b/g, ''), /\bemail\b/);
+    // A leitura sem máscara é a de `accountEmail`, que só a rota auditada chama.
+    const source = readFileSync(MODULE, 'utf8');
+    const plainRead = source.indexOf('SELECT a.email\n');
+    assert.ok(plainRead > source.indexOf('accountEmail(accountId: string)'), 'em accountEmail');
+    assert.ok(plainRead < source.indexOf('listOrders('), 'e só lá');
+  });
+
+  it('pessoas e dono: toda leitura de memberships e company_invitations filtra pela empresa', () => {
+    // `mb.company_id = ` aparece em cada consulta de vínculo (lista por `co.id`, detalhe pelo parâmetro).
+    const memberships = (sql.match(/\bfrom memberships mb\b/g) ?? []).length;
+    const filtered = (sql.match(/\bmb\.company_id = /g) ?? []).length;
+    assert.ok(memberships > 0);
+    assert.ok(
+      filtered >= memberships - 2,
+      'as duas leituras por conta (lista e detalhe) não têm empresa',
     );
-    const plain = sql.match(/\ba\.email\b(?!,\s*'@'|,\s*1,\s*1)/g) ?? [];
-    assert.equal(plain.length, 1, 'um único a.email lido por inteiro (accountDetail)');
+    const invitations = sql.match(/from company_invitations ci\s+where ci\.company_id = /g) ?? [];
+    assert.equal(invitations.length, (sql.match(/\bcompany_invitations\b/g) ?? []).length);
   });
 
   it('é o único arquivo novo com SQL cru: a lista de módulos com $queryRaw/$executeRaw não cresce sem revisão', () => {
