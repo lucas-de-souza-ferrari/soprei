@@ -179,6 +179,7 @@ export function companyDetail(status: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE'): Compan
       },
     ],
     peopleTotal: 3,
+    owner: { accountId: ACCOUNT_A, emailMasked: 'l***@exemplo.test' },
     owners: 1,
     pendingInvitations: 2,
     holder: {
@@ -250,6 +251,7 @@ export function companyDetailB(): CompanyDetail {
       },
     ],
     peopleTotal: 1,
+    owner: null,
     owners: 0,
     pendingInvitations: 0,
     holder: null,

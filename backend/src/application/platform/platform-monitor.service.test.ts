@@ -179,6 +179,7 @@ function companyFacts(id: CompanyId, overrides: Partial<PlatformCompanyDetailFac
       },
     ],
     peopleTotal: 1,
+    owner: { accountId: null, emailMasked: 'l***@exemplo.com' },
     owners: 1,
     pendingInvitations: 0,
     holder: {
@@ -331,6 +332,7 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
     assert.equal(billingOff.people[0]?.role, 'OWNER');
     assert.equal(billingOff.people[0].emailMasked, 'l***@exemplo.com');
     assert.equal(billingOff.owners, 1);
+    assert.equal(billingOff.owner?.emailMasked, 'l***@exemplo.com');
     const overview = await service.overview();
     assert.equal(overview.subscriptions, null);
     assert.equal(overview.paidOrdersThisMonth, null);
@@ -459,13 +461,19 @@ describe('PlatformMonitorService (spec 044, E2)', () => {
 
   it('detalhe da empresa: pessoas, total, donos ativos e convites pendentes passam como vieram (spec 045, E1)', async () => {
     const id = CompanyId.parse(randomUUID());
-    const facts = companyFacts(id, { owners: 0, peopleTotal: 61, pendingInvitations: 2 });
+    const facts = companyFacts(id, {
+      owner: null,
+      owners: 0,
+      peopleTotal: 61,
+      pendingInvitations: 2,
+    });
     const reads = new FakePlatformReadModel({ companyDetail: () => Promise.resolve(facts) });
     const { service, audit } = setup({ reads });
     const detail = await service.companyDetail(id);
     assert.deepEqual(detail.people, facts.people);
     assert.equal(detail.peopleTotal, 61);
     assert.equal(detail.owners, 0);
+    assert.equal(detail.owner, null);
     assert.equal(detail.pendingInvitations, 2);
     assert.equal(audit.events.length, 0, 'ver as pessoas (mascaradas) não grava nada');
   });

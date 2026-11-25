@@ -9,7 +9,6 @@ import {
   countEntries,
   type ActionReason,
   type CompanyDetail,
-  type Person,
 } from '../contracts';
 import {
   errorMessage,
@@ -102,20 +101,12 @@ function usageFacts(usage: NonNullable<CompanyDetail['usage']>) {
 }
 
 /**
- * Dono ativo (spec 045, E1): vínculo `OWNER` ativo com a conta ativa (ou sem conta: vínculo antigo da CLI).
- * A mesma regra do servidor para `owners`; as pessoas já vêm com o dono mais antigo primeiro.
+ * O dono em destaque no topo, ou o aviso de empresa sem dono ativo. Quem é dono ativo (vínculo `OWNER`
+ * ativo com a conta ativa ou sem conta) é decidido só no servidor (`owner` e `owners`); o app só exibe.
  */
-function isActiveOwner(person: Person): boolean {
-  return (
-    person.role === 'OWNER' &&
-    person.status === 'ACTIVE' &&
-    (person.account === null || person.account.status === 'ACTIVE')
-  );
-}
-
-/** O dono em destaque no topo, ou o aviso de empresa sem dono ativo (`owners = 0`). */
 function OwnerLine({ detail }: { readonly detail: CompanyDetail }) {
-  if (detail.owners === 0)
+  const owner = detail.owner;
+  if (owner === null || detail.owners === 0)
     return (
       <p className="flex items-start gap-2 rounded-md border border-destructive p-3 text-sm text-destructive">
         <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
@@ -124,12 +115,11 @@ function OwnerLine({ detail }: { readonly detail: CompanyDetail }) {
         </span>
       </p>
     );
-  const owner = detail.people.find(isActiveOwner);
   const others = detail.owners - 1;
   return (
     <p className="min-w-0 text-base">
       <span className="text-muted-foreground">Dono: </span>
-      <strong className="break-all">{owner?.emailMasked ?? '—'}</strong>
+      <strong className="break-all">{owner.emailMasked}</strong>
       {others > 0 ? (
         <span className="text-muted-foreground">
           {' '}

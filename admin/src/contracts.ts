@@ -48,6 +48,12 @@ const maskedEmail = z
   .max(320)
   .regex(/^[^@]\*\*\*@[^@]*$/);
 
+/**
+ * Dono ativo (spec 045, E1), calculado só no servidor: vínculo `OWNER` ativo com a conta ativa (ou sem
+ * conta). `accountId` nulo: vínculo antigo da CLI.
+ */
+const ownerSchema = z.object({ accountId: id.nullable(), emailMasked: maskedEmail });
+
 /** Objeto com um valor para cada chave da lista (todas presentes; chave a mais é descartada). */
 function fixedKeys<const K extends readonly [string, ...string[]], V extends z.ZodType>(
   keys: K,
@@ -201,7 +207,7 @@ export const companyListItemSchema = z.object({
   activeMembers: count,
   messages7d: count,
   /** O dono ativo mais antigo (spec 045, E1); `null` sem dono ativo. `accountId` nulo: vínculo da CLI. */
-  owner: z.object({ accountId: id.nullable(), emailMasked: maskedEmail }).nullable(),
+  owner: ownerSchema.nullable(),
   /** Quantos donos ativos (vínculo e conta ativos); `0` = "Sem dono ativo". */
   owners: count,
 });
@@ -290,6 +296,8 @@ export const companyDetailSchema = z.object({
   people: z.array(personSchema).max(50),
   /** Todas as pessoas (vínculos) da empresa, além das 50 listadas. */
   peopleTotal: count,
+  /** O dono ativo mais antigo, calculado no servidor (o app só exibe); `null` sem dono ativo. */
+  owner: ownerSchema.nullable(),
   /** Donos ativos; `0` = aviso "Empresa sem dono ativo". */
   owners: count,
   pendingInvitations: count,

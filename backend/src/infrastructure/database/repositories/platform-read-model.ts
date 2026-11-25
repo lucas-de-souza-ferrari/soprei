@@ -664,6 +664,14 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
                   mb.created_at, mb.id
          LIMIT ${PLATFORM_PEOPLE_LIMIT}`;
 
+      // O dono ativo mais antigo: a mesma regra e a mesma ordem do LATERAL da lista, nesta empresa.
+      const [owner] = await db.$queryRaw<{ account_id: string | null; email_masked: string }[]>`
+        SELECT mb.account_id::text AS account_id,
+               ${PERSON_EMAIL_MASKED} AS email_masked
+          ${activeOwnersFrom(Prisma.sql`${companyId}::uuid`)}
+         ORDER BY mb.created_at, mb.id
+         LIMIT 1`;
+
       const [peopleCounts] = await db.$queryRaw<{ owners: number; pending_invitations: number }[]>`
         SELECT (SELECT COUNT(*)::int ${activeOwnersFrom(Prisma.sql`${companyId}::uuid`)}) AS owners,
                (SELECT COUNT(*)::int
@@ -852,6 +860,10 @@ export class PrismaPlatformReadModel implements PlatformReadModel {
               : { status: row.account_status, verified: row.account_verified === true },
         })),
         peopleTotal: memberships.reduce((total, row) => total + num(row.n), 0),
+        owner:
+          owner === undefined
+            ? null
+            : { accountId: owner.account_id, emailMasked: owner.email_masked },
         owners: num(peopleCounts?.owners),
         pendingInvitations: num(peopleCounts?.pending_invitations),
         holder:

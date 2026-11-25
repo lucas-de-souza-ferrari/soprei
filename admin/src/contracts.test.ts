@@ -81,6 +81,11 @@ describe('contratos do admin (spec 044, E3)', () => {
       false,
     );
     assert.equal(
+      companyDetailSchema.safeParse({ ...detail, owner: { accountId: null, emailMasked: full } })
+        .success,
+      false,
+    );
+    assert.equal(
       accountDetailSchema.safeParse({ ...accountDetail, emailMasked: full }).success,
       false,
     );

@@ -226,6 +226,8 @@ export interface PlatformCompanyDetailFacts {
   readonly people: readonly PlatformCompanyPerson[];
   /** Todos os vínculos da empresa (qualquer papel e estado). */
   readonly peopleTotal: number;
+  /** O dono ativo mais antigo (a mesma consulta da lista); `null` sem dono ativo. */
+  readonly owner: PlatformCompanyOwner | null;
   /** Quantos donos ativos (a mesma regra da lista; ver `PlatformCompanyOwner`). */
   readonly owners: number;
   /** Convites `PENDING` ainda dentro da validade. */

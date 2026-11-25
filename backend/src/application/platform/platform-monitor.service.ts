@@ -174,6 +174,8 @@ export interface PlatformCompanyDetail {
   /** Pessoas da empresa (spec 045, E1): até 50, dono primeiro, e-mail mascarado. */
   readonly people: readonly PlatformCompanyPerson[];
   readonly peopleTotal: number;
+  /** O dono ativo mais antigo, mascarado (o app só exibe; a regra é a do servidor). */
+  readonly owner: PlatformCompanyOwner | null;
   /** Quantos donos ativos (`0`: o app avisa "Empresa sem dono ativo"). */
   readonly owners: number;
   readonly pendingInvitations: number;
@@ -486,6 +488,7 @@ export class PlatformMonitorService {
       memberships: facts.memberships,
       people: facts.people,
       peopleTotal: facts.peopleTotal,
+      owner: facts.owner,
       owners: facts.owners,
       pendingInvitations: facts.pendingInvitations,
       holder: facts.holder,
