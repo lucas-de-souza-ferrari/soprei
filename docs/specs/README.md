@@ -53,3 +53,4 @@
 | [042](042-organizacao-da-documentacao.md) | Organização da documentação | em implementação | CI e merge da E1 e da E2 |
 | [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | CI; confirmação da D3; passos do dono parados até existir servidor |
 | [044](044-admin-da-plataforma.md) | Admin da plataforma (painel do dono, frontend separado) | concluída | — (no ar em `soadm.soprei.com` desde 2026-11-24) |
+| [045](045-admin-gestao-da-plataforma.md) | Admin da plataforma: quem é dono e gestão completa (CRUD) | rascunho | aprovação do dono (D1 a D17) |
