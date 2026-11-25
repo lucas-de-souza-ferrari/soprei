@@ -191,14 +191,14 @@ describe('platform-read-model.ts: SQL sem conteúdo (spec 044, E2)', () => {
   });
 
   it('pessoas e dono: toda leitura de memberships e company_invitations filtra pela empresa', () => {
-    // `mb.company_id = ` aparece em cada consulta de vínculo (lista por `co.id`, detalhe pelo parâmetro).
+    // Cada leitura de vínculos filtra pela empresa (`mb.company_id = `: lista por `co.id`, detalhe pelo
+    // parâmetro) ou pela conta (`mb.account_id = `: lista e detalhe de contas, que mostram as empresas DA
+    // conta). Nenhuma fica sem um dos dois.
     const memberships = (sql.match(/\bfrom memberships mb\b/g) ?? []).length;
     const filtered = (sql.match(/\bmb\.company_id = /g) ?? []).length;
+    const byAccount = (sql.match(/\bmb\.account_id = /g) ?? []).length;
     assert.ok(memberships > 0);
-    assert.ok(
-      filtered >= memberships - 2,
-      'as duas leituras por conta (lista e detalhe) não têm empresa',
-    );
+    assert.equal(filtered + byAccount, memberships);
     const invitations = sql.match(/from company_invitations ci\s+where ci\.company_id = /g) ?? [];
     assert.equal(invitations.length, (sql.match(/\bcompany_invitations\b/g) ?? []).length);
   });
