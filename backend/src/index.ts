@@ -430,75 +430,82 @@ async function main(): Promise<void> {
     );
   }
 
+  const accountSessions = new RedisAccountSessionStore(
+    authRedis.client,
+    versionedAuthPrefix(config.AUTH_REDIS_PREFIX, true),
+  );
+  // Contas (spec 017): uma instância só, usada pelo site e pelas ações da plataforma sobre a conta (045, E2).
+  const accountService =
+    config.ACCOUNTS_ENABLED && accountMailer !== undefined
+      ? new AccountService({
+          accounts: new PrismaAccountRepository(prisma),
+          passwords: auth.hasher,
+          sessions: accountSessions,
+          loginLocks: auth.sessions,
+          loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
+          ...(billing === undefined
+            ? {}
+            : {
+                billing: {
+                  trialDays: billing.settings.trialDays,
+                  graceDays: billing.settings.graceDays,
+                },
+              }),
+          // Só id e resultado: nunca e-mail, código nem credenciais SMTP.
+          onVerificationMail: (result, accountId) => {
+            metrics.countVerificationEmail(result);
+            if (result === 'failed') {
+              logger.warn({ accountId, result }, 'falha ao enviar confirmação de e-mail');
+            } else {
+              logger.info({ accountId, result }, 'confirmação de e-mail enviada');
+            }
+          },
+          // Só id e resultado: nunca código, hash, e-mail nem senha.
+          onVerificationAttempt: (result, accountId) => {
+            metrics.countVerificationAttempt(result);
+            if (result === 'exhausted') {
+              logger.warn({ accountId, result }, 'código de confirmação esgotado');
+            } else if (result === 'verified') {
+              logger.info({ accountId, result }, 'e-mail confirmado');
+            }
+          },
+          // Recuperação de senha (spec 021): só resultados e ids, nunca e-mail, código nem senha.
+          onPasswordResetRequest: (result) => {
+            metrics.countPasswordResetRequest(result);
+          },
+          onPasswordReset: (result, accountId) => {
+            metrics.countPasswordResetAttempt(result);
+            if (result === 'reset') {
+              logger.info({ accountId, result }, 'senha redefinida');
+            } else if (result === 'exhausted' || result === 'revoke_failed') {
+              logger.warn({ accountId, result }, 'redefinição de senha recusada');
+            }
+          },
+          onPasswordResetMail: (kind, result, accountId) => {
+            metrics.countPasswordResetEmail(kind, result);
+            if (result === 'failed') {
+              logger.warn({ accountId, kind, result }, 'falha ao enviar e-mail da recuperação');
+            }
+          },
+          onWarning: (event, accountId) => {
+            logger.warn(
+              { accountId, event },
+              event === 'login_lock_reset_failed'
+                ? 'bloqueio de login não zerado depois da redefinição'
+                : event === 'preselect_failed'
+                  ? 'empresa não pré-selecionada no login'
+                  : 'última empresa não gravada',
+            );
+          },
+          mailer: accountMailer,
+        })
+      : undefined;
+
   const app = buildServer({
-    ...(config.ACCOUNTS_ENABLED && accountMailer !== undefined
+    ...(accountService !== undefined && accountMailer !== undefined
       ? {
           accounts: {
-            service: new AccountService({
-              accounts: new PrismaAccountRepository(prisma),
-              passwords: auth.hasher,
-              sessions: new RedisAccountSessionStore(
-                authRedis.client,
-                versionedAuthPrefix(config.AUTH_REDIS_PREFIX, true),
-              ),
-              loginLocks: auth.sessions,
-              loginSecret: deriveLoginLockSecret(config.JWT_SECRET),
-              ...(billing === undefined
-                ? {}
-                : {
-                    billing: {
-                      trialDays: billing.settings.trialDays,
-                      graceDays: billing.settings.graceDays,
-                    },
-                  }),
-              // Só id e resultado: nunca e-mail, código nem credenciais SMTP.
-              onVerificationMail: (result, accountId) => {
-                metrics.countVerificationEmail(result);
-                if (result === 'failed') {
-                  logger.warn({ accountId, result }, 'falha ao enviar confirmação de e-mail');
-                } else {
-                  logger.info({ accountId, result }, 'confirmação de e-mail enviada');
-                }
-              },
-              // Só id e resultado: nunca código, hash, e-mail nem senha.
-              onVerificationAttempt: (result, accountId) => {
-                metrics.countVerificationAttempt(result);
-                if (result === 'exhausted') {
-                  logger.warn({ accountId, result }, 'código de confirmação esgotado');
-                } else if (result === 'verified') {
-                  logger.info({ accountId, result }, 'e-mail confirmado');
-                }
-              },
-              // Recuperação de senha (spec 021): só resultados e ids, nunca e-mail, código nem senha.
-              onPasswordResetRequest: (result) => {
-                metrics.countPasswordResetRequest(result);
-              },
-              onPasswordReset: (result, accountId) => {
-                metrics.countPasswordResetAttempt(result);
-                if (result === 'reset') {
-                  logger.info({ accountId, result }, 'senha redefinida');
-                } else if (result === 'exhausted' || result === 'revoke_failed') {
-                  logger.warn({ accountId, result }, 'redefinição de senha recusada');
-                }
-              },
-              onPasswordResetMail: (kind, result, accountId) => {
-                metrics.countPasswordResetEmail(kind, result);
-                if (result === 'failed') {
-                  logger.warn({ accountId, kind, result }, 'falha ao enviar e-mail da recuperação');
-                }
-              },
-              onWarning: (event, accountId) => {
-                logger.warn(
-                  { accountId, event },
-                  event === 'login_lock_reset_failed'
-                    ? 'bloqueio de login não zerado depois da redefinição'
-                    : event === 'preselect_failed'
-                      ? 'empresa não pré-selecionada no login'
-                      : 'última empresa não gravada',
-                );
-              },
-              mailer: accountMailer,
-            }),
+            service: accountService,
             // Convites por e-mail (spec 025): sem variável nova; só id e enum em log e métrica.
             invitations: new InvitationService({
               invitations: new PrismaCompanyInvitationRepository(prisma),
@@ -574,6 +581,19 @@ async function main(): Promise<void> {
               logger,
               metrics,
             }),
+            // Ações sobre contas (spec 045, E2): só com as contas ligadas.
+            accounts:
+              accountService === undefined
+                ? undefined
+                : new PlatformAccountService({
+                    accounts: new PrismaPlatformAccountUnitOfWork(prisma),
+                    confirmer: auth.service,
+                    accountSessions,
+                    bearerSessions: auth.sessions,
+                    mail: accountService,
+                    logger,
+                    metrics,
+                  }),
           },
         }
       : {}),
@@ -749,6 +769,7 @@ import {
   PrismaCompanyInvitationRepository,
   PrismaInvitationExpiryRepository,
   PrismaInvitationUnitOfWork,
+  PrismaPlatformAccountUnitOfWork,
   PrismaPlatformAuditRepository,
   PrismaPlatformCompanyUnitOfWork,
   PrismaPlatformReadModel,
@@ -756,6 +777,7 @@ import {
 } from './infrastructure/database/index.js';
 import { PlatformAuthService } from './application/platform/platform-auth.service.js';
 import { PlatformMonitorService } from './application/platform/platform-monitor.service.js';
+import { PlatformAccountService } from './application/platform/platform-account.service.js';
 import { RedisPlatformSessionStore } from './infrastructure/auth/redis-platform-session-store.js';
 import { InvitationExpiryPurger } from './application/invitations/invitation-expiry-purger.js';
 import { InvitationService } from './application/invitations/invitation.service.js';

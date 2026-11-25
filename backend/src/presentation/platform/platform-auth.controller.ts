@@ -14,6 +14,10 @@ import {
   platformMonitorController,
   type PlatformMonitorRoutes,
 } from './platform-monitor.controller.js';
+import {
+  platformAccountController,
+  type PlatformAccountRoutes,
+} from './platform-account.controller.js';
 
 /**
  * Cookie da sessão do admin da plataforma (spec 044, E1). O prefixo `__Host-` obriga o navegador a
@@ -46,6 +50,8 @@ export interface PlatformAuthControllerOptions {
   readonly maxAgeSeconds: number;
   /** Leituras e ações da E2 (spec 044); sem isto só existem as rotas de entrada. */
   readonly monitor?: PlatformMonitorRoutes | undefined;
+  /** Ações sobre contas (spec 045, E2); só com as contas ligadas (`ACCOUNTS_ENABLED`). */
+  readonly accounts?: PlatformAccountRoutes | undefined;
 }
 
 function sessionCookie(value: string, maxAgeSeconds: number): string {
@@ -63,7 +69,7 @@ function clearCookie(reply: FastifyReply): void {
  */
 export const platformAuthController: FastifyPluginCallback<PlatformAuthControllerOptions> = (
   app,
-  { auth, origin, maxAgeSeconds, monitor },
+  { auth, origin, maxAgeSeconds, monitor, accounts },
   done,
 ) => {
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -120,6 +126,7 @@ export const platformAuthController: FastifyPluginCallback<PlatformAuthControlle
 
   // Dentro deste plugin: herdam o hook acima (só o cookie do admin, origem conferida nas escritas).
   if (monitor !== undefined) void app.register(platformMonitorController, { monitor });
+  if (accounts !== undefined) void app.register(platformAccountController, { accounts });
 
   done();
 };

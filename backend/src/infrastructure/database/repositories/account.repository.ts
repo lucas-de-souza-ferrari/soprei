@@ -16,7 +16,7 @@ import {
   VERIFICATION_FAILURE_WINDOW_MS,
   VERIFICATION_MAX_ATTEMPTS,
 } from '../../../domain/index.js';
-import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction } from '../transaction.js';
 import { ensureTrialSubscription } from './billing.repository.js';
 import { withRepositoryErrors } from './repository-errors.js';
@@ -25,6 +25,17 @@ import { ForbiddenError, ConflictError } from '../../../shared/errors/index.js';
 /** Início da janela de 24 h do teto diário de erros de confirmação. */
 function failureWindowStart(now: Date): Date {
   return new Date(now.getTime() - VERIFICATION_FAILURE_WINDOW_MS);
+}
+
+/**
+ * Trava a linha da conta até o fim da transação (`FOR NO KEY UPDATE`, a mesma da criação de empresa e do
+ * aceite de convite). Devolve se a conta existe. Usada também pelas ações da plataforma sobre a conta
+ * (spec 045, E2), sempre depois das travas de empresa.
+ */
+export async function lockAccountRow(db: TenantScopedDb, accountId: string): Promise<boolean> {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT id FROM accounts WHERE id = ${accountId}::uuid FOR NO KEY UPDATE`;
+  return rows.length === 1;
 }
 
 export class PrismaAccountRepository implements AccountRepository {
@@ -368,7 +379,7 @@ export class PrismaAccountRepository implements AccountRepository {
   ): Promise<AccountMembership> {
     return withRepositoryErrors('Account.createCompany', () =>
       runInTransaction(this.db, async (tx) => {
-        await tx.$queryRaw`SELECT id FROM accounts WHERE id = ${accountId}::uuid FOR NO KEY UPDATE`;
+        await lockAccountRow(tx, accountId);
         const account = await tx.account.findUnique({ where: { id: accountId } });
         if (account?.status !== 'ACTIVE' || account.emailVerifiedAt === null)
           throw new ForbiddenError('Conta indisponível');

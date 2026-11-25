@@ -1,5 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type {
+  PlatformAccountMembershipRef,
+  PlatformAccountTransaction,
+  PlatformAccountUnitOfWork,
+  PlatformLockedAccount,
+} from '../application/ports/platform-account-unit-of-work.js';
+import type {
   PlatformCompanyTransaction,
   PlatformCompanyUnitOfWork,
 } from '../application/ports/platform-company-unit-of-work.js';
@@ -18,6 +24,7 @@ import {
   totpStep,
 } from '../application/platform/totp.js';
 import type {
+  AccessStatus,
   CompanyStatus,
   ListOptions,
   NewPlatformAuditEvent,
@@ -202,6 +209,71 @@ export class InMemoryPlatformCompanyUnitOfWork implements PlatformCompanyUnitOfW
       });
       // Só no fim, como o commit: falha no meio não grava nada.
       for (const [id, status] of pending) this.statuses.set(id, status);
+      for (const event of events) await this.audit.create(event);
+      return result;
+    });
+    this.chain = next.catch(() => undefined);
+    return next;
+  }
+}
+
+/**
+ * Ações da plataforma sobre contas (spec 045, E2) em memória: contas, vínculos e a contagem de empresas em
+ * que a conta é o único dono ativo (`soleOwner`, posta pelo teste). Registra a ordem das travas
+ * (`locks`) e grava só no fim (como o commit); `failAudit` faz a gravação da trilha falhar.
+ */
+export class InMemoryPlatformAccountUnitOfWork implements PlatformAccountUnitOfWork {
+  readonly accounts = new Map<string, PlatformLockedAccount>();
+  readonly memberships: (PlatformAccountMembershipRef & { readonly accountId: string })[] = [];
+  readonly soleOwner = new Map<string, number>();
+  readonly locks: string[] = [];
+  failAudit = false;
+  private chain: Promise<unknown> = Promise.resolve();
+
+  constructor(
+    readonly audit: InMemoryPlatformAuditRepository = new InMemoryPlatformAuditRepository(),
+  ) {}
+
+  run<T>(fn: (tx: PlatformAccountTransaction) => Promise<T>): Promise<T> {
+    const next = this.chain.then(async () => {
+      const pending = new Map<string, AccessStatus>();
+      const events: NewPlatformAuditEvent[] = [];
+      const result = await fn({
+        lockOwnedCompanies: (accountId) => {
+          this.locks.push(`companies:${accountId}`);
+          return Promise.resolve(this.soleOwner.get(accountId) ?? 0);
+        },
+        lockAccount: (accountId) => {
+          this.locks.push(`account:${accountId}`);
+          const account = this.accounts.get(accountId);
+          if (account === undefined) {
+            return Promise.reject(new NotFoundError('Conta não encontrada'));
+          }
+          return Promise.resolve({ ...account, status: pending.get(accountId) ?? account.status });
+        },
+        soleActiveOwnerCompanies: (accountId) =>
+          Promise.resolve(this.soleOwner.get(accountId) ?? 0),
+        setStatus: (accountId, status) => {
+          pending.set(accountId, status);
+          return Promise.resolve();
+        },
+        memberships: (accountId) =>
+          Promise.resolve(
+            this.memberships
+              .filter((ref) => ref.accountId === accountId)
+              .map(({ companyId, membershipId }) => ({ companyId, membershipId })),
+          ),
+        audit: (event) => {
+          if (this.failAudit) return Promise.reject(new Error('trilha indisponível'));
+          events.push(event);
+          return Promise.resolve();
+        },
+      });
+      // Só no fim, como o commit: falha no meio não grava nada.
+      for (const [id, status] of pending) {
+        const account = this.accounts.get(id);
+        if (account !== undefined) this.accounts.set(id, { ...account, status });
+      }
       for (const event of events) await this.audit.create(event);
       return result;
     });

@@ -203,6 +203,44 @@ export class AccountService {
     });
   }
 
+  /**
+   * Código de recuperação pedido pelo admin da plataforma (spec 045, E2, D6): o e-mail é lido pelo id e o
+   * pedido segue **o mesmo caminho** de `requestPasswordReset` (mesmas travas: só conta confirmada e ativa,
+   * 60 s entre pedidos, teto diário de erros; envio em segundo plano). O admin nunca vê código nem senha.
+   * Conta inexistente: nada acontece (quem chama já conferiu a existência).
+   */
+  async requestPasswordResetFor(accountId: AccountId): Promise<void> {
+    const account = await this.deps.accounts.findById(accountId);
+    if (account === null) return;
+    await this.requestPasswordReset(account.email);
+  }
+
+  /**
+   * Reenvio do código de confirmação pelo admin da plataforma (spec 045, E2): pelo id da conta, sem a
+   * senha da pessoa, com o mesmo intervalo de 60 s e o mesmo teto diário de erros da 020
+   * (`refreshVerification`); o envio roda em segundo plano. `already_verified`: conta confirmada (nada
+   * muda); `ignored`: barrado pelas travas ou conta desativada (nada sai).
+   */
+  async resendVerificationFor(
+    accountId: AccountId,
+  ): Promise<'sent' | 'ignored' | 'already_verified' | 'not_found'> {
+    const account = await this.deps.accounts.findById(accountId);
+    if (account === null) return 'not_found';
+    if (account.emailVerifiedAt !== null) return 'already_verified';
+    const code = generateVerificationCode(this.deps.randomInt);
+    const now = this.now();
+    const stored = await this.deps.accounts.refreshVerification(
+      account.id,
+      this.digest(account.email, code),
+      new Date(now.getTime() + VERIFICATION_TTL_MS),
+      this.retryBefore(now),
+      now,
+    );
+    if (!stored) return 'ignored';
+    this.deliver(account.id, account.email, code);
+    return 'sent';
+  }
+
   private resetFailure(result: PasswordResetResult, accountId?: string): UnauthorizedError {
     this.observe(() => this.deps.onPasswordReset?.(result, accountId));
     return new UnauthorizedError(RESET_INVALID_MESSAGE);

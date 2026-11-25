@@ -249,6 +249,32 @@ function activeOwnersFrom(company: Prisma.Sql): Prisma.Sql {
        AND (mb.account_id IS NULL OR a.status = 'ACTIVE')`;
 }
 
+/**
+ * Regra do último dono para desativar uma conta (spec 045, E2, regra comum 11 e D7): quantas empresas
+ * **ativas e não removidas** têm esta conta como **único** dono ativo. Usa o MESMO `activeOwnersFrom` da E1
+ * (o "dono ativo" é uma definição só). Roda dentro da transação das ações da conta, depois das travas
+ * (empresas em que a conta é dona, depois a conta), então o resultado vale até o commit. A conta entra pela
+ * junção (`a.id`), nunca por e-mail.
+ */
+export async function soleActiveOwnerCompanyCount(
+  db: TenantScopedDb,
+  accountId: string,
+): Promise<number> {
+  const rows = await db.$queryRaw<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n
+      FROM companies co
+     WHERE co.id IN (SELECT mb.company_id
+                       FROM memberships mb
+                      WHERE mb.account_id = ${accountId}::uuid
+                        AND mb.role = 'OWNER'
+                        AND mb.status = 'ACTIVE')
+       AND co.deleted_at IS NULL
+       AND co.status = 'ACTIVE'
+       AND (SELECT COUNT(*) ${activeOwnersFrom(Prisma.sql`co.id`)}) = 1
+       AND EXISTS (SELECT 1 ${activeOwnersFrom(Prisma.sql`co.id`)} AND a.id = ${accountId}::uuid)`;
+  return num(rows[0]?.n);
+}
+
 interface CompanyListSqlRow {
   readonly id: string;
   readonly name: string;
