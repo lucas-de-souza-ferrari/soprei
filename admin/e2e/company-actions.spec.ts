@@ -185,3 +185,32 @@ test('pessoas: 503 ao mudar papel relê a tela e diz que a ação pode ter sido 
   await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
   expect(await storageSizes(page)).toEqual([0, 0]);
 });
+
+test('canal: "Desconectar WhatsApp" avisa da WABA inteira, pede o código novo e, desconectado, o botão some (spec 045, E5)', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await openCompanyA(page);
+  await page.getByRole('button', { name: 'Desconectar WhatsApp' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desconectar o WhatsApp de Padaria Aurora?' });
+  await expect(dialog.getByText('desassinado da WABA inteira', { exact: false })).toBeVisible();
+  const code = dialog.getByLabel('Código novo do autenticador');
+  await code.fill(GOOD.code);
+  await dialog.getByRole('button', { name: 'Desconectar' }).click();
+  await expect(dialog.getByRole('alert')).toContainText(
+    'Código do autenticador inválido ou já usado',
+  );
+  await code.fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Desconectar' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Não conectado.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Desconectar WhatsApp' })).toHaveCount(0);
+  expect(
+    api.callsTo('POST', `/platform/companies/${COMPANY_A}/channel/disconnect`).map((c) => c.body),
+  ).toEqual([
+    { reason: 'OWNER_REQUEST', code: GOOD.code },
+    { reason: 'OWNER_REQUEST', code: FRESH_CODE },
+  ]);
+  expect(await storageSizes(page)).toEqual([0, 0]);
+});

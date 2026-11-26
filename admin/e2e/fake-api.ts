@@ -84,6 +84,8 @@ export class FakeApi {
   /** Spec 045, E3a: nome, remoção e papéis/estados das pessoas da empresa A (as ações mudam, a tela relê). */
   companyName = 'Padaria Aurora';
   companyRemovedAt: string | null = null;
+  /** Spec 045, E5: o canal da empresa A foi desconectado pelo admin. */
+  channelDisconnected = false;
   readonly people = new Map<string, { role: MembershipRole; status: 'ACTIVE' | 'DISABLED' }>();
   /** Spec 045, E3b: convites pendentes da empresa A (o e-mail só mascarado, como o servidor devolve). */
   readonly invitations: Invitation[] = [fx.pendingInvitation];
@@ -119,6 +121,19 @@ export class FakeApi {
     );
     return {
       ...base,
+      ...(this.channelDisconnected
+        ? {
+            channel: {
+              state: 'NOT_CONNECTED' as const,
+              mode: null,
+              phoneNumberId: null,
+              wabaId: null,
+              connectedAt: null,
+              tokenExpiresAt: null,
+              tokenInvalidAt: null,
+            },
+          }
+        : {}),
       name: this.companyName,
       people,
       owners: owners.length,
@@ -298,6 +313,13 @@ export class FakeApi {
       json: { error: { code, message: 'texto do servidor que a tela não mostra', requestId: 'r' } },
     });
     const removedOnly = (): boolean => this.companyRemovedAt !== null;
+    if (action === 'channel/disconnect') {
+      const parsed = confirmedActionBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (parsed.data.code !== FRESH_CODE) return error(400, 'CONFIRMATION_INVALID');
+      this.channelDisconnected = true;
+      return { status: 204 };
+    }
     if (action === 'rename') {
       const parsed = renameBodySchema.safeParse(body);
       if (!parsed.success) return error(400, 'VALIDATION_ERROR');

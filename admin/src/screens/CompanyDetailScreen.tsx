@@ -33,7 +33,7 @@ import {
   Stat,
   StatGrid,
 } from '../ui';
-import { CompanyActions, MembershipActions } from './CompanyActions';
+import { ChannelDisconnect, CompanyActions, MembershipActions } from './CompanyActions';
 import { Invitations } from './InvitationActions';
 import { modulesText, subscriptionFacts } from './subscription-facts';
 
@@ -449,6 +449,7 @@ export function CompanyDetailScreen({
                 ]}
               />
             )}
+            <ChannelDisconnect detail={data} onDone={reload} />
           </Card>
           <Card title="Atendimento">
             <Attendance detail={data} />

@@ -354,3 +354,45 @@ export function MembershipActions({
     </>
   );
 }
+
+/**
+ * Desconectar o WhatsApp da empresa (spec 045, E5, com o código novo do autenticador). Numa empresa `LEGACY`
+ * (número sem conexão) só libera o número. Conectar de novo é sempre com o dono, pelo site (D15).
+ */
+export function ChannelDisconnect({
+  detail,
+  onDone,
+}: {
+  readonly detail: CompanyDetail;
+  readonly onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (detail.removedAt !== null || detail.channel.state === 'NOT_CONNECTED') return null;
+  const legacy = detail.channel.state === 'LEGACY';
+  const spec: ActionSpec = {
+    title: legacy
+      ? `Liberar o número de ${detail.name}?`
+      : `Desconectar o WhatsApp de ${detail.name}?`,
+    effect: legacy
+      ? 'A empresa tem só o número, sem conexão: ele é limpo e fica livre para ser conectado à empresa certa. Mensagens novas para ele deixam de chegar a esta empresa.'
+      : 'A conexão e o número são apagados e o app é desassinado da WABA inteira (todos os números dela deixam de mandar eventos ao Soprei). Mensagens novas deixam de chegar até o dono reconectar pelo site; as pendentes continuam pendentes.',
+    confirm: legacy ? 'Liberar número' : 'Desconectar',
+    danger: true,
+    code: true,
+    path: `/platform/companies/${encodeURIComponent(detail.id)}/channel/disconnect`,
+    kind: 'disconnect',
+  };
+  return (
+    <div className="mt-3">
+      <Button variant="danger" onClick={() => setOpen(true)}>
+        {legacy ? 'Liberar número' : 'Desconectar WhatsApp'}
+      </Button>
+      <ActionDialog
+        key={open ? 'aberto' : 'fechado'}
+        spec={open ? spec : null}
+        onClose={() => setOpen(false)}
+        onDone={onDone}
+      />
+    </div>
+  );
+}

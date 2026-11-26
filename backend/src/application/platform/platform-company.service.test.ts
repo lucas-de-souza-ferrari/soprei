@@ -121,6 +121,10 @@ function setup(): World {
         if (world.unsubscribeFails) return Promise.reject(new Error('Meta fora'));
         return Promise.resolve();
       },
+      disconnect: (actor) => {
+        calls.push(`disconnect:${actor.companyId}:${actor.adminId}:${actor.reason}`);
+        return Promise.resolve(true);
+      },
     },
     logger: logs.logger,
     metrics: {
@@ -547,5 +551,29 @@ describe('PlatformCompanyService: privacidade (spec 045, E3a)', () => {
       assert.ok(!logContains(text, secret), `o log não deve conter ${secret}`);
     }
     assert.ok(text.includes(world.company));
+  });
+});
+
+describe('PlatformCompanyService: desconectar o canal (spec 045, E5)', () => {
+  it('exige o código; empresa removida ou inexistente = 404 sem gastar o código; com código, chama o canal como a plataforma', async () => {
+    const world = setup();
+    await assert.rejects(
+      world.service.disconnectChannel(ADMIN, world.company, 'ABUSE', undefined),
+      (error: unknown) => error instanceof ValidationError && error.code === CONFIRMATION_INVALID,
+    );
+    world.uow.removed.add(world.other);
+    await assert.rejects(
+      world.service.disconnectChannel(ADMIN, world.other, 'ABUSE', CODE),
+      NotFoundError,
+    );
+    await assert.rejects(
+      world.service.disconnectChannel(ADMIN, randomUUID(), 'ABUSE', CODE),
+      NotFoundError,
+    );
+    assert.deepEqual(world.confirmCodes, []);
+    assert.deepEqual(world.calls, []);
+    assert.equal(await world.service.disconnectChannel(ADMIN, world.company, 'ABUSE', CODE), true);
+    assert.deepEqual(world.confirmCodes, [CODE]);
+    assert.deepEqual(world.calls, [`disconnect:${world.company}:${ADMIN.adminId}:ABUSE`]);
   });
 });
