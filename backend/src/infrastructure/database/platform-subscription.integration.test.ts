@@ -456,7 +456,13 @@ describe('ações do admin sobre a assinatura com o Postgres real (spec 045, E4)
     const past = new Date(Date.now() - 2 * DAY);
     await db().subscription.updateMany({
       where: { accountId },
-      data: { status: 'EXPIRED', trialEndsAt: past, currentPeriodEnd: past },
+      // O início também recua: o banco exige fim depois do início (subscriptions_period_check).
+      data: {
+        status: 'EXPIRED',
+        currentPeriodStart: new Date(Date.now() - 9 * DAY),
+        trialEndsAt: past,
+        currentPeriodEnd: past,
+      },
     });
     await service().extend(admin, accountId, 5, 'OTHER');
     const after = await billing.findSubscription(accountId);
