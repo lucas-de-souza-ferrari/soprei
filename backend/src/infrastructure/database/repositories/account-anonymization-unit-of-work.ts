@@ -9,7 +9,9 @@ import { isDeadlock } from '../database-errors.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
 import { lockAccountRow, lockMemberCompanies } from './account.repository.js';
 import { findSubscriptionByAccount } from './billing.repository.js';
+import { lockSubscriptionRow } from './checkout.repository.js';
 import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
+import { hasPayableOrder } from './platform-subscription-unit-of-work.js';
 import { soleOwnerCompanyCountForRemoval } from './platform-read-model.js';
 
 /** `password_hash` de conta excluída: não é um hash válido, então nenhuma senha confere (spec 032, E7). */
@@ -82,11 +84,18 @@ export class PrismaAccountAnonymizationUnitOfWork implements AccountAnonymizatio
             };
           },
           soleOwnerCompanies: (accountId) => soleOwnerCompanyCountForRemoval(db, accountId),
-          paidInForce: async (accountId, now) => {
+          billingBlocks: async (accountId, now) => {
             const subscription = await findSubscriptionByAccount(db, accountId);
-            if (subscription === null) return false;
-            // Sem carência: "período pago em vigor" é ACTIVE antes do fim e sem cancelamento marcado.
-            return resolveAccess(subscription, now, 0).state === 'ACTIVE';
+            if (subscription === null) return { paidInForce: false, orderPending: false };
+            // Trava a assinatura (empresas -> conta -> assinatura, a ordem de sempre): um checkout em
+            // curso cria o pedido sob esta trava, então não escapa da recusa.
+            await lockSubscriptionRow(db, subscription.id);
+            const current = (await findSubscriptionByAccount(db, accountId)) ?? subscription;
+            return {
+              // Sem carência: "período pago em vigor" é ACTIVE antes do fim e sem cancelamento marcado.
+              paidInForce: resolveAccess(current, now, 0).state === 'ACTIVE',
+              orderPending: await hasPayableOrder(db, current.id, now),
+            };
           },
           anonymize: async (accountId, anonymizedEmail) => {
             await db.account.updateMany({

@@ -4,7 +4,7 @@ import type {
 } from '../../../application/ports/platform-subscription-unit-of-work.js';
 import { RECONCILE_WINDOW_MS } from '../../../domain/index.js';
 import { Prisma } from '../../../generated/prisma/client.js';
-import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { isDeadlock } from '../database-errors.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
 import { lockAccountRow, lockOwnedCompanies } from './account.repository.js';
@@ -15,6 +15,26 @@ import {
 } from './billing.repository.js';
 import { lockSubscriptionRow } from './checkout.repository.js';
 import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
+
+/**
+ * Há pedido desta assinatura que ainda pode virar pagamento concedido? Revisão da E4 (I1), o mesmo critério
+ * da reconciliação: `PENDING`, ou `EXPIRED` com link (substituído, mas o link do provedor segue pagável),
+ * criado dentro da janela da reconciliação. Usado pelas ações da E4 e pela remoção da conta (E6).
+ */
+export async function hasPayableOrder(
+  db: TenantScopedDb,
+  subscriptionId: string,
+  now: Date,
+): Promise<boolean> {
+  const count = await db.paymentOrder.count({
+    where: {
+      subscriptionId,
+      createdAt: { gte: new Date(now.getTime() - RECONCILE_WINDOW_MS) },
+      OR: [{ status: 'PENDING' }, { status: 'EXPIRED', checkoutUrl: { not: null } }],
+    },
+  });
+  return count > 0;
+}
 
 /** Repetições depois de um deadlock (a primeira tentativa não conta), como a unidade de trabalho da E2. */
 const DEADLOCK_RETRIES = 2;
@@ -69,18 +89,7 @@ export class PrismaPlatformSubscriptionUnitOfWork implements PlatformSubscriptio
             await lockSubscriptionRow(db, found.id);
             return findSubscriptionByAccount(db, accountId);
           },
-          // Revisão da E4 (I1): conta tudo o que ainda pode virar pagamento concedido, com o mesmo critério da
-          // reconciliação: PENDING, ou EXPIRED com link (substituído, mas o link do provedor segue pagável),
-          // criado dentro da janela da reconciliação. Um pagamento confirmado depois de uma mudança do admin
-          // cairia em renewal_stale/upgrade_stale e em revisão manual.
-          hasPendingOrder: async (subscriptionId, now) =>
-            (await db.paymentOrder.count({
-              where: {
-                subscriptionId,
-                createdAt: { gte: new Date(now.getTime() - RECONCILE_WINDOW_MS) },
-                OR: [{ status: 'PENDING' }, { status: 'EXPIRED', checkoutUrl: { not: null } }],
-              },
-            })) > 0,
+          hasPendingOrder: (subscriptionId, now) => hasPayableOrder(db, subscriptionId, now),
           startTrial: async (accountId, now, trialDays) => {
             const subscription = await ensureTrialSubscription(db, accountId, now, { trialDays });
             const { count } = await db.company.updateMany({

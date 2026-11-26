@@ -81,7 +81,8 @@ export class FakeApi {
   accountStatus: 'ACTIVE' | 'DISABLED' = 'ACTIVE';
   accountVerified = true;
   /** Remover a conta (E6): a recusa que o servidor daria, ou removida. */
-  anonymizeRefusal: 'COMPANY_OWNERSHIP' | 'SUBSCRIPTION_ACTIVE' | undefined = undefined;
+  anonymizeRefusal: 'COMPANY_OWNERSHIP' | 'SUBSCRIPTION_ACTIVE' | 'ORDER_PENDING' | undefined =
+    undefined;
   accountAnonymized = false;
   /** Redis das sessões fora: desativar grava a mudança e responde 503, como o servidor (regra comum 6). */
   revocationDown = false;

@@ -36,6 +36,7 @@ class InMemoryAnonymization implements AccountAnonymizationUnitOfWork {
   readonly events: NewPlatformAuditEvent[] = [];
   soleOwner = 0;
   paid = false;
+  orderPending = false;
   failAudit = false;
   /** Simula outro pedido que anonimiza entre a pré-checagem e a transação principal. */
   concurrent: ((staged: Map<string, StoredAccount>) => void) | undefined = undefined;
@@ -66,7 +67,8 @@ class InMemoryAnonymization implements AccountAnonymizationUnitOfWork {
         );
       },
       soleOwnerCompanies: () => Promise.resolve(this.soleOwner),
-      paidInForce: () => Promise.resolve(this.paid),
+      billingBlocks: () =>
+        Promise.resolve({ paidInForce: this.paid, orderPending: this.orderPending }),
       anonymize: (accountId, email) => {
         this.calls.push('anonymize');
         const account = staged.get(accountId);
@@ -151,13 +153,16 @@ const conflict = (code: string) => (error: unknown) =>
   error instanceof ConflictError && error.code === code;
 
 describe('AccountAnonymizer (spec 032 E7; spec 045 E6)', () => {
-  it('única dona ativa = 409 COMPANY_OWNERSHIP; período pago = 409 SUBSCRIPTION_ACTIVE; nada muda e nenhuma sessão cai', async () => {
+  it('única dona ativa = 409 COMPANY_OWNERSHIP; período pago = 409 SUBSCRIPTION_ACTIVE; pedido pagável = 409 ORDER_PENDING; nada muda e nenhuma sessão cai', async () => {
     const w = setup();
     w.uow.soleOwner = 1;
     await assert.rejects(w.anonymizer.anonymize(w.accountId), conflict('COMPANY_OWNERSHIP'));
     w.uow.soleOwner = 0;
     w.uow.paid = true;
     await assert.rejects(w.anonymizer.anonymize(w.accountId), conflict('SUBSCRIPTION_ACTIVE'));
+    w.uow.paid = false;
+    w.uow.orderPending = true;
+    await assert.rejects(w.anonymizer.anonymize(w.accountId), conflict('ORDER_PENDING'));
     assert.equal(w.uow.accounts.get(w.accountId)?.email, EMAIL);
     assert.ok(!w.calls.some((call) => call.startsWith('revokeAll')));
     assert.deepEqual(w.mails, []);

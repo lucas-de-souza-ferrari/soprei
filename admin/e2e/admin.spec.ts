@@ -706,6 +706,12 @@ test('conta: excluir (anonimizar) diz o que some e o que fica, pede código novo
   await code.fill(FRESH_CODE);
   await confirm.click();
   await expect(dialog.getByRole('alert')).toContainText('período pago em vigor');
+  api.anonymizeRefusal = 'ORDER_PENDING';
+  await code.fill(FRESH_CODE);
+  await confirm.click();
+  await expect(dialog.getByRole('alert')).toContainText(
+    'pedido de pagamento que ainda pode ser pago',
+  );
 
   api.anonymizeRefusal = undefined;
   await code.fill(FRESH_CODE);
@@ -717,6 +723,7 @@ test('conta: excluir (anonimizar) diz o que some e o que fica, pede código novo
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reativar conta' })).toHaveCount(0);
   expect(api.callsTo('POST', path).map((call) => call.body)).toEqual([
+    { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },
     { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },
     { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },
     { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },

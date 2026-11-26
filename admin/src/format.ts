@@ -188,6 +188,8 @@ export function accountActionErrorMessage(error: unknown, action?: string): stri
         return 'A conta tem um período pago em vigor. Marque o cancelamento no fim do período (ou espere o fim) antes de remover.';
       case 'ACCOUNT_ANONYMIZED':
         return 'Esta conta foi removida e não pode ser reativada.';
+      case 'ORDER_PENDING':
+        return 'Há um pedido de pagamento que ainda pode ser pago. Espere ele vencer (até 48 h) antes de remover a conta.';
       case 'ALREADY_VERIFIED':
         return 'O e-mail desta conta já está confirmado.';
     }

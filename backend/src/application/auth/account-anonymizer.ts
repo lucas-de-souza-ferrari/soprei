@@ -51,7 +51,8 @@ type Outcome =
  * E6) e que a exclusão pela própria pessoa (032, E7) vai reaproveitar.
  *
  * 1. Pré-checagem (recusas e o e-mail lido ANTES): única dona ativa de empresa não removida = 409
- *    `COMPANY_OWNERSHIP`; período pago em vigor sem cancelamento = 409 `SUBSCRIPTION_ACTIVE`.
+ *    `COMPANY_OWNERSHIP`; período pago em vigor sem cancelamento = 409 `SUBSCRIPTION_ACTIVE`; pedido de
+ *    pagamento que ainda pode ser pago = 409 `ORDER_PENDING`.
  * 2. `revokeAll` antes de mexer em qualquer coisa: Redis fora = 503 e nada alterado.
  * 3. Transação (empresas -> conta; já anonimizada por um pedido simultâneo = nada; as recusas de novo sob a
  *    trava): conta e vínculos anonimizados e a trilha.
@@ -137,9 +138,16 @@ export class AccountAnonymizer {
         code: 'COMPANY_OWNERSHIP',
       });
     }
-    if (await tx.paidInForce(accountId, now)) {
+    const billing = await tx.billingBlocks(accountId, now);
+    if (billing.paidInForce) {
       throw new ConflictError('Há um período pago em vigor sem cancelamento', {
         code: 'SUBSCRIPTION_ACTIVE',
+      });
+    }
+    // Decisão do dono (2026-11-26): um pagamento que chegasse depois cairia numa conta removida.
+    if (billing.orderPending) {
+      throw new ConflictError('Há um pedido de pagamento pendente desta assinatura', {
+        code: 'ORDER_PENDING',
       });
     }
   }

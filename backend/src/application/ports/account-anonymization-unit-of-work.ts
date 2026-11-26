@@ -38,8 +38,16 @@ export interface AccountAnonymizationTransaction {
    * `COMPANY_OWNERSHIP`.
    */
   soleOwnerCompanies(accountId: AccountId): Promise<number>;
-  /** Há período pago em vigor sem `cancelAtPeriodEnd`? Sim = 409 `SUBSCRIPTION_ACTIVE`. */
-  paidInForce(accountId: AccountId, now: Date): Promise<boolean>;
+  /**
+   * Trava a assinatura da conta (depois da conta: empresas -> conta -> assinatura) e diz o que barra a
+   * remoção: período pago em vigor sem `cancelAtPeriodEnd` (409 `SUBSCRIPTION_ACTIVE`) e pedido de
+   * pagamento que ainda pode ser pago, com o critério da E4 (409 `ORDER_PENDING`, decisão do dono,
+   * 2026-11-26). Sem assinatura, nada barra.
+   */
+  billingBlocks(
+    accountId: AccountId,
+    now: Date,
+  ): Promise<{ readonly paidInForce: boolean; readonly orderPending: boolean }>;
   /**
    * Anonimiza a conta (e-mail `anonymizedEmail`, senha inválida fixa, `DISABLED`, última empresa, códigos e
    * contadores nulos ou zerados) e os vínculos dela (o mesmo e-mail anonimizado, `DISABLED`). Devolve os

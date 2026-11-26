@@ -76,7 +76,7 @@ const COPY: Record<AccountAction, ActionCopy> = {
     button: 'Excluir conta',
     title: 'Excluir a conta (anonimizar)?',
     effect:
-      'Não dá para desfazer. Some: o e-mail e a senha da conta e dos vínculos dela (viram um endereço anônimo), o acesso a todas as empresas e as sessões abertas. Fica, ligado à conta anônima: a assinatura, os pedidos e as trilhas de auditoria. Um aviso vai para o endereço antigo, que fica livre para um cadastro novo, sem herdar nada. É recusado se a conta for a única dona ativa de uma empresa não removida ou tiver um período pago em vigor sem cancelamento.',
+      'Não dá para desfazer. Some: o e-mail e a senha da conta e dos vínculos dela (viram um endereço anônimo), o acesso a todas as empresas e as sessões abertas. Fica, ligado à conta anônima: a assinatura, os pedidos e as trilhas de auditoria. Um aviso vai para o endereço antigo, que fica livre para um cadastro novo, sem herdar nada. É recusado se a conta for a única dona ativa de uma empresa não removida, tiver um período pago em vigor sem cancelamento ou um pedido de pagamento ainda pagável.',
     confirm: 'Excluir conta',
     danger: true,
     done: 'Conta excluída (anonimizada) e sessões encerradas.',

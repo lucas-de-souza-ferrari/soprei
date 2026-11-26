@@ -272,6 +272,9 @@ after(async () => {
     await anonymizer.drain();
     await db().platformAuditEvent.deleteMany({ where: { adminId: { in: createdAdmins } } });
     await tenants.cleanup();
+    await db().paymentOrder.deleteMany({
+      where: { subscription: { accountId: { in: createdAccounts } } },
+    });
     await db().subscription.deleteMany({ where: { accountId: { in: createdAccounts } } });
     await db().account.deleteMany({ where: { id: { in: createdAccounts } } });
     await db().platformAdmin.deleteMany({ where: { id: { in: createdAdmins } } });
@@ -290,7 +293,7 @@ describe('remover uma conta por anonimização com Postgres e Redis reais (spec 
   const membershipsX: string[] = [];
   let membershipY = '';
 
-  it('recusas sem efeito: única dona ativa (também de empresa suspensa) = 409 COMPANY_OWNERSHIP; período pago em vigor sem cancelamento = 409 SUBSCRIPTION_ACTIVE', async () => {
+  it('recusas sem efeito: única dona ativa (também de empresa suspensa) = 409 COMPANY_OWNERSHIP; período pago em vigor sem cancelamento = 409 SUBSCRIPTION_ACTIVE; pedido pagável = 409 ORDER_PENDING', async () => {
     x = await confirmedAccount(EMAIL_X);
     y = await confirmedAccount(EMAIL_Y);
     // A: X é a única dona. B: Y é dona e X atendente (o vínculo de Y nunca é tocado).
@@ -332,6 +335,36 @@ describe('remover uma conta por anonimização com Postgres e Redis reais (spec 
     const paid = await anonymize(x.id);
     assert.equal(paid.statusCode, 409, paid.body);
     assert.equal(paid.json<{ error: { code: string } }>().error.code, 'SUBSCRIPTION_ACTIVE');
+
+    // Cancelamento marcado, mas um pedido ainda pagável barra (decisão do dono, 2026-11-26): PENDING, e
+    // EXPIRED com link dentro da janela da reconciliação; EXPIRED sem link não barra.
+    await db().subscription.updateMany({
+      where: { accountId: x.id },
+      data: { cancelAtPeriodEnd: true },
+    });
+    const subscription = await db().subscription.findFirst({
+      where: { accountId: x.id },
+      select: { id: true },
+    });
+    assert.ok(subscription);
+    const order = await db().paymentOrder.create({
+      data: {
+        subscriptionId: subscription.id,
+        kind: 'NEW',
+        amountCents: 12_345,
+        breakdown: { plan: 'ESSENTIAL' },
+        status: 'PENDING',
+        checkoutUrl: 'https://checkout.exemplo.test/e6',
+        expiresAt: new Date(now.getTime() + DAY),
+      },
+    });
+    for (const data of [{}, { status: 'EXPIRED' as const }]) {
+      await db().paymentOrder.updateMany({ where: { id: order.id }, data });
+      const pending = await anonymize(x.id);
+      assert.equal(pending.statusCode, 409, pending.body);
+      assert.equal(pending.json<{ error: { code: string } }>().error.code, 'ORDER_PENDING');
+    }
+    await db().paymentOrder.updateMany({ where: { id: order.id }, data: { checkoutUrl: null } });
 
     assert.equal((await account(x.id)).email, EMAIL_X);
     assert.equal((await account(x.id)).status, 'ACTIVE');
