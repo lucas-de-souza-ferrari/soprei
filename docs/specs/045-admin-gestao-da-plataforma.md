@@ -1,6 +1,6 @@
 # 045 — Admin da plataforma: quem é dono e gestão completa (CRUD) de contas, empresas, vínculos, assinatura e canal
 
-- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 e E2 na `main` (PRs #30 e #31); E3 dividida em duas (decisão do dono, 2026-11-25): **E3a** (empresas e vínculos) na `main` (PR #32) e **E3b** (convites da plataforma e criar empresa com dono, a migration do convite com deploy manual) na `main` (PR #33, deploy manual feito em 2026-11-25); E4 na `main` (PR #34); E5 em implementação na branch `spec/045-e5-canal`; E6 por fazer
+- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 e E2 na `main` (PRs #30 e #31); E3 dividida em duas (decisão do dono, 2026-11-25): **E3a** (empresas e vínculos) na `main` (PR #32) e **E3b** (convites da plataforma e criar empresa com dono, a migration do convite com deploy manual) na `main` (PR #33, deploy manual feito em 2026-11-25); E4 na `main` (PR #34); E5 na `main` (PR #35); E6 em implementação na branch `spec/045-e6-anonimizar`
 - **Branch:** `spec/045-admin-gestao` (esta spec); cada etapa em branch própria a partir da `main` (`spec/045-e1-pessoas`, `spec/045-e2-contas`, ...)
 - **Depende de:** 044 (admin, sessão com segundo fator, `PlatformAuditEvent`, leitura agregada), 008 (papéis, regra do último `OWNER`, trava da empresa), 017/020/021 (contas, confirmação, recuperação de senha, `revokeAll`), 025 (convites), 015/023/039 (canal), 031/040 (assinatura), 032 (E7 excluir conta e E8 excluir empresa, ainda não implementadas: esta spec cruza com as duas).
 - **Spec de segurança:** cada etapa passa pelo `reviewer` antes do merge. Ela abre as **primeiras escritas da plataforma sobre contas, vínculos, assinatura e canal**, muda o contrato do convite (convidador que não é vínculo) e amplia as decisões D1 e D7 da 044.
@@ -170,7 +170,7 @@ E4:
 
 E5:
 
-- [ ] Desconectar: conexão e número removidos, trilha da plataforma gravada, nada na trilha da empresa; o webhook do número passa a `unknown_number`; empresa `LEGACY` tem só o número limpo; a desassinatura que falha não desfaz nada; nenhuma resposta, log ou métrica traz token, PIN ou WABA inteira.
+- [x] Desconectar: conexão e número removidos, trilha da plataforma gravada, nada na trilha da empresa; o webhook do número passa a `unknown_number`; empresa `LEGACY` tem só o número limpo; a desassinatura que falha não desfaz nada; nenhuma resposta, log ou métrica traz token, PIN ou WABA inteira. _(CI verde no PR #35, `platform-channel.integration.test.ts`.)_
 
 E6:
 
