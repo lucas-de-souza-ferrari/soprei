@@ -2,6 +2,7 @@ import type {
   PlatformSubscriptionTransaction,
   PlatformSubscriptionUnitOfWork,
 } from '../../../application/ports/platform-subscription-unit-of-work.js';
+import { RECONCILE_WINDOW_MS } from '../../../domain/index.js';
 import { Prisma } from '../../../generated/prisma/client.js';
 import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { isDeadlock } from '../database-errors.js';
@@ -49,7 +50,16 @@ export class PrismaPlatformSubscriptionUnitOfWork implements PlatformSubscriptio
         const audit = new PrismaPlatformAuditRepository(db);
         return fn({
           lockOwnedCompanies: (accountId) => lockOwnedCompanies(db, accountId),
-          lockAccount: (accountId) => lockAccountRow(db, accountId),
+          lockAccount: async (accountId) => {
+            if (!(await lockAccountRow(db, accountId))) return null;
+            const row = await db.account.findFirst({
+              where: { id: accountId },
+              select: { status: true, emailVerifiedAt: true },
+            });
+            return row === null
+              ? null
+              : { status: row.status, verified: row.emailVerifiedAt !== null };
+          },
           lockSubscription: async (accountId) => {
             const found = await db.subscription.findFirst({
               where: { accountId },
@@ -59,9 +69,17 @@ export class PrismaPlatformSubscriptionUnitOfWork implements PlatformSubscriptio
             await lockSubscriptionRow(db, found.id);
             return findSubscriptionByAccount(db, accountId);
           },
+          // Revisão da E4 (I1): conta tudo o que ainda pode virar pagamento concedido, com o mesmo critério da
+          // reconciliação: PENDING, ou EXPIRED com link (substituído, mas o link do provedor segue pagável),
+          // criado dentro da janela da reconciliação. Um pagamento confirmado depois de uma mudança do admin
+          // cairia em renewal_stale/upgrade_stale e em revisão manual.
           hasPendingOrder: async (subscriptionId, now) =>
             (await db.paymentOrder.count({
-              where: { subscriptionId, status: 'PENDING', expiresAt: { gt: now } },
+              where: {
+                subscriptionId,
+                createdAt: { gte: new Date(now.getTime() - RECONCILE_WINDOW_MS) },
+                OR: [{ status: 'PENDING' }, { status: 'EXPIRED', checkoutUrl: { not: null } }],
+              },
             })) > 0,
           startTrial: async (accountId, now, trialDays) => {
             const subscription = await ensureTrialSubscription(db, accountId, now, { trialDays });

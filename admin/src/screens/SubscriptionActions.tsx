@@ -156,7 +156,9 @@ export function SubscriptionActions({
     cancel: {
       title: 'Cancelar no fim do período?',
       effect:
-        'A assinatura segue ativa até o fim do período pago e depois encerra, sem carência. Dá para desfazer antes disso.',
+        subscription?.access === 'grace'
+          ? 'A assinatura está na carência (o período pago já acabou): cancelar agora encerra o acesso na hora, sem esperar o fim da carência. Dá para desfazer enquanto ela não for paga de novo.'
+          : 'A assinatura segue ativa até o fim do período pago e depois encerra, sem carência. Dá para desfazer antes disso.',
       confirm: 'Cancelar no fim do período',
       danger: true,
       code: false,

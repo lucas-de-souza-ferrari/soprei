@@ -7,8 +7,10 @@ import type { PlatformSubscriptionUnitOfWork } from '../../application/ports/pla
 import {
   type CompanyId,
   PlatformAdminId,
+  addMonthsUtc,
   priceTotalCents,
   quotaBlockReason,
+  subscriptionFingerprint,
 } from '../../domain/index.js';
 import { ConflictError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
@@ -18,6 +20,7 @@ import { TestTenants } from '../../test-support/tenant-fixtures.js';
 import { createDatabase, type Database } from './database.js';
 import { PrismaAccountRepository } from './repositories/account.repository.js';
 import { PrismaBillingRepository } from './repositories/billing.repository.js';
+import { PrismaCheckoutRepository } from './repositories/checkout.repository.js';
 import { PrismaEntitlementReader } from './repositories/entitlement-reader.js';
 import { PrismaPlatformSubscriptionUnitOfWork } from './repositories/platform-subscription-unit-of-work.js';
 
@@ -355,5 +358,109 @@ describe('ações do admin sobre a assinatura com o Postgres real (spec 045, E4)
     assert.ok(after);
     assert.equal(after.currentPeriodEnd.getTime(), sub.currentPeriodEnd.getTime());
     assert.equal(after.agendaEnabled, false);
+  });
+
+  it('revisão B1: conceder dias e depois renovar pagando nunca perde os dias concedidos (fim novo >= fim concedido + 1 mês)', async () => {
+    const { accountId, sub } = await paidAccount('renew', 'PROFESSIONAL');
+    await service().extend(admin, accountId, 20, 'OTHER');
+    const granted = await billing.findSubscription(accountId);
+    assert.ok(granted);
+    const order = await db().paymentOrder.create({
+      data: {
+        subscriptionId: sub.id,
+        kind: 'RENEWAL',
+        amountCents: sub.price.baseCents,
+        breakdown: {
+          planCode: 'PROFESSIONAL',
+          cycle: 'MONTHLY',
+          agenda: false,
+          stock: false,
+          priceId: sub.price.id,
+          priceVersion: sub.price.version,
+          whatsappBillingMode: sub.price.whatsappBillingMode,
+        },
+        expiresAt: new Date(Date.now() + DAY),
+      },
+    });
+    const result = await new PrismaCheckoutRepository(db()).grantPaidOrder(
+      order.id,
+      { transactionNsu: null, slug: null, captureMethod: null },
+      new Date(),
+      GRACE,
+    );
+    assert.equal(result.granted, true, JSON.stringify(result));
+    const renewed = await billing.findSubscription(accountId);
+    assert.ok(renewed);
+    assert.ok(
+      renewed.currentPeriodEnd.getTime() >= addMonthsUtc(granted.currentPeriodEnd, 1).getTime(),
+      'a renovação não encurta o período concedido',
+    );
+  });
+
+  it('revisão I1: pedido EXPIRED com link (substituído, ainda pagável) também é ORDER_PENDING', async () => {
+    const { accountId, sub } = await paidAccount('expired-link', 'PROFESSIONAL');
+    await db().paymentOrder.create({
+      data: {
+        subscriptionId: sub.id,
+        kind: 'RENEWAL',
+        status: 'EXPIRED',
+        amountCents: 11_990,
+        breakdown: { plan: 'PROFESSIONAL' },
+        checkoutUrl: 'https://checkout.infinitepay.io/teste/link',
+        expiresAt: new Date(Date.now() + DAY),
+      },
+    });
+    await assert.rejects(
+      service().setModules(admin, accountId, { agenda: true, stock: false }, 'OTHER'),
+      conflict('ORDER_PENDING'),
+    );
+  });
+
+  it('revisão I2: o checkout não grava pedido se a assinatura mudou depois da avaliação (impressão digital)', async () => {
+    const { accountId, sub } = await paidAccount('stale', 'PROFESSIONAL');
+    const fingerprint = subscriptionFingerprint(sub);
+    await service().setModules(admin, accountId, { agenda: true, stock: false }, 'OTHER');
+    const checkout = new PrismaCheckoutRepository(db());
+    const input = {
+      id: randomUUID(),
+      kind: 'RENEWAL' as const,
+      amountCents: 11_990,
+      breakdown: {
+        planCode: 'PROFESSIONAL' as const,
+        cycle: 'MONTHLY' as const,
+        agenda: false,
+        stock: false,
+        priceId: sub.price.id,
+        priceVersion: sub.price.version,
+        whatsappBillingMode: sub.price.whatsappBillingMode,
+      },
+      expiresAt: new Date(Date.now() + DAY),
+    };
+    const cap = { since: new Date(Date.now() - DAY), max: 10 };
+    assert.equal(await checkout.createPendingOrder(accountId, input, cap, fingerprint), 'stale');
+    assert.equal(await db().paymentOrder.count({ where: { subscriptionId: sub.id } }), 0);
+    const fresh = await billing.findSubscription(accountId);
+    assert.ok(fresh);
+    const created = await checkout.createPendingOrder(
+      accountId,
+      { ...input, id: randomUUID() },
+      cap,
+      subscriptionFingerprint(fresh),
+    );
+    assert.notEqual(created, 'stale');
+  });
+
+  it('revisão I3: teste gravado como EXPIRED (tarefa dos avisos) continua teste ao conceder dias', async () => {
+    const accountId = await newAccount('trial-expired');
+    const companyId = await companyFor(accountId);
+    const past = new Date(Date.now() - 2 * DAY);
+    await db().subscription.updateMany({
+      where: { accountId },
+      data: { status: 'EXPIRED', trialEndsAt: past, currentPeriodEnd: past },
+    });
+    await service().extend(admin, accountId, 5, 'OTHER');
+    const after = await billing.findSubscription(accountId);
+    assert.equal(after?.status, 'TRIAL');
+    assert.equal((await reader().forCompany(companyId)).access, 'ok');
   });
 });

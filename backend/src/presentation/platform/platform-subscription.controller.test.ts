@@ -69,6 +69,7 @@ async function setup(): Promise<World> {
       redis: () => Promise.resolve(Result.ok(undefined)),
     },
     metrics,
+    metricsToken: 'token-de-metricas-de-teste-com-32-chars',
     auth: auth.service,
     platform: {
       auth: new PlatformAuthService({
@@ -220,6 +221,21 @@ describe('/platform/accounts/:accountId/subscription/* (spec 045, E4)', () => {
         assert.equal(response.statusCode, 409);
         assert.equal(response.json<{ error: { code: string } }>().error.code, code);
       }
+      // Privacidade (critério comum): o código do autenticador nunca volta em resposta nem em /metrics.
+      const failedEnd = await world.app.inject({
+        method: 'POST',
+        url: `${base}/end`,
+        headers,
+        payload: { reason: 'ABUSE', code: '654321' },
+      });
+      assert.ok(!failedEnd.body.includes('654321'));
+      const metrics = await world.app.inject({
+        url: '/metrics',
+        headers: { authorization: 'Bearer token-de-metricas-de-teste-com-32-chars' },
+      });
+      assert.equal(metrics.statusCode, 200);
+      assert.ok(!metrics.body.includes('654321'));
+      assert.ok(!metrics.body.includes('123456'));
     } finally {
       await world.app.close();
     }

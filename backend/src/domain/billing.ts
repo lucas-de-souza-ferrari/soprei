@@ -423,6 +423,46 @@ export function renewalPriceIncrease(
 /** Meses de cada ciclo de cobrança. */
 export const CYCLE_MONTHS: Readonly<Record<BillingCycle, number>> = { MONTHLY: 1, ANNUAL: 12 };
 
+/**
+ * Impressão digital do que um pedido de pagamento depende na assinatura (spec 045, E4, revisão I2): plano,
+ * preço, ciclo, módulos, estado, período, teste, cancelamento e troca agendada. O checkout a confere de novo
+ * sob a trava da assinatura ao gravar o pedido; se a assinatura mudou desde a avaliação (uma ação do admin,
+ * ou outra troca da própria pessoa), o pedido não é gravado (ele cairia em `renewal_stale`/`upgrade_stale`).
+ */
+export function subscriptionFingerprint(
+  subscription: Pick<
+    SubscriptionRecord,
+    | 'plan'
+    | 'price'
+    | 'cycle'
+    | 'agendaEnabled'
+    | 'stockEnabled'
+    | 'status'
+    | 'currentPeriodStart'
+    | 'currentPeriodEnd'
+    | 'trialEndsAt'
+    | 'cancelAtPeriodEnd'
+    | 'pendingChange'
+  >,
+): string {
+  const pending = subscription.pendingChange;
+  return [
+    subscription.plan.id,
+    subscription.price.id,
+    subscription.cycle,
+    String(subscription.agendaEnabled),
+    String(subscription.stockEnabled),
+    subscription.status,
+    subscription.currentPeriodStart.toISOString(),
+    subscription.currentPeriodEnd.toISOString(),
+    subscription.trialEndsAt?.toISOString() ?? '-',
+    String(subscription.cancelAtPeriodEnd),
+    pending === null
+      ? '-'
+      : `${pending.planCode}/${pending.cycle}/${String(pending.agenda)}/${String(pending.stock)}`,
+  ].join('|');
+}
+
 /** Validade do pedido (e do link) a partir da criação: 24 h (spec 031). */
 export const ORDER_VALIDITY_MS = 24 * 3_600_000;
 /** Teto de pedidos criados por assinatura em 24 h (defesa contra abuso do provedor). */
@@ -508,9 +548,14 @@ export function computePaidPeriod(
     };
   }
   const months = windowsInSpan(current.currentPeriodStart, current.currentPeriodEnd);
+  const anchored = addMonthsUtc(current.currentPeriodStart, months + CYCLE_MONTHS[cycle]);
+  // Spec 045, E4 (decisão do dono, revisão B1): dias concedidos pelo admin deixam o fim fora do alinhamento
+  // com o início; a renovação nunca termina antes de "fim atual + 1 ciclo", então nenhum dia concedido some.
+  // Com o fim alinhado (o caso de sempre) os dois valores coincidem e nada muda.
+  const fromEnd = addMonthsUtc(current.currentPeriodEnd, CYCLE_MONTHS[cycle]);
   return {
     periodStart: current.currentPeriodStart,
-    periodEnd: addMonthsUtc(current.currentPeriodStart, months + CYCLE_MONTHS[cycle]),
+    periodEnd: fromEnd.getTime() > anchored.getTime() ? fromEnd : anchored,
     continuing: true,
   };
 }

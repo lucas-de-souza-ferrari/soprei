@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   AccountId,
@@ -18,6 +19,11 @@ import type {
 } from '../ports/platform-subscription-unit-of-work.js';
 import { confirmPlatformAction, type PlatformActionConfirmer } from './platform-confirmation.js';
 
+/** Reagenda as mensagens que ficaram pendentes enquanto a assinatura estava bloqueada (o da 031). */
+export interface PlatformPendingReplies {
+  resume(subscriptionId: string, reference: string): Promise<number>;
+}
+
 const DAY_MS = 86_400_000;
 /** Dias que o admin pode conceder de uma vez (spec 045, E4). */
 export const PLATFORM_EXTEND_MIN_DAYS = 1;
@@ -34,6 +40,11 @@ export interface PlatformSubscriptionServiceDeps {
   readonly confirmer: PlatformActionConfirmer;
   /** Ausente = `BILLING_ENABLED=false`: toda ação responde 409 `BILLING_DISABLED` sem efeito. */
   readonly settings?: PlatformSubscriptionSettings | undefined;
+  /**
+   * Só com o canal ligado (revisão da E4, I4): depois de conceder dias, iniciar o teste ou trocar o plano, as
+   * mensagens que ficaram pendentes durante o bloqueio são reagendadas em segundo plano (nunca rejeita).
+   */
+  readonly pendingReplies?: PlatformPendingReplies | undefined;
   readonly logger: FastifyBaseLogger;
   readonly metrics?: Pick<Metrics, 'countPlatformAction'> | undefined;
   readonly now?: () => Date;
@@ -65,10 +76,9 @@ export function extendedPeriodEnd(
   now: Date,
   days: number,
 ): Date {
-  const currentEnd =
-    subscription.status === 'TRIAL'
-      ? (subscription.trialEndsAt ?? subscription.currentPeriodEnd)
-      : subscription.currentPeriodEnd;
+  // O teste é a linha com `trialEndsAt` (o primeiro pagamento o zera), mesmo que a tarefa dos avisos ou o
+  // "Encerrar agora" já tenham gravado `EXPIRED` (revisão da E4, I3).
+  const currentEnd = subscription.trialEndsAt ?? subscription.currentPeriodEnd;
   return new Date(Math.max(now.getTime(), currentEnd.getTime()) + days * DAY_MS);
 }
 
@@ -93,16 +103,28 @@ export class PlatformSubscriptionService {
     const settings = this.requireBilling();
     const id = this.parseId(accountId);
     const action = 'SUBSCRIPTION_TRIAL_STARTED';
-    await this.deps.subscriptions.run(async (tx) => {
-      // As empresas que o teste adota são travadas antes da conta (a ordem de sempre).
-      await tx.lockOwnedCompanies(id);
-      if (!(await tx.lockAccount(id))) throw accountNotFound();
-      if ((await tx.lockSubscription(id)) !== null) {
-        throw new ConflictError('A conta já tem assinatura', { code: 'SUBSCRIPTION_EXISTS' });
-      }
-      await tx.startTrial(id, this.now(), settings.trialDays);
-      await tx.audit({ adminId: identity.adminId, action, subjectAccountId: id, reason });
-    });
+    await this.deps.subscriptions
+      .run(async (tx) => {
+        // As empresas que o teste adota são travadas antes da conta (a ordem de sempre).
+        await tx.lockOwnedCompanies(id);
+        const account = await tx.lockAccount(id);
+        if (account === null) throw accountNotFound();
+        // Como a criação de empresa da 031: só conta ativa e com e-mail confirmado ganha o teste.
+        if (account.status !== 'ACTIVE' || !account.verified) {
+          throw new ConflictError('A conta precisa estar ativa e com o e-mail confirmado', {
+            code: 'ACCOUNT_NOT_ELIGIBLE',
+          });
+        }
+        if ((await tx.lockSubscription(id)) !== null) {
+          throw new ConflictError('A conta já tem assinatura', { code: 'SUBSCRIPTION_EXISTS' });
+        }
+        await tx.startTrial(id, this.now(), settings.trialDays);
+        await tx.audit({ adminId: identity.adminId, action, subjectAccountId: id, reason });
+        return (await tx.lockSubscription(id))?.id;
+      })
+      .then((subscriptionId) => {
+        if (subscriptionId !== undefined) this.resumePending(subscriptionId);
+      });
     this.recorded(identity, id, action, reason);
   }
 
@@ -128,12 +150,21 @@ export class PlatformSubscriptionService {
       );
     }
     const action = 'SUBSCRIPTION_EXTENDED';
-    await this.mutate(identity, id, action, reason, { days }, (sub) => {
-      const end = extendedPeriodEnd(sub, this.now(), days);
-      return sub.status === 'TRIAL'
-        ? { currentPeriodEnd: end, trialEndsAt: end }
-        : { currentPeriodEnd: end, status: 'ACTIVE' };
-    });
+    await this.mutate(
+      identity,
+      id,
+      action,
+      reason,
+      { days },
+      (sub) => {
+        const end = extendedPeriodEnd(sub, this.now(), days);
+        // O teste continua teste (cota de teste), mesmo se já estiver gravado como EXPIRED (I3).
+        return sub.trialEndsAt !== null
+          ? { currentPeriodEnd: end, trialEndsAt: end, status: 'TRIAL' }
+          : { currentPeriodEnd: end, status: 'ACTIVE' };
+      },
+      true,
+    );
   }
 
   /**
@@ -157,7 +188,13 @@ export class PlatformSubscriptionService {
       (sub) =>
         sub.agendaEnabled === modules.agenda && sub.stockEnabled === modules.stock
           ? null
-          : { agendaEnabled: modules.agenda, stockEnabled: modules.stock },
+          : // A troca agendada pela pessoa desfaria a liberação na renovação (D13: cobra o que estiver
+            // ligado); ela é apagada, como na troca de plano (revisão da E4, M2).
+            {
+              agendaEnabled: modules.agenda,
+              stockEnabled: modules.stock,
+              clearPendingChange: true,
+            },
     );
   }
 
@@ -195,6 +232,7 @@ export class PlatformSubscriptionService {
         }
         return { planId: target.planId, priceId: target.priceId, clearPendingChange: true };
       },
+      true,
     );
   }
 
@@ -278,9 +316,12 @@ export class PlatformSubscriptionService {
       subscription: SubscriptionRecord,
       tx: PlatformSubscriptionTransaction,
     ) => PlatformSubscriptionPatch | null | Promise<PlatformSubscriptionPatch | null>,
+    /** Depois do commit, reagenda as mensagens pendentes (a ação pode ter liberado acesso ou cota). */
+    resume = false,
   ): Promise<boolean> {
+    let subscriptionId: string | undefined;
     const changed = await this.deps.subscriptions.run(async (tx) => {
-      if (!(await tx.lockAccount(accountId))) throw accountNotFound();
+      if ((await tx.lockAccount(accountId)) === null) throw accountNotFound();
       const subscription = await tx.lockSubscription(accountId);
       if (subscription === null) {
         throw new ConflictError('A conta não tem assinatura', { code: 'NO_SUBSCRIPTION' });
@@ -290,6 +331,7 @@ export class PlatformSubscriptionService {
           code: 'ORDER_PENDING',
         });
       }
+      subscriptionId = subscription.id;
       const patch = await decide(subscription, tx);
       if (patch === null) return false;
       await tx.update(subscription.id, patch);
@@ -303,7 +345,15 @@ export class PlatformSubscriptionService {
       return true;
     });
     if (changed) this.recorded(identity, accountId, action, reason);
+    if (changed && resume && subscriptionId !== undefined) this.resumePending(subscriptionId);
     return changed;
+  }
+
+  /** Em segundo plano: a resposta ao admin não espera o reagendamento (o resumer nunca rejeita). */
+  private resumePending(subscriptionId: string): void {
+    const pending = this.deps.pendingReplies;
+    if (pending === undefined) return;
+    void pending.resume(subscriptionId, `platform-${randomUUID()}`).catch(() => undefined);
   }
 
   private requireBilling(): PlatformSubscriptionSettings {

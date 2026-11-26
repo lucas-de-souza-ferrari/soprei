@@ -20,6 +20,7 @@ import {
   subscriptionWindows,
   usageWindowStart,
   WHATSAPP_BILLING_MODES,
+  subscriptionFingerprint,
 } from '../../../domain/index.js';
 import { ConflictError, DatabaseError } from '../../../shared/errors/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
@@ -110,7 +111,8 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
     accountId: string,
     input: NewOrderInput,
     cap: OrderCap,
-  ): Promise<PaymentOrderRecord | 'limit' | null> {
+    expectedFingerprint?: string,
+  ): Promise<PaymentOrderRecord | 'limit' | 'stale' | null> {
     return withRepositoryErrors('Checkout.createPendingOrder', async () => {
       const subscription = await this.db.subscription.findFirst({
         where: { accountId: AccountId.parse(accountId) },
@@ -119,9 +121,16 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
       if (subscription === null) return null;
       return runInTransaction(
         this.db,
-        async (tx): Promise<PaymentOrderRecord | 'limit'> => {
+        async (tx): Promise<PaymentOrderRecord | 'limit' | 'stale'> => {
           // Trava a assinatura: a contagem e a gravação são atômicas (criações simultâneas não furam o teto).
           await lockSubscriptionRow(tx, subscription.id);
+          // Spec 045, E4 (revisão I2): a assinatura avaliada fora da trava pode ter mudado (ação do admin).
+          if (expectedFingerprint !== undefined) {
+            const current = await findSubscriptionById(tx, subscription.id);
+            if (current === null || subscriptionFingerprint(current) !== expectedFingerprint) {
+              return 'stale';
+            }
+          }
           const recent = await tx.paymentOrder.count({
             where: { subscriptionId: subscription.id, createdAt: { gte: cap.since } },
           });

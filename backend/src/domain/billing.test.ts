@@ -434,6 +434,33 @@ describe('período pago e janelas de uso do checkout (spec 031, E3)', () => {
     );
     assert.equal(windowsInSpan(annual.periodStart, annual.periodEnd), 24);
   });
+
+  it('dias concedidos pelo admin (spec 045, E4) nunca somem na renovação: o fim novo é pelo menos o fim atual + 1 ciclo', () => {
+    // Início 1/dez, fim 1/jan; o admin concede 20 dias (fim 21/jan); a pessoa renova em 10/jan.
+    const granted = subscription('ACTIVE', {
+      currentPeriodStart: at('2026-12-01T00:00:00Z'),
+      currentPeriodEnd: at('2027-01-21T00:00:00Z'),
+    });
+    const renewal = computePaidPeriod(granted, at('2027-01-10T00:00:00Z'), GRACE, 'MONTHLY');
+    assert.equal(renewal.continuing, true);
+    assert.equal(renewal.periodStart.toISOString(), '2026-12-01T00:00:00.000Z');
+    assert.equal(renewal.periodEnd.toISOString(), '2027-02-21T00:00:00.000Z');
+    // Na carência depois do fim concedido, também a partir do fim.
+    const late = computePaidPeriod(granted, at('2027-01-23T00:00:00Z'), GRACE, 'MONTHLY');
+    assert.equal(late.periodEnd.toISOString(), '2027-02-21T00:00:00.000Z');
+    // Anual: os dias concedidos ficam.
+    const annual = computePaidPeriod(
+      subscription('ACTIVE', {
+        cycle: 'ANNUAL',
+        currentPeriodStart: at('2026-01-01T00:00:00Z'),
+        currentPeriodEnd: at('2027-01-11T00:00:00Z'),
+      }),
+      at('2026-12-20T00:00:00Z'),
+      GRACE,
+      'ANNUAL',
+    );
+    assert.equal(annual.periodEnd.toISOString(), '2028-01-11T00:00:00.000Z');
+  });
 });
 
 describe('troca de plano: classificação e upgrade proporcional (spec 031, D11)', () => {

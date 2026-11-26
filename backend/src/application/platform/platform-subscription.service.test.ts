@@ -84,6 +84,10 @@ function subscription(
 /** Unidade de trabalho em memória: grava só no fim (como o commit), registra a ordem das travas. */
 class InMemorySubscriptions implements PlatformSubscriptionUnitOfWork {
   readonly accounts = new Set<string>();
+  readonly accountState = new Map<
+    string,
+    { readonly status: 'ACTIVE' | 'DISABLED'; readonly verified: boolean }
+  >();
   readonly subscriptions = new Map<string, SubscriptionRecord>();
   readonly pendingOrders = new Set<string>();
   readonly companies = new Map<string, number>();
@@ -104,7 +108,10 @@ class InMemorySubscriptions implements PlatformSubscriptionUnitOfWork {
       },
       lockAccount: (accountId) => {
         this.locks.push(`account:${accountId}`);
-        return Promise.resolve(this.accounts.has(accountId));
+        if (!this.accounts.has(accountId)) return Promise.resolve(null);
+        return Promise.resolve(
+          this.accountState.get(accountId) ?? { status: 'ACTIVE' as const, verified: true },
+        );
       },
       lockSubscription: (accountId) => {
         this.locks.push(`subscription:${accountId}`);
@@ -189,6 +196,7 @@ interface World {
   readonly codes: (string | undefined)[];
   readonly logs: ReturnType<typeof captureLogs>;
   readonly account: AccountId;
+  readonly resumed: string[];
   confirm: Result<void, LoginFailure>;
 }
 
@@ -201,7 +209,9 @@ function setup(options: { billing?: boolean } = {}): World {
   const metrics: string[] = [];
   const codes: (string | undefined)[] = [];
   const logs = captureLogs();
+  const resumed: string[] = [];
   const world = {
+    resumed,
     uow,
     audit,
     metrics,
@@ -219,6 +229,12 @@ function setup(options: { billing?: boolean } = {}): World {
       },
     },
     settings: options.billing === false ? undefined : SETTINGS,
+    pendingReplies: {
+      resume: (subscriptionId) => {
+        resumed.push(subscriptionId);
+        return Promise.resolve(0);
+      },
+    },
     logger: logs.logger,
     metrics: { countPlatformAction: (action) => metrics.push(action) },
     now: () => NOW,
@@ -309,6 +325,8 @@ describe('PlatformSubscriptionService (spec 045, E4)', () => {
     assert.deepEqual(world.uow.locks, [
       `companies:${world.account}`,
       `account:${world.account}`,
+      `subscription:${world.account}`,
+      // Depois de criar, relê a assinatura nova (o id dela para reagendar as pendentes).
       `subscription:${world.account}`,
     ]);
     assert.deepEqual(
@@ -477,5 +495,63 @@ describe('PlatformSubscriptionService (spec 045, E4)', () => {
     await assert.rejects(world.service.end(ADMIN, world.account, 'OTHER', '987654'));
     assert.deepEqual(sub(world), before);
     assert.ok(!world.logs.raw().includes('987654'));
+  });
+
+  it('teste já gravado como EXPIRED (tarefa dos avisos ou "Encerrar agora") continua teste ao conceder dias (revisão I3)', async () => {
+    const world = setup();
+    const trialEnd = new Date(NOW.getTime() - 3 * DAY);
+    world.uow.subscriptions.set(
+      world.account,
+      subscription(world.account, {
+        status: 'EXPIRED',
+        currentPeriodStart: new Date(NOW.getTime() - 10 * DAY),
+        currentPeriodEnd: trialEnd,
+        trialEndsAt: trialEnd,
+      }),
+    );
+    await world.service.extend(ADMIN, world.account, 5, 'OTHER');
+    const t = sub(world);
+    assert.equal(t.status, 'TRIAL');
+    assert.equal(t.trialEndsAt?.getTime(), NOW.getTime() + 5 * DAY);
+    assert.equal(t.currentPeriodEnd.getTime(), NOW.getTime() + 5 * DAY);
+  });
+
+  it('iniciar teste exige conta ativa e confirmada (409 ACCOUNT_NOT_ELIGIBLE) (revisão M5)', async () => {
+    const world = setup();
+    world.uow.subscriptions.delete(world.account);
+    world.uow.accountState.set(world.account, { status: 'ACTIVE', verified: false });
+    await assert.rejects(
+      world.service.startTrial(ADMIN, world.account, 'OTHER'),
+      code('ACCOUNT_NOT_ELIGIBLE'),
+    );
+    world.uow.accountState.set(world.account, { status: 'DISABLED', verified: true });
+    await assert.rejects(
+      world.service.startTrial(ADMIN, world.account, 'OTHER'),
+      code('ACCOUNT_NOT_ELIGIBLE'),
+    );
+    assert.equal(world.uow.subscriptions.has(world.account), false);
+  });
+
+  it('módulos apagam a troca agendada (a renovação cobra o que estiver ligado, D13) (revisão M2)', async () => {
+    const world = setup();
+    assert.notEqual(sub(world).pendingChange, null);
+    await world.service.setModules(ADMIN, world.account, { agenda: true, stock: false }, 'OTHER');
+    assert.equal(sub(world).pendingChange, null);
+  });
+
+  it('mensagens pendentes são reagendadas depois de conceder dias, iniciar teste e trocar plano; não nos módulos nem no cancelamento (revisão I4)', async () => {
+    const world = setup();
+    const id = sub(world).id;
+    await world.service.extend(ADMIN, world.account, 5, 'OTHER');
+    await world.service.changePlan(ADMIN, world.account, 'SCALE', 'OTHER');
+    await world.service.setModules(ADMIN, world.account, { agenda: true, stock: true }, 'OTHER');
+    await world.service.setCancelAtPeriodEnd(ADMIN, world.account, true, 'OTHER');
+    // O mesmo plano (sem mudança) não reagenda.
+    await world.service.changePlan(ADMIN, world.account, 'SCALE', 'OTHER');
+    assert.deepEqual(world.resumed, [id, id]);
+    world.uow.subscriptions.delete(world.account);
+    await world.service.startTrial(ADMIN, world.account, 'OTHER');
+    assert.equal(world.resumed.length, 3);
+    assert.equal(world.resumed[2], sub(world).id);
   });
 });

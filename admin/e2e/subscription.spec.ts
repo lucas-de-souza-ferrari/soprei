@@ -130,3 +130,15 @@ test('assinatura: pedido pendente mostra a recusa própria; sem assinatura só a
     { reason: 'OWNER_REQUEST' },
   ]);
 });
+
+test('empresa: "Abrir conta titular" leva à conta dona da assinatura, onde ficam as ações', async ({
+  page,
+}) => {
+  await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await nav(page, 'Empresas').click();
+  await page.getByRole('button', { name: 'Abrir Padaria Aurora' }).click();
+  await page.getByRole('button', { name: 'Abrir conta titular' }).click();
+  await expect(page.getByRole('heading', { name: 'Conta', level: 1 })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Conceder dias' })).toBeVisible();
+});

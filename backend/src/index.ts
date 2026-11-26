@@ -612,6 +612,16 @@ async function main(): Promise<void> {
                       graceDays: billing.settings.graceDays,
                       trialDays: billing.settings.trialDays,
                     },
+              // Mensagens pendentes do bloqueio voltam à fila depois de liberar (só com o canal ligado).
+              ...(inboundQueue === undefined
+                ? {}
+                : {
+                    pendingReplies: new PendingReplyResumer({
+                      reader: new PrismaPendingReplyReader(prisma),
+                      queue: inboundQueue.queue,
+                      logger,
+                    }),
+                  }),
               logger,
               metrics,
             }),

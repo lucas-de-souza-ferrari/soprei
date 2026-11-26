@@ -35,11 +35,16 @@ export interface PlatformPlanTarget {
 export interface PlatformSubscriptionTransaction {
   /** Trava as empresas (não removidas) em que a conta é `OWNER` ativa, em ordem de id (as que o teste adota). */
   lockOwnedCompanies(accountId: AccountId): Promise<number>;
-  /** Trava a conta; `false` se não existe. */
-  lockAccount(accountId: AccountId): Promise<boolean>;
+  /** Trava a conta e relê o estado; `null` se não existe (revisão da E4, M5: o teste exige conta apta). */
+  lockAccount(
+    accountId: AccountId,
+  ): Promise<{ readonly status: 'ACTIVE' | 'DISABLED'; readonly verified: boolean } | null>;
   /** Trava e relê a assinatura da conta; `null` se a conta não tem assinatura. */
   lockSubscription(accountId: AccountId): Promise<SubscriptionRecord | null>;
-  /** Há pedido de pagamento `PENDING` ainda válido desta assinatura? (D da E4: `ORDER_PENDING`.) */
+  /**
+   * Há pedido desta assinatura que ainda pode ser pago e concedido? `PENDING`, ou `EXPIRED` com link, criado
+   * dentro da janela da reconciliação (48 h). Sim = 409 `ORDER_PENDING`.
+   */
   hasPendingOrder(subscriptionId: string, now: Date): Promise<boolean>;
   /**
    * Cria o teste gratuito como a 031 (Essencial, Agenda e Estoque, `trialDays`) e adota as empresas em que a

@@ -419,6 +419,19 @@ export function CompanyDetailScreen({
           </Card>
           <Card title="Assinatura e uso">
             <Subscription detail={data} />
+            {/* As ações da assinatura ficam na conta titular (spec 045, E4): a assinatura é da conta. */}
+            {data.holder === null ? null : (
+              <div className="mt-3">
+                <Button
+                  onClick={() => {
+                    if (data.holder !== null)
+                      navigate({ name: 'account', accountId: data.holder.accountId, from: self });
+                  }}
+                >
+                  Abrir conta titular
+                </Button>
+              </div>
+            )}
           </Card>
           <Card title="Canal">
             {data.channel.state === 'NOT_CONNECTED' ? (
