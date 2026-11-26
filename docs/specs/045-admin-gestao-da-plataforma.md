@@ -1,6 +1,6 @@
 # 045 — Admin da plataforma: quem é dono e gestão completa (CRUD) de contas, empresas, vínculos, assinatura e canal
 
-- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 e E2 na `main` (PRs #30 e #31); E3 dividida em duas (decisão do dono, 2026-11-25): **E3a** (empresas e vínculos) na `main` (PR #32) e **E3b** (convites da plataforma e criar empresa com dono, a migration do convite com deploy manual) na `main` (PR #33, deploy manual feito em 2026-11-25); E4 em implementação na branch `spec/045-e4-assinatura`; E5 e E6 por fazer, na ordem
+- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 e E2 na `main` (PRs #30 e #31); E3 dividida em duas (decisão do dono, 2026-11-25): **E3a** (empresas e vínculos) na `main` (PR #32) e **E3b** (convites da plataforma e criar empresa com dono, a migration do convite com deploy manual) na `main` (PR #33, deploy manual feito em 2026-11-25); E4 na `main` (PR #34); E5 em implementação na branch `spec/045-e5-canal`; E6 por fazer
 - **Branch:** `spec/045-admin-gestao` (esta spec); cada etapa em branch própria a partir da `main` (`spec/045-e1-pessoas`, `spec/045-e2-contas`, ...)
 - **Depende de:** 044 (admin, sessão com segundo fator, `PlatformAuditEvent`, leitura agregada), 008 (papéis, regra do último `OWNER`, trava da empresa), 017/020/021 (contas, confirmação, recuperação de senha, `revokeAll`), 025 (convites), 015/023/039 (canal), 031/040 (assinatura), 032 (E7 excluir conta e E8 excluir empresa, ainda não implementadas: esta spec cruza com as duas).
 - **Spec de segurança:** cada etapa passa pelo `reviewer` antes do merge. Ela abre as **primeiras escritas da plataforma sobre contas, vínculos, assinatura e canal**, muda o contrato do convite (convidador que não é vínculo) e amplia as decisões D1 e D7 da 044.
@@ -152,21 +152,21 @@ E2:
 
 E3:
 
-- [ ] (E3b) Migration do convite: convite com os dois convidadores ou nenhum é recusado pelo banco; `OWNER` com convidador vínculo é recusado; `OWNER` com convidador admin é aceito; convites antigos continuam válidos (teste em schema temporário, como o da 025).
-- [ ] (E3b) Convite da plataforma aceito por conta existente (mesmo e-mail) e por pessoa nova (`accept-new`) cria o vínculo com o papel pedido; admin desativado entre o convite e o aceite fecha o convite como `REVOKED` (falha uniforme).
+- [x] (E3b) Migration do convite: convite com os dois convidadores ou nenhum é recusado pelo banco; `OWNER` com convidador vínculo é recusado; `OWNER` com convidador admin é aceito; convites antigos continuam válidos (teste em schema temporário, como o da 025). _(CI verde no PR #33.)_
+- [x] (E3b) Convite da plataforma aceito por conta existente (mesmo e-mail) e por pessoa nova (`accept-new`) cria o vínculo com o papel pedido; admin desativado entre o convite e o aceite fecha o convite como `REVOKED` (falha uniforme). _(CI verde no PR #33.)_
 - [x] (E3a) Mudar papel: rebaixar o último `OWNER` ativo = 409 `LAST_OWNER`; promover B e depois rebaixar A transfere a propriedade; duas transferências concorrentes nunca deixam a empresa sem `OWNER` ativo (Postgres real); `:membershipId` de outra empresa = 404 e nada muda. _(CI verde no PR #32, `platform-companies.integration.test.ts`.)_
-- [ ] (E3b) Criar empresa grava empresa e convite de `OWNER` na mesma transação (falha no convite = nenhuma empresa); slug repetido, inclusive de removida, = 409 `SLUG_TAKEN`.
+- [x] (E3b) Criar empresa grava empresa e convite de `OWNER` na mesma transação (falha no convite = nenhuma empresa); slug repetido, inclusive de removida, = 409 `SLUG_TAKEN`. _(CI verde no PR #33.)_
 - [x] (E3a) Remover empresa: slug errado = 400 sem efeito; certo = soft delete, número liberado, conexão apagada, convites pendentes revogados, desassinatura em melhor esforço (falha da Meta não desfaz nada); os membros perdem o acesso na requisição seguinte; restaurar devolve a empresa sem canal. _(CI verde no PR #32, `platform-companies.integration.test.ts`.)_
 - [x] (E3a) Com `PLATFORM_ADMIN_ENABLED=true`, `POST`/`PATCH`/`DELETE /admin/companies` com Bearer da plataforma = 403 `USE_PLATFORM_ADMIN`; com ele desligado, o comportamento de hoje. _(`companies.controller.test.ts`: as três escritas com o fechamento ligado, 401 sem token e a leitura que continua; com ele desligado, os testes de antes.)_
 
 E4:
 
 - [x] Cobrança desligada = 409 `BILLING_DISABLED` em todas as rotas de assinatura, sem efeito. _(`platform-subscription.service.test.ts`: as seis ações, nada muda e o código não é gasto; também em `platform-subscription.integration.test.ts`.)_
-- [ ] Conceder dias numa assinatura vencida além da carência devolve `access: ok` até o novo fim; numa em teste, estende o teste; o uso já contado não zera.
-- [ ] Liberar Agenda faz `GET /admin/companies/:id/entitlements` da empresa da conta liberar o módulo na hora; a cotação da renovação (`GET /account/billing/quote`) passa a incluir o módulo.
-- [ ] Trocar para um plano que não comporta as empresas = 409 `PLAN_DOWNGRADE_BLOCKED`; com pedido `PENDING` = 409 `ORDER_PENDING`; nada muda em nenhum dos dois.
-- [ ] Encerrar agora: o atendimento da empresa fica bloqueado (o provedor não é chamado), a linha e os pedidos continuam no banco.
-- [ ] Iniciar teste em conta que já tem assinatura = 409 `SUBSCRIPTION_EXISTS`.
+- [x] Conceder dias numa assinatura vencida além da carência devolve `access: ok` até o novo fim; numa em teste, estende o teste; o uso já contado não zera. _(CI verde no PR #34.)_
+- [x] Liberar Agenda faz `GET /admin/companies/:id/entitlements` da empresa da conta liberar o módulo na hora; a cotação da renovação (`GET /account/billing/quote`) passa a incluir o módulo. _(CI verde no PR #34.)_
+- [x] Trocar para um plano que não comporta as empresas = 409 `PLAN_DOWNGRADE_BLOCKED`; com pedido `PENDING` = 409 `ORDER_PENDING`; nada muda em nenhum dos dois. _(CI verde no PR #34.)_
+- [x] Encerrar agora: o atendimento da empresa fica bloqueado (o provedor não é chamado), a linha e os pedidos continuam no banco. _(CI verde no PR #34.)_
+- [x] Iniciar teste em conta que já tem assinatura = 409 `SUBSCRIPTION_EXISTS`. _(CI verde no PR #34.)_
 
 E5:
 
