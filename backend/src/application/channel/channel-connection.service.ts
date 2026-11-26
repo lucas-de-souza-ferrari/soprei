@@ -7,6 +7,8 @@ import {
   type ChannelConnectionRepository,
   type Company,
   type CompanyId,
+  type PlatformActionReason,
+  type PlatformAdminId,
   type CompanyRepository,
   hasPermission,
   type Permission,
@@ -104,6 +106,19 @@ export interface EmbeddedSignupInput {
   readonly mode?: EmbeddedSignupMode | undefined;
 }
 
+/**
+ * Quem desconecta o canal (spec 045, E5): o vínculo da empresa (como sempre) ou o admin da plataforma, que
+ * escolhe a empresa pelo caminho e grava só na trilha da plataforma.
+ */
+export type ChannelDisconnectActor =
+  | MembershipIdentity
+  | {
+      readonly kind: 'platform';
+      readonly adminId: PlatformAdminId;
+      readonly companyId: CompanyId;
+      readonly reason: PlatformActionReason;
+    };
+
 export interface ChannelConnectionServiceDeps {
   /** Gera o PIN de 6 dígitos do registro; por padrão `crypto.randomInt` (CSPRNG). Só os testes trocam. */
   readonly generatePin?: () => string;
@@ -115,7 +130,9 @@ export interface ChannelConnectionServiceDeps {
   /** `WHATSAPP_APP_ID`: todo token precisa pertencer a este app. */
   readonly appId: string;
   readonly logger: FastifyBaseLogger;
-  readonly metrics?: Pick<Metrics, 'countChannelConnection' | 'countAuthzDenial'> | undefined;
+  readonly metrics?:
+    | Pick<Metrics, 'countChannelConnection' | 'countAuthzDenial' | 'countPlatformAction'>
+    | undefined;
 }
 
 interface PendingAudit {
@@ -272,9 +289,14 @@ export class ChannelConnectionService {
     return new SecretString(generate().padStart(6, '0'));
   }
 
-  /** Desconecta (idempotente): apaga a conexão, limpa o número e audita; o `unsubscribe` é melhor esforço. */
-  async disconnect(actor: MembershipIdentity): Promise<void> {
-    this.requirePermission(actor, 'channel:manage');
+  /**
+   * Desconecta (idempotente): apaga a conexão (com o PIN cifrado), limpa o número e audita; o `unsubscribe` é
+   * melhor esforço, depois do commit. O ator é o vínculo da empresa (permissão `channel:manage`, trilha da
+   * empresa) ou o admin da plataforma (spec 045, E5: sem permissão de tenant, a empresa vem do caminho, trilha
+   * só da plataforma, D9). Empresa `LEGACY` (número sem conexão): só limpa o número. Devolve se mudou.
+   */
+  async disconnect(actor: ChannelDisconnectActor): Promise<boolean> {
+    if (actor.kind === 'membership') this.requirePermission(actor, 'channel:manage');
     const outcome = await this.deps.unitOfWork.run(async (tx) => {
       await tx.lockCompany(actor.companyId);
       const company = await tx.companies.findById(actor.companyId);
@@ -287,10 +309,19 @@ export class ChannelConnectionService {
       if (company.whatsappPhoneNumberId !== null) {
         await tx.companies.update(actor.companyId, { whatsappPhoneNumberId: null });
       }
-      await tx.audit.create(actor.companyId, {
-        action: 'CHANNEL_DISCONNECTED',
-        actorMembershipId: actor.membershipId,
-      });
+      if (actor.kind === 'membership') {
+        await tx.audit.create(actor.companyId, {
+          action: 'CHANNEL_DISCONNECTED',
+          actorMembershipId: actor.membershipId,
+        });
+      } else {
+        await tx.platformAudit({
+          adminId: actor.adminId,
+          action: 'CHANNEL_DISCONNECTED_BY_PLATFORM',
+          subjectCompanyId: actor.companyId,
+          reason: actor.reason,
+        });
+      }
       return {
         changed: true as const,
         old:
@@ -299,10 +330,29 @@ export class ChannelConnectionService {
             : { wabaId: connection.wabaId, ciphertext: connection.tokenCiphertext },
       };
     });
-    if (!outcome.changed) return;
-    this.afterCommit(actor, [{ action: 'CHANNEL_DISCONNECTED' }]);
+    if (!outcome.changed) return false;
+    if (actor.kind === 'membership') {
+      this.afterCommit(actor, [{ action: 'CHANNEL_DISCONNECTED' }]);
+    } else {
+      // Só ids, ação e motivo: nunca token, PIN nem a WABA.
+      this.deps.logger.info(
+        {
+          adminId: actor.adminId,
+          companyId: actor.companyId,
+          action: 'CHANNEL_DISCONNECTED_BY_PLATFORM',
+          reason: actor.reason,
+        },
+        'admin da plataforma desconectou o canal de uma empresa',
+      );
+      try {
+        this.deps.metrics?.countPlatformAction('channel_disconnected_by_platform');
+      } catch (error) {
+        this.deps.logger.warn({ err: error }, 'falha ao registrar métrica da plataforma');
+      }
+    }
     this.count('disconnect', 'ok');
     if (outcome.old !== undefined) await this.unsubscribe(actor.companyId, outcome.old);
+    return true;
   }
 
   /**

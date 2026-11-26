@@ -241,6 +241,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           restore: () => Promise.reject(new Error('inventário')),
           changeRole: () => Promise.reject(new Error('inventário')),
           setMembershipStatus: () => Promise.reject(new Error('inventário')),
+          disconnectChannel: () => Promise.reject(new Error('inventário')),
         },
         // Spec 045, E3b: convites da plataforma e "Nova empresa".
         invitations: {
@@ -450,6 +451,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/platform/companies/:companyId/memberships/:membershipId/role',
       '/platform/companies/:companyId/memberships/:membershipId/disable',
       '/platform/companies/:companyId/memberships/:membershipId/enable',
+      '/platform/companies/:companyId/channel/disconnect',
       '/platform/companies/:companyId/invitations',
       '/platform/companies/:companyId/invitations/:invitationId/resend',
       '/platform/companies/:companyId/invitations/:invitationId/revoke',

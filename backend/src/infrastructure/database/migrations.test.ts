@@ -446,3 +446,23 @@ describe('migration da spec 045, E4 (ações sobre a assinatura na trilha da pla
     ]);
   });
 });
+
+describe('migration da spec 045, E5 (desconectar o canal pela plataforma)', () => {
+  const migration = migrationFiles().find((file) =>
+    file.name.endsWith('_platform_channel_disconnect'),
+  );
+
+  it('só acrescenta o valor CHANNEL_DISCONNECTED_BY_PLATFORM no enum da trilha (deploy automático)', () => {
+    assert.ok(migration !== undefined, 'migration _platform_channel_disconnect existe');
+    const statements = migration.sql
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n')
+      .trim();
+    assert.equal(
+      statements,
+      `ALTER TYPE "platform_audit_action" ADD VALUE IF NOT EXISTS 'CHANNEL_DISCONNECTED_BY_PLATFORM';`,
+    );
+    assert.doesNotMatch(migration.sql, /breaking-approved/);
+  });
+});

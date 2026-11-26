@@ -3,6 +3,7 @@ import type {
   ChannelConnectionRepository,
   CompanyId,
   CompanyRepository,
+  NewPlatformAuditEvent,
 } from '../../domain/index.js';
 
 /** Os repositórios de uma transação do canal: tudo confirma ou desfaz junto (spec 015). */
@@ -16,6 +17,11 @@ export interface ChannelTransaction {
    * se a empresa não existe.
    */
   lockCompany(companyId: CompanyId): Promise<void>;
+  /**
+   * Trilha da PLATAFORMA nesta transação (spec 045, E5): o admin desconecta sem tocar na trilha da empresa
+   * (D9), mas a trilha dele confirma ou desfaz junto com a desconexão.
+   */
+  platformAudit(event: NewPlatformAuditEvent): Promise<void>;
 }
 
 /**

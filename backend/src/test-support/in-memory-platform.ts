@@ -268,7 +268,9 @@ export class InMemoryPlatformCompanyUnitOfWork implements PlatformCompanyUnitOfW
         state: (companyId) => {
           const slug = this.slugs.get(companyId);
           return Promise.resolve(
-            slug === undefined ? null : { slug, removed: removed.has(companyId) },
+            slug === undefined
+              ? null
+              : { slug, removed: removed.has(companyId), hasChannel: channels.has(companyId) },
           );
         },
         restore: (companyId) => Promise.resolve(removed.delete(companyId)),

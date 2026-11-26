@@ -67,6 +67,8 @@ async function setup(): Promise<World> {
   const company = CompanyId.parse(randomUUID());
   const other = CompanyId.parse(randomUUID());
   uow.addCompany(company, SLUG, NAME);
+  // Spec 045, E5: a empresa tem canal (conexão), para a rota de desconectar ter o que fazer.
+  uow.channels.set(company, { wabaId: '1234567890', tokenCiphertext: 'cifrado' });
   uow.addCompany(other, 'outra-e3a', 'Outra');
   const owner = MembershipId.parse(randomUUID());
   const agent = MembershipId.parse(randomUUID());
@@ -101,6 +103,17 @@ async function setup(): Promise<World> {
           revokeAllSessions: (scope, subject) => {
             calls.push(`bearer:${scope}:${subject}`);
             return Promise.resolve();
+          },
+        },
+        // O canal é um dublê: o efeito real está em platform-channel.integration.test.ts.
+        channel: {
+          unsubscribeRemoved: (companyId) => {
+            calls.push(`unsubscribe:${companyId}`);
+            return Promise.resolve();
+          },
+          disconnect: (actor) => {
+            calls.push(`disconnect:${actor.companyId}:${actor.reason}`);
+            return Promise.resolve(true);
           },
         },
         logger: logs.logger,
@@ -158,6 +171,7 @@ function routes(
     [`${base}/rename`, { name: 'Outro nome', reason: 'OTHER' }],
     [`${base}/remove`, { reason: 'ABUSE', slug: SLUG, code: '123456' }],
     [`${base}/restore`, { reason: 'OTHER', code: '123456' }],
+    [`${base}/channel/disconnect`, { reason: 'OTHER', code: '123456' }],
     [`${base}/memberships/${membershipId}/role`, { role: 'VIEWER', reason: 'OTHER' }],
     [`${base}/memberships/${membershipId}/disable`, { reason: 'OTHER' }],
     [`${base}/memberships/${membershipId}/enable`, { reason: 'OTHER' }],
@@ -440,6 +454,33 @@ describe('/platform/companies/:companyId/* ações sobre empresa e vínculos (sp
         assert.ok(!metrics.body.includes(secret), `métrica: ${secret}`);
         for (const body of bodies) assert.ok(!body.includes(secret), `resposta: ${secret}`);
       }
+    } finally {
+      await world.app.close();
+    }
+  });
+
+  it('desconectar o canal (spec 045, E5): sem código ou com o do login = 400 CONFIRMATION_INVALID sem efeito; com código novo = 204 e o canal é chamado como a plataforma', async () => {
+    const world = await setup();
+    try {
+      const headers = { ...WRITE_HEADERS, cookie: world.cookie };
+      const url = `/platform/companies/${world.company}/channel/disconnect`;
+      const loginCode = codeAt(world.secret, world.clock.ms);
+      for (const payload of [{ reason: 'ABUSE' }, { reason: 'ABUSE', code: loginCode }]) {
+        const response = await world.app.inject({ method: 'POST', url, headers, payload });
+        assert.equal(response.statusCode, 400, JSON.stringify(payload));
+        assert.equal(errorCode(response), 'CONFIRMATION_INVALID');
+        assert.ok(!response.body.includes(loginCode));
+      }
+      assert.deepEqual(world.calls, []);
+      const ok = await world.app.inject({
+        method: 'POST',
+        url,
+        headers,
+        payload: { reason: 'ABUSE', code: freshCode(world) },
+      });
+      assert.equal(ok.statusCode, 204);
+      assert.equal(ok.body, '');
+      assert.deepEqual(world.calls, [`disconnect:${world.company}:ABUSE`]);
     } finally {
       await world.app.close();
     }

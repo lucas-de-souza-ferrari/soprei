@@ -16,7 +16,7 @@ import {
 
 export type PlatformCompanyRoutes = Pick<
   PlatformCompanyService,
-  'rename' | 'remove' | 'restore' | 'changeRole' | 'setMembershipStatus'
+  'rename' | 'remove' | 'restore' | 'changeRole' | 'setMembershipStatus' | 'disconnectChannel'
 >;
 
 export interface PlatformCompanyControllerOptions {
@@ -55,6 +55,15 @@ export const platformCompanyController: FastifyPluginCallback<PlatformCompanyCon
     const { companyId } = platformCompanyParamsSchema.parse(request.params);
     const { reason, slug, code } = platformRemoveCompanyBodySchema.parse(request.body);
     await companies.remove(identity, companyId, slug, reason, code);
+    return reply.status(204).send();
+  });
+
+  // Spec 045, E5: desconectar o WhatsApp (**[código]**); sem o canal ligado, 404.
+  app.post('/companies/:companyId/channel/disconnect', route, async (request, reply) => {
+    const identity = platformIdentity(request);
+    const { companyId } = platformCompanyParamsSchema.parse(request.params);
+    const { reason, code } = platformConfirmedActionBodySchema.parse(request.body);
+    await companies.disconnectChannel(identity, companyId, reason, code);
     return reply.status(204).send();
   });
 

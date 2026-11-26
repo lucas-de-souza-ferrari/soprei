@@ -233,6 +233,8 @@ before(async () => {
             unsubscribed.push(`${companyId}:${removed.wabaId}`);
             return Promise.resolve();
           },
+          // A E5 tem integração própria (platform-channel.integration.test.ts).
+          disconnect: () => Promise.resolve(false),
         },
         logger: logs.logger,
         metrics,

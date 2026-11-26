@@ -40,6 +40,8 @@ export const PLATFORM_AUDIT_ACTIONS = [
   'SUBSCRIPTION_CANCELLED',
   'SUBSCRIPTION_REACTIVATED',
   'SUBSCRIPTION_ENDED',
+  // Spec 045, E5: canal.
+  'CHANNEL_DISCONNECTED_BY_PLATFORM',
 ] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 

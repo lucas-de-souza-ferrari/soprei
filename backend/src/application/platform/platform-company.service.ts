@@ -28,9 +28,18 @@ import {
 /** O slug digitado na remoção não confere (spec 045, E3a). */
 export const CONFIRMATION_MISMATCH = 'CONFIRMATION_MISMATCH';
 
-/** Desassinar o app da WABA depois de remover a empresa (o `ChannelConnectionService`, só com o canal). */
+/**
+ * O canal da empresa visto pela plataforma (o `ChannelConnectionService`, só com o canal ligado): desassinar o
+ * app da WABA depois de remover a empresa (E3a) e desconectar o canal (E5).
+ */
 export interface PlatformChannelRelease {
   unsubscribeRemoved(companyId: CompanyId, removed: PlatformRemovedChannel): Promise<void>;
+  disconnect(actor: {
+    readonly kind: 'platform';
+    readonly adminId: PlatformIdentity['adminId'];
+    readonly companyId: CompanyId;
+    readonly reason: PlatformActionReason;
+  }): Promise<boolean>;
 }
 
 export interface PlatformCompanyServiceDeps {
@@ -155,6 +164,37 @@ export class PlatformCompanyService {
         this.deps.logger.warn({ companyId: id }, 'desassinatura da WABA falhou depois de remover');
       }
     }
+  }
+
+  /**
+   * Desconecta o WhatsApp da empresa (**[código]**, spec 045, E5): o mesmo efeito do `DELETE .../channel` da
+   * empresa (conexão e PIN apagados, número limpo, desassinatura da WABA em melhor esforço depois do commit),
+   * com a trilha só da plataforma. Empresa `LEGACY` (número sem conexão): só limpa o número, liberando-o.
+   * Sem conexão nem número: 204 sem evento. Canal desligado (`WHATSAPP_ENABLED=false`): 404, como a rota da
+   * empresa. Empresa inexistente ou removida: 404 antes de gastar o código.
+   */
+  async disconnectChannel(
+    identity: PlatformIdentity,
+    companyId: string,
+    reason: PlatformActionReason,
+    code: string | undefined,
+  ): Promise<boolean> {
+    const id = this.parseCompanyId(companyId);
+    const channel = this.deps.channel;
+    if (channel === undefined) {
+      throw new NotFoundError('Canal desligado', { context: { entity: 'Channel' } });
+    }
+    const state = await this.deps.companies.run((tx) => tx.state(id));
+    if (state === null || state.removed) throw companyNotFound();
+    // Nada a desconectar: 204 sem evento e sem gastar o código (revisão da E5).
+    if (!state.hasChannel) return false;
+    await confirmPlatformAction(this.deps.confirmer, identity, code);
+    return channel.disconnect({
+      kind: 'platform',
+      adminId: identity.adminId,
+      companyId: id,
+      reason,
+    });
   }
 
   /**

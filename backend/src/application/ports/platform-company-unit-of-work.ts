@@ -18,6 +18,8 @@ export interface PlatformLockedCompany {
 export interface PlatformCompanyState {
   readonly slug: string;
   readonly removed: boolean;
+  /** Há conexão do canal ou número gravado (spec 045, E5: sem nenhum, desconectar não gasta o código). */
+  readonly hasChannel: boolean;
 }
 
 /**

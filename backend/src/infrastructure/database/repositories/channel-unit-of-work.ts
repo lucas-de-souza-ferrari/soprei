@@ -9,6 +9,7 @@ import { runInTransaction, type TransactionOptions } from '../transaction.js';
 import { PrismaAuditRepository } from './audit.repository.js';
 import { PrismaChannelConnectionRepository } from './channel-connection.repository.js';
 import { PrismaCompanyRepository } from './company.repository.js';
+import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
 
 /**
  * Trava a linha da empresa até o fim da transação: mesmo SQL controlado da gestão de usuários
@@ -46,6 +47,9 @@ export class PrismaChannelUnitOfWork implements ChannelUnitOfWork {
           companies: this.companies.forTransaction(db),
           audit: this.audit.forTransaction(db),
           lockCompany: (companyId) => lockCompanyRow(db, companyId),
+          platformAudit: async (event) => {
+            await new PrismaPlatformAuditRepository(db).create(event);
+          },
         }),
       this.options,
     );
