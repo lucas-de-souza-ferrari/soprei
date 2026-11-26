@@ -1,21 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
-import type { AccountId, NewPlatformAuditEvent } from '../../domain/index.js';
+import {
+  type AccountId,
+  anonymizedEmailFor,
+  isAnonymizedEmail,
+  type NewPlatformAuditEvent,
+} from '../../domain/index.js';
 import { ConflictError, NotFoundError } from '../../shared/errors/index.js';
 import type { AccountDeletionMailer, AccountSessionStore } from '../ports/account-session.js';
 import type {
+  AccountAnonymizationTransaction,
   AccountAnonymizationUnitOfWork,
   AnonymizedMembershipRef,
 } from '../ports/account-anonymization-unit-of-work.js';
 import type { SessionStore } from '../ports/session-store.js';
 
-/** Domínio do e-mail de uma conta anonimizada (`.invalid`, RFC 2606: nunca recebe e-mail). */
-export const ANONYMIZED_EMAIL_DOMAIN = 'excluido.invalid';
-
-/** `true` se o e-mail é de uma conta já anonimizada. */
-export function isAnonymizedEmail(email: string): boolean {
-  return email.startsWith('removida-') && email.endsWith(`@${ANONYMIZED_EMAIL_DOMAIN}`);
-}
+export { ANONYMIZED_EMAIL_DOMAIN, isAnonymizedEmail } from '../../domain/index.js';
 
 export interface AccountAnonymizerDeps {
   readonly accounts: AccountAnonymizationUnitOfWork;
@@ -31,11 +31,20 @@ export interface AccountAnonymizerDeps {
 export interface AnonymizeOptions {
   /** Evento da trilha da plataforma gravado NA transação (spec 045, E6); a exclusão pela pessoa (032) não tem. */
   readonly platformAudit?: NewPlatformAuditEvent;
+  /**
+   * Chamado logo depois do commit que anonimizou (antes da revogação final, que pode falhar com 503): o
+   * chamador registra a ação (log, métrica) mesmo que a resposta seja 503 e a repetição devolva `false`.
+   */
+  readonly onCommitted?: () => void;
 }
 
 function accountNotFound(): NotFoundError {
   return new NotFoundError('Conta não encontrada', { context: { entity: 'Account' } });
 }
+
+type Outcome =
+  | { readonly anonymized: false; readonly memberships: readonly AnonymizedMembershipRef[] }
+  | { readonly anonymized: true; readonly memberships: readonly AnonymizedMembershipRef[] };
 
 /**
  * Remove uma conta por **anonimização** (spec 032, E7), o núcleo único que o admin da plataforma usa (spec 045,
@@ -44,10 +53,11 @@ function accountNotFound(): NotFoundError {
  * 1. Pré-checagem (recusas e o e-mail lido ANTES): única dona ativa de empresa não removida = 409
  *    `COMPANY_OWNERSHIP`; período pago em vigor sem cancelamento = 409 `SUBSCRIPTION_ACTIVE`.
  * 2. `revokeAll` antes de mexer em qualquer coisa: Redis fora = 503 e nada alterado.
- * 3. Transação (empresas -> conta, as recusas de novo sob a trava): conta e vínculos anonimizados e a trilha.
- * 4. Depois do commit: `revokeAll` de novo e as sessões Bearer de cada vínculo (falha = 503 com a conta já
- *    anonimizada; repetir refaz só a revogação), e o aviso "Conta excluída" ao endereço antigo, em segundo
- *    plano (falha só no log).
+ * 3. Transação (empresas -> conta; já anonimizada por um pedido simultâneo = nada; as recusas de novo sob a
+ *    trava): conta e vínculos anonimizados e a trilha.
+ * 4. Depois do commit: `onCommitted`, `revokeAll` de novo e as sessões Bearer de cada vínculo (falha = 503
+ *    com a conta já anonimizada; repetir refaz só a revogação), e o aviso "Conta excluída" ao endereço
+ *    antigo, só se confirmado, em segundo plano (falha só no log).
  *
  * Já anonimizada: devolve `false`, refaz a revogação e não grava evento nem e-mail. Nunca loga e-mail.
  */
@@ -65,7 +75,7 @@ export class AccountAnonymizer {
         return { done: true as const, memberships: await tx.memberships(accountId) };
       }
       await this.refuse(tx, accountId, now);
-      return { done: false as const, email: account.email };
+      return { done: false as const, email: account.email, verified: account.verified };
     });
     if (before.done) {
       await this.revokeAfterCommit(accountId, before.memberships);
@@ -75,19 +85,31 @@ export class AccountAnonymizer {
     // Sessões fora ANTES de alterar: Redis fora = 503 e nada muda.
     await this.deps.accountSessions.revokeAll(accountId);
 
-    const anonymizedEmail = `removida-${randomUUID()}@${ANONYMIZED_EMAIL_DOMAIN}`;
-    const memberships = await this.deps.accounts.run(async (tx) => {
-      await tx.lockOwnedCompanies(accountId);
+    const anonymizedEmail = anonymizedEmailFor(randomUUID());
+    const outcome = await this.deps.accounts.run(async (tx): Promise<Outcome> => {
+      await tx.lockMemberCompanies(accountId);
       const account = await tx.lockAccount(accountId);
       if (account === null) throw accountNotFound();
+      // Outro pedido anonimizou entre a pré-checagem e esta trava: repetição, sem evento nem e-mail.
+      if (isAnonymizedEmail(account.email)) {
+        return { anonymized: false, memberships: await tx.memberships(accountId) };
+      }
       await this.refuse(tx, accountId, now);
-      const refs = await tx.anonymize(accountId, anonymizedEmail);
+      const memberships = await tx.anonymize(accountId, anonymizedEmail);
       if (options.platformAudit !== undefined) await tx.platformAudit(options.platformAudit);
-      return refs;
+      return { anonymized: true, memberships };
     });
-    this.deps.logger.info({ accountId, memberships: memberships.length }, 'conta anonimizada');
-    this.sendNotice(before.email, accountId);
-    await this.revokeAfterCommit(accountId, memberships);
+    if (!outcome.anonymized) {
+      await this.revokeAfterCommit(accountId, outcome.memberships);
+      return false;
+    }
+    this.deps.logger.info(
+      { accountId, memberships: outcome.memberships.length },
+      'conta anonimizada',
+    );
+    options.onCommitted?.();
+    if (before.verified) this.sendNotice(before.email, accountId);
+    await this.revokeAfterCommit(accountId, outcome.memberships);
     return true;
   }
 
@@ -106,7 +128,7 @@ export class AccountAnonymizer {
   }
 
   private async refuse(
-    tx: Parameters<Parameters<AccountAnonymizationUnitOfWork['run']>[0]>[0],
+    tx: AccountAnonymizationTransaction,
     accountId: AccountId,
     now: Date,
   ): Promise<void> {

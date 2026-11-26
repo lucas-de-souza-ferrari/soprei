@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { COMPANY_SLUG_PATTERN, EMAIL_MAX_LENGTH } from '../../domain/index.js';
+import {
+  COMPANY_SLUG_PATTERN,
+  EMAIL_MAX_LENGTH,
+  isAnonymizedEmailDomain,
+} from '../../domain/index.js';
 
 /** Política de senha (NIST SP 800-63B): só tamanho, sem regras de composição. */
 export const PASSWORD_MIN_LENGTH = 12;
@@ -13,7 +17,9 @@ export const emailSchema = z
   .string()
   .max(1024)
   .transform((value) => value.normalize('NFKC').trim().toLowerCase())
-  .pipe(z.email().max(EMAIL_MAX_LENGTH));
+  .pipe(z.email().max(EMAIL_MAX_LENGTH))
+  // O domínio das contas removidas (spec 045, E6) é reservado: ninguém se cadastra nem entra com ele.
+  .refine((value) => !isAnonymizedEmailDomain(value), 'domínio reservado');
 
 function passwordBase(): z.ZodType<string> {
   return z

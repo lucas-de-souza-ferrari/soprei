@@ -202,11 +202,13 @@ export class PlatformAccountService {
     if (anonymizer === undefined) throw accountNotFound();
     await this.confirm(identity, code);
     const action = 'ACCOUNT_ANONYMIZED';
-    const done = await anonymizer.anonymize(id, {
+    // Registra logo depois do commit: uma revogação que falha (503) não apaga a ação da métrica.
+    return anonymizer.anonymize(id, {
       platformAudit: { adminId: identity.adminId, action, subjectAccountId: id, reason },
+      onCommitted: () => {
+        this.recorded(identity, id, action, reason);
+      },
     });
-    if (done) this.recorded(identity, id, action, reason);
-    return done;
   }
 
   private parseId(accountId: string): AccountId {

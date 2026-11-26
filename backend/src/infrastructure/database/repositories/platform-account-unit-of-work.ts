@@ -2,12 +2,11 @@ import type {
   PlatformAccountTransaction,
   PlatformAccountUnitOfWork,
 } from '../../../application/ports/platform-account-unit-of-work.js';
-import { CompanyId, MembershipId } from '../../../domain/index.js';
+import { CompanyId, MembershipId, isAnonymizedEmail } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { isDeadlock } from '../database-errors.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
-import { isAnonymizedEmail } from '../../../application/auth/account-anonymizer.js';
 import { lockAccountRow, lockOwnedCompanies } from './account.repository.js';
 import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
 import { soleActiveOwnerCompanyCount } from './platform-read-model.js';

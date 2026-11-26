@@ -69,6 +69,31 @@ export async function lockOwnedCompanies(db: TenantScopedDb, accountId: string):
   return locked;
 }
 
+/**
+ * Trava, em ordem de id, **todas** as empresas não removidas em que a conta tem vínculo (qualquer papel e
+ * estado). Remover a conta (spec 045, E6) usa esta, não `lockOwnedCompanies`: uma promoção a `OWNER` em
+ * curso numa empresa em que a conta ainda é só atendente também fica serializada (revisão da E6, M2). A
+ * ordem **empresas, depois a conta** é a mesma.
+ */
+export async function lockMemberCompanies(db: TenantScopedDb, accountId: string): Promise<number> {
+  const companies = await db.company.findMany({
+    where: { deletedAt: null, memberships: { some: { accountId } } },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  let locked = 0;
+  for (const { id } of companies) {
+    try {
+      await lockCompanyRow(db, CompanyId.parse(id));
+      locked += 1;
+    } catch (error) {
+      // Removida entre a leitura e a trava: não conta para a regra do dono.
+      if (!(error instanceof NotFoundError)) throw error;
+    }
+  }
+  return locked;
+}
+
 export class PrismaAccountRepository implements AccountRepository {
   constructor(private readonly db: TenantScopedPrisma) {}
 

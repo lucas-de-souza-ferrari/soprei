@@ -135,6 +135,7 @@ async function setup(options: { accounts?: boolean } = {}): Promise<World> {
                   anonymized.add(id);
                   if (options?.platformAudit !== undefined)
                     await audit.create(options.platformAudit);
+                  options?.onCommitted?.();
                   return true;
                 },
               },

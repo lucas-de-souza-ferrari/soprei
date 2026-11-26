@@ -34,12 +34,12 @@ export interface MailTransport {
   sendMail(options: SendMailOptions): Promise<unknown>;
 }
 
-/** Opções do `createTransport`: `auth` só existe com usuário e senha; certificado sempre verificado. */
 /** Aviso de conta excluída (spec 032, E7; spec 045, E6). */
 export const ACCOUNT_DELETED_SUBJECT = 'Sua conta do Soprei foi excluída';
 export const ACCOUNT_DELETED_TEXT =
   'A sua conta do Soprei foi excluída: o e-mail e a senha deixaram de valer e todas as sessões foram encerradas. Os registros de cobrança ficam guardados pelo prazo da lei. Se você não pediu a exclusão, responda a este e-mail.';
 
+/** Opções do `createTransport`: `auth` só existe com usuário e senha; certificado sempre verificado. */
 export function buildTransportOptions(options: SmtpMailerOptions): Record<string, unknown> {
   return {
     host: options.host,

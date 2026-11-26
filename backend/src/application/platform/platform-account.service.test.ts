@@ -406,6 +406,7 @@ describe('PlatformAccountService: remover a conta por anonimização (spec 045, 
     const world = setup({
       anonymize: (id, options) => {
         seen.push([id, options?.platformAudit]);
+        if (result) options?.onCommitted?.();
         return Promise.resolve(result);
       },
     });

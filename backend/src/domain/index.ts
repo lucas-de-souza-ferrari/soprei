@@ -185,6 +185,7 @@ export * from './schedule-ai.js';
 export * from './billing.js';
 export * from './billing-notices.js';
 export * from './attendance-resume.js';
+export * from './account-anonymization.js';
 export type {
   BillingNoticeRepository,
   NoticeCandidate,

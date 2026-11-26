@@ -309,6 +309,13 @@ describe('remover uma conta por anonimização com Postgres e Redis reais (spec 
     assert.equal(suspended.statusCode, 409);
     assert.equal(suspended.json<{ error: { code: string } }>().error.code, 'COMPANY_OWNERSHIP');
 
+    // X desativada continua barrando: a suspensa ficaria sem quem a reative (revisão da E6, I2).
+    await db().account.updateMany({ where: { id: x.id }, data: { status: 'DISABLED' } });
+    const disabled = await anonymize(x.id);
+    assert.equal(disabled.statusCode, 409);
+    assert.equal(disabled.json<{ error: { code: string } }>().error.code, 'COMPANY_OWNERSHIP');
+    await db().account.updateMany({ where: { id: x.id }, data: { status: 'ACTIVE' } });
+
     // A removida não barra; agora a assinatura paga em vigor barra.
     await db().company.updateMany({ where: { id: companyA.id }, data: { deletedAt: new Date() } });
     const now = new Date();
@@ -416,6 +423,13 @@ describe('remover uma conta por anonimização com Postgres e Redis reais (spec 
     assert.equal(enable.json<{ error: { code: string } }>().error.code, 'ACCOUNT_ANONYMIZED');
     assert.equal((await account(x.id)).status, 'DISABLED');
 
+    // O domínio das contas removidas é reservado: ninguém se cadastra com ele.
+    const reserved = await site('/auth/register', {
+      email: `removida-${tag}@excluido.invalid`,
+      password: PASSWORD,
+    });
+    assert.equal(reserved.statusCode, 400);
+
     const fresh = await register(EMAIL_X);
     assert.notEqual(fresh, x.id);
     assert.equal(
@@ -427,7 +441,13 @@ describe('remover uma conta por anonimização com Postgres e Redis reais (spec 
 
   it('privacidade: nenhum e-mail em resposta ou log; a trilha só tem ids e enums', () => {
     const raw = logs.raw();
-    for (const address of [EMAIL_X, EMAIL_Y]) {
+    for (const address of [
+      EMAIL_X,
+      EMAIL_Y,
+      `xa-${tag}@exemplo.test`,
+      `xb-${tag}@exemplo.test`,
+      `yb-${tag}@exemplo.test`,
+    ]) {
       assert.ok(!bodies.some((body) => body.includes(address)), `resposta: ${address}`);
       assert.ok(!logContains(raw, address), `log: ${address}`);
     }

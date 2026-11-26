@@ -7,10 +7,10 @@ import { CompanyId, MembershipId, resolveAccess } from '../../../domain/index.js
 import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { isDeadlock } from '../database-errors.js';
 import { runInTransaction, type TransactionOptions } from '../transaction.js';
-import { lockAccountRow, lockOwnedCompanies } from './account.repository.js';
+import { lockAccountRow, lockMemberCompanies } from './account.repository.js';
 import { findSubscriptionByAccount } from './billing.repository.js';
 import { PrismaPlatformAuditRepository } from './platform-audit.repository.js';
-import { soleActiveOwnerCompanyCount } from './platform-read-model.js';
+import { soleOwnerCompanyCountForRemoval } from './platform-read-model.js';
 
 /** `password_hash` de conta excluída: não é um hash válido, então nenhuma senha confere (spec 032, E7). */
 export const DELETED_ACCOUNT_PASSWORD_HASH = 'account-deleted';
@@ -41,8 +41,8 @@ async function membershipsOf(
 
 /**
  * Anonimização de uma conta (spec 032, E7; spec 045, E6). Sem SQL cru novo: as travas são as que já existem
- * (`lockOwnedCompanies` e `lockAccountRow` de `account.repository.ts`), a regra do único dono é a de
- * `platform-read-model.ts` (com as empresas suspensas) e a escrita é `updateMany` (conta, global; vínculos
+ * (`lockMemberCompanies` e `lockAccountRow` de `account.repository.ts`), a regra do único dono é a de
+ * `platform-read-model.ts` (`soleOwnerCompanyCountForRemoval`) e a escrita é `updateMany` (conta, global; vínculos
  * com `companyId` no `where`). Nada é apagado: a trilha, a assinatura e os pedidos continuam ligados à linha.
  */
 export class PrismaAccountAnonymizationUnitOfWork implements AccountAnonymizationUnitOfWork {
@@ -67,16 +67,21 @@ export class PrismaAccountAnonymizationUnitOfWork implements AccountAnonymizatio
       (db) => {
         const audit = new PrismaPlatformAuditRepository(db);
         return fn({
-          lockOwnedCompanies: (accountId) => lockOwnedCompanies(db, accountId),
+          lockMemberCompanies: (accountId) => lockMemberCompanies(db, accountId),
           lockAccount: async (accountId) => {
             if (!(await lockAccountRow(db, accountId))) return null;
-            return db.account.findFirst({
+            const row = await db.account.findFirst({
               where: { id: accountId },
-              select: { email: true, status: true },
+              select: { email: true, status: true, emailVerifiedAt: true },
             });
+            if (row === null) return null;
+            return {
+              email: row.email,
+              status: row.status,
+              verified: row.emailVerifiedAt !== null,
+            };
           },
-          soleOwnerCompanies: (accountId) =>
-            soleActiveOwnerCompanyCount(db, accountId, { includeSuspended: true }),
+          soleOwnerCompanies: (accountId) => soleOwnerCompanyCountForRemoval(db, accountId),
           paidInForce: async (accountId, now) => {
             const subscription = await findSubscriptionByAccount(db, accountId);
             if (subscription === null) return false;
