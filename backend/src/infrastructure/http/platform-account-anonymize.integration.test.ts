@@ -409,10 +409,17 @@ describe('remover uma conta por anonimização com Postgres e Redis reais (spec 
     assert.equal(row.status, 'DISABLED');
     assert.equal(row.lastCompanyId, null);
     assert.notEqual(row.passwordHash.length, 0);
-    const memberships = await db().membership.findMany({
-      where: { companyId: { in: [companyA.id, companyB.id] }, accountId: x.id },
-      select: { id: true, email: true, status: true },
-    });
+    // Uma empresa por vez: a tenant-scope exige `companyId` exato no `where`.
+    const memberships = (
+      await Promise.all(
+        [companyA.id, companyB.id].map((companyId) =>
+          db().membership.findMany({
+            where: { companyId, accountId: x.id },
+            select: { id: true, email: true, status: true },
+          }),
+        ),
+      )
+    ).flat();
     assert.equal(memberships.length, 2);
     assert.ok(memberships.every((m) => m.email === row.email && m.status === 'DISABLED'));
     const other = await db().membership.findFirst({
