@@ -233,6 +233,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           revokeSessions: () => Promise.reject(new Error('inventário')),
           sendPasswordReset: () => Promise.reject(new Error('inventário')),
           resendVerification: () => Promise.reject(new Error('inventário')),
+          anonymize: () => Promise.reject(new Error('inventário')),
         },
         // Spec 045, E3a: ações sobre empresas e vínculos.
         companies: {
@@ -445,6 +446,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/platform/accounts/:accountId/sessions/revoke',
       '/platform/accounts/:accountId/password-reset',
       '/platform/accounts/:accountId/verification/resend',
+      '/platform/accounts/:accountId/anonymize',
       '/platform/companies/:companyId/rename',
       '/platform/companies/:companyId/remove',
       '/platform/companies/:companyId/restore',

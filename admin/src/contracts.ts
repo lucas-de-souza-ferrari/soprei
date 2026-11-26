@@ -497,6 +497,8 @@ export const ACCOUNT_ACTIONS = {
   revokeSessions: { path: 'sessions/revoke', code: false },
   passwordReset: { path: 'password-reset', code: false },
   resendVerification: { path: 'verification/resend', code: false },
+  // Spec 045, E6: remover por anonimização (código novo e a palavra `EXCLUIR` digitada).
+  anonymize: { path: 'anonymize', code: true },
 } as const;
 export type AccountAction = keyof typeof ACCOUNT_ACTIONS;
 
@@ -507,6 +509,26 @@ export const confirmationCodeSchema = z.string().regex(/^[0-9]{6}$/);
 export const confirmedActionBodySchema = z
   .object({ reason: z.enum(ACTION_REASONS), code: confirmationCodeSchema })
   .strict();
+
+/** A palavra que remover a conta exige digitada (spec 045, E6, D16). */
+export const ANONYMIZE_WORD = 'EXCLUIR';
+
+/** Corpo de remover a conta (anonimizar): motivo, código e a palavra. */
+export const anonymizeBodySchema = z
+  .object({
+    reason: z.enum(ACTION_REASONS),
+    code: confirmationCodeSchema,
+    confirm: z.literal(ANONYMIZE_WORD),
+  })
+  .strict();
+
+/** Domínio do e-mail de uma conta removida (`.invalid`): o mascarado termina nele. */
+export const ANONYMIZED_EMAIL_DOMAIN = 'excluido.invalid';
+
+/** A conta foi removida por anonimização (o e-mail mascarado é o do domínio `.invalid`)? */
+export function isAnonymizedAccount(detail: Pick<AccountDetail, 'emailMasked'>): boolean {
+  return detail.emailMasked.endsWith(`@${ANONYMIZED_EMAIL_DOMAIN}`);
+}
 
 // --- Spec 045, E3a: empresa e vínculos ----------------------------------------------------------
 

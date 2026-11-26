@@ -14,6 +14,7 @@ import type {
 import type {
   CompanyInvitationMail,
   InvitationMailer,
+  AccountDeletionMailer,
   PasswordResetMailer,
   VerificationMailer,
 } from '../../../application/ports/account-session.js';
@@ -34,6 +35,11 @@ export interface MailTransport {
 }
 
 /** Opções do `createTransport`: `auth` só existe com usuário e senha; certificado sempre verificado. */
+/** Aviso de conta excluída (spec 032, E7; spec 045, E6). */
+export const ACCOUNT_DELETED_SUBJECT = 'Sua conta do Soprei foi excluída';
+export const ACCOUNT_DELETED_TEXT =
+  'A sua conta do Soprei foi excluída: o e-mail e a senha deixaram de valer e todas as sessões foram encerradas. Os registros de cobrança ficam guardados pelo prazo da lei. Se você não pediu a exclusão, responda a este e-mail.';
+
 export function buildTransportOptions(options: SmtpMailerOptions): Record<string, unknown> {
   return {
     host: options.host,
@@ -56,7 +62,8 @@ export class SmtpVerificationMailer
     PasswordResetMailer,
     InvitationMailer,
     BillingMailer,
-    SalesContactMailer
+    SalesContactMailer,
+    AccountDeletionMailer
 {
   private readonly transport: MailTransport;
   private readonly from: string;
@@ -152,6 +159,16 @@ export class SmtpVerificationMailer
       // Falha fixa: nunca ecoa destinatário, texto nem o endereço de resposta.
       throw new ServiceUnavailableError('Não foi possível enviar o contato comercial.');
     }
+  }
+
+  /** Spec 032, E7 / 045, E6: assunto e texto fixos, sem código, senha, link nem quem pediu. */
+  sendAccountDeleted(email: string): Promise<void> {
+    return this.send(
+      email,
+      ACCOUNT_DELETED_SUBJECT,
+      [ACCOUNT_DELETED_TEXT],
+      'Não foi possível enviar o aviso de conta excluída.',
+    );
   }
 
   sendPasswordChanged(email: string): Promise<void> {

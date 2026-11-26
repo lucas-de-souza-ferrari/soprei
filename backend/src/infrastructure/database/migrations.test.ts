@@ -466,3 +466,23 @@ describe('migration da spec 045, E5 (desconectar o canal pela plataforma)', () =
     assert.doesNotMatch(migration.sql, /breaking-approved/);
   });
 });
+
+describe('migration da spec 045, E6 (remover a conta por anonimização)', () => {
+  const migration = migrationFiles().find((file) =>
+    file.name.endsWith('_platform_account_anonymize'),
+  );
+
+  it('só acrescenta o valor ACCOUNT_ANONYMIZED no enum da trilha (deploy automático)', () => {
+    assert.ok(migration !== undefined, 'migration _platform_account_anonymize existe');
+    const statements = migration.sql
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n')
+      .trim();
+    assert.equal(
+      statements,
+      `ALTER TYPE "platform_audit_action" ADD VALUE IF NOT EXISTS 'ACCOUNT_ANONYMIZED';`,
+    );
+    assert.doesNotMatch(migration.sql, /breaking-approved/);
+  });
+});
