@@ -80,9 +80,15 @@ export class PrismaPlatformCompanyUnitOfWork implements PlatformCompanyUnitOfWor
           state: async (companyId) => {
             const row = await db.company.findFirst({
               where: { id: companyId },
-              select: { slug: true, deletedAt: true },
+              select: { slug: true, deletedAt: true, whatsappPhoneNumberId: true },
             });
-            return row === null ? null : { slug: row.slug, removed: row.deletedAt !== null };
+            if (row === null) return null;
+            const connections = await db.channelConnection.count({ where: { companyId } });
+            return {
+              slug: row.slug,
+              removed: row.deletedAt !== null,
+              hasChannel: row.whatsappPhoneNumberId !== null || connections > 0,
+            };
           },
           restore: async (companyId) => {
             const { count } = await db.company.updateMany({

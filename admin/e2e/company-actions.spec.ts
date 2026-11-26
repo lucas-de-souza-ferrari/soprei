@@ -214,3 +214,25 @@ test('canal: "Desconectar WhatsApp" avisa da WABA inteira, pede o código novo e
   ]);
   expect(await storageSizes(page)).toEqual([0, 0]);
 });
+
+test('canal LEGACY: "Liberar número" com título e efeito próprios; canal desligado no servidor mostra a recusa própria', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  api.channelLegacy = true;
+  api.channelOff = true;
+  await page.goto('/');
+  await openCompanyA(page);
+  await expect(page.getByRole('button', { name: 'Desconectar WhatsApp' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Liberar número' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Liberar o número de Padaria Aurora?' });
+  await expect(dialog.getByText('fica livre para ser conectado', { exact: false })).toBeVisible();
+  await dialog.getByLabel('Código novo do autenticador').fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Liberar número' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('O canal do WhatsApp está desligado');
+  api.channelOff = false;
+  await dialog.getByLabel('Código novo do autenticador').fill(FRESH_CODE);
+  await dialog.getByRole('button', { name: 'Liberar número' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Liberar número' })).toHaveCount(0);
+});

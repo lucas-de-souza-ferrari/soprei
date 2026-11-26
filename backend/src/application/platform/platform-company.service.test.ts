@@ -577,3 +577,30 @@ describe('PlatformCompanyService: desconectar o canal (spec 045, E5)', () => {
     assert.deepEqual(world.calls, [`disconnect:${world.company}:${ADMIN.adminId}:ABUSE`]);
   });
 });
+
+describe('PlatformCompanyService: desconectar sem nada a desconectar ou com o canal desligado (revisão da E5)', () => {
+  it('sem conexão nem número = false sem gastar o código; canal desligado = 404 sem gastar o código', async () => {
+    const world = setup();
+    world.uow.channels.delete(world.company);
+    assert.equal(await world.service.disconnectChannel(ADMIN, world.company, 'OTHER', CODE), false);
+    assert.deepEqual(world.confirmCodes, []);
+    assert.deepEqual(world.calls, []);
+
+    const withoutChannel = new PlatformCompanyService({
+      companies: world.uow,
+      confirmer: {
+        confirmPlatformCode: (_id, code) => {
+          world.confirmCodes.push(code);
+          return Promise.resolve(Result.ok(undefined));
+        },
+      },
+      bearerSessions: { revokeAllSessions: () => Promise.resolve() },
+      logger: world.logs.logger,
+    });
+    await assert.rejects(
+      withoutChannel.disconnectChannel(ADMIN, world.other, 'OTHER', CODE),
+      NotFoundError,
+    );
+    assert.deepEqual(world.confirmCodes, []);
+  });
+});

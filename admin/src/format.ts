@@ -191,6 +191,9 @@ export function accountActionErrorMessage(error: unknown, action?: string): stri
  */
 export function companyActionErrorMessage(error: unknown, action?: string): string {
   if (error instanceof ApiError) {
+    // Desconectar com o canal desligado no servidor (WHATSAPP_ENABLED=false) responde 404.
+    if (error.status === 404 && action === 'disconnect')
+      return 'O canal do WhatsApp está desligado neste servidor (ou a empresa não existe mais).';
     // Mudar papel e desativar gravam a mudança e a trilha antes de encerrar as sessões do vínculo.
     if (error.status === 503 && (action === 'role' || action === 'disable'))
       return 'A ação pode ter sido registrada sem que as sessões tenham sido encerradas: repita para concluir.';

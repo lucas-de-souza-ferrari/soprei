@@ -86,6 +86,10 @@ export class FakeApi {
   companyRemovedAt: string | null = null;
   /** Spec 045, E5: o canal da empresa A foi desconectado pelo admin. */
   channelDisconnected = false;
+  /** A empresa A só tem o número (LEGACY), sem conexão. */
+  channelLegacy = false;
+  /** O canal está desligado no servidor: desconectar responde 404. */
+  channelOff = false;
   readonly people = new Map<string, { role: MembershipRole; status: 'ACTIVE' | 'DISABLED' }>();
   /** Spec 045, E3b: convites pendentes da empresa A (o e-mail só mascarado, como o servidor devolve). */
   readonly invitations: Invitation[] = [fx.pendingInvitation];
@@ -121,6 +125,19 @@ export class FakeApi {
     );
     return {
       ...base,
+      ...(this.channelLegacy && !this.channelDisconnected
+        ? {
+            channel: {
+              state: 'LEGACY' as const,
+              mode: null,
+              phoneNumberId: '109876543210',
+              wabaId: null,
+              connectedAt: null,
+              tokenExpiresAt: null,
+              tokenInvalidAt: null,
+            },
+          }
+        : {}),
       ...(this.channelDisconnected
         ? {
             channel: {
@@ -314,6 +331,7 @@ export class FakeApi {
     });
     const removedOnly = (): boolean => this.companyRemovedAt !== null;
     if (action === 'channel/disconnect') {
+      if (this.channelOff) return error(404, 'NOT_FOUND');
       const parsed = confirmedActionBodySchema.safeParse(body);
       if (!parsed.success) return error(400, 'VALIDATION_ERROR');
       if (parsed.data.code !== FRESH_CODE) return error(400, 'CONFIRMATION_INVALID');

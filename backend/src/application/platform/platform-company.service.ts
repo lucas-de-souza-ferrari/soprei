@@ -186,6 +186,8 @@ export class PlatformCompanyService {
     }
     const state = await this.deps.companies.run((tx) => tx.state(id));
     if (state === null || state.removed) throw companyNotFound();
+    // Nada a desconectar: 204 sem evento e sem gastar o código (revisão da E5).
+    if (!state.hasChannel) return false;
     await confirmPlatformAction(this.deps.confirmer, identity, code);
     return channel.disconnect({
       kind: 'platform',

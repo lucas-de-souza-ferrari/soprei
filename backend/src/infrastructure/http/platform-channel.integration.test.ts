@@ -8,7 +8,10 @@ import { PlatformCompanyService } from '../../application/platform/platform-comp
 import { type Company, PlatformAdminId } from '../../domain/index.js';
 import { NotFoundError } from '../../shared/errors/index.js';
 import { Result, SecretString } from '../../shared/types/index.js';
-import { buildChannelCredentials } from '../../test-support/channel-credentials.js';
+import {
+  buildChannelCredentials,
+  testCredentialCipher,
+} from '../../test-support/channel-credentials.js';
 import { FakeGraphApi, FULL_SCOPES, graphError } from '../../test-support/fake-graph-api.js';
 import { loadIntegrationConfig } from '../../test-support/integration-env.js';
 import { captureLogs, logContains } from '../../test-support/log-capture.js';
@@ -40,8 +43,11 @@ const createdAdmins: string[] = [];
 const db = () => database.prisma;
 const digits = (): string => `9${randomBytes(6).readUIntBE(0, 6).toString().padStart(15, '0')}`;
 
+/** Uma cifra só: a que grava o token em `connected()` precisa ser a que o serviço usa para decifrá-lo. */
+const cipher = testCredentialCipher();
+
 function channelService(unitOfWork?: ChannelUnitOfWork) {
-  const stack = buildChannelCredentials(database.prisma);
+  const stack = buildChannelCredentials(database.prisma, { cipher });
   const service = new ChannelConnectionService({
     companies: new PrismaCompanyRepository(database.prisma),
     connections: stack.connections,
@@ -87,7 +93,6 @@ async function connected(label: string) {
   graph.addWaba(waba, [number]);
   graph.addToken(token, { appId: APP_ID, scopes: FULL_SCOPES, wabaIds: [waba] });
   graph.subscribed.add(waba);
-  const { cipher } = channelService();
   await db().channelConnection.create({
     data: {
       companyId: company.id,
@@ -229,7 +234,7 @@ describe('desconectar o WhatsApp pela plataforma (spec 045, E5)', () => {
     const body = await metrics.registry.metrics();
     for (const secret of [token, pin, waba]) {
       assert.ok(!logContains(raw, secret), 'no log');
-      assert.ok(!body.includes(secret), 'na métrica');
+      assert.ok(!logContains(body, secret), 'na métrica');
     }
     assert.match(body, /action="channel_disconnected_by_platform"/);
   });
