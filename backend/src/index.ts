@@ -601,6 +601,30 @@ async function main(): Promise<void> {
                     logger,
                     metrics,
                   }),
+            // Assinatura da conta (spec 045, E4): sem a cobrança ligada, toda ação responde 409.
+            subscriptions: new PlatformSubscriptionService({
+              subscriptions: new PrismaPlatformSubscriptionUnitOfWork(prisma),
+              confirmer: auth.service,
+              settings:
+                billing === undefined
+                  ? undefined
+                  : {
+                      graceDays: billing.settings.graceDays,
+                      trialDays: billing.settings.trialDays,
+                    },
+              // Mensagens pendentes do bloqueio voltam à fila depois de liberar (só com o canal ligado).
+              ...(inboundQueue === undefined
+                ? {}
+                : {
+                    pendingReplies: new PendingReplyResumer({
+                      reader: new PrismaPendingReplyReader(prisma),
+                      queue: inboundQueue.queue,
+                      logger,
+                    }),
+                  }),
+              logger,
+              metrics,
+            }),
             // Convites da plataforma e "Nova empresa" (spec 045, E3b): só com as contas ligadas.
             invitations: invitationService,
             // Ações sobre empresas e vínculos (spec 045, E3a).
@@ -793,6 +817,7 @@ import {
   PrismaPlatformAccountUnitOfWork,
   PrismaPlatformAuditRepository,
   PrismaPlatformCompanyUnitOfWork,
+  PrismaPlatformSubscriptionUnitOfWork,
   PrismaPlatformReadModel,
   PrismaUnverifiedAccountPurgeRepository,
 } from './infrastructure/database/index.js';
@@ -800,6 +825,7 @@ import { PlatformAuthService } from './application/platform/platform-auth.servic
 import { PlatformMonitorService } from './application/platform/platform-monitor.service.js';
 import { PlatformAccountService } from './application/platform/platform-account.service.js';
 import { PlatformCompanyService } from './application/platform/platform-company.service.js';
+import { PlatformSubscriptionService } from './application/platform/platform-subscription.service.js';
 import { RedisPlatformSessionStore } from './infrastructure/auth/redis-platform-session-store.js';
 import { InvitationExpiryPurger } from './application/invitations/invitation-expiry-purger.js';
 import { InvitationService } from './application/invitations/invitation.service.js';

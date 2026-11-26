@@ -78,13 +78,15 @@ export interface CheckoutRepository {
   /**
    * Grava o pedido PENDING na assinatura da conta. A contagem do teto e a gravação acontecem na mesma
    * transação, com a linha da assinatura travada (criações simultâneas não furam o teto). Devolve null se a
-   * conta ainda não tem assinatura e 'limit' se o teto foi atingido.
+   * conta ainda não tem assinatura e 'limit' se o teto foi atingido. Com `expectedFingerprint` (spec 045,
+   * E4), a assinatura é relida sob a trava e, se mudou desde a avaliação, nada é gravado ('stale').
    */
   createPendingOrder(
     accountId: string,
     input: NewOrderInput,
     cap: OrderCap,
-  ): Promise<PaymentOrderRecord | 'limit' | null>;
+    expectedFingerprint?: string,
+  ): Promise<PaymentOrderRecord | 'limit' | 'stale' | null>;
   findOrder(accountId: string, orderId: string): Promise<PaymentOrderRecord | null>;
   /** Guarda o link criado (só em pedido PENDING ainda sem link). */
   attachCheckoutUrl(orderId: string, checkoutUrl: string): Promise<void>;

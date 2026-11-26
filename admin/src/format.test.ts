@@ -137,4 +137,17 @@ describe('formatação do admin (spec 044, E3)', () => {
     );
     assert.equal(companyActionErrorMessage(new ApiError(404, 'NOT_FOUND')), 'Não encontrado.');
   });
+
+  it('ações da assinatura (spec 045, E4): códigos de regra com mensagem própria', () => {
+    for (const [code, text] of [
+      ['BILLING_DISABLED', /cobrança está desligada/],
+      ['NO_SUBSCRIPTION', /não tem assinatura/],
+      ['SUBSCRIPTION_EXISTS', /já tem assinatura/],
+      ['ORDER_PENDING', /pagamento pendente/],
+      ['PLAN_DOWNGRADE_BLOCKED', /não comporta as empresas/],
+      ['PLAN_CHANGE_UNAVAILABLE', /paga e em vigor/],
+      ['PLAN_UNAVAILABLE', /catálogo vigente/],
+    ] as const)
+      assert.match(companyActionErrorMessage(new ApiError(409, code)), text, code);
+  });
 });

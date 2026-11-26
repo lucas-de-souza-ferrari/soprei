@@ -24,6 +24,7 @@ import {
   type PlanCode,
   priceTotalCents,
   resolveAccess,
+  subscriptionFingerprint,
 } from '../../domain/index.js';
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import {
@@ -234,7 +235,16 @@ export class CheckoutService {
         });
       }
     }
-    return this.issueOrder(account, ev.entry, ev.price, request, kind, amountCents, now);
+    return this.issueOrder(
+      account,
+      ev.entry,
+      ev.price,
+      request,
+      kind,
+      amountCents,
+      now,
+      subscriptionFingerprint(ev.subscription),
+    );
   }
 
   /**
@@ -351,14 +361,24 @@ export class CheckoutService {
     const sub = ev.subscription;
     // Uma renovação aberta no plano de antes não pode desfazer o upgrade: expira as abertas.
     await this.deps.checkout.expireOpenRenewals(account.id);
-    return this.issueOrder(account, ev.entry, ev.price, request, 'UPGRADE', plan.cents, now, {
-      planCode: sub.plan.code,
-      cycle: sub.cycle,
-      agenda: sub.agendaEnabled,
-      stock: sub.stockEnabled,
-      periodStart: sub.currentPeriodStart.toISOString(),
-      periodEnd: sub.currentPeriodEnd.toISOString(),
-    });
+    return this.issueOrder(
+      account,
+      ev.entry,
+      ev.price,
+      request,
+      'UPGRADE',
+      plan.cents,
+      now,
+      subscriptionFingerprint(sub),
+      {
+        planCode: sub.plan.code,
+        cycle: sub.cycle,
+        agenda: sub.agendaEnabled,
+        stock: sub.stockEnabled,
+        periodStart: sub.currentPeriodStart.toISOString(),
+        periodEnd: sub.currentPeriodEnd.toISOString(),
+      },
+    );
   }
 
   /**
@@ -453,6 +473,7 @@ export class CheckoutService {
     kind: PaymentOrderKindValue,
     amountCents: number,
     now: Date,
+    fingerprint: string,
     upgradeBase?: UpgradeBase,
   ): Promise<CreatedOrder> {
     const { checkout, provider, settings, logger, metrics } = this.deps;
@@ -473,7 +494,14 @@ export class CheckoutService {
       account.id,
       { id: orderId, kind, amountCents, breakdown, expiresAt },
       { since: new Date(now.getTime() - ORDER_VALIDITY_MS), max: ORDER_MAX_PER_DAY },
+      fingerprint,
     );
+    if (order === 'stale') {
+      metrics?.countBillingOrder(kind, 'rejected');
+      throw new ConflictError('A assinatura mudou; confira e tente de novo', {
+        code: 'SUBSCRIPTION_CHANGED',
+      });
+    }
     if (order === 'limit') {
       metrics?.countBillingOrder(kind, 'limit');
       throw new RateLimitError(3_600, 'Muitos pedidos hoje. Tente novamente mais tarde.', {

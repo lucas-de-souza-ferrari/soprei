@@ -26,6 +26,10 @@ import {
   platformInvitationController,
   type PlatformInvitationRoutes,
 } from './platform-invitation.controller.js';
+import {
+  platformSubscriptionController,
+  type PlatformSubscriptionRoutes,
+} from './platform-subscription.controller.js';
 
 /**
  * Cookie da sessão do admin da plataforma (spec 044, E1). O prefixo `__Host-` obriga o navegador a
@@ -64,6 +68,8 @@ export interface PlatformAuthControllerOptions {
   readonly companies?: PlatformCompanyRoutes | undefined;
   /** Convites da plataforma e "Nova empresa" (spec 045, E3b); só com as contas ligadas. */
   readonly invitations?: PlatformInvitationRoutes | undefined;
+  /** Ações sobre a assinatura da conta (spec 045, E4); cobrança desligada = 409 `BILLING_DISABLED`. */
+  readonly subscriptions?: PlatformSubscriptionRoutes | undefined;
 }
 
 function sessionCookie(value: string, maxAgeSeconds: number): string {
@@ -81,7 +87,7 @@ function clearCookie(reply: FastifyReply): void {
  */
 export const platformAuthController: FastifyPluginCallback<PlatformAuthControllerOptions> = (
   app,
-  { auth, origin, maxAgeSeconds, monitor, accounts, companies, invitations },
+  { auth, origin, maxAgeSeconds, monitor, accounts, companies, invitations, subscriptions },
   done,
 ) => {
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -142,6 +148,9 @@ export const platformAuthController: FastifyPluginCallback<PlatformAuthControlle
   if (companies !== undefined) void app.register(platformCompanyController, { companies });
   if (invitations !== undefined) {
     void app.register(platformInvitationController, { invitations });
+  }
+  if (subscriptions !== undefined) {
+    void app.register(platformSubscriptionController, { subscriptions });
   }
 
   done();

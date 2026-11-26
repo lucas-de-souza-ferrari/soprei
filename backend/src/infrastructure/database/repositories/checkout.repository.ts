@@ -20,13 +20,27 @@ import {
   subscriptionWindows,
   usageWindowStart,
   WHATSAPP_BILLING_MODES,
+  subscriptionFingerprint,
 } from '../../../domain/index.js';
 import { ConflictError, DatabaseError } from '../../../shared/errors/index.js';
 import { isUuid } from '../../../shared/utils/index.js';
-import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
+import type { TenantScopedDb, TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { runInTransaction } from '../transaction.js';
 import { findSubscriptionById } from './billing.repository.js';
 import { withRepositoryErrors } from './repository-errors.js';
+
+/**
+ * Trava a linha da assinatura até o fim da transação (`FOR NO KEY UPDATE`): pedidos, concessões e as ações
+ * do admin da plataforma sobre a mesma assinatura se serializam (spec 031; spec 045, E4). SQL controlado:
+ * um único `SELECT` parametrizado pelo id, numa tabela global.
+ */
+export async function lockSubscriptionRow(
+  db: TenantScopedDb,
+  subscriptionId: string,
+): Promise<void> {
+  await db.$queryRaw`
+    SELECT id FROM subscriptions WHERE id = ${subscriptionId}::uuid FOR NO KEY UPDATE`;
+}
 
 const breakdownSchema = z.object({
   planCode: z.enum(PLAN_CODES),
@@ -97,7 +111,8 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
     accountId: string,
     input: NewOrderInput,
     cap: OrderCap,
-  ): Promise<PaymentOrderRecord | 'limit' | null> {
+    expectedFingerprint?: string,
+  ): Promise<PaymentOrderRecord | 'limit' | 'stale' | null> {
     return withRepositoryErrors('Checkout.createPendingOrder', async () => {
       const subscription = await this.db.subscription.findFirst({
         where: { accountId: AccountId.parse(accountId) },
@@ -106,10 +121,16 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
       if (subscription === null) return null;
       return runInTransaction(
         this.db,
-        async (tx): Promise<PaymentOrderRecord | 'limit'> => {
+        async (tx): Promise<PaymentOrderRecord | 'limit' | 'stale'> => {
           // Trava a assinatura: a contagem e a gravação são atômicas (criações simultâneas não furam o teto).
-          await tx.$queryRaw`
-            SELECT id FROM subscriptions WHERE id = ${subscription.id}::uuid FOR NO KEY UPDATE`;
+          await lockSubscriptionRow(tx, subscription.id);
+          // Spec 045, E4 (revisão I2): a assinatura avaliada fora da trava pode ter mudado (ação do admin).
+          if (expectedFingerprint !== undefined) {
+            const current = await findSubscriptionById(tx, subscription.id);
+            if (current === null || subscriptionFingerprint(current) !== expectedFingerprint) {
+              return 'stale';
+            }
+          }
           const recent = await tx.paymentOrder.count({
             where: { subscriptionId: subscription.id, createdAt: { gte: cap.since } },
           });
@@ -260,8 +281,7 @@ export class PrismaCheckoutRepository implements CheckoutRepository {
           const breakdown: OrderBreakdown = toOrder(order).breakdown;
 
           // Trava a linha da assinatura: dois pedidos da mesma assinatura concedendo juntos se serializam.
-          await tx.$queryRaw`
-            SELECT id FROM subscriptions WHERE id = ${order.subscriptionId}::uuid FOR NO KEY UPDATE`;
+          await lockSubscriptionRow(tx, order.subscriptionId);
           const subscription = await findSubscriptionById(tx, order.subscriptionId);
           const price = await tx.planPrice.findFirst({ where: { id: breakdown.priceId } });
           if (subscription === null || price === null) {

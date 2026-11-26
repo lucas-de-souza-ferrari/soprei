@@ -350,6 +350,13 @@ enum PlatformAuditAction {
   INVITATION_CREATED_BY_PLATFORM
   INVITATION_RESENT_BY_PLATFORM
   INVITATION_REVOKED_BY_PLATFORM
+  SUBSCRIPTION_TRIAL_STARTED
+  SUBSCRIPTION_EXTENDED
+  SUBSCRIPTION_MODULES_CHANGED
+  SUBSCRIPTION_PLAN_CHANGED
+  SUBSCRIPTION_CANCELLED
+  SUBSCRIPTION_REACTIVATED
+  SUBSCRIPTION_ENDED
 
   @@map("platform_audit_action")
 }
@@ -377,6 +384,11 @@ model PlatformAuditEvent {
   subjectInvitationId String?               @map("subject_invitation_id") @db.Uuid
   fromRole            MembershipRole?       @map("from_role")
   toRole              MembershipRole?       @map("to_role")
+  /// Spec 045, E4: o que a ação sobre a assinatura gravou (plano, dias concedidos, módulos). Sem texto livre.
+  planCode            PlanCode?             @map("plan_code")
+  days                Int?                  @db.SmallInt
+  moduleSchedule      Boolean?              @map("module_schedule")
+  moduleInventory     Boolean?              @map("module_inventory")
   reason              PlatformActionReason?
   createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 

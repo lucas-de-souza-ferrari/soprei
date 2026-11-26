@@ -7,6 +7,7 @@ import { errorMessage, formatCount, formatDateTime, label } from '../format';
 import { Alert, Button, Card, Facts, List, Loading, PageHeader, RowButton } from '../ui';
 import { AccountActions } from './AccountActions';
 import { subscriptionFacts } from './subscription-facts';
+import { SubscriptionActions } from './SubscriptionActions';
 
 /**
  * Detalhe de uma conta (spec 045, D3). Abre por `GET /platform/accounts/:accountId`, que traz só o e-mail
@@ -127,6 +128,7 @@ export function AccountDetailScreen({
             ) : (
               <Facts items={subscriptionFacts(data.subscription)} />
             )}
+            <SubscriptionActions detail={data} onDone={reload} />
           </Card>
         </div>
       )}

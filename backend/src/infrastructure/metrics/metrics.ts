@@ -154,7 +154,15 @@ export type PlatformActionMetric =
   | 'company_created'
   | 'invitation_created_by_platform'
   | 'invitation_resent_by_platform'
-  | 'invitation_revoked_by_platform';
+  | 'invitation_revoked_by_platform'
+  // Spec 045, E4.
+  | 'subscription_trial_started'
+  | 'subscription_extended'
+  | 'subscription_modules_changed'
+  | 'subscription_plan_changed'
+  | 'subscription_cancelled'
+  | 'subscription_reactivated'
+  | 'subscription_ended';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {

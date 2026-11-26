@@ -395,3 +395,54 @@ describe('migration da spec 045, E3b (convidador da plataforma)', () => {
     ]);
   });
 });
+
+describe('migration da spec 045, E4 (ações sobre a assinatura na trilha da plataforma)', () => {
+  const migration = migrationFiles().find((file) =>
+    file.name.endsWith('_platform_subscription_actions'),
+  );
+  const statements = (migration?.sql ?? '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+
+  it('é aditiva: valores novos no enum e quatro colunas anuláveis; passa no deploy automático', () => {
+    assert.ok(migration !== undefined, 'migration _platform_subscription_actions existe');
+    assert.doesNotMatch(migration.sql, /breaking-approved/);
+    for (const forbidden of [
+      /\bDROP\b/i,
+      /\bDELETE\s+FROM\b/i,
+      /\bTRUNCATE\b/i,
+      /\bRENAME\b/i,
+      /(^|;)\s*UPDATE\b/im,
+      /SET NOT NULL/i,
+      /\bNOT NULL\b/i,
+      /ALTER COLUMN/i,
+      /\bDEFAULT\b/i,
+    ]) {
+      assert.doesNotMatch(statements, forbidden);
+    }
+    const added = [
+      ...statements.matchAll(
+        /ALTER TYPE "platform_audit_action" ADD VALUE IF NOT EXISTS '(\w+)';/g,
+      ),
+    ].map((match) => match[1]);
+    assert.deepEqual(added, [
+      'SUBSCRIPTION_TRIAL_STARTED',
+      'SUBSCRIPTION_EXTENDED',
+      'SUBSCRIPTION_MODULES_CHANGED',
+      'SUBSCRIPTION_PLAN_CHANGED',
+      'SUBSCRIPTION_CANCELLED',
+      'SUBSCRIPTION_REACTIVATED',
+      'SUBSCRIPTION_ENDED',
+    ]);
+    const columns = [
+      ...statements.matchAll(/ALTER TABLE "platform_audit_events" ADD COLUMN "(\w+)" ([^;]+);/g),
+    ].map((match) => `${match[1] ?? ''} ${match[2] ?? ''}`);
+    assert.deepEqual(columns, [
+      'plan_code "plan_code"',
+      'days SMALLINT',
+      'module_schedule BOOLEAN',
+      'module_inventory BOOLEAN',
+    ]);
+  });
+});

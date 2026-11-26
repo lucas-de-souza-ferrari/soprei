@@ -223,6 +223,7 @@ const CODE_MESSAGES: Readonly<Record<string, string>> = {
   PLAN_CHANGE_UNAVAILABLE:
     'Não há um plano pago em vigor para trocar agora. Renove a assinatura ou escolha um plano.',
   PENDING_CHANGE_EXISTS: 'Há uma troca agendada. Desfaça-a antes de continuar.',
+  SUBSCRIPTION_CHANGED: 'A sua assinatura acabou de mudar. Confira o plano e tente de novo.',
   UPGRADE_TOO_LATE:
     'Falta menos de um dia para o fim do período. Renove e troque de plano na renovação.',
   CYCLE_CHANGE_ON_RENEWAL: 'O ciclo (mensal ou anual) só muda na renovação.',
