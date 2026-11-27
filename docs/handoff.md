@@ -4,7 +4,7 @@
 
 ## Última sessão
 
-2026-11-26, Claude Code (Opus 5.5, implementer). **[Spec 045](specs/045-admin-gestao-da-plataforma.md), E6 ("remover conta por anonimização")** na branch `spec/045-e6-anonimizar`: o admin exclui uma conta com o código do autenticador e a palavra `EXCLUIR`; núcleo único `AccountAnonymizer` (que a 032 E7 vai reaproveitar); migration só aditiva (deploy automático). Verde localmente (typecheck, lint, format, unitários tocados, Playwright das contas 36/36); a integração nova (`platform-account-anonymize.integration.test.ts`) só no CI. PR #36. Revisão do `reviewer` feita e corrigida na branch; o dono decidiu que pedido de pagamento ainda pagável barra a remoção (409 `ORDER_PENDING`). **Falta:** CI, merge; depois marcar o critério da E6 e os critérios comuns e fechar a 045. E1 a E5 já estão na `main` (PRs #30 a #35).
+2026-11-27, Claude Code (Opus 5.5, implementer). **[Spec 045](specs/045-admin-gestao-da-plataforma.md) pronta:** E6 ("remover conta por anonimização", núcleo `AccountAnonymizer` que a 032 E7 vai reaproveitar) entrou na `main` pelo PR #36 com CI verde; a falha do primeiro CI era a integração lendo vínculos de duas empresas numa consulta só (`tenant-scope` recusa `in`), corrigida lendo empresa a empresa. Branch `spec/045-fecho`: critérios da E6 e comuns marcados e status "pronta". **Falta:** push, PR e merge desse fecho (só documentação). A migration da E6 é só aditiva (deploy automático).
 
 - **Admin local (máquina do dono):** `PLATFORM_ADMIN_ENABLED=true`, `ADMIN_ORIGIN=http://127.0.0.1:5175` e as chaves `PLATFORM_TOTP_*` no `backend/.env`, `pnpm dev` e `pnpm dev:admin`; o admin local é outro usuário, no banco `soprei`.
 
@@ -33,7 +33,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Spec 045: revisão, CI e merge da E6 (`spec/045-e6-anonimizar`); depois marcar os critérios e fechar a spec. A exclusão da conta pela própria pessoa (032 E7) reaproveita o `AccountAnonymizer`. Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E4 prontas nas branches (falta CI). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
+Merge do fecho da 045 (`spec/045-fecho`, só documentação). A exclusão da conta pela própria pessoa (032 E7) reaproveita o `AccountAnonymizer`. Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E4 prontas nas branches (falta CI). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
 
 ## Decisões do dono que não são óbvias no código
 
