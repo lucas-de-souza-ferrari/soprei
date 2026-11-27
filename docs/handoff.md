@@ -4,24 +4,24 @@
 
 ## Última sessão
 
-2026-11-26, Claude Code (Opus 5.5, implementer). **[Spec 045](specs/045-admin-gestao-da-plataforma.md), E6 ("remover conta por anonimização")** na branch `spec/045-e6-anonimizar`: o admin exclui uma conta com o código do autenticador e a palavra `EXCLUIR`; núcleo único `AccountAnonymizer` (que a 032 E7 vai reaproveitar); migration só aditiva (deploy automático). Verde localmente (typecheck, lint, format, unitários tocados, Playwright das contas 36/36); a integração nova (`platform-account-anonymize.integration.test.ts`) só no CI. PR #36. Revisão do `reviewer` feita e corrigida na branch; o dono decidiu que pedido de pagamento ainda pagável barra a remoção (409 `ORDER_PENDING`). **Falta:** CI, merge; depois marcar o critério da E6 e os critérios comuns e fechar a 045. E1 a E5 já estão na `main` (PRs #30 a #35).
+2026-11-27, Claude Code (Opus 5.5, implementer). **[Spec 045](specs/045-admin-gestao-da-plataforma.md) pronta:** E6 ("remover conta por anonimização", núcleo `AccountAnonymizer` que a 032 E7 vai reaproveitar) entrou na `main` pelo PR #36 com CI verde; a falha do primeiro CI era a integração lendo vínculos de duas empresas numa consulta só (`tenant-scope` recusa `in`), corrigida lendo empresa a empresa. Na mesma branch (`spec/045-fecho`, PR #37, só documentação): 045 marcada "concluída" e **spec 035 fechada** (PRs #19 e #20 já na `main` com CI verde; o dono aceitou três critérios sem teste próprio, registrado em `docs/context.md`). **Falta:** CI e merge do PR #37. A migration da E6 é só aditiva (deploy automático).
 
 - **Admin local (máquina do dono):** `PLATFORM_ADMIN_ENABLED=true`, `ADMIN_ORIGIN=http://127.0.0.1:5175` e as chaves `PLATFORM_TOTP_*` no `backend/.env`, `pnpm dev` e `pnpm dev:admin`; o admin local é outro usuário, no banco `soprei`.
 
 ## Onde estamos
 
 - **Servidor de produção no ar** (Hetzner, nginx 1.28, PM2, deploy automático pelo GitHub Actions a cada merge na `main` com o CI verde). Não há staging: a produção roda com `--allow-unstaged`/`ALLOW_UNSTAGED=true`. O nginx real do site é `/etc/nginx/sites-available/soprei` (espelho em `deploy/nginx/production.conf.example`) e o do admin, `/etc/nginx/sites-available/soprei-admin`.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 043 (passos do dono no servidor). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). A eficiência do turno (antes reservada como 035) ganha número novo quando for a vez.
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes
 
 Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sido feitos.
 
-0. **Spec 044 (admin):** merge do PR `spec/044-producao`; o deploy automático dele já confere o admin (`ADMIN_HOST`).
-1. **Spec 042:** push da E1, CI, merge; depois a E2. Apagar, se quiser, as branches remotas já mergeadas (`spec/040-e2-tela`, `spec/041-conhecimento-pdf-docx`, `fix/backup-runuser`, `docs/registro-desligamento`) e a `dev`.
+0. **Branches remotas (opcional):** apagar as já mergeadas (`spec/040-e2-tela`, `spec/041-conhecimento-pdf-docx`, `fix/backup-runuser`, `docs/registro-desligamento`) e a `dev`.
+1. **Spec 043, D3:** confirmar (ou recusar) a trava do bucket no lugar da credencial sem permissão de apagar (proposta em `docs/context.md`).
 2. **Staging (spec 037, E2):** montar conforme `docs/ops/staging.md`; até lá a produção roda com `ALLOW_UNSTAGED=true` no `entry.conf`. Quando `deploy/soprei-deploy-entry.sh` mudar, reinstalar o programa de entrada à mão.
-3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): depois do merge da [spec 043](specs/043-backup-externo.md), os passos de `docs/ops/backup.md` (chaves, bucket do R2, instalar, primeiro backup, aviso, teste de restauração).
+3. **Backup fora do servidor** (hoje só o diário local, `soprei-backup.sh`): a [spec 043](specs/043-backup-externo.md) está na `main` (PR #18); faltam os passos de `docs/ops/backup.md` (chaves, bucket do R2, instalar, primeiro backup, aviso, teste de restauração).
 4. **Anthropic:** termos de dados (LGPD) e limite de gasto mensal na Console.
 5. **Spec 028, E0** (roteiro na spec): obrigatório antes de ligar `SCHEDULE_AI_ENABLED` e a opção "A IA pode solicitar, cancelar e remarcar horários" com empresa real.
 6. **Spec 041:** o `location ~* .mjs$` foi acrescentado ao nginx do site em 2026-11-24 (o worker do pdf.js sai como `text/javascript`); falta o teste manual da leitura de PDF em computador, iPhone e Android.
@@ -33,7 +33,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Spec 045: revisão, CI e merge da E6 (`spec/045-e6-anonimizar`); depois marcar os critérios e fechar a spec. A exclusão da conta pela própria pessoa (032 E7) reaproveita o `AccountAnonymizer`. Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E4 prontas nas branches (falta CI). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
+Merge do PR #37 (fecho da 045, da 035 e da 042, e critérios da 043; só documentação). A exclusão da conta pela própria pessoa (032 E7) reaproveita o `AccountAnonymizer`. Com o dono: a D3 e a instalação do backup externo (043) e o staging (037; hoje a produção roda com `ALLOW_UNSTAGED`). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
 
 ## Decisões do dono que não são óbvias no código
 

@@ -1,6 +1,6 @@
 # 045 — Admin da plataforma: quem é dono e gestão completa (CRUD) de contas, empresas, vínculos, assinatura e canal
 
-- **Status:** aprovada (pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 e E2 na `main` (PRs #30 e #31); E3 dividida em duas (decisão do dono, 2026-11-25): **E3a** (empresas e vínculos) na `main` (PR #32) e **E3b** (convites da plataforma e criar empresa com dono, a migration do convite com deploy manual) na `main` (PR #33, deploy manual feito em 2026-11-25); E4 na `main` (PR #34); E5 na `main` (PR #35); E6 implementada na branch `spec/045-e6-anonimizar` (falta revisão, CI e merge)
+- **Status:** concluída (aprovada pelo dono em 2026-11-25: D1 a D17 como recomendadas, "aprovo tudo"); E1 e E2 na `main` (PRs #30 e #31); E3 dividida em duas (decisão do dono, 2026-11-25): **E3a** (empresas e vínculos) na `main` (PR #32) e **E3b** (convites da plataforma e criar empresa com dono, a migration do convite com deploy manual) na `main` (PR #33, deploy manual feito em 2026-11-25); E4 na `main` (PR #34); E5 na `main` (PR #35); E6 na `main` (PR #36). **Pronta** (todas as etapas na `main` com CI verde, 2026-11-27)
 - **Branch:** `spec/045-admin-gestao` (esta spec); cada etapa em branch própria a partir da `main` (`spec/045-e1-pessoas`, `spec/045-e2-contas`, ...)
 - **Depende de:** 044 (admin, sessão com segundo fator, `PlatformAuditEvent`, leitura agregada), 008 (papéis, regra do último `OWNER`, trava da empresa), 017/020/021 (contas, confirmação, recuperação de senha, `revokeAll`), 025 (convites), 015/023/039 (canal), 031/040 (assinatura), 032 (E7 excluir conta e E8 excluir empresa, ainda não implementadas: esta spec cruza com as duas).
 - **Spec de segurança:** cada etapa passa pelo `reviewer` antes do merge. Ela abre as **primeiras escritas da plataforma sobre contas, vínculos, assinatura e canal**, muda o contrato do convite (convidador que não é vínculo) e amplia as decisões D1 e D7 da 044.
@@ -127,14 +127,14 @@ Todas em `/platform/accounts/:accountId/subscription/...` (a assinatura é da co
 
 ## Critérios de aceite
 
-Comuns (provados em cada etapa para as rotas dela):
+Comuns (provados em cada etapa para as rotas dela; CI verde nos PRs #30 a #36):
 
-- [ ] Toda rota nova de `/platform/*` aparece no inventário com `requirePlatform()` e perfil `admin`; Bearer de vínculo, Bearer de plataforma e cookie da conta recebem 401/403 e nada é gravado.
-- [ ] Toda escrita nova sem `Origin = ADMIN_ORIGIN` ou sem `X-Soprei-App: admin` é 403 e nada é gravado; corpo com campo a mais ou `reason` fora da lista é 400.
-- [ ] Toda escrita que muda estado grava exatamente um `PlatformAuditEvent` com a ação, o `adminId`, o sujeito e o motivo, **na mesma transação** (teste com falha forçada na gravação da trilha: o estado não muda); repetir o pedido no mesmo estado responde 204 sem novo evento.
-- [ ] Ação **[código]** sem `code`, com código errado ou com o código já usado no login é 400 `CONFIRMATION_INVALID` sem efeito; depois de `AUTH_LOGIN_MAX_FAILURES` erros, 429 com `Retry-After` (inclusive no login da plataforma).
-- [ ] Teste de privacidade das rotas novas (log capturado, `/metrics`, corpos de erro): nenhum e-mail, nome de empresa, código, senha, token ou PIN; a trilha não tem e-mail.
-- [ ] Admin (Playwright, API falsa, desktop e celular, claro e escuro): cada ação da etapa abre o diálogo, exige motivo (e código e slug quando pedidos), envia o corpo esperado e relê a tela; 360 px sem rolagem horizontal; nada em `localStorage`/`sessionStorage`.
+- [x] Toda rota nova de `/platform/*` aparece no inventário com `requirePlatform()` e perfil `admin`; Bearer de vínculo, Bearer de plataforma e cookie da conta recebem 401/403 e nada é gravado.
+- [x] Toda escrita nova sem `Origin = ADMIN_ORIGIN` ou sem `X-Soprei-App: admin` é 403 e nada é gravado; corpo com campo a mais ou `reason` fora da lista é 400.
+- [x] Toda escrita que muda estado grava exatamente um `PlatformAuditEvent` com a ação, o `adminId`, o sujeito e o motivo, **na mesma transação** (teste com falha forçada na gravação da trilha: o estado não muda); repetir o pedido no mesmo estado responde 204 sem novo evento.
+- [x] Ação **[código]** sem `code`, com código errado ou com o código já usado no login é 400 `CONFIRMATION_INVALID` sem efeito; depois de `AUTH_LOGIN_MAX_FAILURES` erros, 429 com `Retry-After` (inclusive no login da plataforma).
+- [x] Teste de privacidade das rotas novas (log capturado, `/metrics`, corpos de erro): nenhum e-mail, nome de empresa, código, senha, token ou PIN; a trilha não tem e-mail.
+- [x] Admin (Playwright, API falsa, desktop e celular, claro e escuro): cada ação da etapa abre o diálogo, exige motivo (e código e slug quando pedidos), envia o corpo esperado e relê a tela; 360 px sem rolagem horizontal; nada em `localStorage`/`sessionStorage`.
 
 E1:
 
@@ -174,11 +174,11 @@ E5:
 
 E6:
 
-- [ ] Anonimizar: recusas `COMPANY_OWNERSHIP` e `SUBSCRIPTION_ACTIVE` sem efeito; caso aceito, e-mail e vínculos anonimizados, sessões revogadas, o e-mail original livre para um cadastro novo que não herda nada, aviso enviado ao endereço antigo; Redis fora antes da transação = 503 sem nada alterado.
+- [x] Anonimizar: recusas `COMPANY_OWNERSHIP` e `SUBSCRIPTION_ACTIVE` sem efeito; caso aceito, e-mail e vínculos anonimizados, sessões revogadas, o e-mail original livre para um cadastro novo que não herda nada, aviso enviado ao endereço antigo; Redis fora antes da transação = 503 sem nada alterado. Também 409 `ORDER_PENDING` com pedido ainda pagável (decisão do dono, 2026-11-26). _(CI verde no PR #36, `platform-account-anonymize.integration.test.ts` e `account-anonymizer.test.ts`.)_
 
 Fecho de cada etapa:
 
-- [ ] `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes; CI verde (`static`, `tests`, `browser`).
+- [x] `pnpm typecheck`, `pnpm lint` e `pnpm format:check` verdes; CI verde (`static`, `tests`, `browser`).
 
 ## Casos de borda e erros
 

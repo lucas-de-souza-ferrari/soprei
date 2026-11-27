@@ -1,6 +1,6 @@
 # 043 — Backup externo do banco e teste de restauração
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 implementada e revisada, aguardando CI; **os passos do dono estão parados: em 2026-11-23 não há servidor de produção**)
+- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 na `main` pelo PR #18, com CI verde, inclusive o `shellcheck` e os cenários só de Linux; **faltam a confirmação da D3 e os passos do dono no servidor**, abaixo)
 - **Branch:** `spec/043-backup-externo`
 - **Depende de:** 037 (deploy, programa de cópia antes de migration, padrão dos scripts de `deploy/`), 032 (prazo de 35 dias das cópias, D8). Substitui a etapa **E5 da spec 033** (rascunho, escrita antes de a produção existir); o resto da 033 não é tocado.
 - **Esta spec passa pelo `reviewer`** antes do merge: o banco inteiro (dados pessoais de todas as empresas) sai do servidor, e há chave e credencial novas.
@@ -65,9 +65,9 @@ Todos por teste automatizado com dublês de `pg_dump`, `runuser`, `age`, `rclone
 - [x] Envio que falha ou tamanho remoto diferente: sai com código diferente de 0, o arquivo cifrado local fica, nenhuma cópia antiga é apagada, `STATUS_FILE` aponta o passo.
 - [x] Na execução seguinte a uma falha de envio, o arquivo cifrado pendente é enviado junto com o novo.
 - [x] Expiração local: arquivos com mais de `LOCAL_KEEP_DAYS` dias somem; os mais novos ficam; nada fora de `LOCAL_DIR` e fora do padrão de nome `soprei-*.dump*` é tocado.
-- [ ] Duas execuções simultâneas: a segunda sai sem fazer nada, com código próprio.
+- [x] Duas execuções simultâneas: a segunda sai sem fazer nada, com código próprio. _(CI verde no PR #18, em Linux com `flock` real: o log do CI não tem o aviso de cenário pulado.)_
 - [x] `--dry-run` não chama `pg_dump`, `age`, `rclone` (exceto listagem) nem `curl`, e não cria nem apaga arquivo.
-- [ ] Configuração ausente, com modo mais aberto que 600, com chave desconhecida, com `AGE_RECIPIENT` que não começa por `age1` ou com `REMOTE` fora do formato: sai com erro antes de qualquer passo.
+- [x] Configuração ausente, com modo mais aberto que 600, com chave desconhecida, com `AGE_RECIPIENT` que não começa por `age1` ou com `REMOTE` fora do formato: sai com erro antes de qualquer passo. _(CI verde no PR #18; o modo 600 roda só em Linux, sem aviso de cenário pulado no log do CI.)_
 - [x] Sentinelas de segredo postas na configuração do `rclone` falsa e no ambiente não aparecem na saída, no `STATUS_FILE` nem nos argumentos registrados pelos dublês; o script não tem `set -x`, `source` nem `eval` (teste de texto, como `deploy-scripts.test.ts`).
 - [x] O `PING_URL` é chamado uma única vez, só com sucesso, por `GET`, sem corpo e sem parâmetro acrescentado pelo script.
 - [x] `soprei-restore-check.sh`: recusa nome de banco diferente de `soprei_restore_check`, recusa se o banco já existe, e apaga o banco temporário e o arquivo decifrado também quando a restauração falha.

@@ -1,6 +1,6 @@
 # 042 — Organização da documentação
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D8 como recomendadas; E1 e E2 implementadas, cada uma na sua branch, aguardando CI, revisão e merge)
+- **Status:** concluída (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D8 como recomendadas; E1 na `main` pelo PR #16 e E2 pelo PR #17, ambos com CI verde; fechada em 2026-11-27)
 - **Branch:** `spec/042-organizacao-da-documentacao`
 - **Depende de:** nenhuma (só documentação; convém não haver outra branch aberta que mexa em `AGENTS.md`)
 
@@ -85,7 +85,7 @@ E2:
 - [x] `docs/specs/README.md` tem uma linha para cada arquivo de spec e nenhuma para arquivo inexistente (`docs-structure.test.ts`).
 - [x] `.tmp-onb.txt` e `lab/` não estão mais versionados (`docs-structure.test.ts`: `git ls-files` não os lista).
 - [x] Todo link relativo do `README.md` aponta para arquivo existente (`docs-structure.test.ts`).
-- [ ] O diff das specs existentes só toca a linha de status (conferido pelo `reviewer` no PR).
+- [x] O diff das specs existentes só toca a linha de status (conferido pelo `reviewer` no PR). _(Conferido em 2026-11-27 no diff do PR #17, `git diff -U0` entre a E1 e a E2 sobre `docs/specs/0*.md`, fora a 042 e a 043: toda linha alterada é `- **Status:**`.)_
 - [x] `ci-workflow.test.ts`, `deploy-workflow.test.ts` e `domain-vocabulary.test.ts` continuam verdes.
 
 ## Casos de borda e erros
