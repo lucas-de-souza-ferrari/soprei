@@ -1,6 +1,6 @@
 # 035 — Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila
 
-- **Status:** em implementação (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 a E4 implementadas, revisadas as E1 a E3; aguardando CI)
+- **Status:** concluída (aprovada pelo dono em 2026-11-23, "Aprovo todas": D1 a D9 como recomendadas; E1 a E3 na `main` pelo PR #19 e E4 pelo PR #20, ambos com CI verde; revisadas pelo `reviewer` as E1 a E3; fechada em 2026-11-27 com três critérios aceitos pelo dono sem teste próprio)
 - **Branch:** `spec/035-resiliencia-do-atendimento` (uma branch por etapa, se o dono preferir PRs menores)
 - **Depende de:** 011 (canal e fila), 013 (agrupamento, `flush`), 015 (credencial por empresa, `TOKEN_INVALID`), 031 (retomada depois do pagamento), 034 (concorrência e guarda do processo), 039 (pausa da IA).
 - **Numeração:** o número 035 estava reservado para "eficiência do turno". O dono priorizou em 2026-11-23 a parte de **resiliência**; a parte de eficiência (leituras repetidas por job, prompt caching, índice de busca) fica em "Fora de escopo" e ganha número novo quando for a vez.
@@ -90,10 +90,10 @@ E1 (integração com Postgres, BullMQ e Graph falso reais, relógio injetado, so
 - [x] O mesmo contato é retomado no máximo `RESUME_MAX_ATTEMPTS` vezes em 24 horas; a tentativa seguinte conta `skipped_limit` e não agenda. *(a varredura com contador falso: unitário passando; o contador no Redis: integração escrita, só no CI; CI verde no PR #19)*
 - [x] **Isolamento:** com duas empresas com pendentes, cada `flush` agendado leva o `companyId` e o número da própria empresa; a resposta de uma nunca sai pelo número da outra; a consulta de cada empresa não devolve contato da outra. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
 - [x] Mais contatos que `RESUME_MAX_CONTACTS_PER_RUN`: a execução agenda só o limite e a seguinte continua de onde parou (rodízio). *(teste unitário passando; corrigido na revisão, S3: a seguinte recomeça na empresa que ficou pela metade)*
-- [ ] Duas execuções seguidas sem o `flush` ter rodado não criam dois jobs para o mesmo contato (deduplicação da fila). *(sem teste novo: é a deduplicação do modo `ensure`, já coberta em `inbound-queue.integration.test.ts`, spec 013)*
+- [x] Duas execuções seguidas sem o `flush` ter rodado não criam dois jobs para o mesmo contato (deduplicação da fila). *(sem teste novo: é a deduplicação do modo `ensure`, já coberta em `inbound-queue.integration.test.ts`, spec 013. Aceito pelo dono sem teste próprio em 2026-11-27, ao fechar a spec.)*
 - [x] Job de `flush` sem o campo `resume` (formato antigo) continua válido. *(teste unitário passando)*
 - [x] O texto das mensagens, o `contactRef` e o telefone não aparecem em log nem em `/metrics` (captura de log com sentinelas). *(log da varredura e `/metrics`: unitário passando; o fluxo completo: integração, só no CI)*
-- [ ] Com `CHANNEL_RESUME_INTERVAL_MINUTES=0` ou com o canal desligado, o timer não existe; o `closeInfrastructure` para o timer e espera a execução ativa. *(sem teste novo: a ligação no `index.ts` não tem teste; `0` desligar é o comportamento de `startPurgeTimer`, já testado; a variável tem teste de config)*
+- [x] Com `CHANNEL_RESUME_INTERVAL_MINUTES=0` ou com o canal desligado, o timer não existe; o `closeInfrastructure` para o timer e espera a execução ativa. *(sem teste novo: a ligação no `index.ts` não tem teste; `0` desligar é o comportamento de `startPurgeTimer`, já testado; a variável tem teste de config. Aceito pelo dono sem teste próprio em 2026-11-27, ao fechar a spec.)*
 
 E2:
 
@@ -101,7 +101,7 @@ E2:
 - [x] Resposta segurada pela pausa da 039 **nunca** é reenviada, nem depois de a pausa vencer. *(unitário do atendimento passando; a leitura: integração, só no CI)*
 - [x] `flush` novo com resposta anterior sem `sentAt`: a anterior chega ao Graph falso **antes** da nova, e as duas ganham `sentAt`. *(unitários do processador e do atendimento passando; a ordem no Graph falso: integração reescrita, só no CI)*
 - [x] Resposta sem `sentAt` de conversa do simulador nunca é enviada ao canal. *(teste unitário passando)*
-- [ ] Envio que deu certo com gravação de `sentAt` falha: a retomada reenvia uma vez (duplicata aceita, D5) e para. *(sem teste: decorre de `sentAt` nulo virar reenvio; risco aceito na D5)*
+- [x] Envio que deu certo com gravação de `sentAt` falha: a retomada reenvia uma vez (duplicata aceita, D5) e para. *(sem teste: decorre de `sentAt` nulo virar reenvio; risco aceito na D5; o estado resultante, resposta sem `sentAt`, é o do critério de reenvio da E2, que tem teste. Aceito pelo dono sem teste próprio em 2026-11-27, ao fechar a spec.)*
 
 E3:
 

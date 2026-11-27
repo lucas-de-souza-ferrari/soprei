@@ -43,7 +43,7 @@
 | [032](032-lgpd-e-retencao.md) | LGPD e retenção de dados | em implementação | E2 em diante (aceite dos termos, retenção, exclusão) |
 | [033](033-producao-deploy-e-operacao.md) | Produção, deploy e operação | rascunho | não aprovada |
 | [034](034-capacidade-do-canal.md) | Capacidade do canal (worker concorrente e processo robusto) | em implementação | E4 (`PROCESS_ROLE`) e E5 (limite do webhook) |
-| [035](035-resiliencia-do-atendimento.md) | Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila | em implementação | CI (integração); `reviewer` na E4, se o dono quiser |
+| [035](035-resiliencia-do-atendimento.md) | Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila | concluída | — (PRs #19 e #20, CI verde; fechada em 2026-11-27) |
 | [036](036-ci-mais-rapido.md) | CI mais rápido | concluída | — |
 | [037](037-deploy-e-staging.md) | Deploy com rollback e staging | concluída | servidor de produção e de staging (dono) |
 | [038](038-notificacoes-atendimento-humano.md) | Notificações no painel: a IA pede atendimento humano | concluída | — |
@@ -53,4 +53,4 @@
 | [042](042-organizacao-da-documentacao.md) | Organização da documentação | em implementação | CI e merge da E1 e da E2 |
 | [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | CI; confirmação da D3; passos do dono parados até existir servidor |
 | [044](044-admin-da-plataforma.md) | Admin da plataforma (painel do dono, frontend separado) | concluída | — (no ar em `soadm.soprei.com` desde 2026-11-24) |
-| [045](045-admin-gestao-da-plataforma.md) | Admin da plataforma: quem é dono e gestão completa (CRUD) | aprovada | E1 a E6, com a E3 dividida em E3a e E3b (E1 e E2 na `main`; E3a, empresas e vínculos, na branch `spec/045-e3a-empresas`) |
+| [045](045-admin-gestao-da-plataforma.md) | Admin da plataforma: quem é dono e gestão completa (CRUD) | concluída | — (E1 a E6 na `main`, PRs #30 a #36, CI verde; fechada em 2026-11-27) |

@@ -4,14 +4,14 @@
 
 ## Última sessão
 
-2026-11-27, Claude Code (Opus 5.5, implementer). **[Spec 045](specs/045-admin-gestao-da-plataforma.md) pronta:** E6 ("remover conta por anonimização", núcleo `AccountAnonymizer` que a 032 E7 vai reaproveitar) entrou na `main` pelo PR #36 com CI verde; a falha do primeiro CI era a integração lendo vínculos de duas empresas numa consulta só (`tenant-scope` recusa `in`), corrigida lendo empresa a empresa. Branch `spec/045-fecho`: critérios da E6 e comuns marcados e status "pronta". **Falta:** push, PR e merge desse fecho (só documentação). A migration da E6 é só aditiva (deploy automático).
+2026-11-27, Claude Code (Opus 5.5, implementer). **[Spec 045](specs/045-admin-gestao-da-plataforma.md) pronta:** E6 ("remover conta por anonimização", núcleo `AccountAnonymizer` que a 032 E7 vai reaproveitar) entrou na `main` pelo PR #36 com CI verde; a falha do primeiro CI era a integração lendo vínculos de duas empresas numa consulta só (`tenant-scope` recusa `in`), corrigida lendo empresa a empresa. Na mesma branch (`spec/045-fecho`, PR #37, só documentação): 045 marcada "concluída" e **spec 035 fechada** (PRs #19 e #20 já na `main` com CI verde; o dono aceitou três critérios sem teste próprio, registrado em `docs/context.md`). **Falta:** CI e merge do PR #37. A migration da E6 é só aditiva (deploy automático).
 
 - **Admin local (máquina do dono):** `PLATFORM_ADMIN_ENABLED=true`, `ADMIN_ORIGIN=http://127.0.0.1:5175` e as chaves `PLATFORM_TOTP_*` no `backend/.env`, `pnpm dev` e `pnpm dev:admin`; o admin local é outro usuário, no banco `soprei`.
 
 ## Onde estamos
 
 - **Servidor de produção no ar** (Hetzner, nginx 1.28, PM2, deploy automático pelo GitHub Actions a cada merge na `main` com o CI verde). Não há staging: a produção roda com `--allow-unstaged`/`ALLOW_UNSTAGED=true`. O nginx real do site é `/etc/nginx/sites-available/soprei` (espelho em `deploy/nginx/production.conf.example`) e o do admin, `/etc/nginx/sites-available/soprei-admin`.
-- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). Reservada: 035 (eficiência do turno).
+- **Specs:** o estado de cada uma está em [docs/specs/README.md](specs/README.md). Com etapas por fazer: 031 (E6, pacote extra), 032 (E2 em diante: aceite dos termos, retenção, exclusão), 034 (E4 `PROCESS_ROLE`, E5 limite do webhook), 042 (esta). Em rascunho: 033. Esboços sob demanda: 006 (cache), 009 (tempo real). A eficiência do turno (antes reservada como 035) ganha número novo quando for a vez.
 - **Validação:** o CI (versão do Node do `.nvmrc`) é a palavra final; confira também a última execução do workflow semanal "Compatibilidade do Node". Localmente, `typecheck`, `lint` e `format:check` da **raiz**; testes só do arquivo que falhou no CI ou da área tocada.
 
 ## Passos do dono pendentes
@@ -33,7 +33,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Merge do fecho da 045 (`spec/045-fecho`, só documentação). A exclusão da conta pela própria pessoa (032 E7) reaproveita o `AccountAnonymizer`. Prioridade do dono (2026-11-23): **resiliência do atendimento**, [spec 035](specs/035-resiliencia-do-atendimento.md): E1 a E4 prontas nas branches (falta CI). Antes: fechar a 042 (E1, depois E2) e a 043 no GitHub. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
+Merge do PR #37 (fecho da 045 e da 035, só documentação). Depois: conferir e fechar a 042 e a 043 (PRs #16, #17 e #18 já na `main`; a linha delas em `docs/specs/README.md` e os passos do dono no handoff estão defasados). A exclusão da conta pela própria pessoa (032 E7) reaproveita o `AccountAnonymizer`. Parado até existir servidor: staging (037) e a instalação do backup (043). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
 
 ## Decisões do dono que não são óbvias no código
 
