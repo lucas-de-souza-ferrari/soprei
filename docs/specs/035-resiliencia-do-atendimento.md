@@ -83,12 +83,12 @@ Depois de E1 a E3, num PR só de movimentação, no molde da 012: nenhuma asser�
 
 E1 (integração com Postgres, BullMQ e Graph falso reais, relógio injetado, sondagem com prazo; padrão de `channel-batching.integration.test.ts`):
 
-- [ ] Mensagem pendente sem job na fila (job apagado à mão) é respondida depois de uma execução da varredura; a resposta chega ao Graph falso uma única vez. *(teste de integração escrito; só roda no CI)*
+- [x] Mensagem pendente sem job na fila (job apagado à mão) é respondida depois de uma execução da varredura; a resposta chega ao Graph falso uma única vez. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
 - [x] Depois de uma falha final do `flush` (modelo falhando), a varredura retoma; com o modelo de volta, o contato recebe a resposta. Com o modelo ainda falhando, o `flush` de retomada **não** envia o texto padrão (o Graph falso recebe o texto padrão uma única vez, o da falha original). *(unitário passando; ver o desvio 3 no Registro: falha do modelo já vira resposta de fallback, então o caso real é erro de banco ou Redis)*
-- [ ] Empresa em `TOKEN_INVALID` não é retomada; depois de reconectar (`PUT` do canal), a execução seguinte retoma. *(teste de integração escrito; só roda no CI)*
-- [ ] Não são retomados: empresa suspensa, empresa removida, conversa com a IA pausada, conversa do simulador, pendente com menos de `RESUME_MIN_AGE`, contato cuja mensagem mais recente passou de `RESUME_WINDOW`. *(simulador e teste do site: unitário passando; os demais: integração escrita, só no CI)*
-- [ ] O mesmo contato é retomado no máximo `RESUME_MAX_ATTEMPTS` vezes em 24 horas; a tentativa seguinte conta `skipped_limit` e não agenda. *(a varredura com contador falso: unitário passando; o contador no Redis: integração escrita, só no CI)*
-- [ ] **Isolamento:** com duas empresas com pendentes, cada `flush` agendado leva o `companyId` e o número da própria empresa; a resposta de uma nunca sai pelo número da outra; a consulta de cada empresa não devolve contato da outra. *(teste de integração escrito; só roda no CI)*
+- [x] Empresa em `TOKEN_INVALID` não é retomada; depois de reconectar (`PUT` do canal), a execução seguinte retoma. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
+- [x] Não são retomados: empresa suspensa, empresa removida, conversa com a IA pausada, conversa do simulador, pendente com menos de `RESUME_MIN_AGE`, contato cuja mensagem mais recente passou de `RESUME_WINDOW`. *(simulador e teste do site: unitário passando; os demais: integração escrita, só no CI; CI verde no PR #19)*
+- [x] O mesmo contato é retomado no máximo `RESUME_MAX_ATTEMPTS` vezes em 24 horas; a tentativa seguinte conta `skipped_limit` e não agenda. *(a varredura com contador falso: unitário passando; o contador no Redis: integração escrita, só no CI; CI verde no PR #19)*
+- [x] **Isolamento:** com duas empresas com pendentes, cada `flush` agendado leva o `companyId` e o número da própria empresa; a resposta de uma nunca sai pelo número da outra; a consulta de cada empresa não devolve contato da outra. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
 - [x] Mais contatos que `RESUME_MAX_CONTACTS_PER_RUN`: a execução agenda só o limite e a seguinte continua de onde parou (rodízio). *(teste unitário passando; corrigido na revisão, S3: a seguinte recomeça na empresa que ficou pela metade)*
 - [ ] Duas execuções seguidas sem o `flush` ter rodado não criam dois jobs para o mesmo contato (deduplicação da fila). *(sem teste novo: é a deduplicação do modo `ensure`, já coberta em `inbound-queue.integration.test.ts`, spec 013)*
 - [x] Job de `flush` sem o campo `resume` (formato antigo) continua válido. *(teste unitário passando)*
@@ -105,15 +105,15 @@ E2:
 
 E3:
 
-- [ ] Job concluído mais velho que o prazo é apagado por uma execução sem nenhum outro job ter terminado; o mais novo que o prazo fica. *(teste de integração escrito; só roda no CI)*
-- [ ] Job falho idem, com o prazo dos falhos. *(teste de integração escrito; só roda no CI)*
-- [ ] Jobs ativos, em espera e atrasados nunca são apagados. *(teste de integração escrito; só roda no CI)*
-- [ ] Depois da limpeza, nenhuma chave do Redis sob o prefixo da fila de teste contém o texto ou o `contactRef` dos jobs apagados. *(teste de integração escrito; só roda no CI)*
+- [x] Job concluído mais velho que o prazo é apagado por uma execução sem nenhum outro job ter terminado; o mais novo que o prazo fica. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
+- [x] Job falho idem, com o prazo dos falhos. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
+- [x] Jobs ativos, em espera e atrasados nunca são apagados. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
+- [x] Depois da limpeza, nenhuma chave do Redis sob o prefixo da fila de teste contém o texto ou o `contactRef` dos jobs apagados. *(teste de integração escrito; só roda no CI; CI verde no PR #19)*
 
 E4:
 
 - [x] `attendance.service.ts` tem menos de 900 linhas e as mesmas assinaturas públicas (teste de texto). *(`attendance-structure.test.ts`, passando: 881 linhas)*
-- [ ] `pnpm test` e `pnpm test:integration` no CI com as mesmas contagens de antes da E4; nenhum arquivo de teste alterado além de imports. *(unitários locais: 1.919 verdes e 11 pulados, antes e depois, sem alterar nenhum teste; a integração, só no CI)*
+- [x] `pnpm test` e `pnpm test:integration` no CI com as mesmas contagens de antes da E4; nenhum arquivo de teste alterado além de imports. *(unitários locais: 1.919 verdes e 11 pulados, antes e depois, sem alterar nenhum teste; CI verde no PR #20, com as mesmas 807 declarações de teste de integração do PR #19 e nenhum arquivo de teste alterado além do novo `attendance-structure.test.ts`)*
 
 Todas: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`; inventário de variáveis em `.env.example`; `docs/areas/canal-whatsapp.md` atualizado.
 
