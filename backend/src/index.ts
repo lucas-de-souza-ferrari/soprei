@@ -501,6 +501,18 @@ async function main(): Promise<void> {
         })
       : undefined;
 
+  // Remover conta por anonimização (spec 045, E6; o núcleo que a 032 E7 vai reaproveitar).
+  const accountAnonymizer =
+    accountService !== undefined && accountMailer !== undefined
+      ? new AccountAnonymizer({
+          accounts: new PrismaAccountAnonymizationUnitOfWork(prisma),
+          accountSessions,
+          bearerSessions: auth.sessions,
+          mailer: accountMailer,
+          logger,
+        })
+      : undefined;
+
   // Convites por e-mail (spec 025): uma instância só, usada pelo site e pelo admin da plataforma (045, E3b),
   // para que o desligamento espere os envios dos dois caminhos.
   const invitationService =
@@ -598,6 +610,7 @@ async function main(): Promise<void> {
                     accountSessions,
                     bearerSessions: auth.sessions,
                     mail: accountService,
+                    anonymizer: accountAnonymizer,
                     logger,
                     metrics,
                   }),
@@ -786,6 +799,13 @@ async function main(): Promise<void> {
     };
   }
 
+  // O aviso "Conta excluída" sai em segundo plano: o desligamento espera os pendentes (spec 045, E6).
+  if (accountAnonymizer !== undefined) {
+    app.addHook('onClose', async () => {
+      await accountAnonymizer.drain();
+    });
+  }
+
   // Sinais e erros fatais não tratados (spec 034): um único desligamento gracioso, com prazo global.
   installProcessGuard({
     target: process,
@@ -818,12 +838,14 @@ import {
   PrismaPlatformAuditRepository,
   PrismaPlatformCompanyUnitOfWork,
   PrismaPlatformSubscriptionUnitOfWork,
+  PrismaAccountAnonymizationUnitOfWork,
   PrismaPlatformReadModel,
   PrismaUnverifiedAccountPurgeRepository,
 } from './infrastructure/database/index.js';
 import { PlatformAuthService } from './application/platform/platform-auth.service.js';
 import { PlatformMonitorService } from './application/platform/platform-monitor.service.js';
 import { PlatformAccountService } from './application/platform/platform-account.service.js';
+import { AccountAnonymizer } from './application/auth/account-anonymizer.js';
 import { PlatformCompanyService } from './application/platform/platform-company.service.js';
 import { PlatformSubscriptionService } from './application/platform/platform-subscription.service.js';
 import { RedisPlatformSessionStore } from './infrastructure/auth/redis-platform-session-store.js';

@@ -17,7 +17,11 @@ import {
 import { captureLogs } from '../../test-support/log-capture.js';
 import type { LoginFailure } from '../auth/auth.service.js';
 import type { PlatformIdentity } from '../auth/identity.js';
-import { CONFIRMATION_INVALID, PlatformAccountService } from './platform-account.service.js';
+import {
+  CONFIRMATION_INVALID,
+  PlatformAccountService,
+  type PlatformAccountServiceDeps,
+} from './platform-account.service.js';
 
 const ADMIN: PlatformIdentity = {
   kind: 'platform',
@@ -40,7 +44,7 @@ interface World {
   redisDown: boolean;
 }
 
-function setup(): World {
+function setup(anonymizer?: PlatformAccountServiceDeps['anonymizer']): World {
   const audit = new InMemoryPlatformAuditRepository();
   const uow = new InMemoryPlatformAccountUnitOfWork(audit);
   const accountId = AccountId.parse(randomUUID());
@@ -105,6 +109,7 @@ function setup(): World {
         return Promise.resolve('sent');
       },
     },
+    anonymizer,
     logger: logs.logger,
     metrics: {
       countPlatformAction: (action) => {
@@ -382,5 +387,73 @@ describe('PlatformAccountService: sessões, recuperação e confirmação (spec 
     assert.equal(line.reason, 'ABUSE');
     assert.ok(!world.logs.raw().includes('@'), 'nenhum e-mail');
     assert.ok(!world.logs.raw().includes(CODE), 'nenhum código');
+  });
+});
+
+describe('PlatformAccountService: remover a conta por anonimização (spec 045, E6)', () => {
+  it('sem o núcleo ligado: 404 sem consultar o autenticador', async () => {
+    const world = setup();
+    await assert.rejects(
+      world.service.anonymize(ADMIN, world.accountId, 'OTHER', CODE),
+      NotFoundError,
+    );
+    assert.deepEqual(world.confirmCodes, []);
+  });
+
+  it('confere o código antes do núcleo; passa a trilha ACCOUNT_ANONYMIZED; métrica só quando anonimizou agora', async () => {
+    const seen: unknown[] = [];
+    let result = true;
+    const world = setup({
+      anonymize: (id, options) => {
+        seen.push([id, options?.platformAudit]);
+        if (result) options?.onCommitted?.();
+        return Promise.resolve(result);
+      },
+    });
+    world.confirmResult = Result.err({ reason: 'invalid_credentials' });
+    await assert.rejects(
+      world.service.anonymize(ADMIN, world.accountId, 'OTHER', '000000'),
+      (error: unknown) => error instanceof ValidationError && error.code === CONFIRMATION_INVALID,
+    );
+    assert.deepEqual(seen, []);
+
+    world.confirmResult = Result.ok(undefined);
+    assert.equal(
+      await world.service.anonymize(ADMIN, world.accountId, 'OWNER_REQUEST', CODE),
+      true,
+    );
+    assert.deepEqual(seen, [
+      [
+        world.accountId,
+        {
+          adminId: ADMIN.adminId,
+          action: 'ACCOUNT_ANONYMIZED',
+          subjectAccountId: world.accountId,
+          reason: 'OWNER_REQUEST',
+        },
+      ],
+    ]);
+    result = false;
+    assert.equal(
+      await world.service.anonymize(ADMIN, world.accountId, 'OWNER_REQUEST', CODE),
+      false,
+    );
+    assert.deepEqual(world.metrics, ['account_anonymized']);
+    await assert.rejects(world.service.anonymize(ADMIN, 'nao-uuid', 'OTHER', CODE), NotFoundError);
+  });
+
+  it('reativar uma conta anonimizada: 409 ACCOUNT_ANONYMIZED sem efeito', async () => {
+    const world = setup();
+    world.uow.accounts.set(world.accountId, {
+      status: 'DISABLED',
+      verified: true,
+      anonymized: true,
+    });
+    await assert.rejects(
+      world.service.setStatus(ADMIN, world.accountId, 'ACTIVE', 'OTHER'),
+      (error: unknown) => error instanceof ConflictError && error.code === 'ACCOUNT_ANONYMIZED',
+    );
+    assert.equal(world.uow.accounts.get(world.accountId)?.status, 'DISABLED');
+    assert.deepEqual(world.audit.events, []);
   });
 });

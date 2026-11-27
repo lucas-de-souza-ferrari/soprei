@@ -173,11 +173,23 @@ export function accountActionErrorMessage(error: unknown, action?: string): stri
     // só da revogação (Redis fora). Repetir é seguro e conclui.
     if (error.status === 503 && (action === 'disable' || action === 'revokeSessions'))
       return 'A ação pode ter sido registrada sem que as sessões tenham sido encerradas: repita para concluir.';
+    // Remover encerra as sessões antes (503 = nada mudou) e de novo depois do commit (503 = a conta pode já
+    // estar removida). Nos dois casos repetir é seguro.
+    if (error.status === 503 && action === 'anonymize')
+      return 'Não foi possível encerrar as sessões agora; a conta pode ou não ter sido removida. Repita para concluir.';
     switch (error.code) {
       case 'CONFIRMATION_INVALID':
         return 'Código do autenticador inválido ou já usado. Espere o próximo código (até 30 s) e tente de novo.';
       case 'LAST_OWNER':
         return 'Esta conta é a única dona ativa de uma empresa ativa. Suspenda a empresa ou transfira a propriedade antes.';
+      case 'COMPANY_OWNERSHIP':
+        return 'Esta conta é a única dona ativa de uma empresa (ativa ou suspensa). Transfira a propriedade ou remova a empresa antes.';
+      case 'SUBSCRIPTION_ACTIVE':
+        return 'A conta tem um período pago em vigor. Marque o cancelamento no fim do período (ou espere o fim) antes de remover.';
+      case 'ACCOUNT_ANONYMIZED':
+        return 'Esta conta foi removida e não pode ser reativada.';
+      case 'ORDER_PENDING':
+        return 'Há um pedido de pagamento que ainda pode ser pago. Espere ele vencer (até 48 h) antes de remover a conta.';
       case 'ALREADY_VERIFIED':
         return 'O e-mail desta conta já está confirmado.';
     }

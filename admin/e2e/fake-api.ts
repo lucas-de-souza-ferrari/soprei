@@ -1,6 +1,7 @@
 import type { Page, Request } from '@playwright/test';
 import {
   actionBodySchema,
+  anonymizeBodySchema,
   confirmedActionBodySchema,
   createCompanyBodySchema,
   extendBodySchema,
@@ -79,6 +80,10 @@ export class FakeApi {
   /** Estado da conta A (spec 045, E2): as ações mudam e o detalhe relê. */
   accountStatus: 'ACTIVE' | 'DISABLED' = 'ACTIVE';
   accountVerified = true;
+  /** Remover a conta (E6): a recusa que o servidor daria, ou removida. */
+  anonymizeRefusal: 'COMPANY_OWNERSHIP' | 'SUBSCRIPTION_ACTIVE' | 'ORDER_PENDING' | undefined =
+    undefined;
+  accountAnonymized = false;
   /** Redis das sessões fora: desativar grava a mudança e responde 503, como o servidor (regra comum 6). */
   revocationDown = false;
   /** Spec 045, E3a: nome, remoção e papéis/estados das pessoas da empresa A (as ações mudam, a tela relê). */
@@ -263,6 +268,7 @@ export class FakeApi {
               subscription: this.accountSubscription,
               status: this.accountStatus,
               verified: this.accountVerified,
+              ...(this.accountAnonymized ? { emailMasked: 'r***@excluido.invalid' } : {}),
             },
           };
         case `/platform/accounts/${fx.ACCOUNT_A}/email`:
@@ -514,6 +520,16 @@ export class FakeApi {
       if (this.options.lastOwner === true) return error(409, 'LAST_OWNER');
       this.accountStatus = 'DISABLED';
       return this.revocationDown ? error(503, 'SERVICE_UNAVAILABLE') : { status: 204 };
+    }
+    if (action === 'anonymize') {
+      const parsed = anonymizeBodySchema.safeParse(body);
+      if (!parsed.success) return error(400, 'VALIDATION_ERROR');
+      if (parsed.data.code !== FRESH_CODE) return error(400, 'CONFIRMATION_INVALID');
+      if (this.anonymizeRefusal !== undefined) return error(409, this.anonymizeRefusal);
+      if (this.revocationDown) return error(503, 'SERVICE_UNAVAILABLE');
+      this.accountAnonymized = true;
+      this.accountStatus = 'DISABLED';
+      return { status: 204 };
     }
     if (!actionBodySchema.safeParse(body).success) return error(400, 'VALIDATION_ERROR');
     switch (action) {

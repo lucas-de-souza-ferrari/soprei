@@ -6,6 +6,8 @@ import {
   accountPageSchema,
   ACCOUNT_ACTIONS,
   actionBodySchema,
+  anonymizeBodySchema,
+  isAnonymizedAccount,
   confirmedActionBodySchema,
   companyDetailSchema,
   companyPageSchema,
@@ -166,11 +168,26 @@ describe('contratos do admin (spec 044, E3)', () => {
     assert.equal(actionBodySchema.safeParse({ reason: 'ABUSE', note: 'x' }).success, false);
   });
 
-  it('ações da conta (spec 045, E2): só desativar pede código; o código são 6 dígitos e nada mais', () => {
+  it('remover a conta (spec 045, E6): código e a palavra EXCLUIR exata; a conta anonimizada é reconhecida pelo domínio', () => {
+    assert.ok(
+      anonymizeBodySchema.safeParse({ reason: 'OTHER', code: '012345', confirm: 'EXCLUIR' })
+        .success,
+    );
+    for (const confirm of [undefined, 'excluir', 'EXCLUIR ', 'SIM'])
+      assert.equal(
+        anonymizeBodySchema.safeParse({ reason: 'OTHER', code: '012345', confirm }).success,
+        false,
+        String(confirm),
+      );
+    assert.ok(isAnonymizedAccount({ emailMasked: 'r***@excluido.invalid' }));
+    assert.equal(isAnonymizedAccount({ emailMasked: 'l***@exemplo.test' }), false);
+  });
+
+  it('ações da conta (spec 045, E2 e E6): só desativar e remover pedem código; o código são 6 dígitos e nada mais', () => {
     const withCode = Object.entries(ACCOUNT_ACTIONS)
       .filter(([, action]) => action.code)
       .map(([name]) => name);
-    assert.deepEqual(withCode, ['disable']);
+    assert.deepEqual(withCode, ['disable', 'anonymize']);
     assert.ok(confirmedActionBodySchema.safeParse({ reason: 'ABUSE', code: '012345' }).success);
     for (const body of [
       { reason: 'ABUSE' },

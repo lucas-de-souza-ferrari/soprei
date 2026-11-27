@@ -34,6 +34,7 @@ export { PrismaPlatformAuditRepository } from './repositories/platform-audit.rep
 export { PrismaPlatformCompanyUnitOfWork } from './repositories/platform-company-unit-of-work.js';
 export { PrismaPlatformAccountUnitOfWork } from './repositories/platform-account-unit-of-work.js';
 export { PrismaPlatformSubscriptionUnitOfWork } from './repositories/platform-subscription-unit-of-work.js';
+export { PrismaAccountAnonymizationUnitOfWork } from './repositories/account-anonymization-unit-of-work.js';
 export { PrismaPlatformReadModel } from './repositories/platform-read-model.js';
 export { PrismaMembershipRepository } from './repositories/membership.repository.js';
 export { PrismaMessageRepository } from './repositories/message.repository.js';

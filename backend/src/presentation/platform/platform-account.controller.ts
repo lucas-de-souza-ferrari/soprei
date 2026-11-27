@@ -1,7 +1,10 @@
 import type { FastifyPluginCallback, FastifyRequest } from 'fastify';
 import type { PlatformIdentity } from '../../application/auth/identity.js';
 import type { PlatformAccountService } from '../../application/platform/platform-account.service.js';
+import { z } from 'zod';
+import { PLATFORM_ACTION_REASONS } from '../../domain/index.js';
 import { UnauthorizedError } from '../../shared/errors/index.js';
+import { totpCodeSchema } from '../auth/auth.validators.js';
 import { requestAuth, requirePlatform } from '../common/auth.hooks.js';
 import { rateLimitProfile } from '../common/rate-limit.js';
 import {
@@ -12,12 +15,21 @@ import {
 
 export type PlatformAccountRoutes = Pick<
   PlatformAccountService,
-  'setStatus' | 'revokeSessions' | 'sendPasswordReset' | 'resendVerification'
+  'setStatus' | 'revokeSessions' | 'sendPasswordReset' | 'resendVerification' | 'anonymize'
 >;
 
 export interface PlatformAccountControllerOptions {
   readonly accounts: PlatformAccountRoutes;
 }
+
+/** Remover a conta (D16): motivo, código novo e a palavra `EXCLUIR` digitada (qualquer outra = 400). */
+const anonymizeBodySchema = z
+  .object({
+    reason: z.enum(PLATFORM_ACTION_REASONS),
+    code: totpCodeSchema.optional(),
+    confirm: z.literal('EXCLUIR'),
+  })
+  .strict();
 
 function platformIdentity(request: FastifyRequest): PlatformIdentity {
   const identity = requestAuth(request);
@@ -50,6 +62,15 @@ export const platformAccountController: FastifyPluginCallback<PlatformAccountCon
       return reply.status(204).send();
     });
   }
+
+  // Spec 045, E6: remover a conta (anonimizar), com o código novo e a palavra EXCLUIR digitada.
+  app.post('/accounts/:accountId/anonymize', route, async (request, reply) => {
+    const identity = platformIdentity(request);
+    const { accountId } = platformAccountParamsSchema.parse(request.params);
+    const { reason, code } = anonymizeBodySchema.parse(request.body);
+    await accounts.anonymize(identity, accountId, reason, code);
+    return reply.status(204).send();
+  });
 
   app.post('/accounts/:accountId/sessions/revoke', route, async (request, reply) => {
     const identity = platformIdentity(request);

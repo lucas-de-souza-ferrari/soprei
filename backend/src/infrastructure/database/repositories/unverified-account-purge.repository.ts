@@ -5,6 +5,8 @@ import { withRepositoryErrors } from './repository-errors.js';
 /**
  * Expurgo de contas nunca confirmadas (spec 021). SQL cru controlado: `accounts` é global e a única
  * leitura de `memberships` é a existência de `account_id` (nenhuma coluna de tenant é lida nem devolvida).
+ * Conta removida por anonimização (domínio `excluido.invalid`, spec 045, E6) nunca é expurgada: a trilha da
+ * plataforma continua apontando para a linha.
  */
 export class PrismaUnverifiedAccountPurgeRepository implements UnverifiedAccountPurgeRepository {
   constructor(private readonly db: TenantScopedPrisma) {}
@@ -22,6 +24,7 @@ export class PrismaUnverifiedAccountPurgeRepository implements UnverifiedAccount
           WHERE a.email_verified_at IS NULL
             AND a.updated_at < ${cutoff}::timestamptz
             AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.account_id = a.id)
+            AND a.email NOT LIKE '%@excluido.invalid'
           ORDER BY a.updated_at
           LIMIT ${batchSize}::int
           FOR UPDATE SKIP LOCKED)
@@ -30,6 +33,7 @@ export class PrismaUnverifiedAccountPurgeRepository implements UnverifiedAccount
           AND email_verified_at IS NULL
           AND updated_at < ${cutoff}::timestamptz
           AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.account_id = accounts.id)
+          AND email NOT LIKE '%@excluido.invalid'
         RETURNING id`;
       return rows.length;
     });

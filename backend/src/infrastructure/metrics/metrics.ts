@@ -164,7 +164,9 @@ export type PlatformActionMetric =
   | 'subscription_reactivated'
   | 'subscription_ended'
   // Spec 045, E5.
-  | 'channel_disconnected_by_platform';
+  | 'channel_disconnected_by_platform'
+  // Spec 045, E6.
+  | 'account_anonymized';
 export type ChannelCredentialErrorReason = 'malformed' | 'unknown_key' | 'tampered';
 
 export interface ChannelSendSample {

@@ -7,6 +7,7 @@ import { PlatformAuthService } from '../../application/platform/platform-auth.se
 import { AccountId, CompanyId, MembershipId } from '../../domain/index.js';
 import { buildServer } from '../../infrastructure/http/server.js';
 import { createMetrics } from '../../infrastructure/metrics/index.js';
+import { ConflictError, NotFoundError } from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import { bearer, buildTestAuth, TEST_PASSWORD } from '../../test-support/in-memory-auth.js';
 import {
@@ -48,6 +49,9 @@ interface World {
   readonly secret: Buffer;
   readonly accountId: AccountId;
   readonly unverified: AccountId;
+  /** Dublê do núcleo da anonimização (o próprio núcleo tem testes em `account-anonymizer.test.ts`). */
+  readonly anonymized: Set<string>;
+  readonly refuse: Map<string, string>;
 }
 
 async function setup(options: { accounts?: boolean } = {}): Promise<World> {
@@ -72,6 +76,8 @@ async function setup(options: { accounts?: boolean } = {}): Promise<World> {
     membershipId: MembershipId.parse(randomUUID()),
   });
   const calls: string[] = [];
+  const anonymized = new Set<string>();
+  const refuse = new Map<string, string>();
   const metrics = createMetrics();
   const app = buildServer({
     logger: logs.logger,
@@ -119,6 +125,20 @@ async function setup(options: { accounts?: boolean } = {}): Promise<World> {
                   return Promise.resolve('sent');
                 },
               },
+              anonymizer: {
+                anonymize: async (id, options) => {
+                  if (!uow.accounts.has(id)) throw new NotFoundError('Conta não encontrada');
+                  const code = refuse.get(id);
+                  if (code !== undefined) throw new ConflictError('recusa', { code });
+                  calls.push(`anonymize:${id}`);
+                  if (anonymized.has(id)) return false;
+                  anonymized.add(id);
+                  if (options?.platformAudit !== undefined)
+                    await audit.create(options.platformAudit);
+                  options?.onCommitted?.();
+                  return true;
+                },
+              },
               logger: logs.logger,
               metrics,
             }),
@@ -151,6 +171,8 @@ async function setup(options: { accounts?: boolean } = {}): Promise<World> {
     secret: admin.secret,
     accountId,
     unverified,
+    anonymized,
+    refuse,
   };
 }
 
@@ -171,6 +193,10 @@ function routes(accountId: string): readonly (readonly [string, Record<string, u
     [`/platform/accounts/${accountId}/sessions/revoke`, { reason: 'OTHER' }],
     [`/platform/accounts/${accountId}/password-reset`, { reason: 'OTHER' }],
     [`/platform/accounts/${accountId}/verification/resend`, { reason: 'OTHER' }],
+    [
+      `/platform/accounts/${accountId}/anonymize`,
+      { reason: 'OWNER_REQUEST', code: '123456', confirm: 'EXCLUIR' },
+    ],
   ];
 }
 
@@ -268,7 +294,10 @@ describe('/platform/accounts/:accountId/* ações sobre a conta (spec 045, E2)',
             method: 'POST',
             url,
             headers,
-            payload: url.endsWith('/disable') ? { ...payload, code: freshCode(world) } : payload,
+            payload:
+              url.endsWith('/disable') || url.endsWith('/anonymize')
+                ? { ...payload, code: freshCode(world) }
+                : payload,
           });
           assert.equal(response.statusCode, 404, url);
         }
@@ -332,6 +361,79 @@ describe('/platform/accounts/:accountId/* ações sobre a conta (spec 045, E2)',
       assert.equal(enable.statusCode, 204);
       assert.equal(world.uow.accounts.get(world.accountId)?.status, 'ACTIVE');
       assert.deepEqual(actions(world), ['ACCOUNT_DISABLED', 'ACCOUNT_ENABLED']);
+    } finally {
+      await world.app.close();
+    }
+  });
+
+  it('remover (anonimizar): a palavra EXCLUIR é exigida (400 sem ela ou com outra); sem código, errado ou o do login = 400 CONFIRMATION_INVALID; código novo = 204 e trilha; repetir = 204 sem evento', async () => {
+    const world = await setup();
+    try {
+      const headers = { ...WRITE_HEADERS, cookie: world.cookie };
+      const url = `/platform/accounts/${world.accountId}/anonymize`;
+      for (const confirm of [undefined, 'excluir', 'EXCLUIR ', 'SIM']) {
+        const response = await world.app.inject({
+          method: 'POST',
+          url,
+          headers,
+          payload: { reason: 'OWNER_REQUEST', code: freshCode(world), confirm },
+        });
+        assert.equal(response.statusCode, 400, String(confirm));
+      }
+      const loginCode = codeAt(world.secret, world.clock.ms);
+      for (const code of [undefined, '000000' === loginCode ? '000001' : '000000']) {
+        const response = await world.app.inject({
+          method: 'POST',
+          url,
+          headers,
+          payload: { reason: 'OWNER_REQUEST', code, confirm: 'EXCLUIR' },
+        });
+        assert.equal(response.statusCode, 400);
+        assert.equal(
+          response.json<{ error: { code: string } }>().error.code,
+          'CONFIRMATION_INVALID',
+        );
+      }
+      assert.deepEqual(world.calls, []);
+      assert.deepEqual(actions(world), []);
+
+      const payload = () => ({
+        reason: 'OWNER_REQUEST',
+        code: freshCode(world),
+        confirm: 'EXCLUIR',
+      });
+      const ok = await world.app.inject({ method: 'POST', url, headers, payload: payload() });
+      assert.equal(ok.statusCode, 204);
+      assert.equal(ok.body, '');
+      assert.deepEqual(actions(world), ['ACCOUNT_ANONYMIZED']);
+      assert.equal(world.audit.events.at(-1)?.subjectAccountId, world.accountId);
+      assert.equal(world.audit.events.at(-1)?.reason, 'OWNER_REQUEST');
+
+      const again = await world.app.inject({ method: 'POST', url, headers, payload: payload() });
+      assert.equal(again.statusCode, 204);
+      assert.deepEqual(actions(world), ['ACCOUNT_ANONYMIZED']);
+    } finally {
+      await world.app.close();
+    }
+  });
+
+  it('remover (anonimizar): as recusas COMPANY_OWNERSHIP e SUBSCRIPTION_ACTIVE chegam como 409 com o código, sem trilha', async () => {
+    const world = await setup();
+    try {
+      const headers = { ...WRITE_HEADERS, cookie: world.cookie };
+      for (const code of ['COMPANY_OWNERSHIP', 'SUBSCRIPTION_ACTIVE']) {
+        world.refuse.set(world.accountId, code);
+        const response = await world.app.inject({
+          method: 'POST',
+          url: `/platform/accounts/${world.accountId}/anonymize`,
+          headers,
+          payload: { reason: 'OTHER', code: freshCode(world), confirm: 'EXCLUIR' },
+        });
+        assert.equal(response.statusCode, 409);
+        assert.equal(response.json<{ error: { code: string } }>().error.code, code);
+      }
+      assert.deepEqual(actions(world), []);
+      assert.equal(world.anonymized.size, 0);
     } finally {
       await world.app.close();
     }
@@ -434,6 +536,16 @@ describe('/platform/accounts/:accountId/* ações sobre a conta (spec 045, E2)',
       ] as const) {
         bodies.push((await world.app.inject({ method: 'POST', url, headers, payload })).body);
       }
+      bodies.push(
+        (
+          await world.app.inject({
+            method: 'POST',
+            url: `/platform/accounts/${world.unverified}/anonymize`,
+            headers,
+            payload: { reason: 'OTHER', code: freshCode(world), confirm: 'EXCLUIR' },
+          })
+        ).body,
+      );
       const metrics = await world.app.inject({
         method: 'GET',
         url: '/metrics',
@@ -451,6 +563,7 @@ describe('/platform/accounts/:accountId/* ações sobre a conta (spec 045, E2)',
         'account_password_reset_sent',
         'account_verification_sent',
         'account_sessions_revoked',
+        'account_anonymized',
       ]) {
         assert.match(metrics.body, new RegExp(`platform_actions_total\\{action="${action}"\\} 1`));
       }

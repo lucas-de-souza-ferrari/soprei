@@ -280,6 +280,31 @@ export async function soleActiveOwnerCompanyCount(
 }
 
 /**
+ * Regra do dono para **remover** a conta (spec 045, E6; 032, E7): quantas empresas **não removidas, de
+ * qualquer estado** (suspensas incluídas: removida a conta, ficariam sem quem as reative) têm esta conta com
+ * vínculo `OWNER` ativo e **nenhum outro** dono ativo (o mesmo `activeOwnersFrom`). O estado da conta não
+ * importa: uma conta desativada que é a única dona continua barrando (revisão da E6, I2). Roda sob as travas
+ * da transação de anonimização, como `soleActiveOwnerCompanyCount`.
+ */
+export async function soleOwnerCompanyCountForRemoval(
+  db: TenantScopedDb,
+  accountId: string,
+): Promise<number> {
+  const rows = await db.$queryRaw<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n
+      FROM companies co
+     WHERE co.id IN (SELECT mb.company_id
+                       FROM memberships mb
+                      WHERE mb.account_id = ${accountId}::uuid
+                        AND mb.role = 'OWNER'
+                        AND mb.status = 'ACTIVE')
+       AND co.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 ${activeOwnersFrom(Prisma.sql`co.id`)}
+                          AND mb.account_id IS DISTINCT FROM ${accountId}::uuid)`;
+  return num(rows[0]?.n);
+}
+
+/**
  * Quantos donos ativos a empresa tem agora (spec 045, E3a, regra comum 11): o MESMO `activeOwnersFrom` da
  * E1 e da E2, filtrado pelo `companyId` do parâmetro. Usado pela regra do último dono ao mudar o papel ou
  * desativar um vínculo, dentro da transação que trava a empresa (como `soleActiveOwnerCompanyCount`, fora do

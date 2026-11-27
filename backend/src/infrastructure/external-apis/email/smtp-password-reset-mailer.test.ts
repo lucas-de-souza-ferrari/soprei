@@ -64,6 +64,18 @@ test('aviso de senha alterada: sem código, senha, IP nem link', async () => {
   assert.doesNotMatch(message.text, /https?:|[0-9]{6}/);
 });
 
+test('conta excluída (spec 045, E6): assunto fixo, texto simples sem link nem código', async () => {
+  const { sent, mailer } = capture();
+  await mailer.sendAccountDeleted('recipient@example.test');
+  const message = sent[0];
+  assert.ok(message);
+  assert.equal(message.to, 'recipient@example.test');
+  assert.equal(message.subject, 'Sua conta do Soprei foi excluída');
+  assert.equal(message.html, undefined);
+  assert.ok(typeof message.text === 'string' && message.text.length > 0);
+  assert.doesNotMatch(message.text, /https?:|[0-9]{6}|recipient/);
+});
+
 test('falha do transporte vira ServiceUnavailableError fixo, sem cause, e-mail, código nem texto da falha', async () => {
   const mailer = new SmtpVerificationMailer(BASE, {
     sendMail: () =>
@@ -72,6 +84,7 @@ test('falha do transporte vira ServiceUnavailableError fixo, sem cause, e-mail, 
   for (const send of [
     () => mailer.sendPasswordReset('recipient@example.test', '482913'),
     () => mailer.sendPasswordChanged('recipient@example.test'),
+    () => mailer.sendAccountDeleted('recipient@example.test'),
   ]) {
     await assert.rejects(send(), (error) => {
       assert.ok(error instanceof ServiceUnavailableError);

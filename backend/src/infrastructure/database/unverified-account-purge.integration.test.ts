@@ -168,3 +168,18 @@ test('depois do expurgo o mesmo e-mail se cadastra de novo com id novo', async (
     await repo.verify(novo, 'codigo-novo', T0);
   });
 });
+
+test('conta removida por anonimização (spec 045, E6) nunca é expurgada, mesmo não confirmada e sem vínculo', async () => {
+  await withPurge(async ({ purge, insert, exists, sql }) => {
+    const removed = await insert({ updatedAt: OLD });
+    await sql.query('UPDATE accounts SET email = $1, updated_at = $2 WHERE id = $3', [
+      `removida-${randomUUID()}@excluido.invalid`,
+      OLD,
+      removed.id,
+    ]);
+    const stale = await insert({ updatedAt: OLD });
+    assert.equal(await purge.purgeUnverified(CUTOFF, 100), 1);
+    assert.equal(await exists(removed.id), true);
+    assert.equal(await exists(stale.id), false);
+  });
+});

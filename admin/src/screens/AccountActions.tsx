@@ -4,6 +4,8 @@ import { useAdmin } from '../admin-context';
 import {
   ACCOUNT_ACTIONS,
   ACTION_REASONS,
+  ANONYMIZE_WORD,
+  isAnonymizedAccount,
   type AccountAction,
   type AccountDetail,
   type ActionReason,
@@ -70,16 +72,28 @@ const COPY: Record<AccountAction, ActionCopy> = {
     danger: false,
     done: 'Pedido registrado: o código sai por e-mail se a conta estiver apta.',
   },
+  anonymize: {
+    button: 'Excluir conta',
+    title: 'Excluir a conta (anonimizar)?',
+    effect:
+      'Não dá para desfazer. Some: o e-mail e a senha da conta e dos vínculos dela (viram um endereço anônimo), o acesso a todas as empresas e as sessões abertas. Fica, ligado à conta anônima: a assinatura, os pedidos e as trilhas de auditoria. Um aviso vai para o endereço antigo, que fica livre para um cadastro novo, sem herdar nada. É recusado se a conta for a única dona ativa de uma empresa não removida, tiver um período pago em vigor sem cancelamento ou um pedido de pagamento ainda pagável.',
+    confirm: 'Excluir conta',
+    danger: true,
+    done: 'Conta excluída (anonimizada) e sessões encerradas.',
+  },
 };
 
 /** Quais ações a conta admite no estado em que está (o servidor confere de novo). */
 export function availableAccountActions(
-  detail: Pick<AccountDetail, 'status' | 'verified'>,
+  detail: Pick<AccountDetail, 'status' | 'verified' | 'emailMasked'>,
 ): AccountAction[] {
+  // Conta removida (E6): nenhuma ação; ela não volta.
+  if (isAnonymizedAccount(detail)) return [];
   const actions: AccountAction[] = [detail.status === 'ACTIVE' ? 'disable' : 'enable'];
   actions.push('revokeSessions');
   if (detail.verified && detail.status === 'ACTIVE') actions.push('passwordReset');
   if (!detail.verified) actions.push('resendVerification');
+  actions.push('anonymize');
   return actions;
 }
 
@@ -100,6 +114,8 @@ export function AccountActions({
   const [current, setCurrent] = useState<AccountAction | null>(null);
   const [reason, setReason] = useState<ActionReason>('OWNER_REQUEST');
   const [code, setCode] = useState('');
+  /** A palavra digitada em remover (E6). */
+  const [word, setWord] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(undefined);
   /** A ação que falhou (o texto do 503 depende dela). */
@@ -112,6 +128,7 @@ export function AccountActions({
     setCurrent(next);
     setReason('OWNER_REQUEST');
     setCode('');
+    setWord('');
     setError(undefined);
     setNotice(undefined);
   }
@@ -126,6 +143,7 @@ export function AccountActions({
       await api.post(`/platform/accounts/${encodeURIComponent(detail.id)}/${action.path}`, {
         reason,
         ...(action.code ? { code: sent } : {}),
+        ...(current === 'anonymize' ? { confirm: word } : {}),
       });
       setCurrent(null);
       setNotice(copy.done);
@@ -139,7 +157,7 @@ export function AccountActions({
       if (
         failure instanceof ApiError &&
         failure.status === 503 &&
-        (current === 'disable' || current === 'revokeSessions')
+        (current === 'disable' || current === 'revokeSessions' || current === 'anonymize')
       ) {
         onDone();
       }
@@ -149,12 +167,19 @@ export function AccountActions({
   }
 
   const needsCode = action?.code === true;
-  const ready = !needsCode || code.length === 6;
+  const needsWord = current === 'anonymize';
+  const ready = (!needsCode || code.length === 6) && (!needsWord || word === ANONYMIZE_WORD);
+  const available = availableAccountActions(detail);
 
   return (
     <Card title="Ações">
+      {available.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Esta conta foi excluída (anonimizada): não há ações sobre ela.
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
-        {availableAccountActions(detail).map((name) => (
+        {available.map((name) => (
           <Button
             key={name}
             variant={COPY[name].danger ? 'danger' : 'secondary'}
@@ -200,6 +225,22 @@ export function AccountActions({
               <span className="text-xs text-muted-foreground">
                 O código usado para entrar não vale de novo: espere o próximo (até 30 s).
               </span>
+            </label>
+          ) : null}
+          {needsWord ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted-foreground">Digite {ANONYMIZE_WORD} para confirmar</span>
+              <input
+                type="text"
+                name="confirmation-word"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                required
+                value={word}
+                onChange={(event) => setWord(event.target.value)}
+                className={FIELD}
+              />
             </label>
           ) : null}
         </div>

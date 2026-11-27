@@ -2,7 +2,7 @@ import type {
   PlatformAccountTransaction,
   PlatformAccountUnitOfWork,
 } from '../../../application/ports/platform-account-unit-of-work.js';
-import { CompanyId, MembershipId } from '../../../domain/index.js';
+import { CompanyId, MembershipId, isAnonymizedEmail } from '../../../domain/index.js';
 import { NotFoundError } from '../../../shared/errors/index.js';
 import type { TenantScopedPrisma } from '../extensions/tenant-scope.js';
 import { isDeadlock } from '../database-errors.js';
@@ -57,10 +57,14 @@ export class PrismaPlatformAccountUnitOfWork implements PlatformAccountUnitOfWor
             if (!(await lockAccountRow(db, accountId))) throw accountNotFound();
             const row = await db.account.findFirst({
               where: { id: accountId },
-              select: { status: true, emailVerifiedAt: true },
+              select: { status: true, emailVerifiedAt: true, email: true },
             });
             if (row === null) throw accountNotFound();
-            return { status: row.status, verified: row.emailVerifiedAt !== null };
+            return {
+              status: row.status,
+              verified: row.emailVerifiedAt !== null,
+              anonymized: isAnonymizedEmail(row.email),
+            };
           },
           soleActiveOwnerCompanies: (accountId) => soleActiveOwnerCompanyCount(db, accountId),
           setStatus: async (accountId, status) => {

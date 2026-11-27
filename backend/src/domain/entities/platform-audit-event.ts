@@ -42,6 +42,8 @@ export const PLATFORM_AUDIT_ACTIONS = [
   'SUBSCRIPTION_ENDED',
   // Spec 045, E5: canal.
   'CHANNEL_DISCONNECTED_BY_PLATFORM',
+  // Spec 045, E6: remover conta (anonimizar).
+  'ACCOUNT_ANONYMIZED',
 ] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 

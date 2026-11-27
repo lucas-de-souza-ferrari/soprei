@@ -673,3 +673,59 @@ test('nenhuma tela rola de lado e o tema segue o sistema', async ({ page }, test
   expect(await hasHorizontalScroll(page), 'Entrar').toBe(false);
   expect(await storageSizes(page)).toEqual([0, 0]);
 });
+
+test('conta: excluir (anonimizar) diz o que some e o que fica, pede código novo e a palavra EXCLUIR, mostra as recusas e, removida, não oferece mais ações (spec 045, E6)', async ({
+  page,
+}) => {
+  const api = await installFakeApi(page, { signedIn: true });
+  await page.goto('/');
+  await openAccount(page);
+  const path = `/platform/accounts/${ACCOUNT_A}/anonymize`;
+
+  await page.getByRole('button', { name: 'Excluir conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Excluir a conta (anonimizar)?' });
+  await expect(dialog.getByText('Não dá para desfazer.', { exact: false })).toBeVisible();
+  await expect(
+    dialog.getByText('a assinatura, os pedidos e as trilhas', { exact: false }),
+  ).toBeVisible();
+  const confirm = dialog.getByRole('button', { name: 'Excluir conta' });
+  const code = dialog.getByLabel('Código novo do autenticador');
+  const word = dialog.getByLabel('Digite EXCLUIR para confirmar');
+  await expect(confirm).toBeDisabled();
+  await code.fill(FRESH_CODE);
+  await expect(confirm).toBeDisabled();
+  await word.fill('excluir');
+  await expect(confirm).toBeDisabled();
+  await word.fill('EXCLUIR');
+  await expect(confirm).toBeEnabled();
+
+  api.anonymizeRefusal = 'COMPANY_OWNERSHIP';
+  await confirm.click();
+  await expect(dialog.getByRole('alert')).toContainText('única dona ativa de uma empresa');
+  api.anonymizeRefusal = 'SUBSCRIPTION_ACTIVE';
+  await code.fill(FRESH_CODE);
+  await confirm.click();
+  await expect(dialog.getByRole('alert')).toContainText('período pago em vigor');
+  api.anonymizeRefusal = 'ORDER_PENDING';
+  await code.fill(FRESH_CODE);
+  await confirm.click();
+  await expect(dialog.getByRole('alert')).toContainText(
+    'pedido de pagamento que ainda pode ser pago',
+  );
+
+  api.anonymizeRefusal = undefined;
+  await code.fill(FRESH_CODE);
+  await confirm.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Conta excluída (anonimizada) e sessões encerradas.')).toBeVisible();
+  await expect(
+    page.getByText('Esta conta foi excluída (anonimizada): não há ações sobre ela.'),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reativar conta' })).toHaveCount(0);
+  expect(api.callsTo('POST', path).map((call) => call.body)).toEqual([
+    { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },
+    { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },
+    { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },
+    { reason: 'OWNER_REQUEST', code: FRESH_CODE, confirm: 'EXCLUIR' },
+  ]);
+});

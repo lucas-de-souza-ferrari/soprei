@@ -8,6 +8,7 @@ import {
 import type { Metrics } from '../../infrastructure/metrics/index.js';
 import { ConflictError, NotFoundError } from '../../shared/errors/index.js';
 import { isUuid } from '../../shared/utils/index.js';
+import type { AccountAnonymizer } from '../auth/account-anonymizer.js';
 import type { PlatformIdentity } from '../auth/identity.js';
 import type { AccountSessionStore } from '../ports/account-session.js';
 import type {
@@ -37,6 +38,8 @@ export interface PlatformAccountServiceDeps {
   /** Sessões Bearer dos vínculos (`revokeAllSessions`, spec 007/008). */
   readonly bearerSessions: Pick<SessionStore, 'revokeAllSessions'>;
   readonly mail: PlatformAccountMail;
+  /** O núcleo da remoção por anonimização (spec 045, E6; reaproveitado pela 032, E7). */
+  readonly anonymizer?: Pick<AccountAnonymizer, 'anonymize'> | undefined;
   readonly logger: FastifyBaseLogger;
   readonly metrics?: Pick<Metrics, 'countPlatformAction'> | undefined;
 }
@@ -53,6 +56,7 @@ const METRIC: Partial<Record<PlatformAuditAction, PlatformActionMetric>> = {
   ACCOUNT_SESSIONS_REVOKED: 'account_sessions_revoked',
   ACCOUNT_PASSWORD_RESET_SENT: 'account_password_reset_sent',
   ACCOUNT_VERIFICATION_SENT: 'account_verification_sent',
+  ACCOUNT_ANONYMIZED: 'account_anonymized',
 };
 
 /**
@@ -88,6 +92,10 @@ export class PlatformAccountService {
       const current = await tx.lockAccount(id);
       if (current.status === target) {
         return { changed: false, memberships: disabling ? await tx.memberships(id) : [] };
+      }
+      // Conta removida por anonimização (E6) não volta: o e-mail e a senha dela já não são de ninguém.
+      if (!disabling && current.anonymized === true) {
+        throw new ConflictError('A conta foi removida', { code: 'ACCOUNT_ANONYMIZED' });
       }
       if (disabling) {
         // Promoção confirmada entre a primeira leitura e a trava da conta: trava também essa empresa.
@@ -174,6 +182,33 @@ export class PlatformAccountService {
       { adminId: identity.adminId, accountId: id, result },
       'reenvio da confirmação pedido pela plataforma',
     );
+  }
+
+  /**
+   * Remove a conta por anonimização (**[código]** e a palavra `EXCLUIR`, spec 045, E6, D16): os efeitos da
+   * 032 E7 pelo `AccountAnonymizer`, com a trilha `ACCOUNT_ANONYMIZED` na transação. Recusas 409
+   * `COMPANY_OWNERSHIP` (única dona ativa de empresa não removida) e `SUBSCRIPTION_ACTIVE` (período pago em vigor
+   * sem cancelamento), sem efeito; Redis fora antes = 503 sem nada alterado. Já anonimizada: 204 sem evento
+   * (refaz a revogação). Devolve se anonimizou agora.
+   */
+  async anonymize(
+    identity: PlatformIdentity,
+    accountId: string,
+    reason: PlatformActionReason,
+    code: string | undefined,
+  ): Promise<boolean> {
+    const id = this.parseId(accountId);
+    const anonymizer = this.deps.anonymizer;
+    if (anonymizer === undefined) throw accountNotFound();
+    await this.confirm(identity, code);
+    const action = 'ACCOUNT_ANONYMIZED';
+    // Registra logo depois do commit: uma revogação que falha (503) não apaga a ação da métrica.
+    return anonymizer.anonymize(id, {
+      platformAudit: { adminId: identity.adminId, action, subjectAccountId: id, reason },
+      onCommitted: () => {
+        this.recorded(identity, id, action, reason);
+      },
+    });
   }
 
   private parseId(accountId: string): AccountId {

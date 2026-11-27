@@ -30,6 +30,11 @@ export interface PasswordResetMailer {
   sendPasswordChanged(email: string): Promise<void>;
 }
 
+/** Aviso de conta excluída (spec 032, E7; spec 045, E6): texto fixo, sem código, senha nem link. */
+export interface AccountDeletionMailer {
+  sendAccountDeleted(email: string): Promise<void>;
+}
+
 /** O que o `AccountService` precisa do transporte de e-mail. */
 export type AccountMailer = VerificationMailer & PasswordResetMailer;
 

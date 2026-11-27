@@ -358,6 +358,7 @@ enum PlatformAuditAction {
   SUBSCRIPTION_REACTIVATED
   SUBSCRIPTION_ENDED
   CHANNEL_DISCONNECTED_BY_PLATFORM
+  ACCOUNT_ANONYMIZED
 
   @@map("platform_audit_action")
 }

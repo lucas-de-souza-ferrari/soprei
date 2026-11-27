@@ -10,6 +10,8 @@ import type {
 export interface PlatformLockedAccount {
   readonly status: AccessStatus;
   readonly verified: boolean;
+  /** Conta removida por anonimização (spec 045, E6): não volta a ser reativada. */
+  readonly anonymized?: boolean;
 }
 
 /** Um vínculo da conta, para revogar as sessões Bearer dele depois do commit. */
