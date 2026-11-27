@@ -295,14 +295,25 @@ describe('excluir a própria conta pelo site com Postgres e Redis reais (spec 03
     assert.equal((await account(x.id)).email, EMAIL_X);
     assert.equal((await account(x.id)).status, 'ACTIVE');
     assert.deepEqual(deletedMail, []);
+    // Nada anonimizado também nos vínculos, e o cookie continua valendo.
+    const memberships = (
+      await Promise.all(
+        [companyA.id, companyB.id].map((companyId) =>
+          db().membership.findMany({
+            where: { companyId, accountId: x.id },
+            select: { email: true, status: true },
+          }),
+        ),
+      )
+    ).flat();
+    assert.equal(memberships.length, 2);
+    assert.ok(
+      memberships.every((m) => !m.email.endsWith('@excluido.invalid') && m.status === 'ACTIVE'),
+    );
+    assert.equal(await session(x.cookie), 200);
   });
 
   it('sucesso: conta e vínculos anonimizados, cookie limpo, sessões fora, aviso ao endereço antigo; a auditoria continua apontando para o vínculo; o vínculo de outra conta não muda', async () => {
-    // O 503 anterior já derrubou as sessões de X: entra de novo.
-    const login = await site('/auth/login', { email: EMAIL_X, password: PASSWORD });
-    assert.equal(login.statusCode, 204);
-    x = { ...x, cookie: String(login.headers['set-cookie']).split(';')[0] ?? '' };
-
     const response = await remove(x.cookie);
     assert.equal(response.statusCode, 204, response.body);
     assert.match(String(response.headers['set-cookie']), /^soprei_session=; .*Max-Age=0/);

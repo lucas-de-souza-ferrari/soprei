@@ -909,6 +909,10 @@ export function AccountApp({
                 <DeleteAccountDialog
                   open={deletingAccount}
                   onDeleted={accountDeleted}
+                  onSessionEnded={() => {
+                    setDeletingAccount(false);
+                    sessionLost();
+                  }}
                   onClose={() => setDeletingAccount(false)}
                 />
               </>

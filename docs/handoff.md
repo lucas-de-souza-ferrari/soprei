@@ -4,7 +4,7 @@
 
 ## Última sessão
 
-2026-11-27, Claude Code (Opus 5.5, implementer). **[Spec 032](specs/032-lgpd-e-retencao.md), E7 ("excluir a própria conta")** na branch `spec/032-e7-excluir-conta`: `POST /account/delete` (cookie e senha, a mesma 401 e o bloqueio do login) chama o `AccountAnonymizer` da 045 E6; no site, "Excluir minha conta" na tela de empresas. Sem migration. Verde localmente (typecheck, lint, format, unitários tocados, Playwright `account-delete`, `accounts` e `open-company`); a integração nova (`account-delete.integration.test.ts`) só no CI. **Falta:** revisão do `reviewer`, CI e merge; depois marcar os critérios da E7. Specs 035, 042 e 045 concluídas (PR #37).
+2026-11-27, Claude Code (Opus 5.5, implementer). **[Spec 032](specs/032-lgpd-e-retencao.md), E7 ("excluir a própria conta")** na branch `spec/032-e7-excluir-conta`: `POST /account/delete` (cookie e senha, a mesma 401 e o bloqueio do login) chama o `AccountAnonymizer` da 045 E6; no site, "Excluir minha conta" na tela de empresas. Sem migration. Verde localmente (typecheck, lint, format, unitários tocados, Playwright `account-delete`, `accounts` e `open-company`); a integração nova (`account-delete.integration.test.ts`) só no CI. Revisão do `reviewer` feita e corrigida na branch (um Importante, dois Menores). **Falta:** CI e merge; depois marcar os critérios da E7. Specs 035, 042 e 045 concluídas (PR #37).
 
 - **Admin local (máquina do dono):** `PLATFORM_ADMIN_ENABLED=true`, `ADMIN_ORIGIN=http://127.0.0.1:5175` e as chaves `PLATFORM_TOTP_*` no `backend/.env`, `pnpm dev` e `pnpm dev:admin`; o admin local é outro usuário, no banco `soprei`.
 
@@ -33,7 +33,7 @@ Itens herdados das sessões anteriores; os marcados "conferir" podem já ter sid
 
 ## Próximo passo
 
-Revisão, CI e merge da 032 E7 (`spec/032-e7-excluir-conta`); depois marcar os critérios. Passo do dono: atualizar a instrução de excluir a conta em `frontend/src/legal/exclusao-de-dados.md` (texto `vigente`). Com o dono: a D3 e a instalação do backup externo (043) e o staging (037; hoje a produção roda com `ALLOW_UNSTAGED`). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
+CI e merge da 032 E7 (`spec/032-e7-excluir-conta`); depois marcar os critérios. Passo do dono: atualizar a instrução de excluir a conta em `frontend/src/legal/exclusao-de-dados.md` (texto `vigente`). Com o dono: a D3 e a instalação do backup externo (043) e o staging (037; hoje a produção roda com `ALLOW_UNSTAGED`). Depois: etapas restantes da 032 antes de empresas reais. Sem spec: lazy loading, error boundary e CSP no site; proteger a `main`.
 
 ## Decisões do dono que não são óbvias no código
 

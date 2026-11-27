@@ -96,3 +96,32 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page).toHaveTitle(/^(?!.*fixa@example)/);
   });
 }
+
+test('401 com a sessão já encerrada não diz "senha incorreta": volta ao login', async ({
+  page,
+}) => {
+  let sessionAlive = true;
+  await page.route('https://**/*', (route) => route.abort());
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname.replace('/api', '');
+    if (path === '/account/delete') {
+      // O cookie venceu entre abrir a tela e confirmar.
+      sessionAlive = false;
+      await route.fulfill({ status: 401, json: { error: { code: 'UNAUTHORIZED' } } });
+    } else if (!sessionAlive) await route.fulfill({ status: 401, json: {} });
+    else if (path === '/auth/session')
+      await route.fulfill({
+        status: 200,
+        json: { id: randomUUID(), email: 'fixa@example.test', selectedCompanyId: null },
+      });
+    else await route.fulfill({ status: 200, json: { items: [] } });
+  });
+  await page.goto('/painel/empresas');
+  await page.getByRole('button', { name: 'Excluir minha conta' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Excluir minha conta' });
+  await dialog.getByLabel('Sua senha atual').fill('Senha1-da-pessoa');
+  await dialog.getByRole('button', { name: 'Excluir conta' }).click();
+  await expect(page.getByRole('alert')).toContainText('Sua sessão terminou');
+  await expect(page.getByLabel('E-mail', { exact: true })).toBeVisible();
+  await expect(page.getByText('Senha incorreta')).not.toBeVisible();
+});

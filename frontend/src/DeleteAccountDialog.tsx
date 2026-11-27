@@ -26,10 +26,22 @@ export function deleteAccountMessage(error: unknown): string {
   return 'Não foi possível excluir a conta. Tente novamente mais tarde.';
 }
 
+/** A sessão do cookie ainda vale? Só um 401 diz que não; qualquer outra falha conta como viva. */
+async function sessionAlive(): Promise<boolean> {
+  try {
+    await api('/auth/session');
+    return true;
+  } catch (error) {
+    return !(error instanceof ApiError && error.status === 401);
+  }
+}
+
 export interface DeleteAccountDialogProps {
   readonly open: boolean;
   /** A conta foi excluída: quem chama sai da conta. */
   readonly onDeleted: () => void;
+  /** O cookie já não vale (sessão vencida ou encerrada): quem chama volta ao login. */
+  readonly onSessionEnded: () => void;
   readonly onClose: () => void;
 }
 
@@ -37,7 +49,12 @@ export interface DeleteAccountDialogProps {
  * "Excluir minha conta" (spec 032, E7): `<dialog>` nativo com a senha atual. O foco vai ao campo da senha,
  * Esc fecha sem excluir (menos durante o envio) e a senha some da memória ao fechar ou depois do envio.
  */
-export function DeleteAccountDialog({ open, onDeleted, onClose }: DeleteAccountDialogProps) {
+export function DeleteAccountDialog({
+  open,
+  onDeleted,
+  onSessionEnded,
+  onClose,
+}: DeleteAccountDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const textId = useId();
@@ -69,6 +86,12 @@ export function DeleteAccountDialog({ open, onDeleted, onClose }: DeleteAccountD
       onDeleted();
     } catch (failure) {
       setPassword('');
+      // Revisão da E7: o 401 é o mesmo para senha errada e para cookie que já não vale. Só a sessão diz qual;
+      // sem ela, a tela não insiste em "senha incorreta" (revisão da E7, I1).
+      if (failure instanceof ApiError && failure.status === 401 && !(await sessionAlive())) {
+        onSessionEnded();
+        return;
+      }
       setError(deleteAccountMessage(failure));
     } finally {
       setBusy(false);

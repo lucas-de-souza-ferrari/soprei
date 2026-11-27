@@ -5,6 +5,7 @@ import {
   ConflictError,
   NotFoundError,
   RateLimitError,
+  ServiceUnavailableError,
   UnauthorizedError,
 } from '../../shared/errors/index.js';
 import { InMemoryAccountRepository } from '../../test-support/in-memory-account.repository.js';
@@ -20,7 +21,14 @@ const EMAIL = 'pessoa@example.test';
 const COOKIE = 'sessao-da-pessoa';
 
 /** Exclusão da própria conta (spec 032, E7): o `AccountService` confere cookie e senha e chama o núcleo. */
-async function harness(options: { anonymizer?: false; refuse?: string } = {}) {
+async function harness(
+  options: {
+    anonymizer?: false;
+    refuse?: string;
+    failBeforeCommit?: boolean;
+    failAfterCommit?: boolean;
+  } = {},
+) {
   const accounts = new InMemoryAccountRepository();
   await accounts.create(EMAIL, await new FakePasswordHasher().hash(PASSWORD));
   accounts.patch(EMAIL, { emailVerifiedAt: new Date('2026-11-27T12:00:00.000Z') });
@@ -55,8 +63,14 @@ async function harness(options: { anonymizer?: false; refuse?: string } = {}) {
               if (options.refuse !== undefined) {
                 return Promise.reject(new ConflictError('recusado', { code: options.refuse }));
               }
+              if (options.failBeforeCommit === true) {
+                return Promise.reject(new ServiceUnavailableError('Sessão indisponível'));
+              }
               accounts.patch(EMAIL, { status: 'DISABLED' });
               opts?.onCommitted?.();
+              if (options.failAfterCommit === true) {
+                return Promise.reject(new ServiceUnavailableError('Sessão indisponível'));
+              }
               return Promise.resolve(true);
             },
           },
@@ -119,4 +133,17 @@ test('recusa do núcleo (409) sobe sem registrar exclusão', async () => {
 test('sem o núcleo ligado a rota responde 404', async () => {
   const h = await harness({ anonymizer: false });
   await assert.rejects(h.service.deleteAccount(COOKIE, PASSWORD), NotFoundError);
+});
+
+test('revogação final que falha depois do commit: a exclusão já valeu, então a resposta é o sucesso', async () => {
+  const h = await harness({ failAfterCommit: true });
+  await h.service.deleteAccount(COOKIE, PASSWORD);
+  assert.deepEqual(h.deleted, [h.row.id]);
+  assert.equal(h.accounts.peek(EMAIL).status, 'DISABLED');
+});
+
+test('falha antes do commit (Redis fora no revokeAll inicial) sobe: nada foi excluído', async () => {
+  const h = await harness({ failBeforeCommit: true });
+  await assert.rejects(h.service.deleteAccount(COOKIE, PASSWORD), ServiceUnavailableError);
+  assert.deepEqual(h.deleted, []);
 });

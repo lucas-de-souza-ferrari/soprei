@@ -40,7 +40,7 @@
 | [029](029-redesign-painel.md) | Redesign do painel: sidebar, empresa sempre aberta, bolhas de mensagem e calendário da agenda | concluída | — |
 | [030](030-wizard-onboarding.md) | Primeiros passos: assistente de configuração (wizard) e lista "Configuração" | concluída | — |
 | [031](031-planos-e-assinaturas.md) | Planos e assinaturas (cobrança pela InfinitePay) | em implementação | E6 (pacote extra de respostas) |
-| [032](032-lgpd-e-retencao.md) | LGPD e retenção de dados | em implementação | E7 na branch (revisão, CI, merge); E2 a E6 e E8 em diante (aceite dos termos, retenção, exclusão da empresa) |
+| [032](032-lgpd-e-retencao.md) | LGPD e retenção de dados | em implementação | E7 na branch (CI, merge); E2 a E6 e E8 em diante (aceite dos termos, retenção, exclusão da empresa) |
 | [033](033-producao-deploy-e-operacao.md) | Produção, deploy e operação | rascunho | não aprovada |
 | [034](034-capacidade-do-canal.md) | Capacidade do canal (worker concorrente e processo robusto) | em implementação | E4 (`PROCESS_ROLE`) e E5 (limite do webhook) |
 | [035](035-resiliencia-do-atendimento.md) | Resiliência do atendimento: retomar o que ficou sem resposta e limpar a fila | concluída | — (PRs #19 e #20, CI verde; fechada em 2026-11-27) |
