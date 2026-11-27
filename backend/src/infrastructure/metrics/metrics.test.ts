@@ -316,6 +316,7 @@ describe('métricas da recuperação de senha e do expurgo (spec 021)', () => {
     metrics.countPasswordResetEmail('notice', 'sent');
     metrics.countAccountsPurged(0);
     metrics.countAccountsPurged(3);
+    metrics.countAccountDeleted();
     metrics.countAccountPurgeRun('ok');
     metrics.countAccountPurgeRun('error');
     const body = await metrics.render();
@@ -328,6 +329,7 @@ describe('métricas da recuperação de senha e do expurgo (spec 021)', () => {
     assert.ok(body.includes('account_password_reset_emails_total{kind="code",result="failed"} 1'));
     assert.ok(body.includes('account_password_reset_emails_total{kind="notice",result="sent"} 1'));
     assert.ok(body.includes('account_purged_total 3'));
+    assert.ok(body.includes('account_deleted_total 1'));
     assert.ok(body.includes('account_purge_runs_total{result="ok"} 1'));
     assert.ok(body.includes('account_purge_runs_total{result="error"} 1'));
     const labelled = body

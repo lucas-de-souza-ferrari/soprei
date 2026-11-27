@@ -434,6 +434,19 @@ async function main(): Promise<void> {
     authRedis.client,
     versionedAuthPrefix(config.AUTH_REDIS_PREFIX, true),
   );
+  // Remover conta por anonimização: núcleo único do admin da plataforma (spec 045, E6) e da exclusão pela
+  // própria pessoa (spec 032, E7).
+  const accountAnonymizer =
+    config.ACCOUNTS_ENABLED && accountMailer !== undefined
+      ? new AccountAnonymizer({
+          accounts: new PrismaAccountAnonymizationUnitOfWork(prisma),
+          accountSessions,
+          bearerSessions: auth.sessions,
+          mailer: accountMailer,
+          logger,
+        })
+      : undefined;
+
   // Contas (spec 017): uma instância só, usada pelo site e pelas ações da plataforma sobre a conta (045, E2).
   const accountService =
     config.ACCOUNTS_ENABLED && accountMailer !== undefined
@@ -497,19 +510,13 @@ async function main(): Promise<void> {
                   : 'última empresa não gravada',
             );
           },
+          ...(accountAnonymizer === undefined ? {} : { anonymizer: accountAnonymizer }),
+          // Exclusão da própria conta (spec 032, E7): só o id.
+          onAccountDeleted: (accountId) => {
+            metrics.countAccountDeleted();
+            logger.info({ accountId, result: 'deleted' }, 'conta excluída pela própria pessoa');
+          },
           mailer: accountMailer,
-        })
-      : undefined;
-
-  // Remover conta por anonimização (spec 045, E6; o núcleo que a 032 E7 vai reaproveitar).
-  const accountAnonymizer =
-    accountService !== undefined && accountMailer !== undefined
-      ? new AccountAnonymizer({
-          accounts: new PrismaAccountAnonymizationUnitOfWork(prisma),
-          accountSessions,
-          bearerSessions: auth.sessions,
-          mailer: accountMailer,
-          logger,
         })
       : undefined;
 

@@ -417,6 +417,8 @@ export interface Metrics {
   countPasswordResetEmail(kind: PasswordResetEmailKind, result: VerificationEmailResult): void;
   /** Contas não confirmadas apagadas por uma execução do expurgo (spec 021). */
   countAccountsPurged(count: number): void;
+  /** Uma conta foi excluída (anonimizada) pela própria pessoa (spec 032, E7). */
+  countAccountDeleted(): void;
   /** Uma execução do expurgo terminou (spec 021). */
   countAccountPurgeRun(result: AccountPurgeRunResult): void;
   /** O hook `requirePermission` negou uma permissão (spec 008). `permission` é do conjunto fixo, nunca id. */
@@ -820,6 +822,11 @@ export function createMetrics(): Metrics {
     help: 'Contas não confirmadas apagadas pelo expurgo',
     registers: [registry],
   });
+  const accountsDeleted = new Counter({
+    name: 'account_deleted_total',
+    help: 'Contas excluídas (anonimizadas) pela própria pessoa',
+    registers: [registry],
+  });
   const accountPurgeRuns = new Counter({
     name: 'account_purge_runs_total',
     help: 'Execuções do expurgo de contas não confirmadas por resultado (ok, error)',
@@ -1128,6 +1135,9 @@ export function createMetrics(): Metrics {
     },
     countAccountsPurged(count) {
       if (count > 0) accountsPurged.inc(count);
+    },
+    countAccountDeleted() {
+      accountsDeleted.inc();
     },
     countAccountPurgeRun(result) {
       accountPurgeRuns.inc({ result });

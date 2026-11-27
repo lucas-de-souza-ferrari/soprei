@@ -3,7 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { test } from 'node:test';
 import type { AccountService } from '../../application/auth/account.service.js';
 import { buildServer } from '../../infrastructure/http/server.js';
-import { ServiceUnavailableError, UnauthorizedError } from '../../shared/errors/index.js';
+import {
+  ConflictError,
+  ServiceUnavailableError,
+  UnauthorizedError,
+} from '../../shared/errors/index.js';
 import { Result } from '../../shared/types/index.js';
 import { captureLogs } from '../../test-support/log-capture.js';
 import { accountCookie, cookieIsSecure, verificationSchema } from './account.controller.js';
@@ -147,6 +151,80 @@ test('POST /auth/verify-email: formato inválido é 400 e nunca chega ao serviç
       refused.json<{ error: { message: string } }>().error.message,
       'Confirmação inválida ou expirada',
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test('POST /account/delete (spec 032, E7): corpo estrito, origem, cookie limpo só no sucesso', async () => {
+  const secret = randomBytes(32).toString('base64url');
+  const calls: unknown[][] = [];
+  let failure: Error | undefined;
+  const service = {
+    drain: () => Promise.resolve(),
+    deleteAccount: (...args: unknown[]) => {
+      calls.push(args);
+      return failure === undefined ? Promise.resolve() : Promise.reject(failure);
+    },
+  } as unknown as AccountService;
+  const logs = captureLogs();
+  const app = buildServer({
+    logger: logs.logger,
+    readiness: {
+      database: () => Promise.resolve(Result.ok(undefined)),
+      redis: () => Promise.resolve(Result.ok(undefined)),
+    },
+    accounts: { service, origin: 'http://localhost:5174', secure: false },
+  });
+  const post = (payload: unknown, headers: Record<string, string> = {}) =>
+    app.inject({
+      method: 'POST',
+      url: '/account/delete',
+      payload: payload as object,
+      headers: {
+        origin: 'http://localhost:5174',
+        'x-soprei-app': 'web',
+        cookie: `soprei_session=${secret}`,
+        ...headers,
+      },
+    });
+  const SENHA = 'Senha1-secreta-do-teste';
+  try {
+    // Origem ou cabeçalho do site errados: 403 antes de tudo.
+    assert.equal((await post({ password: SENHA }, { origin: 'http://evil.test' })).statusCode, 403);
+    assert.equal((await post({ password: SENHA }, { 'x-soprei-app': 'admin' })).statusCode, 403);
+    // Corpo estrito e senha obrigatória.
+    for (const payload of [{}, { password: SENHA, extra: 1 }, { password: '' }, { senha: SENHA }]) {
+      assert.equal((await post(payload)).statusCode, 400, JSON.stringify(payload));
+    }
+    // Sem cookie: 401 sem chamar o serviço.
+    const anonymous = await app.inject({
+      method: 'POST',
+      url: '/account/delete',
+      payload: { password: SENHA },
+      headers: { origin: 'http://localhost:5174', 'x-soprei-app': 'web' },
+    });
+    assert.equal(anonymous.statusCode, 401);
+    assert.equal(calls.length, 0);
+    // Recusas mantêm o cookie.
+    for (const [error, status] of [
+      [new UnauthorizedError('Credenciais inválidas'), 401],
+      [new ConflictError('recusado', { code: 'COMPANY_OWNERSHIP' }), 409],
+      [new ServiceUnavailableError('Sessão indisponível'), 503],
+    ] as const) {
+      failure = error;
+      const refused = await post({ password: SENHA });
+      assert.equal(refused.statusCode, status);
+      assert.equal(refused.headers['set-cookie'], undefined);
+    }
+    failure = undefined;
+    const ok = await post({ password: SENHA });
+    assert.equal(ok.statusCode, 204);
+    assert.match(String(ok.headers['set-cookie']), /^soprei_session=; .*Max-Age=0/);
+    assert.deepEqual(calls.at(-1), [secret, SENHA]);
+    // A senha e o cookie nunca vão ao log.
+    assert.ok(!logs.raw().includes(SENHA));
+    assert.ok(!logs.raw().includes(secret));
   } finally {
     await app.close();
   }

@@ -199,6 +199,13 @@ export const accountController: FastifyPluginCallback<{
     const result = await service.createCompany(accountCookie(request.headers.cookie), name);
     return reply.status(201).send(result);
   });
+  // Excluir a própria conta (spec 032, E7): cookie e senha; perfil `login` (fail-closed). O cookie só é
+  // limpo depois da anonimização e da revogação; 409 e 503 o mantêm.
+  app.post('/account/delete', login, async (request, reply) => {
+    const { password } = z.object({ password: loginPasswordSchema }).strict().parse(request.body);
+    await service.deleteAccount(accountCookie(request.headers.cookie), password);
+    return reply.header('set-cookie', cookie('', true)).status(204).send();
+  });
   app.post('/account/companies/:companyId/select', admin, async (request, reply) => {
     const { companyId } = z.object({ companyId: z.uuid() }).parse(request.params);
     await service.selectCompany(accountCookie(request.headers.cookie), companyId);
