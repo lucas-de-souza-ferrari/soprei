@@ -20,6 +20,7 @@ import {
 import type { SessionStore } from '../ports/session-store.js';
 import type { PasswordHasher } from '../ports/password-hasher.js';
 import type { AccountMailer, AccountSessionStore } from '../ports/account-session.js';
+import type { AccountAnonymizer } from './account-anonymizer.js';
 import type { MembershipIdentity } from './identity.js';
 import { pickCompanyToOpen } from './company-pick.js';
 import { normalizeEmail } from './credentials.js';
@@ -85,6 +86,13 @@ export class AccountService {
         result: 'sent' | 'failed',
         accountId: string,
       ) => void;
+      /**
+       * Exclusão da própria conta (spec 032, E7): o núcleo da anonimização da spec 045 (E6). Ausente, a
+       * rota responde 404.
+       */
+      anonymizer?: Pick<AccountAnonymizer, 'anonymize'>;
+      /** A conta foi anonimizada pela própria pessoa (logo depois do commit); só o id. */
+      onAccountDeleted?: (accountId: string) => void;
       /** Aviso operacional que não derruba a operação (só id da conta, nunca e-mail). */
       onWarning?: (
         event: 'login_lock_reset_failed' | 'preselect_failed' | 'last_company_failed',
@@ -477,6 +485,35 @@ export class AccountService {
       role: member.role,
       sessionId: session.id,
     };
+  }
+  /**
+   * Exclui a própria conta (spec 032, E7), por anonimização. Pede o cookie **e** a senha: senha errada é a
+   * mesma 401 do login e conta no bloqueio por conta (429 quando bloqueado). As recusas (única dona ativa,
+   * período pago em vigor, pedido de pagamento ainda pagável), o `revokeAll` antes e depois e o aviso por
+   * e-mail são do `AccountAnonymizer`.
+   *
+   * Revisão da E7 (I1): se a revogação final falhar **depois** do commit, a conta já está excluída e o aviso
+   * já saiu; a resposta é o sucesso (o cookie não vale mais: a conta está `DISABLED`), porque pelo site não
+   * há como repetir. O núcleo já registrou a falha no log; o operador refaz a revogação pela remoção do admin
+   * da plataforma (spec 045, E6), que trata a conta já anonimizada como repetição.
+   */
+  async deleteAccount(secret: string, password: string): Promise<void> {
+    const { anonymizer } = this.deps;
+    if (anonymizer === undefined) throw new NotFoundError('Recurso não encontrado');
+    const { account } = await this.session(secret);
+    await this.credentials(account.email, password);
+    // Objeto, não `let`: o TypeScript não enxerga a escrita feita dentro do callback.
+    const progress = { committed: false };
+    try {
+      await anonymizer.anonymize(account.id, {
+        onCommitted: () => {
+          progress.committed = true;
+          this.observe(() => this.deps.onAccountDeleted?.(account.id));
+        },
+      });
+    } catch (error) {
+      if (!progress.committed) throw error;
+    }
   }
   logout(secret: string): Promise<void> {
     return this.deps.sessions.revoke(secret);

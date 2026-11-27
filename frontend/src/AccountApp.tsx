@@ -6,6 +6,7 @@ import { Logo } from './components/logo';
 import { Alert, AlertContent, AlertDescription, AlertIcon } from './components/motion/alert';
 import { Button } from './components/motion/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/motion/card';
+import { DeleteAccountDialog } from './DeleteAccountDialog';
 import { Input } from './components/motion/input';
 import { Loader } from './components/motion/loader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs';
@@ -135,6 +136,8 @@ export function AccountApp({
   /** Spec 038: muda quando uma notificação é resolvida, para o sino reler a contagem. */
   const [bellRefresh, setBellRefresh] = useState(0);
   const [notice, setNotice] = useState<Notice>(null);
+  /** Diálogo "Excluir minha conta" (spec 032, E7) aberto. */
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [invalid, setInvalid] = useState<{
     field: 'password' | 'confirmation' | 'verification';
     text: string;
@@ -387,6 +390,23 @@ export function AccountApp({
       }
     }
   };
+  /** Sai da conta na tela (o servidor já encerrou a sessão): limpa o que era dela e volta ao login. */
+  const leaveAccount = () => {
+    setSession(null);
+    setCompanies([]);
+    setName('');
+    setEmail('');
+    setPassword('');
+    setCode('');
+    navigate('login');
+  };
+  const accountDeleted = () => {
+    // Invalida respostas atrasadas da conta que deixou de existir.
+    ++generation.current;
+    setDeletingAccount(false);
+    leaveAccount();
+    setNotice({ tone: 'success', text: 'Sua conta foi excluída.' });
+  };
   const logout = () => {
     // Invalida respostas atrasadas; a tela só sai da conta depois que o servidor confirma.
     const stamp = ++generation.current;
@@ -395,13 +415,7 @@ export function AccountApp({
     void api('/auth/logout', {})
       .then(() => {
         if (stamp !== generation.current) return;
-        setSession(null);
-        setCompanies([]);
-        setName('');
-        setEmail('');
-        setPassword('');
-        setCode('');
-        navigate('login');
+        leaveAccount();
       })
       .catch(() => {
         if (stamp === generation.current)
@@ -872,6 +886,35 @@ export function AccountApp({
                     )}
                   </Button>
                 </form>
+                <section
+                  aria-labelledby="account-danger-title"
+                  className="mt-4 grid gap-2 border-t border-border pt-4"
+                >
+                  <h2 id="account-danger-title" className="m-0 text-base font-semibold">
+                    Excluir conta
+                  </h2>
+                  <p className="m-0 text-sm text-muted-foreground">
+                    Remove seu e-mail e sua senha e tira seu acesso a todas as empresas.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="justify-self-start border-destructive text-destructive"
+                    disabled={busy}
+                    onClick={() => setDeletingAccount(true)}
+                  >
+                    Excluir minha conta
+                  </Button>
+                </section>
+                <DeleteAccountDialog
+                  open={deletingAccount}
+                  onDeleted={accountDeleted}
+                  onSessionEnded={() => {
+                    setDeletingAccount(false);
+                    sessionLost();
+                  }}
+                  onClose={() => setDeletingAccount(false)}
+                />
               </>
             ) : (
               <>

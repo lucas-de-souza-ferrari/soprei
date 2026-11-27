@@ -424,6 +424,7 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
       '/auth/invitations/preview',
       '/auth/invitations/accept',
       '/auth/invitations/accept-new',
+      '/account/delete',
       '/admin/companies/:companyId/invitations',
       '/admin/companies/:companyId/invitations/:invitationId/resend',
       '/admin/companies/:companyId/invitations/:invitationId',
@@ -701,6 +702,9 @@ describe('inventário de rotas: toda rota declara o seu perfil', () => {
           '/auth/invitations/accept-new': 'login',
         };
         assert.equal(route.config.rateLimitProfile, expected[route.url], `${label} perfil`);
+      } else if (route.url === '/account/delete') {
+        // Spec 032 (E7): excluir a própria conta confere a senha, então é `login` (fail-closed).
+        assert.equal(route.config.rateLimitProfile, 'login', `${label} perfil`);
       } else {
         assert.ok(
           isRateLimitProfile(route.config.rateLimitProfile),
