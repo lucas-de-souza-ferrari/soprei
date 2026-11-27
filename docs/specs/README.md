@@ -50,7 +50,7 @@
 | [039](039-conexao-por-coexistencia.md) | Conexão do WhatsApp por coexistência (o cliente continua usando o aplicativo WhatsApp Business no celular) | concluída | — |
 | [040](040-novos-planos-e-enterprise.md) | Novo catálogo de planos, cota de tokens fora da tela e plano Enterprise por contato | concluída | — |
 | [041](041-conhecimento-pdf-docx.md) | Conhecimento: ler PDF e DOCX no navegador | concluída | teste manual da leitura de PDF (dono; o `location` do `.mjs` está no nginx desde 2026-11-24) |
-| [042](042-organizacao-da-documentacao.md) | Organização da documentação | em implementação | CI e merge da E1 e da E2 |
-| [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | CI; confirmação da D3; passos do dono parados até existir servidor |
+| [042](042-organizacao-da-documentacao.md) | Organização da documentação | concluída | — (PRs #16 e #17, CI verde; fechada em 2026-11-27) |
+| [043](043-backup-externo.md) | Backup externo do banco e teste de restauração | em implementação | Confirmação da D3 e os passos do dono no servidor (código na `main`, PR #18) |
 | [044](044-admin-da-plataforma.md) | Admin da plataforma (painel do dono, frontend separado) | concluída | — (no ar em `soadm.soprei.com` desde 2026-11-24) |
 | [045](045-admin-gestao-da-plataforma.md) | Admin da plataforma: quem é dono e gestão completa (CRUD) | concluída | — (E1 a E6 na `main`, PRs #30 a #36, CI verde; fechada em 2026-11-27) |
